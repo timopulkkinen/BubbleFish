@@ -23,7 +23,7 @@ InfoBarService* InfoBarService::FromTabContents(TabContents* tab) {
 
 InfoBarTabHelper::InfoBarTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      infobars_enabled_(true) {
+      infobars_enabled_(false) {
   DCHECK(web_contents);
 }
 

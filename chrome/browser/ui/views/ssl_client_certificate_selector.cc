@@ -145,6 +145,7 @@ void SSLClientCertificateSelector::Init() {
   // Select the first row automatically.  This must be done after the dialog has
   // been created.
   table_->Select(0);
+  Accept();
 }
 
 net::X509Certificate* SSLClientCertificateSelector::GetSelectedCert() const {

@@ -1262,15 +1262,19 @@ void Browser::OnWindowDidShow() {
     return;
 
   // Show any pending global error bubble.
+  /*
   GlobalErrorService* service =
       GlobalErrorServiceFactory::GetForProfile(profile());
   GlobalError* error = service->GetFirstGlobalErrorWithBubbleView();
   if (error)
     error->ShowBubbleView(this);
+  */
 }
 
 void Browser::ShowFirstRunBubble() {
+  /*
   window()->GetLocationBar()->ShowFirstRunBubble();
+  */
 }
 
 ///////////////////////////////////////////////////////////////////////////////

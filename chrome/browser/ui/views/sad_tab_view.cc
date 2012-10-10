@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/time.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
@@ -29,7 +30,7 @@
 
 using content::OpenURLParams;
 using content::WebContents;
-
+using base::TimeDelta;
 namespace {
 
 const int kPadding = 20;
@@ -67,7 +68,8 @@ SadTabView::SadTabView(WebContents* web_contents, chrome::SadTabKind kind)
       message_(NULL),
       help_link_(NULL),
       feedback_link_(NULL),
-      reload_button_(NULL) {
+      reload_button_(NULL),
+	  reload_delay_(3000){
   DCHECK(web_contents);
 
   // Sometimes the user will never see this tab, so keep track of the total
@@ -104,7 +106,10 @@ SadTabView::SadTabView(WebContents* web_contents, chrome::SadTabKind kind)
       (kind_ == chrome::SAD_TAB_KIND_CRASHED) ? kCrashColor : kKillColor));
 }
 
-SadTabView::~SadTabView() {}
+SadTabView::~SadTabView() {
+	if(reload_timer_.IsRunning()) 
+		reload_timer_.Reset();
+}
 
 void SadTabView::LinkClicked(views::Link* source, int event_flags) {
   DCHECK(web_contents_);
@@ -130,11 +135,11 @@ void SadTabView::ButtonPressed(views::Button* source,
   web_contents_->GetController().Reload(true);
 }
 
-void SadTabView::Layout() {
+/*void SadTabView::Layout() {
   // Specify the maximum message width explicitly.
   message_->SizeToFit(static_cast<int>(width() * kMessageSize));
   View::Layout();
-}
+}*/
 
 void SadTabView::ViewHierarchyChanged(bool is_add,
                                       views::View* parent,
@@ -151,13 +156,13 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
   columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
                      0, views::GridLayout::USE_PREF, 0, 0);
   columns->AddPaddingColumn(1, kPadding);
-
+  /*
   views::ImageView* image = new views::ImageView();
   image->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       (kind_ == chrome::SAD_TAB_KIND_CRASHED) ? IDR_SAD_TAB : IDR_KILLED_TAB));
   layout->StartRowWithPadding(0, column_set_id, 1, kPadding);
   layout->AddView(image);
-
+  
   views::Label* title = CreateLabel(l10n_util::GetStringUTF16(
       (kind_ == chrome::SAD_TAB_KIND_CRASHED) ?
           IDS_SAD_TAB_TITLE : IDS_KILLED_TAB_TITLE));
@@ -165,12 +170,14 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
   layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
   layout->AddView(title);
 
+  
   message_ = CreateLabel(l10n_util::GetStringUTF16(
       (kind_ == chrome::SAD_TAB_KIND_CRASHED) ?
           IDS_SAD_TAB_MESSAGE : IDS_KILLED_TAB_MESSAGE));
   message_->SetMultiLine(true);
   layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
   layout->AddView(message_);
+  
 
   if (web_contents_) {
     layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
@@ -181,11 +188,13 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
         reload_button_));
     layout->AddView(reload_button_);
 
-    help_link_ = CreateLink(l10n_util::GetStringUTF16(
+    
+	help_link_ = CreateLink(l10n_util::GetStringUTF16(
         (kind_ == chrome::SAD_TAB_KIND_CRASHED) ?
             IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE));
 
-    if (kind_ == chrome::SAD_TAB_KIND_CRASHED) {
+    
+	if (kind_ == chrome::SAD_TAB_KIND_CRASHED) {
       size_t offset = 0;
       string16 help_text(l10n_util::GetStringFUTF16(IDS_SAD_TAB_HELP_MESSAGE,
                                                     string16(), &offset));
@@ -214,8 +223,16 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
       layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
       layout->AddView(feedback_link_);
     }
+	
   }
-  layout->AddPaddingRow(1, kPadding);
+  //layout->AddPaddingRow(1, kPadding);
+  */
+  reload_timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(reload_delay_), this, &SadTabView::ReloadTab);
+}
+
+void SadTabView::ReloadTab() {
+  DCHECK(web_contents_);
+  web_contents_->GetController().Reload(true);
 }
 
 void SadTabView::OnPaint(gfx::Canvas* canvas) {

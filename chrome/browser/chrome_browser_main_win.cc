@@ -238,6 +238,9 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
       parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
     return;
 
+  // IM: we don't want these dialogs ever!
+  return;
+
   // The encoding we use for the info is "title|context|direction" where
   // direction is either env_vars::kRtlLocale or env_vars::kLtrLocale depending
   // on the current locale.

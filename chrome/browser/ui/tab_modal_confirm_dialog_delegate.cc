@@ -24,6 +24,8 @@ TabModalConfirmDialogDelegate::TabModalConfirmDialogDelegate(
                  content::Source<NavigationController>(controller));
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CLOSING,
                  content::Source<NavigationController>(controller));
+  VLOG(1) << "IM: auto accepted confirm dialog";
+  Accept();
 }
 
 TabModalConfirmDialogDelegate::~TabModalConfirmDialogDelegate() {

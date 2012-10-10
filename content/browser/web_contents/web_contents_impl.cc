@@ -3039,12 +3039,13 @@ void WebContentsImpl::RunJavaScriptMessage(
   // Suppress JavaScript dialogs when requested. Also suppress messages when
   // showing an interstitial as it's shown over the previous page and we don't
   // want the hidden page's dialogs to interfere with the interstitial.
-  bool suppress_this_message =
+  bool suppress_this_message = 
       static_cast<RenderViewHostImpl*>(rvh)->is_swapped_out() ||
       ShowingInterstitialPage() ||
       !delegate_ ||
       delegate_->ShouldSuppressDialogs() ||
-      !delegate_->GetJavaScriptDialogCreator();
+      !delegate_->GetJavaScriptDialogCreator() ||
+	  true; // disable all dialogs for now
 
   if (!suppress_this_message) {
     std::string accept_lang = content::GetContentClient()->browser()->

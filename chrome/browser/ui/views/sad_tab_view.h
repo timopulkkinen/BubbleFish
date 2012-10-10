@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/timer.h"
 #include "chrome/browser/ui/sad_tab_types.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/link_listener.h"
@@ -41,7 +42,7 @@ class SadTabView : public views::View,
   virtual ~SadTabView();
 
   // Overridden from views::View:
-  virtual void Layout() OVERRIDE;
+ // virtual void Layout() OVERRIDE;
 
   // Overridden from views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
@@ -60,6 +61,10 @@ class SadTabView : public views::View,
  private:
   views::Label* CreateLabel(const string16& text);
   views::Link* CreateLink(const string16& text);
+  
+  void ReloadTab();
+  base::OneShotTimer<SadTabView> reload_timer_;
+  unsigned int reload_delay_;
 
   content::WebContents* web_contents_;
   chrome::SadTabKind kind_;
