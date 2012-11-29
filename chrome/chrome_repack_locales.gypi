@@ -7,10 +7,14 @@
     'conditions': [
       ['branding=="Chrome"', {
         'branding_flag': ['-b', 'google_chrome',],
-      }, {  # else: branding!="Chrome"
+      }],
+	  ['branding=="Chromium"',{  # else: branding!="Chrome"
         'branding_flag': ['-b', 'chromium',],
       }],
-    ],
+	  ['branding=="Infomonitor"',{  # else: branding!="Chrome"
+        'branding_flag': ['-b', 'chromium',],
+      }],
+	  ],
   },
   'inputs': [
     'tools/build/repack_locales.py',

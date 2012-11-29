@@ -176,11 +176,12 @@ ToolsMenuModel::ToolsMenuModel(ui::SimpleMenuModel::Delegate* delegate,
 ToolsMenuModel::~ToolsMenuModel() {}
 
 void ToolsMenuModel::Build(Browser* browser) {
+/*
 #if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
   AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
   AddSeparator(ui::NORMAL_SEPARATOR);
 #endif
-
+  */
   AddItemWithStringId(IDC_MANAGE_EXTENSIONS, IDS_SHOW_EXTENSIONS);
 
   if (chrome::CanOpenTaskManager())
@@ -189,7 +190,7 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
 
   AddSeparator(ui::NORMAL_SEPARATOR);
-
+/*
 #if !defined(OS_CHROMEOS)
   // Show IDC_FEEDBACK in "Tools" menu for non-ChromeOS platforms.
   AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
@@ -199,6 +200,7 @@ void ToolsMenuModel::Build(Browser* browser) {
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
                          encoding_menu_model_.get());
+*/
   AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
   AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
@@ -474,7 +476,7 @@ void WrenchMenuModel::Build() {
 
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
 #if defined(OS_WIN)
-  if (base::win::IsMetroProcess()) {
+  /*if (base::win::IsMetroProcess()) {
     // In Metro, we only show the New Window options if there isn't already
     // a window of the requested type (incognito or not) that is available.
     if (browser_->profile()->IsOffTheRecord()) {
@@ -489,7 +491,7 @@ void WrenchMenuModel::Build() {
   } else {
     AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
     AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
-  }
+  } */
 #else  // defined(OS_WIN)
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
 #if defined(OS_CHROMEOS)
@@ -509,7 +511,7 @@ void WrenchMenuModel::Build() {
       AddItemWithStringId(IDC_TOGGLE_ASH_DESKTOP, IDS_CLOSE_ASH_DESKTOP);
   }
 #endif
-
+  /*
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
@@ -527,18 +529,19 @@ void WrenchMenuModel::Build() {
     AddSeparator(ui::SPACING_SEPARATOR);
   }
 #endif
+  */
 
   // Append the full menu including separators. The final separator only gets
   // appended when this is a touch menu - otherwise it would get added twice.
-  CreateCutCopyPasteMenu(is_new_menu);
+  //CreateCutCopyPasteMenu(is_new_menu);
 
   if (!is_new_menu)
     CreateZoomMenu(is_new_menu);
-
+  /*
   AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
   AddItemWithStringId(IDC_FIND, IDS_FIND);
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-
+  */
   tools_menu_model_.reset(new ToolsMenuModel(this, browser_));
   // In case of touch this is the last item.
   if (!is_new_menu) {
@@ -550,11 +553,11 @@ void WrenchMenuModel::Build() {
     CreateZoomMenu(is_new_menu);
   else
     AddSeparator(ui::NORMAL_SEPARATOR);
-
+/*
   AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator(ui::NORMAL_SEPARATOR);
-
+  
   if (browser_defaults::kShowSyncSetupMenuItem &&
       browser_->profile()->GetOriginalProfile()->IsSyncAccessible()) {
     const string16 short_product_name =
@@ -563,7 +566,7 @@ void WrenchMenuModel::Build() {
         IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
     AddSeparator(ui::NORMAL_SEPARATOR);
   }
-
+  */
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
 
 #if defined(OS_CHROMEOS)
@@ -600,7 +603,7 @@ void WrenchMenuModel::Build() {
 #endif
 
   if (!is_new_menu) {
-    AddItemWithStringId(IDC_HELP_PAGE_VIA_MENU, IDS_HELP_PAGE);
+  //  AddItemWithStringId(IDC_HELP_PAGE_VIA_MENU, IDS_HELP_PAGE);
 
     if (browser_defaults::kShowHelpMenuItemIcon) {
       ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();

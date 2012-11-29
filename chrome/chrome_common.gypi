@@ -417,13 +417,20 @@
                      'branding_path':
                        'app/theme/google_chrome/BRANDING',
                   },
-                }, { # else branding!="Chrome"
+                }], 
+				[ 'branding == "Chromium"', { # else branding!="Chrome"
                   'variables': {
                      'branding_path':
                        'app/theme/chromium/BRANDING',
                   },
                 }],
-              ],
+				[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+                  'variables': {
+                     'branding_path':
+                       'app/theme/infomonitor/BRANDING',
+                  },
+                }],
+				],
               'inputs': [
                 '<(template_input_path)',
                 '<(version_path)',

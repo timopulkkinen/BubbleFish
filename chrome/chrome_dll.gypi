@@ -285,10 +285,14 @@
                 'conditions': [
                   ['branding=="Chrome"', {
                     'theme_dir_name': 'google_chrome',
-                  }, {  # else: 'branding!="Chrome"
+                  }],
+				  ['branding=="Chromium"', {  # else: 'branding!="Chrome"
                     'theme_dir_name': 'chromium',
                   }],
-                ],
+				  ['branding=="Infomonitor"', {  
+                    'theme_dir_name': 'infomonitor',
+                  }],
+				  ],
                 'repack_path': '../tools/grit/grit/format/repack.py',
               },
               'postbuilds': [

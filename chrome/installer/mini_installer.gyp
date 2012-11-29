@@ -159,12 +159,18 @@
             'variables': {
                'branding_dir': '../app/theme/google_chrome',
             },
-          }, { # else branding!="Chrome"
+          }],
+		  [ 'branding == "Chromium"', { # else branding!="Chrome"
             'variables': {
                'branding_dir': '../app/theme/chromium',
             },
           }],
-        ],
+		  [ 'branding == "Infomonitor"', { # else branding!="Chrome"
+            'variables': {
+               'branding_dir': '../app/theme/infomonitor',
+            },
+          }],
+		  ],
       },
       'targets': [
         {

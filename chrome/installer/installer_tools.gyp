@@ -38,10 +38,16 @@
       'variables': {
          'branding_dir': '<(DEPTH)/chrome/app/theme/google_chrome',
       },
-    }, { # else branding!="Chrome"
+    }],
+	[ 'branding == "Chromium"', { # else branding!="Chrome"
       'variables': {
          'branding_dir': '<(DEPTH)/chrome/app/theme/chromium',
       },
     }],
-  ],
+	[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+      'variables': {
+         'branding_dir': '<(DEPTH)/chrome/app/theme/infomonitor',
+      },
+    }],
+	],
 }

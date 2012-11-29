@@ -21,7 +21,7 @@ call %SolutionDir%\..\third_party\cygwin\setup_env.bat
 cat %SolutionDir%\VERSION | sed "s/\(.*\)/set \1/" > %VarsBat%
 
 :: Load branding strings as environment variables
-set Distribution="chromium"
+set Distribution="infomonitor"
 if "%CHROMIUM_BUILD%" == "_google_chrome" set Distribution="google_chrome"
 cat %SolutionDir%app\theme\%Distribution%\BRANDING | sed "s/\(.*\)/set \1/" >> %VarsBat%
 

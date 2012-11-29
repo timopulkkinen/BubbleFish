@@ -160,7 +160,7 @@
       'library%': 'static_library',
 
       # Override branding to select the desired branding flavor.
-      'branding%': 'Chromium',
+      'branding%': 'Infomonitor',
 
       'buildtype%': '<(buildtype)',
 
@@ -1212,9 +1212,14 @@
         # consistency they should look for google_chrome_build like C++.
         'grit_defines': ['-D', '_google_chrome',
                          '-E', 'CHROMIUM_BUILD=google_chrome'],
-      }, {
+      },],
+	  ['branding=="Chromium"',{
         'grit_defines': ['-D', '_chromium',
                          '-E', 'CHROMIUM_BUILD=chromium'],
+      }],
+	  ['branding=="Infomonitor"',{
+        'grit_defines': ['-D', '_infomonitor',
+                         '-E', 'CHROMIUM_BUILD=infomonitor'],
       }],
       ['chromeos==1', {
         'grit_defines': ['-D', 'chromeos', '-D', 'scale_factors=2x'],

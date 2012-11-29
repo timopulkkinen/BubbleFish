@@ -383,12 +383,19 @@
                  'branding_dir': 'app/theme/google_chrome',
                  'branding_dir_100': 'app/theme/default_100_percent/google_chrome',
               },
-            }, { # else branding!="Chrome"
+            }],
+			[ 'branding == "Chromium"', { # else branding!="Chrome"
               'variables': {
                  'branding_dir': 'app/theme/chromium',
                  'branding_dir_100': 'app/theme/default_100_percent/chromium',
               },
             }],
+			[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+              'variables': {
+                 'branding_dir': 'app/theme/infomonitor',
+                 'branding_dir_100': 'app/theme/default_100_percent/infomonitor',
+              },
+            }],	
           ],
         },
         {
@@ -1093,10 +1100,17 @@
          'branding_dir': 'app/theme/google_chrome',
          'branding_dir_100': 'app/theme/default_100_percent/google_chrome',
       },
-    }, { # else branding!="Chrome"
+    }],
+	[ 'branding == "Chromium"', { # else branding!="Chrome"
       'variables': {
          'branding_dir': 'app/theme/chromium',
          'branding_dir_100': 'app/theme/default_100_percent/chromium',
+      },
+    }],
+	[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+      'variables': {
+         'branding_dir': 'app/theme/infomonitor',
+         'branding_dir_100': 'app/theme/default_100_percent/infomonitor',
       },
     }],
   ],

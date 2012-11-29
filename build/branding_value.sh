@@ -35,7 +35,10 @@ case ${BUILD_BRANDING} in
   Chrome)
     BRANDING_FILE="${TOP}/chrome/app/theme/google_chrome/BRANDING"
     ;;
-  *)
+  Infomonitor)
+    BRANDING_FILE="${TOP}/chrome/app/theme/infomonitor/BRANDING"
+    ;;
+	*)
     echo "error: unknown branding: ${BUILD_BRANDING}" >&2
     exit 1
     ;;

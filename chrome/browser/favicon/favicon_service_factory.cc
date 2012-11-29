@@ -15,7 +15,7 @@
 // static
 FaviconService* FaviconServiceFactory::GetForProfile(
     Profile* profile, Profile::ServiceAccessType sat) {
-  if (!profile->IsOffTheRecord()) {
+if (!profile->IsOffTheRecord()) {
     return static_cast<FaviconService*>(
         GetInstance()->GetServiceForProfile(profile, true));
   } else if (sat == Profile::EXPLICIT_ACCESS) {
@@ -32,7 +32,7 @@ FaviconService* FaviconServiceFactory::GetForProfile(
 
 // static
 FaviconServiceFactory* FaviconServiceFactory::GetInstance() {
-  return Singleton<FaviconServiceFactory>::get();
+	return Singleton<FaviconServiceFactory>::get();
 }
 
 FaviconServiceFactory::FaviconServiceFactory()

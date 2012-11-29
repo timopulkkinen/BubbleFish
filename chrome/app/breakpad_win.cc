@@ -490,7 +490,7 @@ bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       MDRawAssertionInfo*, bool) {
   // If the exception is because there was a problem loading a delay-loaded
   // module, then show the user a dialog explaining the problem and then exit.
-  if (DelayLoadFailureExceptionMessageBox(ex_info))
+  //if (DelayLoadFailureExceptionMessageBox(ex_info))
     return true;
 
   // We set CHROME_CRASHED env var. If the CHROME_RESTART is present.

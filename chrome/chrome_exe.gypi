@@ -81,14 +81,22 @@
                     'filename': 'google-chrome',
                     'confdir': 'google-chrome',
                   },
-                }, { # else branding!="Chrome"
+                }],
+				[ 'branding == "Chromium"', { # else branding!="Chrome"
                   'variables': {
                     'name': 'Chromium',
                     'filename': 'chromium-browser',
                     'confdir': 'chromium',
                   },
                 }],
-              ],
+				[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+                  'variables': {
+                    'name': 'Infomonitor Player',
+                    'filename': 'infomonitor-player',
+                    'confdir': 'infomonitor-player',
+                  },
+                }],
+				],
               'inputs': [
                 'tools/build/linux/sed.sh',
                 'app/resources/manpage.1.in',
@@ -133,9 +141,14 @@
                   'conditions': [
                     ['branding=="Chrome"', {
                       'files': ['app/theme/google_chrome/product_logo_48.png']
-                    }, { # else: 'branding!="Chrome"
+                    }],
+					['branding=="Chromium"', { # else: 'branding!="Chrome"
                       'files': ['app/theme/chromium/product_logo_48.png']
                     }],
+					['branding=="Infomonitor"', { # else: 'branding!="Chrome"
+                      'files': ['app/theme/infomonitor/product_logo_48.png']
+                    }],
+
                   ],
                 },
               ],
@@ -181,13 +194,21 @@
                 'app/theme/google_chrome/document.icns',
                 'browser/ui/cocoa/applescript/scripting.sdef',
               ],
-            }, {  # else: 'branding!="Chrome"
+            }],
+			['branding=="Chromium"', {  # else: 'branding!="Chrome"
               'mac_bundle_resources': [
                 'app/theme/chromium/app.icns',
                 'app/theme/chromium/document.icns',
                 'browser/ui/cocoa/applescript/scripting.sdef',
               ],
             }],
+			['branding=="Infomonitor"', {  # else: 'branding!="Chrome"
+              'mac_bundle_resources': [
+                'app/theme/infomonitor/app.icns',
+                'app/theme/infomonitor/document.icns',
+                'browser/ui/cocoa/applescript/scripting.sdef',
+              ],
+            }],			
             ['mac_breakpad==1', {
               'variables': {
                 # A real .dSYM is needed for dump_syms to operate on.
@@ -276,12 +297,18 @@
                   'variables': {
                      'branding_name': 'google_chrome_strings',
                   },
-                }, { # else branding!="Chrome"
+                }], 
+				[ 'branding == "Chromium"', { # else branding!="Chrome"
                   'variables': {
                      'branding_name': 'chromium_strings',
                   },
                 }],
-              ],
+				[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+                  'variables': {
+                     'branding_name': 'infomonitorplayer_strings',
+                  },
+                }],
+			  ],
               'inputs': [
                 '<(tool_path)',
                 '<(version_path)',

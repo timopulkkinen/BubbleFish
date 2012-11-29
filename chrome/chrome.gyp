@@ -93,13 +93,20 @@
             'mac_creator': 'rimZ',
             # The policy .grd file also needs the bundle id.
             'grit_defines': ['-D', 'mac_bundle_id=com.google.Chrome'],
-          }, {  # else: branding!="Chrome"
+          }],
+		  ['branding=="Chromium"',{  # else: branding!="Chrome"
             'mac_bundle_id': 'org.chromium.Chromium',
             'mac_creator': 'Cr24',
             # The policy .grd file also needs the bundle id.
             'grit_defines': ['-D', 'mac_bundle_id=org.chromium.Chromium'],
           }],  # branding
-        ],  # conditions
+		  ['branding=="Infomonitor"',{  
+            'mac_bundle_id': 'com.cemron.InfomonitorPlayer',
+            'mac_creator': 'Cr24',
+            # The policy .grd file also needs the bundle id.
+            'grit_defines': ['-D', 'mac_bundle_id=com.cemron.InfomonitorPlayer'],
+          }],  # branding
+		 ],  # conditions
       }],  # OS=="mac"
       # TODO(mcgrathr): This duplicates native_client/build/common.gypi;
       # we should figure out a way to unify the settings.
@@ -601,9 +608,14 @@
               # This duplicates the output path from build_app_dmg.
               ['branding=="Chrome"', {
                 'dmg_name': 'GoogleChrome.dmg',
-              }, { # else: branding!="Chrome"
+              }], 
+			  ['branding=="Chromium"', { # else: branding!="Chrome"
                 'dmg_name': 'Chromium.dmg',
               }],
+			  ['branding=="Infomonitor"', { 
+                'dmg_name': 'InfomonitorPlayer.dmg',
+              }],
+			  
             ],
           },
           'actions': [
@@ -900,9 +912,15 @@
                   'variables': {
                      'branding_path': 'app/theme/google_chrome/BRANDING',
                   },
-                }, { # else branding!="Chrome"
+                }], 
+				['branding == "Chromium"', { # else branding!="Chrome"
                   'variables': {
                      'branding_path': 'app/theme/chromium/BRANDING',
+                  },
+                }],
+				['branding == "Infomonitor"', { 
+                  'variables': {
+                     'branding_path': 'app/theme/infomonitor/BRANDING',
                   },
                 }],
               ],
@@ -945,11 +963,17 @@
                   'variables': {
                      'branding_path': 'app/theme/google_chrome/BRANDING',
                   },
-                }, { # else branding!="Chrome"
+                }],
+				['branding == "Chromium"',{ # else branding!="Chrome"
                   'variables': {
                      'branding_path': 'app/theme/chromium/BRANDING',
                   },
                 }],
+				['branding == "Infomonitor"',{
+                  'variables': {
+                     'branding_path': 'app/theme/infomonitor/BRANDING',
+                  },
+                }],				
               ],
               'inputs': [
                 '<(version_path)',

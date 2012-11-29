@@ -32,14 +32,20 @@
         },
       ],
     }],
-    [ 'branding == "Chrome"', {
-      'variables': {
-         'branding_dir': '../app/theme/google_chrome',
-      },
-    }, {  # else branding!="Chrome"
-      'variables': {
-         'branding_dir': '../app/theme/chromium',
-      },
-    }],
+              [ 'branding == "Chrome"', {
+            'variables': {
+               'branding_dir': '../app/theme/google_chrome',
+            },
+          }],
+		  [ 'branding == "Chromium"', { # else branding!="Chrome"
+            'variables': {
+               'branding_dir': '../app/theme/chromium',
+            },
+          }],
+		  [ 'branding == "Infomonitor"', { # else branding!="Chrome"
+            'variables': {
+               'branding_dir': '../app/theme/infomonitor',
+            },
+          }],
   ],
 }
