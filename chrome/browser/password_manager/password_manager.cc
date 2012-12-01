@@ -57,7 +57,7 @@ void ReportMetrics(bool password_manager_enabled) {
 // static
 void PasswordManager::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kPasswordManagerEnabled,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kPasswordManagerAllowShowPasswords,
                              true,

@@ -274,7 +274,7 @@ void SetShowWelcomePagePrefIfNeeded(
 }
 
 bool SkipFirstRunUI(installer::MasterPreferences* install_prefs) {
-  bool value = false;
+  bool value = true;
   install_prefs->GetBool(installer::master_preferences::kDistroSkipFirstRunPref,
                          &value);
   return value;

@@ -49,13 +49,13 @@ const char* const Profile::kProfileKey = "__PROFILE__";
 // static
 void Profile::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kSearchSuggestEnabled,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSessionExitedCleanly,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSafeBrowsingEnabled,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSafeBrowsingReportingEnabled,
                              false,

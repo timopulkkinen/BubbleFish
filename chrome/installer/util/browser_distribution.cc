@@ -23,6 +23,7 @@
 #include "chrome/installer/util/google_chrome_binaries_distribution.h"
 #include "chrome/installer/util/google_chrome_distribution.h"
 #include "chrome/installer/util/google_chrome_sxs_distribution.h"
+#include "chrome/installer/util/infomonitor_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/master_preferences.h"
@@ -33,14 +34,16 @@ using installer::MasterPreferences;
 
 namespace {
 
-const wchar_t kCommandExecuteImplUuid[] =
-    L"{A2DF06F9-A21A-44A8-8A99-8B9C84F29160}";
+	const wchar_t kCommandExecuteImplUuid[] =
+    L"{A2DF06F9-A21A-44A8-8A99-8B9C84F29161}";
+const wchar_t kInfomonitorGuid[] = L"{FDA71E6F-AC4C-4a00-8B70-9958A68906FF}";
 
 // The BrowserDistribution objects are never freed.
 BrowserDistribution* g_browser_distribution = NULL;
 BrowserDistribution* g_chrome_frame_distribution = NULL;
 BrowserDistribution* g_binaries_distribution = NULL;
 BrowserDistribution* g_chrome_app_host_distribution = NULL;
+BrowserDistribution* g_infomonitor_distribution = NULL;
 
 // Returns true if currently running in npchrome_frame.dll
 bool IsChromeFrameModule() {
@@ -140,11 +143,11 @@ void BrowserDistribution::DoPostUninstallOperations(
 }
 
 string16 BrowserDistribution::GetAppGuid() {
-  return L"";
+  return kInfomonitorGuid;
 }
 
 string16 BrowserDistribution::GetBaseAppName() {
-  return L"Chromium";
+  return L"Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetAppShortCutName() {
@@ -152,41 +155,39 @@ string16 BrowserDistribution::GetAppShortCutName() {
 }
 
 string16 BrowserDistribution::GetAlternateApplicationName() {
-  return L"The Internet";
+  return L"The Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetBaseAppId() {
-  return L"Chromium";
+  return L"InfomonitorPlayer";
 }
 
 string16 BrowserDistribution::GetInstallSubDir() {
-  return L"Chromium";
+  return L"InfomonitorPlayer";
 }
 
 string16 BrowserDistribution::GetPublisherName() {
-  return L"Chromium";
+  return L"Cemron Ltd";
 }
 
 string16 BrowserDistribution::GetAppDescription() {
-  return L"Browse the web";
+  return L"Cemron Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetLongAppDescription() {
-  const string16& app_description =
-      installer::GetLocalizedString(IDS_PRODUCT_DESCRIPTION_BASE);
-  return app_description;
+  return L"Cemron Infomonitor Player";
 }
 
 std::string BrowserDistribution::GetSafeBrowsingName() {
-  return "chromium";
+  return "infomonitorplayer";
 }
 
 string16 BrowserDistribution::GetStateKey() {
-  return L"Software\\Chromium";
+  return L"Software\\Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetStateMediumKey() {
-  return L"Software\\Chromium";
+  return L"Software\\Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetStatsServerURL() {
@@ -206,19 +207,19 @@ string16 BrowserDistribution::GetDistributionData(HKEY root_key) {
 }
 
 string16 BrowserDistribution::GetUninstallLinkName() {
-  return L"Uninstall Chromium";
+  return L"Uninstall Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetUninstallRegPath() {
-  return L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Chromium";
+  return L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetVersionKey() {
-  return L"Software\\Chromium";
+  return L"Software\\Infomonitor Player";
 }
 
 bool BrowserDistribution::CanSetAsDefault() {
-  return true;
+  return false;
 }
 
 bool BrowserDistribution::CanCreateDesktopShortcuts() {

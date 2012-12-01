@@ -37,7 +37,7 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kHomePageIsNewTabPage,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kShowHomeButton,
                              false,
@@ -52,7 +52,7 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
   // us from having to hard-code pref registration in the several unit tests
   // that use this preference.
   prefs->RegisterBooleanPref(prefs::kShowUpdatePromotionInfoBar,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
 #endif
   prefs->RegisterBooleanPref(prefs::kDeleteBrowsingHistory,
@@ -74,13 +74,13 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kDeleteHostedAppsData,
-                             false,
+                             true,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kDeleteTimePeriod,
                              0,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kCheckDefaultBrowser,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
 #if defined(OS_WIN)
   // As with Mac-spacific code above, it should be in a platform-specific
@@ -90,7 +90,7 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
 #endif
   prefs->RegisterBooleanPref(prefs::kShowOmniboxSearchHint,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kWebAppCreateOnDesktop,
                              true,
@@ -102,16 +102,16 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              true,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kEnableTranslate,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kCloudPrintEmail,
                             std::string(),
                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kCloudPrintProxyEnabled,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kCloudPrintSubmitEnabled,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kDevToolsDisabled,
                              false,
@@ -127,19 +127,19 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kPreferencesWindowPlacement,
                                 PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kImportBookmarks,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kImportHistory,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kImportHomepage,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kImportSearchEngine,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kImportSavedPasswords,
-                             true,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kEnableDoNotTrack,
                              false,
@@ -154,10 +154,10 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
   // We need to register the type of these preferences in order to query
   // them even though they're only typically controlled via policy.
   prefs->RegisterBooleanPref(prefs::kPluginsAllowOutdated,
-                             false,
+                             true,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kPluginsAlwaysAuthorize,
-                             false,
+                             true,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kClearPluginLSODataEnabled,
                              true,

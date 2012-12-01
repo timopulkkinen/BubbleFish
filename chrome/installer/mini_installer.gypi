@@ -9,6 +9,8 @@
     '../chrome.gyp:chrome_nacl_win64',
     '../chrome.gyp:default_extensions',
     '../chrome.gyp:setup',
+	'../../base/base.gyp:base',
+	'../../base/base.gyp:base_i18n',
   ],
   'include_dirs': [
     '../..',

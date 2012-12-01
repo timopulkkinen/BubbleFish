@@ -724,7 +724,7 @@ void BrowserOptionsHandler::BecomeDefaultBrowser(const ListValue* args) {
   // If the user attempted to make Chrome the default browser, then he/she
   // arguably wants to be notified when that changes.
   PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
-  prefs->SetBoolean(prefs::kCheckDefaultBrowser, true);
+  prefs->SetBoolean(prefs::kCheckDefaultBrowser, false);
 }
 
 int BrowserOptionsHandler::StatusStringIdForState(

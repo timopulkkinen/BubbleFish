@@ -37,7 +37,7 @@ AlternateErrorPageTabObserver::~AlternateErrorPageTabObserver() {
 
 // static
 void AlternateErrorPageTabObserver::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kAlternateErrorPagesEnabled, true,
+  prefs->RegisterBooleanPref(prefs::kAlternateErrorPagesEnabled, false,
                              PrefService::SYNCABLE_PREF);
 }
 

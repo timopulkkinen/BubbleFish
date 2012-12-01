@@ -54,7 +54,7 @@ void NetPrefObserver::ApplySettings() {
 // static
 void NetPrefObserver::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kNetworkPredictionEnabled,
-                             true,
+                             false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kDisableSpdy,
                              false,

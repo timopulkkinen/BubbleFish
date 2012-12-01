@@ -228,6 +228,8 @@ int InstallationState::IndexFromDistType(BrowserDistribution::Type type) {
                  unexpected_chrome_frame_distribution_value_);
   COMPILE_ASSERT(BrowserDistribution::CHROME_APP_HOST == CHROME_APP_HOST_INDEX,
                  unexpected_chrome_frame_distribution_value_);
+
+ 
   DCHECK(type == BrowserDistribution::CHROME_BROWSER ||
          type == BrowserDistribution::CHROME_FRAME ||
          type == BrowserDistribution::CHROME_BINARIES ||

@@ -29,20 +29,19 @@ using WebKit::WebCache;
 static const int kReviseAllocationDelayMS = 200;
 
 // The default size limit of the in-memory cache is 8 MB
-static const int kDefaultMemoryCacheSize = 8 * 1024 * 1024;
+static const int kDefaultMemoryCacheSize = 512 * 1024 * 1024;
 
 namespace {
 
 int GetDefaultCacheSize() {
-  // Start off with a modest default
   int default_cache_size = kDefaultMemoryCacheSize;
 
   // Check how much physical memory the OS has
   int mem_size_mb = base::SysInfo::AmountOfPhysicalMemoryMB();
-  if (mem_size_mb >= 1000)  // If we have a GB of memory, set a larger default.
-    default_cache_size *= 4;
-  else if (mem_size_mb >= 512)  // With 512 MB, set a slightly larger default.
+  if (mem_size_mb >= 2000)  // If we have a GB of memory, set a larger default.
     default_cache_size *= 2;
+  else if (mem_size_mb < 1000)  // With 512 MB, set a slightly larger default.
+    default_cache_size /= 2;
 
   UMA_HISTOGRAM_MEMORY_MB("Cache.MaxCacheSizeMB",
                           default_cache_size / 1024 / 1024);

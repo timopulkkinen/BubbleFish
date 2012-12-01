@@ -206,7 +206,7 @@ AutofillManager::~AutofillManager() {
 // static
 void AutofillManager::RegisterUserPrefs(PrefServiceBase* prefs) {
   prefs->RegisterBooleanPref(prefs::kAutofillEnabled,
-                             true,
+                             false,
                              PrefServiceBase::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kPasswordGenerationEnabled,
                              true,

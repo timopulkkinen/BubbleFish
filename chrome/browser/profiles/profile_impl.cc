@@ -237,10 +237,10 @@ void ProfileImpl::RegisterUserPrefs(PrefService* prefs) {
                               FilePath(),
                               PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kDiskCacheSize,
-                             0,
+                             INT_MAX,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kMediaCacheSize,
-                             0,
+                             INT_MAX,
                              PrefService::UNSYNCABLE_PREF);
 
   // Deprecated. Kept around for migration.

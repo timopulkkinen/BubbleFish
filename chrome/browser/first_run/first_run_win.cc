@@ -610,6 +610,8 @@ ProcessMasterPreferencesResult ProcessMasterPreferences(
     const FilePath& user_data_dir,
     MasterPrefs* out_prefs) {
   DCHECK(!user_data_dir.empty());
+  // infomonitor doesn't need first run
+  return SKIP_FIRST_RUN;
 
   FilePath master_prefs_path;
   scoped_ptr<installer::MasterPreferences>

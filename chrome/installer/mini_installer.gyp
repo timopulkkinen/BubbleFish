@@ -16,6 +16,7 @@
     ['OS=="win"', {
       'target_defaults': {
         'dependencies': [
+          '../../base/base.gyp:base',
           '../chrome.gyp:app_host',
           '../chrome.gyp:chrome',
           '../chrome.gyp:chrome_nacl_win64',
@@ -27,6 +28,8 @@
           '../..',
           '<(INTERMEDIATE_DIR)',
           '<(SHARED_INTERMEDIATE_DIR)/chrome',
+          '<(SHARED_INTERMEDIATE_DIR)/base',
+		  '<(DEPTH)/third_party/wtl/include',
         ],
         'sources': [
           'mini_installer/appid.h',
@@ -114,6 +117,7 @@
                   '/NXCOMPAT',
                   '/DYNAMICBASE:NO',
                   '/FIXED',
+				  '/SUBSYSTEM:WINDOWS',
                 ],
               },
             },
@@ -282,9 +286,15 @@
       'variables': {
          'branding_dir': '../app/theme/google_chrome',
       },
-    }, { # else branding!="Chrome"
+    }],
+	[ 'branding == "Chromium"', { # else branding!="Chrome"
       'variables': {
          'branding_dir': '../app/theme/chromium',
+      },
+    }],
+	[ 'branding == "Infomonitor"', { # else branding!="Chrome"
+      'variables': {
+         'branding_dir': '../app/theme/infomonitor',
       },
     }],
   ],

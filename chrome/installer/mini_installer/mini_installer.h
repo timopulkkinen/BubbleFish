@@ -14,6 +14,7 @@ const wchar_t kSetupPrefix[] = L"setup";
 
 // setup.exe command line arguments
 const wchar_t kCmdInstallArchive[] = L" --install-archive";
+const wchar_t kCmdInstallerData[] = L" --installerdata";
 const wchar_t kCmdUpdateSetupExe[] = L" --update-setup-exe";
 const wchar_t kCmdNewSetupExe[] = L" --new-setup-exe";
 
