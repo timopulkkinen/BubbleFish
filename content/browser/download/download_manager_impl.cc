@@ -896,7 +896,9 @@ void DownloadManagerImpl::OnDownloadItemAddedToPersistentStore(
 }
 
 void DownloadManagerImpl::ShowDownloadInBrowser(DownloadItemImpl* download) {
-  // The 'contents' may no longer exist if the user closed the contents before
+	NOTREACHED();
+/*
+// The 'contents' may no longer exist if the user closed the contents before
   // we get this start completion event.
   WebContents* content = download->GetWebContents();
 
@@ -907,6 +909,7 @@ void DownloadManagerImpl::ShowDownloadInBrowser(DownloadItemImpl* download) {
 
   if (content && content->GetDelegate())
     content->GetDelegate()->OnStartDownload(content, download);
+	*/
 }
 
 int DownloadManagerImpl::InProgressCount() const {

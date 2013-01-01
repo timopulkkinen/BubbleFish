@@ -23,7 +23,7 @@ void SetNewHomePagePrefs(PrefService* prefs) {
   if (home_page_is_new_tab_page_pref &&
       !home_page_is_new_tab_page_pref->IsManaged() &&
       !prefs->HasPrefPath(prefs::kHomePageIsNewTabPage))
-    prefs->SetBoolean(prefs::kHomePageIsNewTabPage, false);
+    prefs->SetBoolean(prefs::kHomePageIsNewTabPage, true);
 }
 
 void RegisterBrowserPrefs(PrefService* prefs) {
@@ -37,7 +37,7 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kHomePageIsNewTabPage,
-                             false,
+                             true,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kShowHomeButton,
                              false,

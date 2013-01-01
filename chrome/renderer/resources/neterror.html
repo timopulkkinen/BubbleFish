@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html i18n-values="dir:textdirection">
 <head>
+<meta http-equiv="refresh" content="10" />
 <if expr="pp_ifdef('android')">
 <meta name="viewport" content="width=device-width" />
 </if>
@@ -132,6 +133,39 @@ a:visited {
       url('../../app/theme/default_200_percent/%DISTRIBUTION%/product_logo.png') 2x);
 }
 
+</style>
+<style>
+h1, #errorSummary, #suggestions {
+    display:none;
+}
+@-webkit-keyframes bounce {
+ from {
+   top:30%;
+
+ }
+ to {
+   top:50%;
+
+ }
+}
+
+#box {
+    top:40%;
+    -webkit-animation-duration: 1.5s;
+    -webkit-animation-name: bounce;
+    -webkit-animation-iteration-count:infinite;
+    -webkit-animation-direction: alternate;
+    -webkit-animation-timing-function: linear;
+    position:absolute;
+    left:12%;
+
+}
+#errorDetails {
+    font-weight:bold;
+    padding-top:0;
+    margin-bottom:30px;
+    text-align:center;
+}
 </style>
 </head>
 

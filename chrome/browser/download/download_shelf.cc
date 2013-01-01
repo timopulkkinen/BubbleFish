@@ -6,18 +6,18 @@
 
 DownloadShelf::DownloadShelf()
     : should_show_on_unhide_(false),
-      is_hidden_(false) {}
+      is_hidden_(true) {}
 
 void DownloadShelf::AddDownload(BaseDownloadItemModel* download_model) {
   if (is_hidden_)
-    Unhide();
-  Show();
+ //   Unhide();
+ // Show();
   DoAddDownload(download_model);
 }
 
 void DownloadShelf::Show() {
   if (is_hidden_) {
-    should_show_on_unhide_ = true;
+    should_show_on_unhide_ = false;
     return;
   }
   DoShow();
@@ -36,7 +36,7 @@ void DownloadShelf::Hide() {
     return;
   is_hidden_ = true;
   if (IsShowing()) {
-    should_show_on_unhide_ = true;
+    should_show_on_unhide_ = false;
     DoClose();
   }
 }

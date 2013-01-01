@@ -1442,10 +1442,11 @@ int Browser::GetExtraRenderViewHeight() const {
 
 void Browser::OnStartDownload(WebContents* source,
                               content::DownloadItem* download) {
+  return;
   WebContents* constrained = GetConstrainingWebContents(source);
   if (constrained != source) {
     // Download in a constrained popup is shown in the tab that opened it.
-    constrained->GetDelegate()->OnStartDownload(constrained, download);
+    //constrained->GetDelegate()->OnStartDownload(constrained, download);
     return;
   }
 

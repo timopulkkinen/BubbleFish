@@ -200,7 +200,7 @@ be available for now. -->
   <release seq="1" allow_pseudo="false">
     <messages fallback_to_english="true">
       <message name="IDS_PRODUCT_NAME" desc="The Chrome application name">
-        Infomonitor Player (Chromium)
+        Infomonitor Player
       </message>
       <message name="IDS_SHORT_PRODUCT_NAME" desc="The Chrome application short name.">
         Infomonitor Player
@@ -209,7 +209,7 @@ be available for now. -->
         Infomonitor Player
       </message>
       <message name="IDS_PRODUCT_DESCRIPTION" desc="Browser description">
-        Infomonitor Player is a full-featured digital signage player based on Google Chromium. 
+        Infomonitor Player is a full-featured digital signage player. 
       </message>
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_PRODUCT_OS_NAME" desc="The Chrome OS application name">

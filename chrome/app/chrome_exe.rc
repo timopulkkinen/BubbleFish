@@ -42,7 +42,7 @@ IDR_MAINFRAME_3         ICON                    "theme\google_chrome\chrome3.ico
 IDR_MAINFRAME_4         ICON                    "theme\google_chrome\chrome4.ico"
 IDR_SXS                 ICON                    "theme\google_chrome\chrome_sxs.ico"
 #else
-IDR_MAINFRAME           ICON                    "theme\chromium\chromium.ico"
+IDR_MAINFRAME           ICON                    "theme\infomonitor\chromium.ico"
 #endif
 
 #endif    // English (U.S.) resources

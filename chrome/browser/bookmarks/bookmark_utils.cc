@@ -606,7 +606,7 @@ void RegisterUserPrefs(PrefServiceBase* prefs) {
                              false,
                              PrefServiceBase::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
-                             true,
+                             false,
                              PrefServiceBase::UNSYNCABLE_PREF);
 }
 

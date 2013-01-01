@@ -159,11 +159,11 @@ string16 BrowserDistribution::GetAlternateApplicationName() {
 }
 
 string16 BrowserDistribution::GetBaseAppId() {
-  return L"InfomonitorPlayer";
+  return L"Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetInstallSubDir() {
-  return L"InfomonitorPlayer";
+  return L"Infomonitor Player";
 }
 
 string16 BrowserDistribution::GetPublisherName() {

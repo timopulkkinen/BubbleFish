@@ -100,48 +100,6 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   web_ui->HideURL();
   web_ui->OverrideTitle(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
 
-  // We count all link clicks as AUTO_BOOKMARK, so that site can be ranked more
-  // highly. Note this means we're including clicks on not only most visited
-  // thumbnails, but also clicks on recently bookmarked.
-  web_ui->SetLinkTransitionType(content::PAGE_TRANSITION_AUTO_BOOKMARK);
-
-  if (!GetProfile()->IsOffTheRecord()) {
-    web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
-    web_ui->AddMessageHandler(new MostVisitedHandler());
-    web_ui->AddMessageHandler(new RecentlyClosedTabsHandler());
-    web_ui->AddMessageHandler(new MetricsHandler());
-#if !defined(OS_ANDROID)
-    if (NewTabUI::IsDiscoveryInNTPEnabled())
-      web_ui->AddMessageHandler(new SuggestionsHandler());
-    // Android doesn't have a sync promo/username on NTP.
-    if (GetProfile()->IsSyncAccessible())
-      web_ui->AddMessageHandler(new NewTabPageSyncHandler());
-
-    // Or apps.
-    if (ShouldShowApps()) {
-      ExtensionService* service = GetProfile()->GetExtensionService();
-      // We might not have an ExtensionService (on ChromeOS when not logged in
-      // for example).
-      if (service)
-        web_ui->AddMessageHandler(new AppLauncherHandler(service));
-    }
-#endif
-
-    web_ui->AddMessageHandler(new NewTabPageHandler());
-    web_ui->AddMessageHandler(new FaviconWebUIHandler());
-  }
-
-#if defined(OS_ANDROID)
-  // These handlers are specific to the Android NTP page.
-  web_ui->AddMessageHandler(new BookmarksHandler());
-  web_ui->AddMessageHandler(new ContextMenuHandler());
-  if (!GetProfile()->IsOffTheRecord())
-    web_ui->AddMessageHandler(new PromoHandler());
-#else
-  // Android uses native UI for sync setup.
-  if (NTPLoginHandler::ShouldShow(GetProfile()))
-    web_ui->AddMessageHandler(new NTPLoginHandler());
-#endif
 
   // Initializing the CSS and HTML can require some CPU, so do it after
   // we've hooked up the most visited handler.  This allows the DB query
@@ -150,12 +108,12 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   NewTabHTMLSource* html_source =
       new NewTabHTMLSource(GetProfile()->GetOriginalProfile());
   // These two resources should be loaded only if suggestions NTP is enabled.
-  html_source->AddResource("suggestions_page.css", "text/css",
+ /* html_source->AddResource("suggestions_page.css", "text/css",
       NewTabUI::IsDiscoveryInNTPEnabled() ? IDR_SUGGESTIONS_PAGE_CSS : 0);
   if (NewTabUI::IsDiscoveryInNTPEnabled()) {
     html_source->AddResource("suggestions_page.js", "application/javascript",
         IDR_SUGGESTIONS_PAGE_JS);
-  }
+  }*/
   // ChromeURLDataManager assumes the ownership of the html_source and in some
   // tests immediately deletes it, so html_source should not be accessed after
   // this call.
@@ -163,7 +121,6 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   ChromeURLDataManager::AddDataSource(profile, html_source);
 
   pref_change_registrar_.Init(GetProfile()->GetPrefs());
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
 
 #if defined(ENABLE_THEMES)
   // Listen for theme installation.
@@ -221,11 +178,7 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
 }
 
 bool NewTabUI::CanShowBookmarkBar() const {
-  PrefService* prefs = GetProfile()->GetPrefs();
-  bool disabled_by_policy =
-      prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
-      !prefs->GetBoolean(prefs::kShowBookmarkBar);
-  return browser_defaults::bookmarks_enabled && !disabled_by_policy;
+	return false;
 }
 
 void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
