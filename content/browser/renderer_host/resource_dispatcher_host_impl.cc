@@ -662,15 +662,21 @@ bool ResourceDispatcherHostImpl::HandleExternalProtocol(ResourceLoader* loader,
     return false;
 
   ResourceRequestInfoImpl* info = loader->GetRequestInfo();
+  VLOG(1) << __FUNCTION__ << " Handling URL : " << "\"" << url.spec() << "\"" ;
+  VLOG(1) << __FUNCTION__ << " Context : " << info->GetContext()->GetRequestContext() << "\"";
 
-  if (!ResourceType::IsFrame(info->GetResourceType()))
-    return false;
+  loader->request()->SetIMOfflineURLHeader(url);
+  if (!ResourceType::IsFrame(info->GetResourceType()) && !loader->request()->HasIMOfflineURLHeader()){
+	VLOG(1) << __FUNCTION__ << " Is not a frame " << "\"" << url.spec() << "\""; 
+	return false;
+  }
 
   const net::URLRequestJobFactory* job_factory =
       info->GetContext()->GetRequestContext()->job_factory();
-  if (job_factory->IsHandledURL(url))
-    return false;
-
+  if (job_factory->IsHandledURL(url)){
+     VLOG(1) << __FUNCTION__ << " IsHandledURL " << "\"" << url.spec() << "\"" ;
+	return false;  
+  }
   delegate_->HandleExternalProtocol(url, info->GetChildID(),
                                     info->GetRouteID());
   return true;
@@ -943,6 +949,8 @@ void ResourceDispatcherHostImpl::BeginRequest(
     net::HttpRequestHeaders headers;
     headers.AddHeadersFromString(request_data.headers);
     request->SetExtraRequestHeaders(headers);
+	request->SetIMOfflineURLHeader();
+	VLOG(1) << __FUNCTION__ << "(), has header:" << request->HasIMOfflineURLHeader();
   }
 
   // TODO(darin): Do we really need all of these URLRequest setters in the

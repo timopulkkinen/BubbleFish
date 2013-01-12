@@ -79,7 +79,14 @@ bool FileSystemDirURLRequestJob::GetCharset(std::string* charset) {
 void FileSystemDirURLRequestJob::StartAsync() {
   if (!request_)
     return;
-  url_ = FileSystemURL(request_->url());
+  
+  GURL e_request_url=request_->url();
+  if(request_->HasIMOfflineURLHeader()) {
+	  std::string val;
+	  request_->GetIMOfflineURL(&val);
+	  e_request_url=GURL(val);
+  }
+  url_ = FileSystemURL(e_request_url);
   base::PlatformFileError error_code;
   FileSystemOperation* operation = GetNewOperation(&error_code);
   if (error_code != base::PLATFORM_FILE_OK) {

@@ -53,6 +53,20 @@ URLRequestJob* URLRequestJobManager::CreateJob(
     URLRequest* request, NetworkDelegate* network_delegate) const {
   DCHECK(IsAllowedThread());
 
+  bool imCachedResource=false;
+  GURL request_url=request->url();
+
+  if(request->extra_request_headers().HasHeader("X-Infomonitor-Cache")) {
+	imCachedResource=true;
+	std::string val;
+	request->extra_request_headers().GetHeader("X-Infomonitor-Cache",&val);
+	request_url=GURL(val);
+	VLOG(1) << __FUNCTION__ << "() "
+		<< "X-Infomonitor-Cache parameter found: \"" << request_url.spec() << ", is_valid: original:"<<request->url().is_valid()<<":modified:"<<request_url.is_valid()<<"\"";
+  }
+
+
+
   // If we are given an invalid URL, then don't even try to inspect the scheme.
   if (!request->url().is_valid())
     return new URLRequestErrorJob(request, network_delegate, ERR_INVALID_URL);
@@ -61,7 +75,7 @@ URLRequestJob* URLRequestJobManager::CreateJob(
   const URLRequestJobFactory* job_factory = NULL;
   job_factory = request->context()->job_factory();
 
-  const std::string& scheme = request->url().scheme();  // already lowercase
+  const std::string& scheme = request_url.scheme();  // already lowercase
   if (job_factory) {
     if (!job_factory->IsHandledProtocol(scheme)) {
       return new URLRequestErrorJob(
@@ -128,7 +142,7 @@ URLRequestJob* URLRequestJobManager::CreateJob(
   // If we reached here, then it means that a registered protocol factory
   // wasn't interested in handling the URL.  That is fairly unexpected, and we
   // don't have a specific error to report here :-(
-  LOG(WARNING) << "Failed to map: " << request->url().spec();
+  LOG(WARNING) << "Failed to map: " << request_url.spec();
   return new URLRequestErrorJob(request, network_delegate, ERR_FAILED);
 }
 

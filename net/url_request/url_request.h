@@ -37,6 +37,9 @@ class ComponentUpdateInterceptor;
 class TestAutomationProvider;
 class URLRequestAutomationJob;
 
+const std::string IMCacheHeaderKey="X-Infomonitor-Cache";
+const std::string IMCacheQueryKey="__im_offline_cache_id";
+
 namespace base {
 namespace debug {
 class StackTrace;
@@ -355,6 +358,18 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // redirects, this vector will contain one element.
   const std::vector<GURL>& url_chain() const { return url_chain_; }
   const GURL& url() const { return url_chain_.back(); }
+  
+  bool HasIMOfflineURLHeader();
+
+  void GetIMOfflineURL(std::string* out);
+
+  void SetIMOfflineURLHeader();
+  void SetIMOfflineURLHeader(const GURL& url);
+
+  // dirty copy of implementation from url_util.cc
+  bool GetValueForKeyInQuery(const GURL& url,
+                           const std::string& search_key,
+                           std::string* out_value);
 
   // The URL that should be consulted for the third-party cookie blocking
   // policy.

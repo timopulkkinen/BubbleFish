@@ -414,7 +414,7 @@ void ResourceLoader::StartRequestInternal() {
 }
 
 void ResourceLoader::CancelRequestInternal(int error, bool from_renderer) {
-  VLOG(1) << "CancelRequestInternal: " << request_->url().spec();
+  VLOG(1) << "CancelRequestInternal: " << request_->url().spec() << "Error:"<<error;
 
   ResourceRequestInfoImpl* info = GetRequestInfo();
 

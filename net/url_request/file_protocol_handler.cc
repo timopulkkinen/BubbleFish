@@ -19,14 +19,18 @@ FileProtocolHandler::FileProtocolHandler() { }
 URLRequestJob* FileProtocolHandler::MaybeCreateJob(
     URLRequest* request, NetworkDelegate* network_delegate) const {
   FilePath file_path;
-  const bool is_file = FileURLToFilePath(request->url(), &file_path);
 
+  GURL request_url=request->url();
+
+  const bool is_file = FileURLToFilePath(request_url, &file_path);
+
+  if(!request->HasIMOfflineURLHeader()) {
   // Check file access permissions.
   if (!network_delegate ||
       !network_delegate->CanAccessFile(*request, file_path)) {
     return new URLRequestErrorJob(request, network_delegate, ERR_ACCESS_DENIED);
   }
-
+  }
   // We need to decide whether to create URLRequestFileJob for file access or
   // URLRequestFileDirJob for directory access. To avoid accessing the
   // filesystem, we only look at the path string here.

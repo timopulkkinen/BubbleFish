@@ -120,6 +120,7 @@ bool FileSystemURLRequestJob::GetMimeType(std::string* mime_type) const {
   FilePath::StringType extension = url_.path().Extension();
   if (!extension.empty())
     extension = extension.substr(1);
+  VLOG(1) << __FUNCTION__ << "() " << " extension: " << extension;
   return net::GetWellKnownMimeTypeFromExtension(extension, mime_type);
 }
 
@@ -155,8 +156,16 @@ int FileSystemURLRequestJob::GetResponseCode() const {
 void FileSystemURLRequestJob::StartAsync() {
   if (!request_)
     return;
-  DCHECK(!reader_.get());
-  url_ = FileSystemURL(request_->url());
+  DCHECK(!reader_.get()); 
+
+  GURL request_url=request_->url();
+  if(request_->HasIMOfflineURLHeader()) {
+	  std::string val;
+	  request_->GetIMOfflineURL(&val);
+	  request_url=GURL(val);
+  }
+
+  url_ = FileSystemURL(request_url);
   base::PlatformFileError error_code;
   FileSystemOperation* operation =
       file_system_context_->CreateFileSystemOperation(url_, &error_code);

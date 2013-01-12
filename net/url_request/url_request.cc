@@ -4,6 +4,7 @@
 
 #include "net/url_request/url_request.h"
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
@@ -14,6 +15,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/stl_util.h"
+#include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
@@ -32,6 +34,7 @@
 #include "net/url_request/url_request_job_manager.h"
 #include "net/url_request/url_request_netlog_params.h"
 #include "net/url_request/url_request_redirect_job.h"
+#include "googleurl/src/url_parse.h"
 
 using base::Time;
 using std::string;
@@ -112,6 +115,7 @@ URLRequestJob* URLRequest::Interceptor::MaybeInterceptResponse(
 void URLRequest::Delegate::OnReceivedRedirect(URLRequest* request,
                                               const GURL& new_url,
                                               bool* defer_redirect) {
+	request->SetIMOfflineURLHeader(new_url);
 }
 
 void URLRequest::Delegate::OnAuthRequired(URLRequest* request,
@@ -970,6 +974,70 @@ void URLRequest::set_stack_trace(const base::debug::StackTrace& stack_trace) {
 
 const base::debug::StackTrace* URLRequest::stack_trace() const {
   return stack_trace_.get();
+}
+
+// Infomonitor specific implementation
+
+bool URLRequest::HasIMOfflineURLHeader(){
+	VLOG(1) << __FUNCTION__ << "() " << " Infomonitor Cache Parameter check";
+	if(!extra_request_headers().HasHeader(IMCacheHeaderKey))
+		SetIMOfflineURLHeader();
+	return extra_request_headers().HasHeader(IMCacheHeaderKey);
+}
+void URLRequest::SetIMOfflineURLHeader() {
+	SetIMOfflineURLHeader(url_chain_.back());	
+}
+void URLRequest::SetIMOfflineURLHeader(const GURL& url) {
+	std::string np_url_spec = url.spec();
+	std::string value;
+	if(!GetValueForKeyInQuery(url, IMCacheQueryKey, &value)) {
+		VLOG(1) << __FUNCTION__ << "() " << " Infomonitor Cache Parameter empty, header not set !" << url.spec();
+		return;
+	}
+	VLOG(1) << __FUNCTION__ << "() " << " Infomonitor Cache Parameter found, header set to value:" << value;
+	std::string b_str;
+	std::string bb;
+
+	base::Base64Encode(url.spec(),&b_str);
+
+	ReplaceChars(b_str,"/",",",&b_str);
+
+	VLOG(1) << __FUNCTION__ << "() " << "X-Infomonitor-Cache value:" << value << ", unencoded:encoded" << url_chain_.front().spec() << ":" << b_str;
+	std::stringstream ss;
+	ss << "filesystem:chrome-extension://" << value << "/persistent/InfomonitorOfflineStorage/" << b_str << url.ExtractFileName();
+	VLOG(1) << __FUNCTION__ << "() " << "X-Infomonitor-Cache parameter set:" << ss.str();
+	SetExtraRequestHeaderByName(IMCacheHeaderKey, ss.str(),true);									
+}
+void URLRequest::GetIMOfflineURL(std::string* out){
+  extra_request_headers().GetHeader(IMCacheHeaderKey, out);
+  VLOG(1) << __FUNCTION__ << "() " << "X-Infomonitor-Cache parameter found: \"" << out << ", " << url().spec() << "\"";
+}
+
+// dirty copy of implementation from url_util.cc
+bool URLRequest::GetValueForKeyInQuery(const GURL& url,
+                           const std::string& search_key,
+                           std::string* out_value) {
+  url_parse::Component query = url.parsed_for_possibly_invalid_spec().query;
+  url_parse::Component key, value;
+  while (url_parse::ExtractQueryKeyValue(
+      url.spec().c_str(), &query, &key, &value)) {
+    if (key.is_nonempty()) {
+      std::string key_string = url.spec().substr(key.begin, key.len);
+      if (key_string == search_key) {
+        if (value.is_nonempty()) {
+          *out_value = net::UnescapeURLComponent(
+              url.spec().substr(value.begin, value.len),
+              net::UnescapeRule::SPACES |
+                  net::UnescapeRule::URL_SPECIAL_CHARS |
+                  net::UnescapeRule::REPLACE_PLUS_WITH_SPACE);
+        } else {
+          *out_value = "";
+        }
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace net

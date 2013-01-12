@@ -191,6 +191,8 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+   VLOG(1) << __FUNCTION__ << " Running Extension event handler for: " << "\"" << request->url().spec() << "\"";
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
   // blocked. However, an extension might redirect the request to another URL,
@@ -198,6 +200,8 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (url_blacklist_manager_ &&
       url_blacklist_manager_->IsURLBlocked(request->url())) {
     // URL access blocked by policy.
+	VLOG(1) << __FUNCTION__ << " URL is blacklisted for extensions: " << "\"" << request->url().spec() << "\"";
+
     request->net_log().AddEvent(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
@@ -210,6 +214,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (managed_mode_url_filter_ &&
       !managed_mode_url_filter_->IsURLWhitelisted(request->url())) {
     // Block for now.
+	VLOG(1) << __FUNCTION__ << " Managed mode URL filter blocked URL: " << "\"" << request->url().spec() << "\"";
     return net::ERR_NETWORK_ACCESS_DENIED;
   }
 #endif
@@ -227,7 +232,10 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
 int ChromeNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
-    net::HttpRequestHeaders* headers) {
+    net::HttpRequestHeaders* headers) { 
+		
+  VLOG(1) << __FUNCTION__ << " Running Extension event handler for: " << "\"" << request->url().spec() << "\"";
+
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeSendHeaders(
       profile_, extension_info_map_.get(), request, callback, headers);
 }
