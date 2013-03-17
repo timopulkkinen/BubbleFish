@@ -24,7 +24,12 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
+#if defined(OS_WIN)
+#include "ui/base/win/scoped_ole_initializer.h"
+#endif
+
 #if defined(USE_AURA)
+#include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_helper.h"
 #endif
 
@@ -70,7 +75,7 @@ class ViewWithNameAndRole : public views::View {
         role_(role) {
   }
 
-  void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE {
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE {
     views::View::GetAccessibleState(state);
     state->name = name_;
     state->role = role_;
@@ -89,6 +94,9 @@ class AccessibilityEventRouterViewsTest
   }
 
   virtual void SetUp() {
+#if defined(OS_WIN)
+    ole_initializer_.reset(new ui::ScopedOleInitializer());
+#endif
     views::ViewsDelegate::views_delegate = new AccessibilityViewsDelegate();
 #if defined(USE_AURA)
     aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
@@ -106,12 +114,22 @@ class AccessibilityEventRouterViewsTest
     // The Widget's FocusManager is deleted using DeleteSoon - this
     // forces it to be deleted now, so we don't have any memory leaks
     // when this method exits.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
+
+#if defined(OS_WIN)
+    ole_initializer_.reset();
+#endif
   }
 
   views::Widget* CreateWindowWithContents(views::View* contents) {
-    return views::Widget::CreateWindowWithBounds(
+    gfx::NativeView context = NULL;
+#if defined(USE_AURA)
+    context = aura_test_helper_->root_window();
+#endif
+
+    return views::Widget::CreateWindowWithContextAndBounds(
         new AccessibilityWindowDelegate(contents),
+        context,
         gfx::Rect(0, 0, 500, 500));
   }
 
@@ -120,7 +138,7 @@ class AccessibilityEventRouterViewsTest
   // ACCESSIBILITY_CONTROL_FOCUSED event.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     ASSERT_EQ(type, chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED);
     const AccessibilityControlInfo* info =
         content::Details<const AccessibilityControlInfo>(details).ptr();
@@ -133,6 +151,9 @@ class AccessibilityEventRouterViewsTest
   int focus_event_count_;
   std::string last_control_name_;
   std::string last_control_context_;
+#if defined(OS_WIN)
+  scoped_ptr<ui::ScopedOleInitializer> ole_initializer_;
+#endif
 #if defined(USE_AURA)
   scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
 #endif

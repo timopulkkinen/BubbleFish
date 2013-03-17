@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Note that the embedder is welcome to persist these values across
+// invocations of the browser, and possibly across browser versions.
+// Thus individual errors may be deprecated and new errors added, but
+// the values of particular errors should not be changed.
 
 // File errors.
 
@@ -36,6 +40,17 @@ INTERRUPT_REASON(FILE_VIRUS_INFECTED, 7)
 // "Temporary Problem".
 INTERRUPT_REASON(FILE_TRANSIENT_ERROR, 10)
 
+// The file was blocked due to local policy.
+// "Blocked"
+INTERRUPT_REASON(FILE_BLOCKED, 11)
+
+// An attempt to check the safety of the download failed due to unexpected
+// reasons. See http://crbug.com/153212.
+INTERRUPT_REASON(FILE_SECURITY_CHECK_FAILED, 12)
+
+// An attempt was made to seek past the end of a file in opening
+// a file (as part of resuming a previously interrupted download).
+INTERRUPT_REASON(FILE_TOO_SHORT, 13)
 
 // Network errors.
 

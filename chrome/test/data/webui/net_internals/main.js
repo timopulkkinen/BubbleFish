@@ -30,6 +30,7 @@ TEST_F('NetInternalsTest', 'netInternalsTourTabs', function() {
     dns: true,
     sockets: true,
     spdy: true,
+    quic: true,
     httpPipeline: true,
     httpCache: true,
     serviceProviders: cr.isWindows,
@@ -37,6 +38,7 @@ TEST_F('NetInternalsTest', 'netInternalsTourTabs', function() {
     hsts: true,
     logs: cr.isChromeOS,
     prerender: true,
+    bandwidth: true,
     chromeos: cr.isChromeOS
   };
 

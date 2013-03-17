@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/chromeos/chromeos_version.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -18,7 +18,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
-#include "unicode/timezone.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
+#include "third_party/icu/public/i18n/unicode/timezone.h"
 
 using content::BrowserThread;
 
@@ -159,9 +162,9 @@ void SetTimezoneIDFromString(const std::string& id) {
   // We want to do this in an atomic way. So we are going to create the symlink
   // at kTimezoneSymlink2 and then move it to kTimezoneSymlink
 
-  FilePath timezone_symlink(kTimezoneSymlink);
-  FilePath timezone_symlink2(kTimezoneSymlink2);
-  FilePath timezone_file(kTimezoneFilesDir + id);
+  base::FilePath timezone_symlink(kTimezoneSymlink);
+  base::FilePath timezone_symlink2(kTimezoneSymlink2);
+  base::FilePath timezone_file(kTimezoneFilesDir + id);
 
   // Make sure timezone_file exists.
   if (!file_util::PathExists(timezone_file)) {
@@ -214,6 +217,10 @@ class TimezoneSettingsBaseImpl : public chromeos::system::TimezoneSettings {
   //   US/Pacific == America/Los_Angeles
   const icu::TimeZone* GetKnownTimezoneOrNull(
       const icu::TimeZone& timezone) const;
+
+  // Notifies each renderer of the change in timezone to reset cached
+  // information stored in v8 to accelerate date operations.
+  void NotifyRenderers();
 
   ObserverList<Observer> observers_;
   std::vector<icu::TimeZone*> timezones_;
@@ -271,6 +278,7 @@ void TimezoneSettingsBaseImpl::SetTimezoneFromID(const string16& timezone_id) {
   scoped_ptr<icu::TimeZone> timezone(icu::TimeZone::createTimeZone(
       icu::UnicodeString(timezone_id.c_str(), timezone_id.size())));
   SetTimezone(*timezone);
+  NotifyRenderers();
 }
 
 void TimezoneSettingsBaseImpl::AddObserver(Observer* observer) {
@@ -307,6 +315,26 @@ const icu::TimeZone* TimezoneSettingsBaseImpl::GetKnownTimezoneOrNull(
 
   // May return NULL if we did not find a matching timezone in our list.
   return known_timezone;
+}
+
+void TimezoneSettingsBaseImpl::NotifyRenderers() {
+  content::RenderProcessHost::iterator process_iterator(
+      content::RenderProcessHost::AllHostsIterator());
+  for (; !process_iterator.IsAtEnd(); process_iterator.Advance()) {
+    content::RenderProcessHost* render_process_host =
+        process_iterator.GetCurrentValue();
+    content::RenderProcessHost::RenderWidgetHostsIterator widget_iterator(
+        render_process_host->GetRenderWidgetHostsIterator());
+    for (; !widget_iterator.IsAtEnd(); widget_iterator.Advance()) {
+      const content::RenderWidgetHost* widget =
+          widget_iterator.GetCurrentValue();
+      if (widget->IsRenderView()) {
+        content::RenderViewHost* view = content::RenderViewHost::From(
+            const_cast<content::RenderWidgetHost*>(widget));
+        view->NotifyTimezoneChange();
+      }
+    }
+  }
 }
 
 void TimezoneSettingsImpl::SetTimezone(const icu::TimeZone& timezone) {

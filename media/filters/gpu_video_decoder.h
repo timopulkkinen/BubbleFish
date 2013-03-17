@@ -55,15 +55,15 @@ class MEDIA_EXPORT GpuVideoDecoder
     // Close()ing the returned pointer.
     virtual base::SharedMemory* CreateSharedMemory(size_t size) = 0;
 
+    // Returns the message loop the VideoDecodeAccelerator runs on.
+    virtual scoped_refptr<base::MessageLoopProxy> GetMessageLoop() = 0;
+
    protected:
     friend class base::RefCountedThreadSafe<Factories>;
     virtual ~Factories();
   };
 
-  typedef base::Callback<
-      scoped_refptr<base::MessageLoopProxy>()> MessageLoopFactoryCB;
-  GpuVideoDecoder(const MessageLoopFactoryCB& message_loop_factory_cb,
-                  const scoped_refptr<base::MessageLoopProxy>& vda_loop_proxy,
+  GpuVideoDecoder(const scoped_refptr<base::MessageLoopProxy>& message_loop,
                   const scoped_refptr<Factories>& factories);
 
   // VideoDecoder implementation.
@@ -125,9 +125,9 @@ class MEDIA_EXPORT GpuVideoDecoder
   void ReusePictureBuffer(int64 picture_buffer_id);
 
   void RecordBufferData(
-      const BitstreamBuffer& bitstream_buffer, const Buffer& buffer);
+      const BitstreamBuffer& bitstream_buffer, const DecoderBuffer& buffer);
   void GetBufferData(int32 id, base::TimeDelta* timetamp,
-                     gfx::Size* natural_size);
+                     gfx::Rect* visible_rect, gfx::Size* natural_size);
 
   // Set |vda_| and |weak_vda_| on the VDA thread (in practice the render
   // thread).
@@ -152,13 +152,12 @@ class MEDIA_EXPORT GpuVideoDecoder
   // Return a shared-memory segment to the available pool.
   void PutSHM(SHMBuffer* shm_buffer);
 
+  void DestroyTextures();
+
   StatisticsCB statistics_cb_;
 
   // Pointer to the demuxer stream that will feed us compressed buffers.
   scoped_refptr<DemuxerStream> demuxer_stream_;
-
-  // This is !is_null() iff Initialize() hasn't been called.
-  MessageLoopFactoryCB message_loop_factory_cb_;
 
   // MessageLoop on which to fire callbacks and trampoline calls to this class
   // if they arrive on other loops.
@@ -206,11 +205,12 @@ class MEDIA_EXPORT GpuVideoDecoder
   uint32 decoder_texture_target_;
 
   struct BufferData {
-    BufferData(int32 bbid, base::TimeDelta ts,
+    BufferData(int32 bbid, base::TimeDelta ts, const gfx::Rect& visible_rect,
                const gfx::Size& natural_size);
     ~BufferData();
     int32 bitstream_buffer_id;
     base::TimeDelta timestamp;
+    gfx::Rect visible_rect;
     gfx::Size natural_size;
   };
   std::list<BufferData> input_buffer_data_;
@@ -218,8 +218,8 @@ class MEDIA_EXPORT GpuVideoDecoder
   // picture_buffer_id and the frame wrapping the corresponding Picture, for
   // frames that have been decoded but haven't been requested by a Read() yet.
   std::list<scoped_refptr<VideoFrame> > ready_video_frames_;
-  int64 next_picture_buffer_id_;
-  int64 next_bitstream_buffer_id_;
+  int32 next_picture_buffer_id_;
+  int32 next_bitstream_buffer_id_;
 
   // Indicates decoding error occurred.
   bool error_occured_;

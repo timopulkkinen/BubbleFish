@@ -10,13 +10,14 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/quota/quota_types.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace sql {
 class Connection;
@@ -30,14 +31,14 @@ namespace quota {
 class SpecialStoragePolicy;
 
 // All the methods of this class must run on the DB thread.
-class QuotaDatabase {
+class WEBKIT_STORAGE_EXPORT_PRIVATE QuotaDatabase {
  public:
   // Constants for {Get,Set}QuotaConfigValue keys.
   static const char kDesiredAvailableSpaceKey[];
   static const char kTemporaryQuotaOverrideKey[];
 
   // If 'path' is empty, an in memory database will be used.
-  explicit QuotaDatabase(const FilePath& path);
+  explicit QuotaDatabase(const base::FilePath& path);
   ~QuotaDatabase();
 
   void CloseConnection();
@@ -87,7 +88,7 @@ class QuotaDatabase {
   bool SetOriginDatabaseBootstrapped(bool bootstrap_flag);
 
  private:
-  struct QuotaTableEntry {
+  struct WEBKIT_STORAGE_EXPORT_PRIVATE QuotaTableEntry {
     QuotaTableEntry();
     QuotaTableEntry(
         const std::string& host,
@@ -97,10 +98,10 @@ class QuotaDatabase {
     StorageType type;
     int64 quota;
   };
-  friend bool operator <(const QuotaTableEntry& lhs,
-                         const QuotaTableEntry& rhs);
+  friend WEBKIT_STORAGE_EXPORT_PRIVATE bool operator <(
+      const QuotaTableEntry& lhs, const QuotaTableEntry& rhs);
 
-  struct OriginInfoTableEntry {
+  struct WEBKIT_STORAGE_EXPORT_PRIVATE OriginInfoTableEntry {
     OriginInfoTableEntry();
     OriginInfoTableEntry(
         const GURL& origin,
@@ -114,8 +115,8 @@ class QuotaDatabase {
     base::Time last_access_time;
     base::Time last_modified_time;
   };
-  friend bool operator <(const OriginInfoTableEntry& lhs,
-                         const OriginInfoTableEntry& rhs);
+  friend WEBKIT_STORAGE_EXPORT_PRIVATE bool operator <(
+      const OriginInfoTableEntry& lhs, const OriginInfoTableEntry& rhs);
 
   // Structures used for CreateSchema.
   struct TableSchema {
@@ -162,7 +163,7 @@ class QuotaDatabase {
   bool DumpQuotaTable(QuotaTableCallback* callback);
   bool DumpOriginInfoTable(OriginInfoTableCallback* callback);
 
-  FilePath db_file_path_;
+  base::FilePath db_file_path_;
 
   scoped_ptr<sql::Connection> db_;
   scoped_ptr<sql::MetaTable> meta_table_;

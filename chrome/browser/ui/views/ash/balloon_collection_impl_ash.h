@@ -7,14 +7,17 @@
 
 #include <set>
 
-#include "ash/system/web_notification/web_notification_tray.h"
 #include "chrome/browser/chromeos/notifications/balloon_view_host_chromeos.h"  // MessageCallback
 #include "chrome/browser/notifications/balloon_collection_impl.h"
+#include "ui/message_center/message_center.h"
+
+class MessageCenterSettingsController;
 
 // Wrapper on top of ::BalloonCollectionImpl to provide integration between
 // the Chrome notification UI and Ash notifications (ash::WebNotificationTray).
-class BalloonCollectionImplAsh : public BalloonCollectionImpl,
-                                 public ash::WebNotificationTray::Delegate {
+class BalloonCollectionImplAsh
+    : public BalloonCollectionImpl,
+      public message_center::MessageCenter::Delegate {
  public:
   BalloonCollectionImplAsh();
   virtual ~BalloonCollectionImplAsh();
@@ -24,13 +27,17 @@ class BalloonCollectionImplAsh : public BalloonCollectionImpl,
                    Profile* profile) OVERRIDE;
   virtual bool HasSpace() const OVERRIDE;
 
-  // Overridden from WebNotificationTray::Delegate.
-  virtual void NotificationRemoved(const std::string& notifcation_id) OVERRIDE;
-  virtual void DisableExtension(const std::string& notifcation_id) OVERRIDE;
+  // Overridden from message_center::MessageCenter::Delegate.
+  virtual void NotificationRemoved(const std::string& notification_id,
+                                   bool by_user) OVERRIDE;
+  virtual void DisableExtension(const std::string& notification_id) OVERRIDE;
   virtual void DisableNotificationsFromSource(
-      const std::string& notifcation_id) OVERRIDE;
-  virtual void ShowSettings(const std::string& notifcation_id) OVERRIDE;
-  virtual void OnClicked(const std::string& notifcation_id) OVERRIDE;
+      const std::string& notification_id) OVERRIDE;
+  virtual void ShowSettings(const std::string& notification_id) OVERRIDE;
+  virtual void ShowSettingsDialog(gfx::NativeView context) OVERRIDE;
+  virtual void OnClicked(const std::string& notification_id) OVERRIDE;
+  virtual void OnButtonClicked(const std::string& notification_id,
+                               int button_index) OVERRIDE;
 
   // Adds a callback for WebUI message. Returns true if the callback
   // is succssfully registered, or false otherwise. It fails to add if
@@ -61,6 +68,8 @@ class BalloonCollectionImplAsh : public BalloonCollectionImpl,
   const extensions::Extension* GetBalloonExtension(Balloon* balloon);
 
  private:
+  scoped_ptr<MessageCenterSettingsController> settings_controller_;
+
   DISALLOW_COPY_AND_ASSIGN(BalloonCollectionImplAsh);
 };
 

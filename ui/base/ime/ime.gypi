@@ -10,8 +10,6 @@
       'composition_text.cc',
       'composition_text.h',
       'composition_underline.h',
-      'ibus_client.cc',
-      'ibus_client.h',
       'input_method.h',
       'input_method_base.cc',
       'input_method_base.h',
@@ -20,15 +18,30 @@
       'input_method_factory.h',
       'input_method_ibus.cc',
       'input_method_ibus.h',
+      'input_method_win.cc',
+      'input_method_win.h',
       'mock_input_method.cc',
       'mock_input_method.h',
+      'fake_input_method.cc',
+      'fake_input_method.h',
       'text_input_client.cc',
       'text_input_client.h',
       'text_input_type.h',
     ],
+    'tsf_files': [
+      'win/tsf_bridge.cc',
+      'win/tsf_bridge.h',
+      'win/tsf_event_router.cc',
+      'win/tsf_event_router.h',
+      'win/tsf_input_scope.cc',
+      'win/tsf_input_scope.h',
+      'win/tsf_text_store.cc',
+      'win/tsf_text_store.h',
+    ],
   },
   'sources': [
     '<@(ime_files)',
+    '<@(tsf_files)',
   ],
   'conditions': [
     ['use_aura==0', {
@@ -46,14 +59,17 @@
       'sources!': [
         'character_composer.cc',
         'character_composer.h',
-        'ibus_client.cc',
-        'ibus_client.h',
         'input_method_ibus.cc',
         'input_method_ibus.h',
       ],
     }, {
       'dependencies': [
         '<(DEPTH)/chromeos/chromeos.gyp:chromeos',
+      ],
+    }],
+    ['OS!="win"', {
+      'sources!': [
+        '<@(tsf_files)',
       ],
     }],
   ],

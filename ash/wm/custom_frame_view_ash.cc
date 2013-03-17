@@ -11,6 +11,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
@@ -97,7 +98,7 @@ void CustomFrameViewAsh::GetWindowMask(const gfx::Size& size,
 }
 
 void CustomFrameViewAsh::ResetWindowControls() {
-  maximize_button_->SetState(views::CustomButton::BS_NORMAL);
+  maximize_button_->SetState(views::CustomButton::STATE_NORMAL);
 }
 
 void CustomFrameViewAsh::UpdateWindowIcon() {
@@ -125,6 +126,14 @@ void CustomFrameViewAsh::Layout() {
 }
 
 void CustomFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
+  if (frame_->IsFullscreen())
+    return;
+
+  // Prevent bleeding paint onto the client area below the window frame, which
+  // may become visible when the WebContent is transparent.
+  canvas->Save();
+  canvas->ClipRect(gfx::Rect(0, 0, width(), NonClientTopBorderHeight()));
+
   bool paint_as_active = ShouldPaintAsActive();
   int theme_image_id = paint_as_active ? IDR_AURA_WINDOW_HEADER_BASE_ACTIVE :
       IDR_AURA_WINDOW_HEADER_BASE_INACTIVE;
@@ -136,6 +145,7 @@ void CustomFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
       NULL);
   frame_painter_->PaintTitleBar(this, canvas, GetTitleFont());
   frame_painter_->PaintHeaderContentSeparator(this, canvas);
+  canvas->Restore();
 }
 
 std::string CustomFrameViewAsh::GetClassName() const {
@@ -144,6 +154,10 @@ std::string CustomFrameViewAsh::GetClassName() const {
 
 gfx::Size CustomFrameViewAsh::GetMinimumSize() {
   return frame_painter_->GetMinimumSize(this);
+}
+
+gfx::Size CustomFrameViewAsh::GetMaximumSize() {
+  return frame_painter_->GetMaximumSize(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -171,6 +185,9 @@ void CustomFrameViewAsh::ButtonPressed(views::Button* sender,
 // CustomFrameViewAsh, private:
 
 int CustomFrameViewAsh::NonClientTopBorderHeight() const {
+  if (frame_->IsFullscreen())
+    return 0;
+
   // Reserve enough space to see the buttons, including any offset from top and
   // reserving space for the separator line.
   return close_button_->bounds().bottom() +

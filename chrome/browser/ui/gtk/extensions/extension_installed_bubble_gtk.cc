@@ -12,7 +12,8 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
-#include "chrome/browser/extensions/api/commands/command_service_factory.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
@@ -23,8 +24,9 @@
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -37,6 +39,7 @@
 #include "ui/gfx/gtk_util.h"
 
 using extensions::Extension;
+using extensions::ExtensionActionManager;
 
 namespace {
 
@@ -75,14 +78,19 @@ ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
     : extension_(extension),
       browser_(browser),
       icon_(icon),
-      animation_wait_retries_(kAnimationWaitRetries) {
+      animation_wait_retries_(kAnimationWaitRetries),
+      bubble_(NULL) {
   AddRef();  // Balanced in Close().
 
-  if (!extension_->omnibox_keyword().empty())
+  extensions::ExtensionActionManager* extension_action_manager =
+      ExtensionActionManager::Get(browser_->profile());
+
+  if (!extensions::OmniboxInfo::GetKeyword(extension_).empty())
     type_ = OMNIBOX_KEYWORD;
-  else if (extension_->browser_action())
+  else if (extension_action_manager->GetBrowserAction(*extension_))
     type_ = BROWSER_ACTION;
-  else if (extension->page_action() && extension->is_verbose_install_message())
+  else if (extension_action_manager->GetPageAction(*extension) &&
+           extensions::ActionInfo::IsVerboseInstallMessage(extension))
     type_ = PAGE_ACTION;
   else
     type_ = GENERIC;
@@ -157,10 +165,12 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   } else if (type_ == PAGE_ACTION) {
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
-    location_bar_view->SetPreviewEnabledPageAction(extension_->page_action(),
+    ExtensionAction* page_action =
+        ExtensionActionManager::Get(browser_->profile())->
+        GetPageAction(*extension_);
+    location_bar_view->SetPreviewEnabledPageAction(page_action,
                                                    true);  // preview_enabled
-    reference_widget = location_bar_view->GetPageActionWidget(
-        extension_->page_action());
+    reference_widget = location_bar_view->GetPageActionWidget(page_action);
     // glib delays recalculating layout, but we need reference_widget to know
     // its coordinates, so we force a check_resize here.
     gtk_container_check_resize(GTK_CONTAINER(
@@ -238,8 +248,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   // Browser action label.
   if (type_ == BROWSER_ACTION) {
     extensions::CommandService* command_service =
-        extensions::CommandServiceFactory::GetForProfile(
-            browser_->profile());
+        extensions::CommandService::Get(browser_->profile());
     extensions::Command browser_action_command;
     GtkWidget* info_label;
     if (!command_service->GetBrowserActionCommand(
@@ -262,8 +271,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   // Page action label.
   if (type_ == PAGE_ACTION) {
     extensions::CommandService* command_service =
-        extensions::CommandServiceFactory::GetForProfile(
-            browser_->profile());
+        extensions::CommandService::Get(browser_->profile());
     extensions::Command page_action_command;
     GtkWidget* info_label;
     if (!command_service->GetPageActionCommand(
@@ -287,7 +295,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   if (type_ == OMNIBOX_KEYWORD) {
     GtkWidget* info_label = gtk_label_new(l10n_util::GetStringFUTF8(
         IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
-        UTF8ToUTF16(extension_->omnibox_keyword())).c_str());
+        UTF8ToUTF16(extensions::OmniboxInfo::GetKeyword(extension_))).c_str());
     gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
   }
@@ -318,20 +326,14 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   gtk_box_pack_start(GTK_BOX(close_column), close_button_->widget(),
       FALSE, FALSE, 0);
 
-  BubbleGtk::ArrowLocationGtk arrow_location =
-      !base::i18n::IsRTL() ?
-      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
-      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
+  BubbleGtk::FrameStyle frame_style = BubbleGtk::ANCHOR_TOP_RIGHT;
 
   gfx::Rect bounds = gtk_util::WidgetBounds(reference_widget);
   if (type_ == OMNIBOX_KEYWORD) {
     // Reverse the arrow for omnibox keywords, since the bubble will be on the
     // other side of the window. We also clear the width to avoid centering
     // the popup on the URL bar.
-    arrow_location =
-        !base::i18n::IsRTL() ?
-        BubbleGtk::ARROW_LOCATION_TOP_LEFT :
-        BubbleGtk::ARROW_LOCATION_TOP_RIGHT;
+    frame_style = BubbleGtk::ANCHOR_TOP_LEFT;
     if (base::i18n::IsRTL())
       bounds.Offset(bounds.width(), 0);
     bounds.set_width(0);
@@ -340,7 +342,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   bubble_ = BubbleGtk::Show(reference_widget,
                             &bounds,
                             bubble_content,
-                            arrow_location,
+                            frame_style,
                             BubbleGtk::MATCH_SYSTEM_THEME |
                                 BubbleGtk::POPUP_WINDOW |
                                 BubbleGtk::GRAB_INPUT,
@@ -378,8 +380,10 @@ void ExtensionInstalledBubbleGtk::BubbleClosing(BubbleGtk* bubble,
               browser_->window()->GetNativeWindow());
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
-    location_bar_view->SetPreviewEnabledPageAction(extension_->page_action(),
-                                                   false);  // preview_enabled
+    location_bar_view->SetPreviewEnabledPageAction(
+        ExtensionActionManager::Get(browser_->profile())->
+        GetPageAction(*extension_),
+        false);  // preview_enabled
   }
 
   // We need to allow the bubble to close and remove the widgets from

@@ -8,6 +8,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/pickle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/histogram_controller.h"
@@ -165,7 +166,7 @@ HistogramSynchronizer::HistogramSynchronizer()
       callback_thread_(NULL),
       last_used_sequence_number_(kNeverUsableSequenceNumber),
       async_sequence_number_(kNeverUsableSequenceNumber) {
-  content::HistogramController::GetInstance()->Register(this);
+  HistogramController::GetInstance()->Register(this);
 }
 
 HistogramSynchronizer::~HistogramSynchronizer() {
@@ -239,8 +240,7 @@ void HistogramSynchronizer::RegisterAndNotifyAllProcesses(
   RequestContext::Register(callback, sequence_number);
 
   // Get histogram data from renderer and browser child processes.
-  content::HistogramController::GetInstance()->GetHistogramData(
-      sequence_number);
+  HistogramController::GetInstance()->GetHistogramData(sequence_number);
 
   // Post a task that would be called after waiting for wait_time.  This acts
   // as a watchdog, to cancel the requests for non-responsive processes.
@@ -273,7 +273,9 @@ void HistogramSynchronizer::OnHistogramDataCollected(
   for (std::vector<std::string>::const_iterator it = pickled_histograms.begin();
        it < pickled_histograms.end();
        ++it) {
-    base::Histogram::DeserializeHistogramInfo(*it);
+    Pickle pickle(it->data(), it->size());
+    PickleIterator iter(pickle);
+    base::DeserializeHistogramAndAddSamples(&iter);
   }
 
   if (!request)

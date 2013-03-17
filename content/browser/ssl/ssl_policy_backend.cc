@@ -8,6 +8,8 @@
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/public/browser/browser_context.h"
 
+namespace content {
+
 SSLPolicyBackend::SSLPolicyBackend(NavigationControllerImpl* controller)
     : ssl_host_state_(SSLHostState::GetFor(controller->GetBrowserContext())),
       controller_(controller) {
@@ -16,7 +18,7 @@ SSLPolicyBackend::SSLPolicyBackend(NavigationControllerImpl* controller)
 
 void SSLPolicyBackend::HostRanInsecureContent(const std::string& host, int id) {
   ssl_host_state_->HostRanInsecureContent(host, id);
-  SSLManager::NotifySSLInternalStateChanged(controller_);
+  SSLManager::NotifySSLInternalStateChanged(controller_->GetBrowserContext());
 }
 
 bool SSLPolicyBackend::DidHostRunInsecureContent(const std::string& host,
@@ -38,3 +40,5 @@ net::CertPolicy::Judgment SSLPolicyBackend::QueryPolicy(
     net::X509Certificate* cert, const std::string& host) {
   return ssl_host_state_->QueryPolicy(cert, host);
 }
+
+}  // namespace content

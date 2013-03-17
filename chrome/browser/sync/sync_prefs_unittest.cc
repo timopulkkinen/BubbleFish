@@ -4,9 +4,11 @@
 
 #include "chrome/browser/sync/sync_prefs.h"
 
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,29 +22,17 @@ using ::testing::StrictMock;
 
 class SyncPrefsTest : public testing::Test {
  protected:
-  TestingPrefService pref_service_;
+  virtual void SetUp() OVERRIDE {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kHistoryEnableFullHistorySync);
+    SyncPrefs::RegisterUserPrefs(pref_service_.registry());
+  }
+
+  TestingPrefServiceSyncable pref_service_;
 
  private:
   MessageLoop loop_;
 };
-
-// Get all types with a user-facing component.
-syncer::ModelTypeSet GetNonPassiveTypes() {
-  syncer::ModelTypeSet non_passive_types = syncer::ModelTypeSet::All();
-  non_passive_types.Remove(syncer::NIGORI);
-  return non_passive_types;
-}
-
-// Returns all types visible from the setup UI.
-syncer::ModelTypeSet GetUserVisibleTypes() {
-  syncer::ModelTypeSet user_visible_types(GetNonPassiveTypes());
-  user_visible_types.Remove(syncer::APP_NOTIFICATIONS);
-  user_visible_types.Remove(syncer::APP_SETTINGS);
-  user_visible_types.Remove(syncer::AUTOFILL_PROFILE);
-  user_visible_types.Remove(syncer::EXTENSION_SETTINGS);
-  user_visible_types.Remove(syncer::SEARCH_ENGINES);
-  return user_visible_types;
-}
 
 TEST_F(SyncPrefsTest, Basic) {
   SyncPrefs sync_prefs(&pref_service_);
@@ -78,17 +68,17 @@ TEST_F(SyncPrefsTest, PreferredTypesKeepEverythingSynced) {
 
   EXPECT_TRUE(sync_prefs.HasKeepEverythingSynced());
 
-  const syncer::ModelTypeSet non_passive_types = GetNonPassiveTypes();
-  EXPECT_TRUE(non_passive_types.Equals(
-      sync_prefs.GetPreferredDataTypes(non_passive_types)));
-  const syncer::ModelTypeSet user_visible_types = GetUserVisibleTypes();
+  const syncer::ModelTypeSet user_types = syncer::UserTypes();
+  EXPECT_TRUE(user_types.Equals(
+      sync_prefs.GetPreferredDataTypes(user_types)));
+  const syncer::ModelTypeSet user_visible_types = syncer::UserSelectableTypes();
   for (syncer::ModelTypeSet::Iterator it = user_visible_types.First();
        it.Good(); it.Inc()) {
     syncer::ModelTypeSet preferred_types;
     preferred_types.Put(it.Get());
-    sync_prefs.SetPreferredDataTypes(non_passive_types, preferred_types);
-    EXPECT_TRUE(non_passive_types.Equals(
-        sync_prefs.GetPreferredDataTypes(non_passive_types)));
+    sync_prefs.SetPreferredDataTypes(user_types, preferred_types);
+    EXPECT_TRUE(user_types.Equals(
+        sync_prefs.GetPreferredDataTypes(user_types)));
   }
 }
 
@@ -97,10 +87,10 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
 
   sync_prefs.SetKeepEverythingSynced(false);
 
-  const syncer::ModelTypeSet non_passive_types = GetNonPassiveTypes();
-  EXPECT_TRUE(non_passive_types.Equals(
-      sync_prefs.GetPreferredDataTypes(non_passive_types)));
-  const syncer::ModelTypeSet user_visible_types = GetUserVisibleTypes();
+  const syncer::ModelTypeSet user_types = syncer::UserTypes();
+  EXPECT_TRUE(user_types.Equals(
+      sync_prefs.GetPreferredDataTypes(user_types)));
+  const syncer::ModelTypeSet user_visible_types = syncer::UserSelectableTypes();
   for (syncer::ModelTypeSet::Iterator it = user_visible_types.First();
        it.Good(); it.Inc()) {
     syncer::ModelTypeSet preferred_types;
@@ -110,6 +100,7 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
       expected_preferred_types.Put(syncer::AUTOFILL_PROFILE);
     }
     if (it.Get() == syncer::PREFERENCES) {
+      expected_preferred_types.Put(syncer::DICTIONARY);
       expected_preferred_types.Put(syncer::SEARCH_ENGINES);
     }
     if (it.Get() == syncer::APPS) {
@@ -119,9 +110,20 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
     if (it.Get() == syncer::EXTENSIONS) {
       expected_preferred_types.Put(syncer::EXTENSION_SETTINGS);
     }
-    sync_prefs.SetPreferredDataTypes(non_passive_types, preferred_types);
+    if (it.Get() == syncer::TYPED_URLS) {
+      expected_preferred_types.Put(syncer::HISTORY_DELETE_DIRECTIVES);
+      expected_preferred_types.Put(syncer::SESSIONS);
+      expected_preferred_types.Put(syncer::FAVICON_IMAGES);
+      expected_preferred_types.Put(syncer::FAVICON_TRACKING);
+    }
+    if (it.Get() == syncer::PROXY_TABS) {
+      expected_preferred_types.Put(syncer::SESSIONS);
+      expected_preferred_types.Put(syncer::FAVICON_IMAGES);
+      expected_preferred_types.Put(syncer::FAVICON_TRACKING);
+    }
+    sync_prefs.SetPreferredDataTypes(user_types, preferred_types);
     EXPECT_TRUE(expected_preferred_types.Equals(
-        sync_prefs.GetPreferredDataTypes(non_passive_types)));
+        sync_prefs.GetPreferredDataTypes(user_types)));
   }
 }
 
@@ -194,8 +196,8 @@ TEST_F(SyncPrefsTest, NullPrefService) {
   EXPECT_FALSE(sync_prefs.IsStartSuppressed());
   EXPECT_EQ(base::Time(), sync_prefs.GetLastSyncedTime());
   EXPECT_FALSE(sync_prefs.HasKeepEverythingSynced());
-  const syncer::ModelTypeSet non_passive_types = GetNonPassiveTypes();
-  EXPECT_TRUE(sync_prefs.GetPreferredDataTypes(non_passive_types).Empty());
+  const syncer::ModelTypeSet user_types = syncer::UserTypes();
+  EXPECT_TRUE(sync_prefs.GetPreferredDataTypes(user_types).Empty());
   EXPECT_FALSE(sync_prefs.IsManaged());
   EXPECT_TRUE(sync_prefs.GetEncryptionBootstrapToken().empty());
 }

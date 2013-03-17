@@ -5,26 +5,40 @@
 #include "chrome/browser/ui/webui/instant_ui.h"
 
 #include "base/bind.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
+#include "base/stringprintf.h"
+#include "base/time.h"
+#include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 
 namespace {
 
-ChromeWebUIDataSource* CreateInstantHTMLSource() {
-  ChromeWebUIDataSource* source =
-      new ChromeWebUIDataSource(chrome::kChromeUIInstantHost);
-
-  source->set_json_path("strings.js");
-  source->add_resource_path("instant.js", IDR_INSTANT_JS);
-  source->add_resource_path("instant.css", IDR_INSTANT_CSS);
-  source->set_default_resource(IDR_INSTANT_HTML);
+content::WebUIDataSource* CreateInstantHTMLSource() {
+  content::WebUIDataSource* source =
+      content::WebUIDataSource::Create(chrome::kChromeUIInstantHost);
+  source->SetJsonPath("strings.js");
+  source->AddResourcePath("instant.js", IDR_INSTANT_JS);
+  source->AddResourcePath("instant.css", IDR_INSTANT_CSS);
+  source->SetDefaultResource(IDR_INSTANT_HTML);
   return source;
+}
+
+std::string FormatTime(int64 time) {
+  base::Time::Exploded exploded;
+  base::Time::FromInternalValue(time).UTCExplode(&exploded);
+  return base::StringPrintf("%04d-%02d-%02d %02d:%02d:%02d.%03d",
+      exploded.year, exploded.month, exploded.day_of_month,
+      exploded.hour, exploded.minute, exploded.second, exploded.millisecond);
 }
 
 // This class receives JavaScript messages from the renderer.
@@ -40,22 +54,13 @@ class InstantUIMessageHandler
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  static int slow_animation_scale_factor() {
-    return slow_animation_scale_factor_;
-  }
-
  private:
   void GetPreferenceValue(const base::ListValue* args);
   void SetPreferenceValue(const base::ListValue* args);
-
-  // Slows down Instant animations by a time factor.
-  static int slow_animation_scale_factor_;
+  void GetDebugInfo(const base::ListValue* value);
 
   DISALLOW_COPY_AND_ASSIGN(InstantUIMessageHandler);
 };
-
-// static
-int InstantUIMessageHandler::slow_animation_scale_factor_ = 1;
 
 InstantUIMessageHandler::InstantUIMessageHandler() {}
 
@@ -70,6 +75,10 @@ void InstantUIMessageHandler::RegisterMessages() {
       "setPreferenceValue",
       base::Bind(&InstantUIMessageHandler::SetPreferenceValue,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getDebugInfo",
+      base::Bind(&InstantUIMessageHandler::GetDebugInfo,
+                 base::Unretained(this)));
 }
 
 void InstantUIMessageHandler::GetPreferenceValue(const base::ListValue* args) {
@@ -77,20 +86,7 @@ void InstantUIMessageHandler::GetPreferenceValue(const base::ListValue* args) {
   if (!args->GetString(0, &pref_name)) return;
 
   base::StringValue pref_name_value(pref_name);
-  if (pref_name == prefs::kInstantAnimationScaleFactor) {
-    double value = 0.0;
-#if defined(TOOLKIT_VIEWS)
-    value = slow_animation_scale_factor_;
-#endif
-    base::FundamentalValue arg(value);
-    web_ui()->CallJavascriptFunction(
-        "instantConfig.getPreferenceValueResult", pref_name_value, arg);
-  } else if (pref_name == prefs::kInstantShowSearchProviderLogo) {
-    PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
-    base::FundamentalValue arg(prefs->GetBoolean(pref_name.c_str()));
-    web_ui()->CallJavascriptFunction(
-        "instantConfig.getPreferenceValueResult", pref_name_value, arg);
-  } else if (pref_name == prefs::kExperimentalZeroSuggestUrlPrefix) {
+  if (pref_name == prefs::kInstantUIZeroSuggestUrlPrefix) {
     PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
     base::StringValue arg(prefs->GetString(pref_name.c_str()));
     web_ui()->CallJavascriptFunction(
@@ -102,30 +98,42 @@ void InstantUIMessageHandler::SetPreferenceValue(const base::ListValue* args) {
   std::string pref_name;
   if (!args->GetString(0, &pref_name)) return;
 
-  if (pref_name == prefs::kInstantAnimationScaleFactor) {
-    double value;
-    if (!args->GetDouble(1, &value))
-      return;
-#if defined(TOOLKIT_VIEWS)
-    // Clamp to something reasonable.
-    value = std::max(0.1, std::min(value, 20.0));
-    slow_animation_scale_factor_ = static_cast<int>(value);
-#else
-    NOTIMPLEMENTED();
-#endif  // defined(TOOLKIT_VIEWS)
-  } else if (pref_name == prefs::kInstantShowSearchProviderLogo) {
-    bool value;
-    if (!args->GetBoolean(1, &value))
-      return;
-    PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
-    prefs->SetBoolean(pref_name.c_str(), value);
-  } else if (pref_name == prefs::kExperimentalZeroSuggestUrlPrefix) {
+  if (pref_name == prefs::kInstantUIZeroSuggestUrlPrefix) {
     std::string value;
     if (!args->GetString(1, &value))
       return;
     PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
     prefs->SetString(pref_name.c_str(), value);
   }
+}
+
+void InstantUIMessageHandler::GetDebugInfo(const base::ListValue* args) {
+#if !defined(OS_ANDROID)
+  typedef std::pair<int64, std::string> DebugEvent;
+
+  if (!web_ui()->GetWebContents())
+    return;
+  Browser* browser = chrome::FindBrowserWithWebContents(
+      web_ui()->GetWebContents());
+  if (!browser || !browser->instant_controller())
+    return;
+
+  InstantController* instant = browser->instant_controller()->instant();
+  const std::list<DebugEvent>& events = instant->debug_events();
+
+  base::DictionaryValue data;
+  base::ListValue* entries = new base::ListValue();
+  for (std::list<DebugEvent>::const_iterator it = events.begin();
+       it != events.end(); ++it) {
+    base::DictionaryValue* entry = new base::DictionaryValue();
+    entry->SetString("time", FormatTime(it->first));
+    entry->SetString("text", it->second);
+    entries->Append(entry);
+  }
+  data.Set("entries", entries);
+
+  web_ui()->CallJavascriptFunction("instantConfig.getDebugInfoResult", data);
+#endif
 }
 
 }  // namespace
@@ -138,25 +146,11 @@ InstantUI::InstantUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://instant/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, CreateInstantHTMLSource());
+  content::WebUIDataSource::Add(profile, CreateInstantHTMLSource());
 }
 
 // static
-int InstantUI::GetSlowAnimationScaleFactor() {
-  return InstantUIMessageHandler::slow_animation_scale_factor();
-}
-
-// static
-bool InstantUI::ShouldShowSearchProviderLogo(
-      content::BrowserContext* browser_context) {
-  PrefService* prefs = Profile::FromBrowserContext(browser_context)->GetPrefs();
-  return prefs->GetBoolean(prefs::kInstantShowSearchProviderLogo);
-}
-
-// static
-void InstantUI::RegisterUserPrefs(PrefService* user_prefs) {
-  user_prefs->RegisterBooleanPref(prefs::kInstantShowSearchProviderLogo, false,
-                                  PrefService::UNSYNCABLE_PREF);
-  user_prefs->RegisterStringPref(prefs::kExperimentalZeroSuggestUrlPrefix, "",
-                                 PrefService::UNSYNCABLE_PREF);
+void InstantUI::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterStringPref(prefs::kInstantUIZeroSuggestUrlPrefix, "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 }

@@ -34,26 +34,8 @@ def Main(args):
   # them off on the main Chrome waterfall, but not on NaCl's integration bots.
   # This makes it easier to see when things have been fixed NaCl side.
   if not is_integration_bot:
-    # TODO(nfullagar): Reenable when this issue is resolved.
-    # http://code.google.com/p/chromium/issues/detail?id=116169
-    tests_to_disable.append('run_ppapi_example_audio_test');
-    # TODO(ncbray): Reenable when this issue is resolved.
-    # http://code.google.com/p/nativeclient/issues/detail?id=2091
-    tests_to_disable.append('run_ppapi_bad_browser_test')
-    # This thread safety stress test is flaky on at least Windows.
-    # See http://code.google.com/p/nativeclient/issues/detail?id=2124
-    # TODO(mseaborn): Reenable when this issue is resolved.
-    tests_to_disable.append('run_ppapi_ppb_var_browser_test')
     # http://code.google.com/p/nativeclient/issues/detail?id=2511
     tests_to_disable.append('run_ppapi_ppb_image_data_browser_test')
-
-    # TODO(ncbray) are these tests stable?
-    tests_to_disable.extend([
-        'run_no_fault_pm_nameservice_chrome_browser_test',
-        'run_fault_pm_nameservice_chrome_browser_test',
-        'run_fault_pq_os_pm_nameservice_chrome_browser_test',
-        'run_fault_pq_dep_pm_nameservice_chrome_browser_test',
-        ])
 
     if sys.platform == 'darwin':
       # TODO(mseaborn) fix
@@ -66,15 +48,9 @@ def Main(args):
       # See http://crbug.com/132395
       tests_to_disable.append('run_inbrowser_test_runner')
 
-  if sys.platform in ('win32', 'cygwin'):
-    tests_to_disable.append('run_ppapi_ppp_input_event_browser_test')
-
   script_dir = os.path.dirname(os.path.abspath(__file__))
-  test_dir = os.path.dirname(script_dir)
-  chrome_dir = os.path.dirname(test_dir)
-  src_dir = os.path.dirname(chrome_dir)
-  nacl_integration_script = os.path.join(
-      src_dir, 'native_client/build/buildbot_chrome_nacl_stage.py')
+  nacl_integration_script = os.path.join(script_dir,
+                                         'buildbot_chrome_nacl_stage.py')
   cmd = [sys.executable,
          nacl_integration_script,
          # TODO(ncbray) re-enable.

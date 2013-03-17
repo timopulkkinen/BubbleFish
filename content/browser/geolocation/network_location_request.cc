@@ -9,10 +9,11 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/browser/geolocation/location_arbitrator.h"
+#include "content/browser/geolocation/location_arbitrator_impl.h"
 #include "content/public/common/geoposition.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
@@ -21,6 +22,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
+namespace content {
 namespace {
 
 const size_t kMaxRequestLength = 2048;
@@ -48,7 +50,7 @@ void GetLocationFromResponse(bool http_post_result,
                              const std::string& response_body,
                              const base::Time& timestamp,
                              const GURL& server_url,
-                             content::Geoposition* position,
+                             Geoposition* position,
                              string16* access_token);
 
 // Parses the server response body. Returns true if parsing was successful.
@@ -56,7 +58,7 @@ void GetLocationFromResponse(bool http_post_result,
 // otherwise leaves it unchanged.
 bool ParseServerResponse(const std::string& response_body,
                          const base::Time& timestamp,
-                         content::Geoposition* position,
+                         Geoposition* position,
                          string16* access_token);
 void AddWifiData(const WifiData& wifi_data,
                  int age_milliseconds,
@@ -99,6 +101,7 @@ bool NetworkLocationRequest::MakeRequest(const string16& access_token,
       net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
       net::LOAD_DO_NOT_SEND_AUTH_DATA);
 
+  start_time_ = base::TimeTicks::Now();
   url_fetcher_->Start();
   return true;
 }
@@ -110,7 +113,7 @@ void NetworkLocationRequest::OnURLFetchComplete(
   net::URLRequestStatus status = source->GetStatus();
   int response_code = source->GetResponseCode();
 
-  content::Geoposition position;
+  Geoposition position;
   string16 access_token;
   std::string data;
   source->GetResponseAsString(&data);
@@ -124,6 +127,17 @@ void NetworkLocationRequest::OnURLFetchComplete(
   const bool server_error =
       !status.is_success() || (response_code >= 500 && response_code < 600);
   url_fetcher_.reset();
+
+  if (!server_error) {
+    const base::TimeDelta request_time = base::TimeTicks::Now() - start_time_;
+
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.Wifi.LbsLatency",
+        request_time,
+        base::TimeDelta::FromMilliseconds(1),
+        base::TimeDelta::FromSeconds(10),
+        100);
+  }
 
   DCHECK(listener_);
   DVLOG(1) << "NetworkLocationRequest::Run() : Calling listener with position.";
@@ -142,7 +156,7 @@ struct AccessPointLess {
 };
 
 GURL FormRequestURL(const GURL& url) {
-  if (url == GeolocationArbitrator::DefaultNetworkProviderURL()) {
+  if (url == GeolocationArbitratorImpl::DefaultNetworkProviderURL()) {
     std::string api_key = google_apis::GetAPIKey();
     if (!api_key.empty()) {
       std::string query(url.query());
@@ -226,9 +240,8 @@ void AddWifiData(const WifiData& wifi_data,
 
 void FormatPositionError(const GURL& server_url,
                          const std::string& message,
-                         content::Geoposition* position) {
-    position->error_code =
-        content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+                         Geoposition* position) {
+    position->error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
     position->error_message = "Network location provider at '";
     position->error_message += server_url.GetOrigin().spec();
     position->error_message += "' : ";
@@ -243,7 +256,7 @@ void GetLocationFromResponse(bool http_post_result,
                              const std::string& response_body,
                              const base::Time& timestamp,
                              const GURL& server_url,
-                             content::Geoposition* position,
+                             Geoposition* position,
                              string16* access_token) {
   DCHECK(position);
   DCHECK(access_token);
@@ -298,11 +311,11 @@ bool GetAsDouble(const base::DictionaryValue& object,
 
 bool ParseServerResponse(const std::string& response_body,
                          const base::Time& timestamp,
-                         content::Geoposition* position,
+                         Geoposition* position,
                          string16* access_token) {
   DCHECK(position);
   DCHECK(!position->Validate());
-  DCHECK(position->error_code == content::Geoposition::ERROR_CODE_NONE);
+  DCHECK(position->error_code == Geoposition::ERROR_CODE_NONE);
   DCHECK(access_token);
   DCHECK(!timestamp.is_null());
 
@@ -376,3 +389,4 @@ bool ParseServerResponse(const std::string& response_body,
 
 }  // namespace
 
+}  // namespace content

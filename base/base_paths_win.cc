@@ -7,14 +7,16 @@
 #include <shlobj.h>
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/windows_version.h"
 
 // http://blogs.msdn.com/oldnewthing/archive/2004/10/25/247180.aspx
 extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+using base::FilePath;
 
 namespace {
 
@@ -191,6 +193,12 @@ bool PathProviderWin(int key, FilePath* result) {
     case base::DIR_DEFAULT_USER_QUICK_LAUNCH:
       if (!GetQuickLaunchPath(true, &cur))
         return false;
+      break;
+    case base::DIR_TASKBAR_PINS:
+      if (!PathService::Get(base::DIR_USER_QUICK_LAUNCH, &cur))
+        return false;
+      cur = cur.AppendASCII("User Pinned");
+      cur = cur.AppendASCII("TaskBar");
       break;
     default:
       return false;

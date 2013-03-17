@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Java mirror of Chrome command-line utilities (e.g. class CommandLine from base/command_line.h).
  * Command line program adb_command_line can be used to set the Chrome command line:
- * adb shell "echo chrome --my-param > /data/local/tmp/chrome-command-line"
+ * adb shell "echo chrome --my-param > /data/local/chrome-command-line"
  */
 public abstract class CommandLine {
     // Block onCreate() of Chrome until a Java debugger is attached.
@@ -36,19 +36,36 @@ public abstract class CommandLine {
     // Enables test intent handling.
     public static final String ENABLE_TEST_INTENTS = "enable-test-intents";
 
-    // Sets the max number of sandboxed service processes to use.
-    // Unlike renderer-process-limit, this is a hard limit on the number of
-    // concurrent sandboxed processes.
-    public static final String SANDBOXED_SERVICE_LIMIT = "sandboxed-service-limit";
-
     // Dump frames-per-second to the log
     public static final String LOG_FPS = "log-fps";
 
     // Whether Chromium should use a mobile user agent.
     public static final String USE_MOBILE_UA = "use-mobile-user-agent";
 
+    // tablet specific UI components.
+    // Native switch - chrome_switches::kTabletUI
+    public static final String TABLET_UI = "tablet-ui";
+
     // Change the url of the JavaScript that gets injected when accessibility mode is enabled.
     public static final String ACCESSIBILITY_JAVASCRIPT_URL = "accessibility-js-url";
+
+    public static final String ACCESSIBILITY_DEBUG_BRAILLE_SERVICE = "debug-braille-service";
+
+    // Sets the ISO country code that will be used for phone number detection.
+    public static final String NETWORK_COUNTRY_ISO = "network-country-iso";
+
+    // Whether to enable the auto-hiding top controls.
+    public static final String ENABLE_TOP_CONTROLS_POSITION_CALCULATION
+            = "enable-top-controls-position-calculation";
+
+    // The height of the movable top controls.
+    public static final String TOP_CONTROLS_HEIGHT = "top-controls-height";
+
+    // How much of the top controls need to be shown before they will auto show.
+    public static final String TOP_CONTROLS_SHOW_THRESHOLD = "top-controls-show-threshold";
+
+    // How much of the top controls need to be hidden before they will auto hide.
+    public static final String TOP_CONTROLS_HIDE_THRESHOLD = "top-controls-hide-threshold";
 
     // Public abstract interface, implemented in derived classes.
     // All these methods reflect their native-side counterparts.
@@ -122,8 +139,9 @@ public abstract class CommandLine {
 
     // Equivalent to CommandLine::ForCurrentProcess in C++.
     public static CommandLine getInstance() {
-        assert sCommandLine.get() != null;
-        return sCommandLine.get();
+        CommandLine commandLine = sCommandLine.get();
+        assert commandLine != null;
+        return commandLine;
     }
 
     /**
@@ -132,8 +150,7 @@ public abstract class CommandLine {
      * @param args command line flags in 'argv' format: args[0] is the program name.
      */
     public static void init(String[] args) {
-        assert sCommandLine.get() == null;
-        sCommandLine.compareAndSet(null, new JavaCommandLine(args));
+        setInstance(new JavaCommandLine(args));
     }
 
     /**
@@ -159,10 +176,7 @@ public abstract class CommandLine {
      * command line initialization to be re-run including the call to onJniLoaded.
      */
     public static void reset() {
-        if (sCommandLine.get() != null && sCommandLine.get().isNativeImplementation()) {
-            nativeReset();
-        }
-        sCommandLine.set(null);
+        setInstance(null);
     }
 
     /**
@@ -175,18 +189,23 @@ public abstract class CommandLine {
      * @return the tokenized arguments, suitable for passing to init().
      */
     public static String[] tokenizeQuotedAruments(char[] buffer) {
-        boolean inQuotes = false;
         ArrayList<String> args = new ArrayList<String>();
         StringBuilder arg = null;
+        final char noQuote = '\0';
+        final char singleQuote = '\'';
+        final char doubleQuote = '"';
+        char currentQuote = noQuote;
         for (char c : buffer) {
-            if (c == '\"') {
+            // Detect start or end of quote block.
+            if ((currentQuote == noQuote && (c == singleQuote || c == doubleQuote)) ||
+                c == currentQuote) {
                 if (arg != null && arg.length() > 0 && arg.charAt(arg.length() - 1) == '\\') {
-                    // Last char was a backslash; pop it, and treat this " as a literal.
+                    // Last char was a backslash; pop it, and treat c as a literal.
                     arg.setCharAt(arg.length() - 1, c);
                 } else {
-                    inQuotes = !inQuotes;
+                    currentQuote = currentQuote == noQuote ? c : noQuote;
                 }
-            } else if (!inQuotes && Character.isWhitespace(c)) {
+            } else if (currentQuote == noQuote && Character.isWhitespace(c)) {
                 if (arg != null) {
                     args.add(arg.toString());
                     arg = null;
@@ -197,7 +216,7 @@ public abstract class CommandLine {
             }
         }
         if (arg != null) {
-            if (inQuotes) {
+            if (currentQuote != noQuote) {
                 Log.w(TAG, "Unterminated quoted string: " + arg);
             }
             args.add(arg.toString());
@@ -224,6 +243,13 @@ public abstract class CommandLine {
             return ((JavaCommandLine) commandLine).getCommandLineArguments();
         }
         return null;
+    }
+
+    private static void setInstance(CommandLine commandLine) {
+        CommandLine oldCommandLine = sCommandLine.getAndSet(commandLine);
+        if (oldCommandLine != null && oldCommandLine.isNativeImplementation()) {
+            nativeReset();
+        }
     }
 
     /**

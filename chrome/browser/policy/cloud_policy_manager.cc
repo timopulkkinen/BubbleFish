@@ -7,85 +7,80 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "chrome/browser/policy/cloud_policy_refresh_scheduler.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/policy/cloud_policy_service.h"
 #include "chrome/browser/policy/policy_bundle.h"
 #include "chrome/browser/policy/policy_map.h"
 
 namespace policy {
 
-CloudPolicyManager::CloudPolicyManager(scoped_ptr<CloudPolicyStore> store)
-    : store_(store.Pass()),
+CloudPolicyManager::CloudPolicyManager(const PolicyNamespaceKey& policy_ns_key,
+                                       CloudPolicyStore* cloud_policy_store)
+    : core_(policy_ns_key, cloud_policy_store),
       waiting_for_policy_refresh_(false) {
-  store_->AddObserver(this);
-  store_->Load();
+  store()->AddObserver(this);
+
+  // If the underlying store is already initialized, publish the loaded
+  // policy. Otherwise, request a load now.
+  if (store()->is_initialized())
+    CheckAndPublishPolicy();
+  else
+    store()->Load();
 }
 
-CloudPolicyManager::~CloudPolicyManager() {
-  ShutdownService();
-  store_->RemoveObserver(this);
+CloudPolicyManager::~CloudPolicyManager() {}
+
+void CloudPolicyManager::Shutdown() {
+  core_.Disconnect();
+  store()->RemoveObserver(this);
+  ConfigurationPolicyProvider::Shutdown();
 }
 
-bool CloudPolicyManager::IsInitializationComplete() const {
-  return store_->is_initialized();
+bool CloudPolicyManager::IsInitializationComplete(PolicyDomain domain) const {
+  if (domain == POLICY_DOMAIN_CHROME)
+    return store()->is_initialized();
+  return true;
 }
 
 void CloudPolicyManager::RefreshPolicies() {
-  if (service_.get()) {
+  if (service()) {
     waiting_for_policy_refresh_ = true;
-    service_->RefreshPolicy(
+    service()->RefreshPolicy(
         base::Bind(&CloudPolicyManager::OnRefreshComplete,
                    base::Unretained(this)));
   } else {
-    OnRefreshComplete();
+    OnRefreshComplete(false);
   }
 }
 
-void CloudPolicyManager::OnStoreLoaded(CloudPolicyStore* store) {
-  DCHECK_EQ(store_.get(), store);
+void CloudPolicyManager::OnStoreLoaded(CloudPolicyStore* cloud_policy_store) {
+  DCHECK_EQ(store(), cloud_policy_store);
   CheckAndPublishPolicy();
 }
 
-void CloudPolicyManager::OnStoreError(CloudPolicyStore* store) {
-  DCHECK_EQ(store_.get(), store);
-  // No action required, the old policy is still valid.
-}
-
-void CloudPolicyManager::InitializeService(
-    scoped_ptr<CloudPolicyClient> client) {
-  CHECK(!client_.get());
-  CHECK(client.get());
-  client_ = client.Pass();
-  service_.reset(new CloudPolicyService(client_.get(), store_.get()));
-}
-
-void CloudPolicyManager::ShutdownService() {
-  refresh_scheduler_.reset();
-  service_.reset();
-  client_.reset();
-}
-
-void CloudPolicyManager::StartRefreshScheduler(
-    PrefService* local_state,
-    const std::string& refresh_rate_pref) {
-  if (!refresh_scheduler_.get()) {
-    refresh_scheduler_.reset(
-        new CloudPolicyRefreshScheduler(
-            client_.get(), store_.get(), local_state, refresh_rate_pref,
-            MessageLoop::current()->message_loop_proxy()));
-  }
+void CloudPolicyManager::OnStoreError(CloudPolicyStore* cloud_policy_store) {
+  DCHECK_EQ(store(), cloud_policy_store);
+  // Publish policy (even though it hasn't changed) in order to signal load
+  // complete on the ConfigurationPolicyProvider interface. Technically, this
+  // is only required on the first load, but doesn't hurt in any case.
+  CheckAndPublishPolicy();
 }
 
 void CloudPolicyManager::CheckAndPublishPolicy() {
-  if (IsInitializationComplete() && !waiting_for_policy_refresh_) {
-    scoped_ptr<PolicyBundle> bundle(new PolicyBundle());
-    bundle->Get(POLICY_DOMAIN_CHROME, std::string()).CopyFrom(
-        store_->policy_map());
-    UpdatePolicy(bundle.Pass());
+  if (IsInitializationComplete(POLICY_DOMAIN_CHROME) &&
+      !waiting_for_policy_refresh_) {
+    UpdatePolicy(CreatePolicyBundle());
   }
 }
 
-void CloudPolicyManager::OnRefreshComplete() {
+scoped_ptr<PolicyBundle> CloudPolicyManager::CreatePolicyBundle() {
+  scoped_ptr<PolicyBundle> bundle(new PolicyBundle);
+  bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+      .CopyFrom(store()->policy_map());
+  return bundle.Pass();
+}
+
+void CloudPolicyManager::OnRefreshComplete(bool success) {
   waiting_for_policy_refresh_ = false;
   CheckAndPublishPolicy();
 }

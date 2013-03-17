@@ -194,6 +194,26 @@ class ChromeTests:
     if gtest_filter:
       cmd.append("--gtest_filter=%s" % gtest_filter)
 
+  @staticmethod
+  def ShowTests():
+    test_to_names = {}
+    for name, test_function in ChromeTests._test_list.iteritems():
+      test_to_names.setdefault(test_function, []).append(name)
+
+    name_to_aliases = {}
+    for names in test_to_names.itervalues():
+      names.sort(key=lambda name: len(name))
+      name_to_aliases[names[0]] = names[1:]
+
+    print
+    print "Available tests:"
+    print "----------------"
+    for name, aliases in sorted(name_to_aliases.iteritems()):
+      if aliases:
+        print "   {} (aka {})".format(name, ', '.join(aliases))
+      else:
+        print "   {}".format(name)
+
   def SetupLdPath(self, requires_build_dir):
     if requires_build_dir:
       self._EnsureBuildDirFound()
@@ -236,6 +256,9 @@ class ChromeTests:
   def TestChromeOS(self):
     return self.SimpleTest("chromeos", "chromeos_unittests")
 
+  def TestComponents(self):
+    return self.SimpleTest("components", "components_unittests")
+
   def TestCompositor(self):
     return self.SimpleTest("compositor", "compositor_unittests")
 
@@ -250,6 +273,9 @@ class ChromeTests:
 
   def TestCrypto(self):
     return self.SimpleTest("crypto", "crypto_unittests")
+
+  def TestDevice(self):
+    return self.SimpleTest("device", "device_unittests")
 
   def TestFFmpeg(self):
     return self.SimpleTest("chrome", "ffmpeg_unittests")
@@ -294,6 +320,9 @@ class ChromeTests:
   def TestSync(self):
     return self.SimpleTest("chrome", "sync_unit_tests")
 
+  def TestLinuxSandbox(self):
+    return self.SimpleTest("sandbox", "sandbox_linux_unittests")
+
   def TestTestShell(self):
     return self.SimpleTest("webkit", "test_shell_tests")
 
@@ -316,14 +345,16 @@ class ChromeTests:
   UI_VALGRIND_ARGS = ["--timeout=14400", "--trace_children", "--indirect"]
   # UI test timeouts are in milliseconds.
   UI_TEST_ARGS = ["--ui-test-action-timeout=60000",
-                  "--ui-test-action-max-timeout=150000"]
+                  "--ui-test-action-max-timeout=150000",
+                  "--no-sandbox"]
 
   # TODO(thestig) fine-tune these values.
   # Valgrind timeouts are in seconds.
   BROWSER_VALGRIND_ARGS = ["--timeout=50000", "--trace_children", "--indirect"]
   # Browser test timeouts are in milliseconds.
   BROWSER_TEST_ARGS = ["--ui-test-action-timeout=200000",
-                       "--ui-test-action-max-timeout=400000"]
+                       "--ui-test-action-max-timeout=400000",
+                       "--no-sandbox"]
 
   def TestAutomatedUI(self):
     return self.SimpleTest("chrome", "automated_ui_tests",
@@ -393,8 +424,9 @@ class ChromeTests:
                   "--run-singly",  # run a separate DumpRenderTree for each test
                   "--fully-parallel",
                   "--time-out-ms=200000",
-                  "--noshow-results",
                   "--no-retry-failures",  # retrying takes too much time
+                  # http://crbug.com/176908: Don't launch a browser when done.
+                  "--no-show-results",
                   "--nocheck-sys-deps"]
     # Pass build mode to run_webkit_tests.py.  We aren't passed it directly,
     # so parse it out of build_dir.  run_webkit_tests.py can only handle
@@ -454,10 +486,9 @@ class ChromeTests:
     except IOError, (errno, strerror):
       logging.error("error reading from file %s (%d, %s)" % (chunk_file,
                     errno, strerror))
-    ret = self.TestLayoutChunk(chunk_num, chunk_size)
-    # Wait until after the test runs to completion to write out the new chunk
-    # number.  This way, if the bot is killed, we'll start running again from
-    # the current chunk rather than skipping it.
+    # Save the new chunk size before running the tests. Otherwise if a
+    # particular chunk hangs the bot, the chunk number will never get
+    # incremented and the bot will be wedged.
     logging.info("Saving state to " + chunk_file)
     try:
       f = open(chunk_file, "w")
@@ -470,7 +501,7 @@ class ChromeTests:
     # Since we're running small chunks of the layout tests, it's important to
     # mark the ones that have errors in them.  These won't be visible in the
     # summary list for long, but will be useful for someone reviewing this bot.
-    return ret
+    return self.TestLayoutChunk(chunk_num, chunk_size)
 
   # The known list of tests.
   # Recognise the original abbreviations as well as full executable names.
@@ -482,11 +513,13 @@ class ChromeTests:
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
     "chromeos": TestChromeOS,    "chromeos_unittests": TestChromeOS,
+    "components": TestComponents,"components_unittests": TestComponents,
     "compositor": TestCompositor,"compositor_unittests": TestCompositor,
     "content": TestContent,      "content_unittests": TestContent,
     "content_browsertests": TestContentBrowser,
     "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
     "crypto": TestCrypto,        "crypto_unittests": TestCrypto,
+    "device": TestDevice,        "device_unittests": TestDevice,
     "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
     "ffmpeg_regression_tests": TestFFmpegRegressions,
     "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
@@ -503,6 +536,7 @@ class ChromeTests:
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
     "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
+    "sandbox": TestLinuxSandbox, "sandbox_linux_unittests": TestLinuxSandbox,
     "sql": TestSql,              "sql_unittests": TestSql,
     "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
@@ -518,6 +552,9 @@ def _main():
   parser = optparse.OptionParser("usage: %prog -b <dir> -t <test> "
                                  "[-t <test> ...]")
   parser.disable_interspersed_args()
+
+  parser.add_option("", "--help-tests", dest="help_tests", action="store_true",
+                    default=False, help="List all available tests")
   parser.add_option("-b", "--build_dir",
                     help="the location of the compiler output")
   parser.add_option("-t", "--test", action="append", default=[],
@@ -553,6 +590,10 @@ def _main():
     logging_utils.config_root(logging.DEBUG)
   else:
     logging_utils.config_root()
+
+  if options.help_tests:
+    ChromeTests.ShowTests()
+    return 0
 
   if not options.test:
     parser.error("--test not specified")

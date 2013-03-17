@@ -29,8 +29,9 @@ ui::ScaleFactor GetDeviceScaleFactorForNativeView(views::Widget* widget) {
   // yet care about device scale factor on other platforms. So to keep drag and
   // drop behavior on other platforms un-touched, we wrap this in the #if guard.
   if (widget && widget->GetNativeView()) {
-    gfx::Display display = gfx::Screen::GetDisplayNearestWindow(
-        widget->GetNativeView());
+    gfx::NativeView view = widget->GetNativeView();
+    gfx::Display display = gfx::Screen::GetScreenFor(view)->
+        GetDisplayNearestWindow(view);
     device_scale_factor = ui::GetScaleFactorFromScale(
         display.device_scale_factor());
   }
@@ -43,14 +44,15 @@ namespace views {
 void RunShellDrag(gfx::NativeView view,
                   const ui::OSExchangeData& data,
                   const gfx::Point& location,
-                  int operation) {
+                  int operation,
+                  ui::DragDropTypes::DragEventSource source) {
 #if defined(USE_AURA)
   gfx::Point root_location(location);
   aura::RootWindow* root_window = view->GetRootWindow();
   aura::Window::ConvertPointToTarget(view, root_window, &root_location);
   if (aura::client::GetDragDropClient(root_window)) {
     aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
-        data, root_window, root_location, operation);
+        data, root_window, view, root_location, operation, source);
   }
 #elif defined(OS_WIN)
   scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);

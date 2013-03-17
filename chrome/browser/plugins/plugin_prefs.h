@@ -10,13 +10,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/plugins/plugin_finder.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
-#include "content/public/browser/notification_observer.h"
 
 class Profile;
 
@@ -34,11 +33,8 @@ class PluginList;
 // This class stores information about whether a plug-in or a plug-in group is
 // enabled or disabled.
 // Except where otherwise noted, it can be used on every thread.
-class PluginPrefs : public RefcountedProfileKeyedService,
-                    public content::NotificationObserver {
+class PluginPrefs : public RefcountedProfileKeyedService {
  public:
-  typedef std::map<string16, std::vector<string16> > PluginVersionsMap;
-
   enum PolicyStatus {
     NO_POLICY = 0,  // Neither enabled or disabled by policy.
     POLICY_ENABLED,
@@ -72,13 +68,12 @@ class PluginPrefs : public RefcountedProfileKeyedService,
   // then enabling/disabling the plug-in is ignored and |callback| is run
   // with 'false' passed to it. Otherwise the plug-in state is changed
   // and |callback| is run with 'true' passed to it.
-  void EnablePlugin(bool enable, const FilePath& file_path,
+  void EnablePlugin(bool enable, const base::FilePath& file_path,
                     const base::Callback<void(bool)>& callback);
 
   // Returns whether there is a policy enabling or disabling plug-ins of the
-  // given name and/or version.
-  PolicyStatus PolicyStatusForPlugin(const string16& name,
-                                     const string16& version) const;
+  // given name.
+  PolicyStatus PolicyStatusForPlugin(const string16& name) const;
 
   // Returns whether the plugin is enabled or not.
   bool IsPluginEnabled(const webkit::WebPluginInfo& plugin) const;
@@ -87,11 +82,6 @@ class PluginPrefs : public RefcountedProfileKeyedService,
 
   // RefCountedProfileKeyedBase method override.
   virtual void ShutdownOnUIThread() OVERRIDE;
-
-  // content::NotificationObserver method override.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<PluginPrefs>;
@@ -107,26 +97,27 @@ class PluginPrefs : public RefcountedProfileKeyedService,
 
     // Returns whether |plugin| is found. If |plugin| cannot be found,
     // |*enabled| won't be touched.
-    bool Get(const FilePath& plugin, bool* enabled) const;
-    void Set(const FilePath& plugin, bool enabled);
-    // It is similar to Set(), except that it does nothing if |plugin| needs to
-    // be converted to a different key.
-    void SetIgnorePseudoKey(const FilePath& plugin, bool enabled);
+    bool Get(const base::FilePath& plugin, bool* enabled) const;
+    void Set(const base::FilePath& plugin, bool enabled);
 
    private:
-    FilePath ConvertMapKey(const FilePath& plugin) const;
+    base::FilePath ConvertMapKey(const base::FilePath& plugin) const;
 
-    std::map<FilePath, bool> state_;
+    std::map<base::FilePath, bool> state_;
   };
 
   virtual ~PluginPrefs();
+
+  // Called to update one of the policy_xyz patterns below when a
+  // preference changes.
+  void UpdatePatternsAndNotify(std::set<string16>* patterns,
+                               const std::string& pref_name);
 
   // Allows unit tests to directly set enforced plug-in patterns.
   void SetPolicyEnforcedPluginPatterns(
       const std::set<string16>& disabled_patterns,
       const std::set<string16>& disabled_exception_patterns,
-      const std::set<string16>& enabled_patterns,
-      const PluginVersionsMap& disabled_by_version_patterns);
+      const std::set<string16>& enabled_patterns);
 
   // Returns the plugin list to use, either the singleton or the override.
   webkit::npapi::PluginList* GetPluginList() const;
@@ -138,7 +129,7 @@ class PluginPrefs : public RefcountedProfileKeyedService,
       const std::vector<webkit::WebPluginInfo>& plugins);
   void EnablePluginInternal(
       bool enabled,
-      const FilePath& path,
+      const base::FilePath& path,
       PluginFinder* plugin_finder,
       const base::Callback<void(bool)>& callback,
       const std::vector<webkit::WebPluginInfo>& plugins);
@@ -156,17 +147,9 @@ class PluginPrefs : public RefcountedProfileKeyedService,
   static void ListValueToStringSet(const base::ListValue* src,
                                    std::set<string16>* dest);
 
-  static void ListValueToPluginVersionsMap(const base::ListValue* src,
-                                           PluginVersionsMap* dest);
-
   // Checks if |name| matches any of the patterns in |pattern_set|.
   static bool IsStringMatchedInSet(const string16& name,
                                    const std::set<string16>& pattern_set);
-
-  // Checks if the plug-in is in DisabledByPluginVersions policy.
-  PolicyStatus PolicyStatusForPluginByVersion(
-      const string16& name,
-      const string16& version_str) const;
 
   // Guards access to the following data structures.
   mutable base::Lock lock_;
@@ -177,7 +160,6 @@ class PluginPrefs : public RefcountedProfileKeyedService,
   std::set<string16> policy_disabled_plugin_patterns_;
   std::set<string16> policy_disabled_plugin_exception_patterns_;
   std::set<string16> policy_enabled_plugin_patterns_;
-  PluginVersionsMap policy_disabled_plugins_by_version_;
 
   // Weak pointer, owns us. Only used as a notification source.
   Profile* profile_;

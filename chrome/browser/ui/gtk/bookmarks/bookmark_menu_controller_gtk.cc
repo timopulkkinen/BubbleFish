@@ -12,6 +12,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/event_utils.h"
@@ -25,8 +26,8 @@
 #include "grit/ui_resources.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/gtk_util.h"
-#include "webkit/glue/window_open_disposition.h"
 
 using content::OpenURLParams;
 using content::PageNavigator;
@@ -243,8 +244,8 @@ gboolean BookmarkMenuController::OnMenuButtonPressedOrReleased(
       menu_item ? GetNodeFromMenuItem(menu_item) : NULL;
 
   if (event->button == 2 && node && node->is_folder()) {
-    bookmark_utils::OpenAll(parent_window_, page_navigator_, node,
-                            NEW_BACKGROUND_TAB);
+    chrome::OpenAll(parent_window_, page_navigator_, node, NEW_BACKGROUND_TAB,
+                    browser_->profile());
     gtk_menu_popdown(GTK_MENU(menu_));
     return TRUE;
   } else if (event->button == 3) {

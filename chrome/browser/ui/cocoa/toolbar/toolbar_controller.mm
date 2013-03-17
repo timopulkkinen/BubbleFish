@@ -9,6 +9,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -18,12 +19,10 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
@@ -45,6 +44,7 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -87,7 +87,7 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 @property(assign, nonatomic) Browser* browser;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
-- (void)prefChanged:(std::string*)prefName;
+- (void)prefChanged:(const std::string&)prefName;
 - (BackgroundGradientView*)backgroundGradientView;
 - (void)toolbarFrameChanged;
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
@@ -105,7 +105,8 @@ namespace ToolbarControllerInternal {
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
-class NotificationBridge : public content::NotificationObserver {
+class NotificationBridge
+    : public content::NotificationObserver {
  public:
   explicit NotificationBridge(ToolbarController* controller)
       : controller_(controller) {
@@ -118,11 +119,8 @@ class NotificationBridge : public content::NotificationObserver {
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_PREF_CHANGED:
-        [controller_ prefChanged:content::Details<std::string>(details).ptr()];
-        break;
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
       case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
         [controller_ badgeWrenchMenuIfNeeded];
@@ -130,6 +128,10 @@ class NotificationBridge : public content::NotificationObserver {
       default:
         NOTREACHED();
     }
+  }
+
+  void OnPreferenceChanged(const std::string& pref_name) {
+    [controller_ prefChanged:pref_name];
   }
 
  private:
@@ -168,7 +170,6 @@ class NotificationBridge : public content::NotificationObserver {
     commandObserver_->ObserveCommand(IDC_RELOAD);
     commandObserver_->ObserveCommand(IDC_HOME);
     commandObserver_->ObserveCommand(IDC_BOOKMARK_PAGE);
-    commandObserver_->ObserveCommand(IDC_CHROME_TO_MOBILE_PAGE);
   }
   return self;
 }
@@ -275,8 +276,11 @@ class NotificationBridge : public content::NotificationObserver {
   notificationBridge_.reset(
       new ToolbarControllerInternal::NotificationBridge(self));
   PrefService* prefs = profile_->GetPrefs();
-  showHomeButton_.Init(prefs::kShowHomeButton, prefs,
-                       notificationBridge_.get());
+  showHomeButton_.Init(
+      prefs::kShowHomeButton, prefs,
+      base::Bind(
+          &ToolbarControllerInternal::NotificationBridge::OnPreferenceChanged,
+          base::Unretained(notificationBridge_.get())));
   [self showOptionalHomeButton];
   [self installWrenchMenu];
 
@@ -432,7 +436,7 @@ class NotificationBridge : public content::NotificationObserver {
                shouldRestoreState:(BOOL)shouldRestore {
   locationBarView_->Update(tab, shouldRestore ? true : false);
 
-  [locationBar_ updateCursorAndToolTipRects];
+  [locationBar_ updateMouseTracking];
 
   if (browserActionsController_.get()) {
     [browserActionsController_ update];
@@ -444,7 +448,8 @@ class NotificationBridge : public content::NotificationObserver {
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
-  locationBarView_->ZoomChangedForActiveTab(canShowBubble ? true : false);
+  locationBarView_->ZoomChangedForActiveTab(
+      canShowBubble && ![wrenchMenuController_ isMenuOpen]);
 }
 
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
@@ -564,9 +569,8 @@ class NotificationBridge : public content::NotificationObserver {
   [[wrenchButton_ cell] setOverlayImageID:error_badge_id];
 }
 
-- (void)prefChanged:(std::string*)prefName {
-  if (!prefName) return;
-  if (*prefName == prefs::kShowHomeButton) {
+- (void)prefChanged:(const std::string&)prefName {
+  if (prefName == prefs::kShowHomeButton) {
     [self showOptionalHomeButton];
   }
 }
@@ -767,7 +771,7 @@ class NotificationBridge : public content::NotificationObserver {
   }
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  chrome::GetActiveWebContents(browser_)->OpenURL(params);
+  browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)
@@ -784,7 +788,7 @@ class NotificationBridge : public content::NotificationObserver {
 
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  chrome::GetActiveWebContents(browser_)->OpenURL(params);
+  browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)

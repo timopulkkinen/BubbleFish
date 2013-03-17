@@ -21,8 +21,8 @@
           'target_name': 'alternate_version_generator_lib',
           'type': 'static_library',
           'dependencies': [
-            '../chrome.gyp:common_constants',
             '../chrome.gyp:installer_util',
+            '../common_constants.gyp:common_constants',
             '../../base/base.gyp:base',
           ],
           'include_dirs': [
@@ -38,6 +38,8 @@
             'test/resource_updater.cc',
             'test/resource_updater.h',
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [4267, ],
         },
         {
           'target_name': 'upgrade_test',
@@ -53,8 +55,8 @@
             # 'mini_installer.gyp:mini_installer',
             '../../base/base.gyp:test_support_base',
             '../../testing/gtest.gyp:gtest',
-            '../chrome.gyp:common_constants',
             '../chrome.gyp:installer_util',
+            '../common_constants.gyp:common_constants',
           ],
           'include_dirs': [
             '../..',
@@ -71,8 +73,8 @@
             'alternate_version_generator_lib',
             '../../base/base.gyp:test_support_base',
             '../../testing/gtest.gyp:gtest',
-            '../chrome.gyp:common_constants',
             '../chrome.gyp:installer_util',
+            '../common_constants.gyp:common_constants',
           ],
           'include_dirs': [
             '../..',
@@ -80,6 +82,8 @@
           'sources': [
             'test/alternate_version_generator_main.cc',
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
       ],
     }],

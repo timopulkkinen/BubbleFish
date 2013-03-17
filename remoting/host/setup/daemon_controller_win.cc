@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -26,11 +26,10 @@
 #include "base/win/windows_version.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/host/branding.h"
-#include "remoting/host/plugin/daemon_installer_win.h"
+// chromoting_lib.h contains MIDL-generated declarations.
+#include "remoting/host/chromoting_lib.h"
+#include "remoting/host/setup/daemon_installer_win.h"
 #include "remoting/host/usage_stats_consent.h"
-
-// MIDL-generated declarations and definitions.
-#include "remoting/host/elevated_controller.h"
 
 using base::win::ScopedBstr;
 using base::win::ScopedComPtr;
@@ -62,20 +61,6 @@ const int kPrivilegedTimeoutSec = 5 * 60;
 // the old binary still can be used. So dropping the references often makes sure
 // that the old binary will go away sooner.
 const int kUnprivilegedTimeoutSec = 60;
-
-// A base::Thread implementation that initializes COM on the new thread.
-class ComThread : public base::Thread {
- public:
-  explicit ComThread(const char* name);
-
-  bool Start();
-
- protected:
-  virtual void Init() OVERRIDE;
-  virtual void CleanUp() OVERRIDE;
-
-  DISALLOW_COPY_AND_ASSIGN(ComThread);
-};
 
 class DaemonControllerWin : public remoting::DaemonController {
  public:
@@ -161,34 +146,18 @@ class DaemonControllerWin : public remoting::DaemonController {
   HWND window_handle_;
 
   // The worker thread used for servicing long running operations.
-  ComThread worker_thread_;
+  base::Thread worker_thread_;
 
   scoped_ptr<DaemonInstallerWin> installer_;
 
   DISALLOW_COPY_AND_ASSIGN(DaemonControllerWin);
 };
 
-ComThread::ComThread(const char* name) : base::Thread(name) {
-}
-
-bool ComThread::Start() {
-  // N.B. The single threaded COM apartment must be run on a UI message loop.
-  base::Thread::Options thread_options(MessageLoop::TYPE_UI, 0);
-  return StartWithOptions(thread_options);
-}
-
-void ComThread::Init() {
-  CoInitialize(NULL);
-}
-
-void ComThread::CleanUp() {
-  CoUninitialize();
-}
-
 DaemonControllerWin::DaemonControllerWin()
     : control_is_elevated_(false),
       window_handle_(NULL),
       worker_thread_(kDaemonControllerThreadName) {
+  worker_thread_.init_com_with_mta(false);
   if (!worker_thread_.Start()) {
     LOG(FATAL) << "Failed to start the Daemon Controller worker thread.";
   }
@@ -458,9 +427,15 @@ remoting::DaemonController::State DaemonControllerWin::ConvertToDaemonState(
 // static
 DaemonController::AsyncResult DaemonControllerWin::HResultToAsyncResult(
     HRESULT hr) {
-  // TODO(sergeyu): Report other errors to the webapp once it knows
-  // how to handle them.
-  return FAILED(hr) ? RESULT_FAILED : RESULT_OK;
+  if (SUCCEEDED(hr)) {
+    return RESULT_OK;
+  } else if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+    return RESULT_CANCELLED;
+  } else {
+    // TODO(sergeyu): Report other errors to the webapp once it knows
+    // how to handle them.
+    return RESULT_FAILED;
+  }
 }
 
 void DaemonControllerWin::DoGetConfig(const GetConfigCallback& callback) {
@@ -660,11 +635,9 @@ void DaemonControllerWin::DoGetUsageStatsConsent(
   // Activate the Daemon Controller and see if it supports |IDaemonControl2|.
   HRESULT hr = ActivateController();
   if (FAILED(hr)) {
-    // The host is not installed yet. Assume that the user's consent is not
-    // recorded yet and set the default value to true. This value will not come
-    // into effect until the user installs the host and agrees to crash
-    // dump reporting.
-    done.Run(true, true, false);
+    // The host is not installed yet. Assume that the user didn't consent to
+    // collecting crash dumps.
+    done.Run(true, false, false);
     return;
   }
 
@@ -679,10 +652,9 @@ void DaemonControllerWin::DoGetUsageStatsConsent(
   BOOL set_by_policy;
   hr = control2_->GetUsageStatsConsent(&allowed, &set_by_policy);
   if (FAILED(hr)) {
-    // If the user's consent is not recorded yet, set the default value to true.
-    // This value will not come into effect until the user agrees to crash
-    // dump reporting.
-    done.Run(true, true, false);
+    // If the user's consent is not recorded yet, assume that the user didn't
+    // consent to collecting crash dumps.
+    done.Run(true, false, false);
     return;
   }
 

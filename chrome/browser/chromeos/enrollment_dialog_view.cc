@@ -11,8 +11,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "content/public/common/page_transition_types.h"
+#include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -53,9 +54,6 @@ class EnrollmentDialogView : public views::DialogDelegateView {
 
   // views::View overrides
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-
-  // views::Widget overrides
-  virtual views::View* GetContentsView() OVERRIDE;
 
  private:
   EnrollmentDialogView(const std::string& network_name,
@@ -110,10 +108,14 @@ int EnrollmentDialogView::GetDialogButtons() const {
 bool EnrollmentDialogView::Accept() {
   // TODO(beng): use Navigate().
   // Navigate to the target URI in a browser tab.
-  Browser* browser = browser::FindTabbedBrowser(profile_, false);
+  Browser* browser = chrome::FindTabbedBrowser(profile_, false,
+                                               chrome::HOST_DESKTOP_TYPE_ASH);
   if (!browser) {
     // Couldn't find a tabbed browser: create one.
-    browser = new Browser(Browser::CreateParams(profile_));
+    browser = new Browser(
+        Browser::CreateParams(Browser::TYPE_TABBED,
+                              profile_,
+                              chrome::HOST_DESKTOP_TYPE_ASH));
   }
   DCHECK(browser);
   chrome::AddSelectedTabWithURL(browser, target_uri_,
@@ -140,10 +142,6 @@ gfx::Size EnrollmentDialogView::GetPreferredSize() {
   return gfx::Size(kDefaultWidth, kDefaultHeight);
 }
 
-views::View* EnrollmentDialogView::GetContentsView() {
-  return this;
-}
-
 void EnrollmentDialogView::InitDialog() {
   added_cert_ = false;
   // Create the views and layout manager and set them up.
@@ -152,7 +150,7 @@ void EnrollmentDialogView::InitDialog() {
                                  UTF8ToUTF16(network_name_)));
   label->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
       ui::ResourceBundle::BaseFont));
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetMultiLine(true);
   label->SetAllowCharacterBreak(true);
 
@@ -225,7 +223,7 @@ void DialogEnrollmentDelegate::Enroll(const std::vector<std::string>& uri_list,
   for (std::vector<std::string>::const_iterator iter = uri_list.begin();
        iter != uri_list.end(); ++iter) {
     GURL uri(*iter);
-    if (uri.IsStandard() || uri.scheme() == chrome::kExtensionScheme) {
+    if (uri.IsStandard() || uri.scheme() == extensions::kExtensionScheme) {
       // If this is a "standard" scheme, like http, ftp, etc., then open that in
       // the enrollment dialog.
       EnrollmentDialogView::ShowDialog(owning_window_,

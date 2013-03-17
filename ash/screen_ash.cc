@@ -5,14 +5,15 @@
 #include "ash/screen_ash.h"
 
 #include "ash/display/display_controller.h"
-#include "ash/display/multi_display_manager.h"
+#include "ash/display/display_manager.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/display_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
@@ -20,9 +21,8 @@
 namespace ash {
 
 namespace {
-internal::MultiDisplayManager* GetDisplayManager() {
-  return static_cast<internal::MultiDisplayManager*>(
-      aura::Env::GetInstance()->display_manager());
+internal::DisplayManager* GetDisplayManager() {
+  return Shell::GetInstance()->display_manager();
 }
 }  // namespace
 
@@ -39,33 +39,24 @@ gfx::Display ScreenAsh::FindDisplayContainingPoint(const gfx::Point& point) {
 
 // static
 gfx::Rect ScreenAsh::GetMaximizedWindowBoundsInParent(aura::Window* window) {
-  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
-    return Shell::GetInstance()->shelf()->GetMaximizedWindowBounds(window);
+  if (GetRootWindowController(window->GetRootWindow())->launcher())
+    return GetDisplayWorkAreaBoundsInParent(window);
   else
     return GetDisplayBoundsInParent(window);
-}
-
-// static
-gfx::Rect ScreenAsh::GetUnmaximizedWorkAreaBoundsInParent(
-    aura::Window* window) {
-  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
-    return Shell::GetInstance()->shelf()->GetUnmaximizedWorkAreaBounds(window);
-  else
-    return GetDisplayWorkAreaBoundsInParent(window);
 }
 
 // static
 gfx::Rect ScreenAsh::GetDisplayBoundsInParent(aura::Window* window) {
   return ConvertRectFromScreen(
       window->parent(),
-      gfx::Screen::GetDisplayNearestWindow(window).bounds());
+      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
 }
 
 // static
 gfx::Rect ScreenAsh::GetDisplayWorkAreaBoundsInParent(aura::Window* window) {
   return ConvertRectFromScreen(
       window->parent(),
-      gfx::Screen::GetDisplayNearestWindow(window).work_area());
+      Shell::GetScreen()->GetDisplayNearestWindow(window).work_area());
 }
 
 // static
@@ -91,17 +82,40 @@ const gfx::Display& ScreenAsh::GetSecondaryDisplay() {
   return *(Shell::GetInstance()->display_controller()->GetSecondaryDisplay());
 }
 
+// static
+const gfx::Display& ScreenAsh::GetDisplayForId(int64 display_id) {
+  return GetDisplayManager()->GetDisplayForId(display_id);
+}
+
+void ScreenAsh::NotifyBoundsChanged(const gfx::Display& display) {
+  FOR_EACH_OBSERVER(gfx::DisplayObserver, observers_,
+                    OnDisplayBoundsChanged(display));
+}
+
+void ScreenAsh::NotifyDisplayAdded(const gfx::Display& display) {
+  FOR_EACH_OBSERVER(gfx::DisplayObserver, observers_, OnDisplayAdded(display));
+}
+
+void ScreenAsh::NotifyDisplayRemoved(const gfx::Display& display) {
+  FOR_EACH_OBSERVER(
+      gfx::DisplayObserver, observers_, OnDisplayRemoved(display));
+}
+
+bool ScreenAsh::IsDIPEnabled() {
+  return true;
+}
+
 gfx::Point ScreenAsh::GetCursorScreenPoint() {
   return aura::Env::GetInstance()->last_mouse_location();
 }
 
 gfx::NativeWindow ScreenAsh::GetWindowAtCursorScreenPoint() {
-  const gfx::Point point = gfx::Screen::GetCursorScreenPoint();
+  const gfx::Point point = Shell::GetScreen()->GetCursorScreenPoint();
   return wm::GetRootWindowAt(point)->GetTopWindowContainingPoint(point);
 }
 
 int ScreenAsh::GetNumDisplays() {
-  return GetDisplayManager()->GetNumDisplays();
+  return DisplayController::GetNumDisplays();
 }
 
 gfx::Display ScreenAsh::GetDisplayNearestWindow(gfx::NativeView window) const {
@@ -118,6 +132,14 @@ gfx::Display ScreenAsh::GetDisplayMatching(const gfx::Rect& match_rect) const {
 
 gfx::Display ScreenAsh::GetPrimaryDisplay() const {
   return DisplayController::GetPrimaryDisplay();
+}
+
+void ScreenAsh::AddObserver(gfx::DisplayObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void ScreenAsh::RemoveObserver(gfx::DisplayObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 }  // namespace ash

@@ -90,7 +90,7 @@ scoped_ptr_malloc<IP_ADAPTER_ADDRESSES> CreateAdapterAddresses(
     adapter->IfType = info.if_type;
     adapter->OperStatus = info.oper_status;
     adapter->DnsSuffix = info.dns_suffix;
-    IP_ADAPTER_DNS_SERVER_ADDRESS* address;
+    IP_ADAPTER_DNS_SERVER_ADDRESS* address = NULL;
     for (size_t j = 0; !info.dns_server_addresses[j].empty(); ++j) {
       --num_addresses;
       if (j == 0) {
@@ -144,20 +144,21 @@ TEST(DnsConfigServiceWinTest, ConvertAdapterAddresses) {
       "chromium.org",
       { 1024, 24 },
     },
-    {  // Use the preferred adapter (first in binding order).
+    {  // Use the preferred adapter (first in binding order) and filter
+       // stateless DNS discovery addresses.
       {
         { IF_TYPE_SOFTWARE_LOOPBACK, IfOperStatusUp, L"funnyloop",
           { "2.0.0.2" } },
         { IF_TYPE_FASTETHER, IfOperStatusUp, L"example.com",
-          { "1.0.0.1" } },
+          { "1.0.0.1", "fec0:0:0:ffff::2", "8.8.8.8" } },
         { IF_TYPE_USB, IfOperStatusUp, L"chromium.org",
           { "10.0.0.10", "2001:FFFF::1111" } },
         { 0 },
       },
-      { "1.0.0.1" },
+      { "1.0.0.1", "8.8.8.8" },
       "example.com",
     },
-    {  // No usable nameservers.
+    {  // No usable adapters.
       {
         { IF_TYPE_SOFTWARE_LOOPBACK, IfOperStatusUp, L"localhost",
           { "2.0.0.2" } },

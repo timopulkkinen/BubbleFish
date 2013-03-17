@@ -206,8 +206,16 @@ class BasePerfTest(pyauto.PyUITest):
       logging.info('Current CPU utilization = %f.', fraction_non_idle_time)
       if time_passed > timeout:
         self._LogProcessActivity()
-        self.fail('CPU did not idle after %fs wait (utilization = %f).' % (
-                  time_passed, fraction_non_idle_time))
+        message = ('CPU did not idle after %fs wait (utilization = %f).' % (
+                   time_passed, fraction_non_idle_time))
+
+        # crosbug.com/37389
+        if self._IsPGOMode():
+          logging.info(message)
+          logging.info('Still continuing because we are in PGO mode.')
+          return
+
+        self.fail(message)
     logging.info('Wait for idle CPU took %fs (utilization = %f).',
                  time_passed, fraction_non_idle_time)
 
@@ -414,15 +422,16 @@ class BasePerfTest(pyauto.PyUITest):
       assert isinstance(value, list)
 
     if self.IsChromeOS():
-      # ChromeOS results don't support lists.
+      # Autotest doesn't support result lists.
+      autotest_value = value
       if (isinstance(value, list) and value[0] is not None and
           not isinstance(value[0], tuple)):
-        value = Mean(value)
+        autotest_value = Mean(value)
 
       if units_x:
         # TODO(dennisjeffrey): Support long-running performance measurements on
         # ChromeOS in a way that can be graphed: crosbug.com/21881.
-        pyauto_utils.PrintPerfResult(graph_name, description, value,
+        pyauto_utils.PrintPerfResult(graph_name, description, autotest_value,
                                      units + ' ' + units_x)
       else:
         # Output short-running performance results in a format understood by
@@ -433,8 +442,14 @@ class BasePerfTest(pyauto.PyUITest):
                           '(length 30) when added to the autotest database.',
                           perf_key, perf_key[:30])
         print '\n%s(\'%s\', %f)%s' % (self._PERF_OUTPUT_MARKER_PRE,
-                                        perf_key, value,
+                                        perf_key, autotest_value,
                                         self._PERF_OUTPUT_MARKER_POST)
+
+        # Also output results in the format recognized by buildbot, for cases
+        # in which these tests are run on chromeOS through buildbot.  Since
+        # buildbot supports result lists, it's ok for |value| to be a list here.
+        pyauto_utils.PrintPerfResult(graph_name, description, value, units)
+
         sys.stdout.flush()
     else:
       # TODO(dmikurube): Support stacked graphs in PrintPerfResult.
@@ -2271,17 +2286,25 @@ class PageCyclerReplay(object):
       'extension':  'src/tools/page_cycler/webpagereplay/extension',
       }
 
-  CHROME_FLAGS = webpagereplay.CHROME_FLAGS + [
-      '--log-level=0',
-      '--disable-background-networking',
-      '--enable-experimental-extension-apis',
-      '--enable-logging',
-      '--enable-benchmarking',
-      '--metrics-recording-only',
-      '--activate-on-launch',
-      '--no-first-run',
-      '--no-proxy-server',
-      ]
+  WEBPAGEREPLAY_HOST = '127.0.0.1'
+  WEBPAGEREPLAY_HTTP_PORT = 8080
+  WEBPAGEREPLAY_HTTPS_PORT = 8413
+
+  CHROME_FLAGS = webpagereplay.GetChromeFlags(
+      WEBPAGEREPLAY_HOST,
+      WEBPAGEREPLAY_HTTP_PORT,
+      WEBPAGEREPLAY_HTTPS_PORT) + [
+          '--log-level=0',
+          '--disable-background-networking',
+          '--enable-experimental-extension-apis',
+          '--enable-logging',
+          '--enable-benchmarking',
+          '--enable-net-benchmarking',
+          '--metrics-recording-only',
+          '--activate-on-launch',
+          '--no-first-run',
+          '--no-proxy-server',
+          ]
 
   @classmethod
   def Path(cls, key, **kwargs):
@@ -2290,7 +2313,11 @@ class PageCyclerReplay(object):
   @classmethod
   def ReplayServer(cls, test_name, replay_options=None):
     archive_path = cls.Path('archive', test_name=test_name)
-    return webpagereplay.ReplayServer(archive_path, replay_options)
+    return webpagereplay.ReplayServer(archive_path,
+                                      cls.WEBPAGEREPLAY_HOST,
+                                      cls.WEBPAGEREPLAY_HTTP_PORT,
+                                      cls.WEBPAGEREPLAY_HTTPS_PORT,
+                                      replay_options)
 
 
 class PageCyclerNetSimTest(BasePageCyclerTest):

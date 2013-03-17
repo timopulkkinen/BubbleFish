@@ -17,6 +17,8 @@ namespace base {
 class SharedMemory;
 }
 
+namespace content {
+
 // A AudioOutputController::SyncReader implementation using SyncSocket. This
 // is used by AudioOutputController to provide a low latency data source for
 // transmitting audio packets between the browser process and the renderer
@@ -45,7 +47,6 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
 
  private:
   base::SharedMemory* shared_memory_;
-  base::Time previous_call_time_;
 
   // Number of input channels for synchronized I/O.
   int input_channels_;
@@ -66,7 +67,14 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
   // Maximum amount of audio data which can be transferred in one Read() call.
   int packet_size_;
 
+  // Track the number of times the renderer missed its real-time deadline and
+  // report a UMA stat during destruction.
+  size_t renderer_callback_count_;
+  size_t renderer_missed_callback_count_;
+
   DISALLOW_COPY_AND_ASSIGN(AudioSyncReader);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_SYNC_READER_H_

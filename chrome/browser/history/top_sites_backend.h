@@ -6,13 +6,16 @@
 #define CHROME_BROWSER_HISTORY_TOP_SITES_BACKEND_H_
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
 
+class CancelableTaskTracker;
+
+namespace base {
 class FilePath;
+}
 
 namespace history {
 
@@ -21,30 +24,25 @@ class TopSitesDatabase;
 // Service used by TopSites to have db interaction happen on the DB thread.  All
 // public methods are invoked on the ui thread and get funneled to the DB
 // thread.
-class TopSitesBackend
-    : public base::RefCountedThreadSafe<TopSitesBackend>,
-      public CancelableRequestProvider {
+class TopSitesBackend : public base::RefCountedThreadSafe<TopSitesBackend> {
  public:
+  // The boolean parameter indicates if the DB existed on disk or needs to be
+  // migrated.
+  typedef base::Callback<void(const scoped_refptr<MostVisitedThumbnails>&,
+                              const bool*)>
+      GetMostVisitedThumbnailsCallback;
+
   TopSitesBackend();
 
-  void Init(const FilePath& path);
+  void Init(const base::FilePath& path);
 
   // Schedules the db to be shutdown.
   void Shutdown();
 
-  // The boolean parameter indicates if the DB existed on disk or needs to be
-  // migrated.
-  typedef base::Callback<
-      void(Handle, scoped_refptr<MostVisitedThumbnails>, bool)>
-          GetMostVisitedThumbnailsCallback;
-  typedef CancelableRequest1<TopSitesBackend::GetMostVisitedThumbnailsCallback,
-                             scoped_refptr<MostVisitedThumbnails> >
-      GetMostVisitedThumbnailsRequest;
-
   // Fetches MostVisitedThumbnails.
-  Handle GetMostVisitedThumbnails(
-      CancelableRequestConsumerBase* consumer,
-      const GetMostVisitedThumbnailsCallback& callback);
+  void GetMostVisitedThumbnails(
+      const GetMostVisitedThumbnailsCallback& callback,
+      CancelableTaskTracker* tracker);
 
   // Updates top sites database from the specified delta.
   void UpdateTopSites(const TopSitesDelta& delta);
@@ -57,15 +55,11 @@ class TopSitesBackend
   // Deletes the database and recreates it.
   void ResetDatabase();
 
-  typedef base::Callback<void(Handle)> EmptyRequestCallback;
-  typedef CancelableRequest<TopSitesBackend::EmptyRequestCallback>
-      EmptyRequestRequest;
-
   // Schedules a request that does nothing on the DB thread, but then notifies
-  // the callback on the calling thread. This is used to make sure the db has
+  // the the calling thread with a reply. This is used to make sure the db has
   // finished processing a request.
-  Handle DoEmptyRequest(CancelableRequestConsumerBase* consumer,
-                        const EmptyRequestCallback& callback);
+  void DoEmptyRequest(const base::Closure& reply,
+                      CancelableTaskTracker* tracker);
 
  private:
   friend class base::RefCountedThreadSafe<TopSitesBackend>;
@@ -73,14 +67,15 @@ class TopSitesBackend
   virtual ~TopSitesBackend();
 
   // Invokes Init on the db_.
-  void InitDBOnDBThread(const FilePath& path);
+  void InitDBOnDBThread(const base::FilePath& path);
 
   // Shuts down the db.
   void ShutdownDBOnDBThread();
 
   // Does the work of getting the most visted thumbnails.
   void GetMostVisitedThumbnailsOnDBThread(
-      scoped_refptr<GetMostVisitedThumbnailsRequest> request);
+      scoped_refptr<MostVisitedThumbnails> thumbnails,
+      bool* need_history_migration);
 
   // Updates top sites.
   void UpdateTopSitesOnDBThread(const TopSitesDelta& delta);
@@ -91,12 +86,9 @@ class TopSitesBackend
                                   const Images& thumbnail);
 
   // Resets the database.
-  void ResetDatabaseOnDBThread(const FilePath& file_path);
+  void ResetDatabaseOnDBThread(const base::FilePath& file_path);
 
-  // Notifies the request.
-  void DoEmptyRequestOnDBThread(scoped_refptr<EmptyRequestRequest> request);
-
-  FilePath db_path_;
+  base::FilePath db_path_;
 
   scoped_ptr<TopSitesDatabase> db_;
 

@@ -57,6 +57,10 @@ int LowWaterAdjust(int high_water) {
   return high_water - kCleanUpMargin;
 }
 
+bool FallingBehind(int current_size, int max_size) {
+  return current_size > max_size - kCleanUpMargin * 20;
+}
+
 }  // namespace
 
 namespace disk_cache {
@@ -219,8 +223,10 @@ void Eviction::DelayedTrim() {
 }
 
 bool Eviction::ShouldTrim() {
-  if (trim_delays_ < kMaxDelayedTrims && backend_->IsLoaded())
+  if (!FallingBehind(header_->num_bytes, max_size_) &&
+      trim_delays_ < kMaxDelayedTrims && backend_->IsLoaded()) {
     return false;
+  }
 
   UMA_HISTOGRAM_COUNTS("DiskCache.TrimDelays", trim_delays_);
   trim_delays_ = 0;
@@ -281,8 +287,6 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty,
   ReportTrimTimes(entry);
   if (empty || !new_eviction_) {
     entry->DoomImpl();
-    if (!empty)
-      backend_->OnEvent(Stats::TRIM_ENTRY);
   } else {
     entry->DeleteEntryData(false);
     EntryStore* info = entry->entry()->Data();
@@ -292,7 +296,13 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty,
     info->state = ENTRY_EVICTED;
     entry->entry()->Store();
     rankings_->Insert(entry->rankings(), true, Rankings::DELETED);
+  }
+  if (!empty) {
     backend_->OnEvent(Stats::TRIM_ENTRY);
+
+    static const char gajs[] = "http://www.google-analytics.com/ga.js";
+    if (!entry->GetKey().compare(gajs))
+      backend_->OnEvent(Stats::GAJS_EVICTED);
   }
   entry->Release();
 

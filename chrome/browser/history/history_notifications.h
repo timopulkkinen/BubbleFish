@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "googleurl/src/gurl.h"
-#include "chrome/browser/common/url_database/template_url_id.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 
 namespace history {
 
@@ -63,19 +63,6 @@ struct URLsDeletedDetails : public HistoryDetails {
   // The URLRows of URLs deleted. This is valid only when all_history is false
   // indicating that a subset of history has been deleted.
   URLRows rows;
-};
-
-// Details for NOTIFY_URLS_STARRED.
-struct URLsStarredDetails : public HistoryDetails {
-  explicit URLsStarredDetails(bool being_starred);
-  virtual ~URLsStarredDetails();
-
-  // The new starred state of the list of URLs. True when they are being
-  // starred, false when they are being unstarred.
-  bool starred;
-
-  // The list of URLs that are changing.
-  std::set<GURL> changed_urls;
 };
 
 // Details for NOTIFY_FAVICON_CHANGED.

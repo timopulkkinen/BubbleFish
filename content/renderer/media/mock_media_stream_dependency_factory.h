@@ -11,60 +11,115 @@
 #include "base/compiler_specific.h"
 #include "content/renderer/media/media_stream_dependency_factory.h"
 
-namespace webrtc {
+namespace content {
 
-class MockLocalVideoTrack : public LocalVideoTrackInterface {
+class MockVideoSource : public webrtc::VideoSourceInterface {
  public:
-  explicit MockLocalVideoTrack(std::string label)
-    : enabled_(false),
-      label_(label) {
+  MockVideoSource();
+
+  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual void UnregisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual MediaSourceInterface::SourceState state() const OVERRIDE;
+  virtual cricket::VideoCapturer* GetVideoCapturer() OVERRIDE;
+  virtual void AddSink(cricket::VideoRenderer* output) OVERRIDE;
+  virtual void RemoveSink(cricket::VideoRenderer* output) OVERRIDE;
+  virtual const cricket::VideoOptions* options() const OVERRIDE;
+
+  // Changes the state of the source to live and notifies the observer.
+  void SetLive();
+  // Changes the state of the source to ended and notifies the observer.
+  void SetEnded();
+
+ protected:
+  virtual ~MockVideoSource();
+
+ private:
+   webrtc::ObserverInterface* observer_;
+   MediaSourceInterface::SourceState state_;
+};
+
+class MockAudioSource : public webrtc::AudioSourceInterface {
+ public:
+  MockAudioSource(const webrtc::MediaConstraintsInterface* constraints);
+
+  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual void UnregisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual MediaSourceInterface::SourceState state() const OVERRIDE;
+
+  // Changes the state of the source to live and notifies the observer.
+  void SetLive();
+  // Changes the state of the source to ended and notifies the observer.
+  void SetEnded();
+
+  const webrtc::MediaConstraintsInterface::Constraints& optional_constraints() {
+    return optional_constraints_;
   }
-  virtual cricket::VideoCapturer* GetVideoCapture() OVERRIDE;
-  virtual void AddRenderer(VideoRendererInterface* renderer) OVERRIDE;
-  virtual void RemoveRenderer(VideoRendererInterface* renderer) OVERRIDE;
+
+  const webrtc::MediaConstraintsInterface::Constraints&
+  mandatory_constraints() {
+    return mandatory_constraints_;
+  }
+
+ protected:
+  virtual ~MockAudioSource();
+
+ private:
+  webrtc::ObserverInterface* observer_;
+  MediaSourceInterface::SourceState state_;
+  webrtc::MediaConstraintsInterface::Constraints optional_constraints_;
+  webrtc::MediaConstraintsInterface::Constraints mandatory_constraints_;
+};
+
+class MockLocalVideoTrack : public webrtc::VideoTrackInterface {
+ public:
+  MockLocalVideoTrack(std::string id,
+                      webrtc::VideoSourceInterface* source);
+  virtual void AddRenderer(webrtc::VideoRendererInterface* renderer) OVERRIDE;
+  virtual void RemoveRenderer(
+      webrtc::VideoRendererInterface* renderer) OVERRIDE;
   virtual cricket::VideoRenderer* FrameInput() OVERRIDE;
   virtual std::string kind() const OVERRIDE;
-  virtual std::string label() const OVERRIDE;
+  virtual std::string id() const OVERRIDE;
   virtual bool enabled() const OVERRIDE;
   virtual TrackState state() const OVERRIDE;
   virtual bool set_enabled(bool enable) OVERRIDE;
   virtual bool set_state(TrackState new_state) OVERRIDE;
-  virtual void RegisterObserver(ObserverInterface* observer) OVERRIDE;
-  virtual void UnregisterObserver(ObserverInterface* observer) OVERRIDE;
+  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual void UnregisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual webrtc::VideoSourceInterface* GetSource() const OVERRIDE;
 
  protected:
-  virtual ~MockLocalVideoTrack() {}
+  virtual ~MockLocalVideoTrack();
 
  private:
   bool enabled_;
-  std::string label_;
+  std::string id_;
+  scoped_refptr<webrtc::VideoSourceInterface> source_;
 };
 
-class MockLocalAudioTrack : public LocalAudioTrackInterface {
+class MockLocalAudioTrack : public webrtc::AudioTrackInterface {
  public:
-  explicit MockLocalAudioTrack(const std::string& label)
+  explicit MockLocalAudioTrack(const std::string& id)
     : enabled_(false),
-      label_(label) {
+      id_(id) {
   }
-  virtual AudioDeviceModule* GetAudioDevice() OVERRIDE;
   virtual std::string kind() const OVERRIDE;
-  virtual std::string label() const OVERRIDE;
+  virtual std::string id() const OVERRIDE;
   virtual bool enabled() const OVERRIDE;
   virtual TrackState state() const OVERRIDE;
   virtual bool set_enabled(bool enable) OVERRIDE;
   virtual bool set_state(TrackState new_state) OVERRIDE;
-  virtual void RegisterObserver(ObserverInterface* observer) OVERRIDE;
-  virtual void UnregisterObserver(ObserverInterface* observer) OVERRIDE;
+  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual void UnregisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
+  virtual webrtc::AudioSourceInterface* GetSource() const OVERRIDE;
 
  protected:
   virtual ~MockLocalAudioTrack() {}
 
  private:
   bool enabled_;
-  std::string label_;
+  std::string id_;
 };
-
-}  //  namespace webrtc
 
 // A mock factory for creating different objects for
 // RTC MediaStreams and PeerConnections.
@@ -73,39 +128,54 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
   MockMediaStreamDependencyFactory();
   virtual ~MockMediaStreamDependencyFactory();
 
-  virtual scoped_refptr<webrtc::PeerConnectionInterface>
-      CreatePeerConnection(const std::string& config,
-                           webrtc::PeerConnectionObserver* observer) OVERRIDE;
-  virtual scoped_refptr<webrtc::PeerConnectionInterface>
-      CreatePeerConnection(const webrtc::JsepInterface::IceServers& ice_servers,
-                           const webrtc::MediaConstraintsInterface* constraints,
-                           WebKit::WebFrame* frame,
-                           webrtc::PeerConnectionObserver* observer) OVERRIDE;
-  virtual scoped_refptr<webrtc::LocalMediaStreamInterface>
+  virtual scoped_refptr<webrtc::PeerConnectionInterface> CreatePeerConnection(
+      const webrtc::PeerConnectionInterface::IceServers& ice_servers,
+      const webrtc::MediaConstraintsInterface* constraints,
+      WebKit::WebFrame* frame,
+      webrtc::PeerConnectionObserver* observer) OVERRIDE;
+  virtual scoped_refptr<webrtc::AudioSourceInterface>
+      CreateLocalAudioSource(
+          const webrtc::MediaConstraintsInterface* constraints) OVERRIDE;
+  virtual scoped_refptr<webrtc::VideoSourceInterface>
+      CreateLocalVideoSource(
+          int video_session_id,
+          bool is_screencast,
+          const webrtc::MediaConstraintsInterface* constraints) OVERRIDE;
+  virtual bool InitializeAudioSource(
+      const StreamDeviceInfo& device_info) OVERRIDE;
+  virtual bool CreateWebAudioSource(
+      WebKit::WebMediaStreamSource* source) OVERRIDE;
+  virtual scoped_refptr<webrtc::MediaStreamInterface>
       CreateLocalMediaStream(const std::string& label) OVERRIDE;
-  virtual scoped_refptr<webrtc::LocalVideoTrackInterface>
-      CreateLocalVideoTrack(const std::string& label,
-                            int video_session_id) OVERRIDE;
-  virtual scoped_refptr<webrtc::LocalAudioTrackInterface>
-      CreateLocalAudioTrack(const std::string& label,
-                            webrtc::AudioDeviceModule* audio_device) OVERRIDE;
-  virtual webrtc::SessionDescriptionInterface* CreateSessionDescription(
-      const std::string& sdp) OVERRIDE;
+  virtual scoped_refptr<webrtc::VideoTrackInterface>
+      CreateLocalVideoTrack(const std::string& id,
+                            webrtc::VideoSourceInterface* source) OVERRIDE;
+  virtual scoped_refptr<webrtc::AudioTrackInterface>
+      CreateLocalAudioTrack(const std::string& id,
+                            webrtc::AudioSourceInterface* source) OVERRIDE;
   virtual webrtc::SessionDescriptionInterface* CreateSessionDescription(
       const std::string& type,
-      const std::string& sdp) OVERRIDE;
+      const std::string& sdp,
+      webrtc::SdpParseError* error) OVERRIDE;
   virtual webrtc::IceCandidateInterface* CreateIceCandidate(
       const std::string& sdp_mid,
       int sdp_mline_index,
       const std::string& sdp) OVERRIDE;
 
   virtual bool EnsurePeerConnectionFactory() OVERRIDE;
-  virtual void SetAudioDeviceSessionId(int session_id) OVERRIDE;
+  virtual bool PeerConnectionFactoryCreated() OVERRIDE;
+
+  MockAudioSource* last_audio_source() { return last_audio_source_; }
+  MockVideoSource* last_video_source() { return last_video_source_; }
 
  private:
   bool mock_pc_factory_created_;
+  scoped_refptr <MockAudioSource> last_audio_source_;
+  scoped_refptr <MockVideoSource> last_video_source_;
 
   DISALLOW_COPY_AND_ASSIGN(MockMediaStreamDependencyFactory);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_MOCK_MEDIA_STREAM_DEPENDENCY_FACTORY_H_

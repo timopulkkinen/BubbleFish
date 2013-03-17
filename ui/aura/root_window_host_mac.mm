@@ -14,6 +14,7 @@
 #include "ui/aura/root_window_host.h"
 #include "ui/aura/root_window_mac.h"
 #include "ui/aura/root_window_view_mac.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/point.h"
 
 namespace aura {
@@ -45,6 +46,9 @@ class RootWindowHostMac : public RootWindowHost,
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
+  virtual bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                  const gfx::Point& dest_offset,
+                                  SkCanvas* canvas) OVERRIDE;
   virtual bool GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) OVERRIDE;

@@ -6,16 +6,18 @@
 
 #include <algorithm>
 #include <deque>
+#include <functional>
 #include <set>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
@@ -149,6 +151,15 @@ bool UpdateModifiedTimeOnDBThread(const GURL& origin,
   return database->SetOriginLastModifiedTime(origin, type, modified_time);
 }
 
+int64 CallSystemGetAmountOfFreeDiskSpace(const base::FilePath& profile_path) {
+  // Ensure the profile path exists.
+  if(!file_util::CreateDirectory(profile_path)) {
+    LOG(WARNING) << "Create directory failed for path" << profile_path.value();
+    return 0;
+  }
+  return base::SysInfo::AmountOfFreeDiskSpace(profile_path);
+}
+
 }  // anonymous namespace
 
 const int64 QuotaManager::kNoLimit = kint64max;
@@ -156,6 +167,13 @@ const int64 QuotaManager::kNoLimit = kint64max;
 const int QuotaManager::kPerHostTemporaryPortion = 5;  // 20%
 
 const char QuotaManager::kDatabaseName[] = "QuotaManager";
+
+// Preserve kMinimumPreserveForSystem disk space for system book-keeping
+// when returning the quota to unlimited apps/extensions.
+// TODO(kinuko): This should be like 10% of the actual disk space.
+// For now we simply use a constant as getting the disk size needs
+// platform-dependent code. (http://crbug.com/178976)
+const int64 QuotaManager::kMinimumPreserveForSystem = 1024 * kMBytes;
 
 const int QuotaManager::kThresholdOfErrorsToBeBlacklisted = 3;
 
@@ -167,6 +185,20 @@ const int QuotaManager::kEvictionIntervalInMilliSeconds =
 // and by multiple apps.
 int64 QuotaManager::kSyncableStorageDefaultHostQuota = 500 * kMBytes;
 
+int64 CalculateQuotaForUnlimitedInstalledApp(
+    int64 available_disk_space, int64 usage) {
+  if (available_disk_space < QuotaManager::kMinimumPreserveForSystem) {
+    // No more space; cap the quota to the current usage.
+    return usage;
+  }
+
+  available_disk_space -= QuotaManager::kMinimumPreserveForSystem;
+  if (available_disk_space < kint64max - usage)
+    return available_disk_space + usage;
+
+  return kint64max;
+}
+
 // Callback translators.
 void CallGetUsageAndQuotaCallback(
     const QuotaManager::GetUsageAndQuotaCallback& callback,
@@ -174,19 +206,27 @@ void CallGetUsageAndQuotaCallback(
     bool is_installed_app,
     QuotaStatusCode status,
     const QuotaAndUsage& quota_and_usage) {
-  int64 usage;
-  int64 quota;
-
-  if (unlimited) {
-    usage = quota_and_usage.unlimited_usage;
-    quota = is_installed_app ? quota_and_usage.available_disk_space :
-        QuotaManager::kNoLimit;
-  } else {
-    usage = quota_and_usage.usage;
-    quota = quota_and_usage.quota;
+  // Regular limited case.
+  if (!unlimited) {
+    callback.Run(status, quota_and_usage.usage, quota_and_usage.quota);
+    return;
   }
 
-  callback.Run(status, usage, quota);
+  int64 usage = quota_and_usage.unlimited_usage;
+
+  // Unlimited case: for non-installed apps just return unlimited quota.
+  // TODO(kinuko): We should probably always return the capped disk space
+  // for internal quota clients (while we still would not want to expose
+  // the actual usage to webapps). http://crbug.com/179040
+  if (!is_installed_app) {
+    callback.Run(status, usage, QuotaManager::kNoLimit);
+    return;
+  }
+
+  // For installed unlimited apps.
+  callback.Run(status, usage,
+               CalculateQuotaForUnlimitedInstalledApp(
+                   quota_and_usage.available_disk_space, usage));
 }
 
 void CallQuotaCallback(
@@ -865,7 +905,7 @@ class QuotaManager::DumpOriginInfoTableHelper {
 // QuotaManager ---------------------------------------------------------------
 
 QuotaManager::QuotaManager(bool is_incognito,
-                           const FilePath& profile_path,
+                           const base::FilePath& profile_path,
                            base::SingleThreadTaskRunner* io_thread,
                            base::SequencedTaskRunner* db_thread,
                            SpecialStoragePolicy* special_storage_policy)
@@ -882,7 +922,7 @@ QuotaManager::QuotaManager(bool is_incognito,
     desired_available_space_(-1),
     special_storage_policy_(special_storage_policy),
     weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-    get_disk_space_fn_(&base::SysInfo::AmountOfFreeDiskSpace) {
+    get_disk_space_fn_(&CallSystemGetAmountOfFreeDiskSpace) {
 }
 
 void QuotaManager::GetUsageInfo(const GetUsageInfoCallback& callback) {
@@ -894,6 +934,7 @@ void QuotaManager::GetUsageInfo(const GetUsageInfoCallback& callback) {
 void QuotaManager::GetUsageAndQuota(
     const GURL& origin, StorageType type,
     const GetUsageAndQuotaCallback& callback) {
+  DCHECK(origin == origin.GetOrigin());
   GetUsageAndQuotaInternal(
       origin, type, false /* global */,
       base::Bind(&CallGetUsageAndQuotaCallback, callback,
@@ -903,12 +944,14 @@ void QuotaManager::GetUsageAndQuota(
 void QuotaManager::NotifyStorageAccessed(
     QuotaClient::ID client_id,
     const GURL& origin, StorageType type) {
+  DCHECK(origin == origin.GetOrigin());
   NotifyStorageAccessedInternal(client_id, origin, type, base::Time::Now());
 }
 
 void QuotaManager::NotifyStorageModified(
     QuotaClient::ID client_id,
     const GURL& origin, StorageType type, int64 delta) {
+  DCHECK(origin == origin.GetOrigin());
   NotifyStorageModifiedInternal(client_id, origin, type, delta,
                                 base::Time::Now());
 }
@@ -936,6 +979,7 @@ void QuotaManager::DeleteOriginData(
     return;
   }
 
+  DCHECK(origin == origin.GetOrigin());
   OriginDataDeleter* deleter =
       new OriginDataDeleter(this, origin, type, quota_client_mask, callback);
   deleter->Start();
@@ -1134,6 +1178,11 @@ bool QuotaManager::ResetUsageTracker(StorageType type) {
           new UsageTracker(clients_, kStorageTypePersistent,
                            special_storage_policy_));
       return true;
+    case kStorageTypeSyncable:
+      syncable_usage_tracker_.reset(
+          new UsageTracker(clients_, kStorageTypeSyncable,
+                           special_storage_policy_));
+      return true;
     default:
       NOTREACHED();
   }
@@ -1163,7 +1212,7 @@ void QuotaManager::LazyInitialize() {
   }
 
   // Use an empty path to open an in-memory only databse for incognito.
-  database_.reset(new QuotaDatabase(is_incognito_ ? FilePath() :
+  database_.reset(new QuotaDatabase(is_incognito_ ? base::FilePath() :
       profile_path_.AppendASCII(kDatabaseName)));
 
   temporary_usage_tracker_.reset(

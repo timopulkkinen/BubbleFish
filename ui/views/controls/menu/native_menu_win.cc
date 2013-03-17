@@ -17,13 +17,14 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/native_theme/native_theme.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
+#include "ui/native_theme/native_theme.h"
+#include "ui/native_theme/native_theme_win.h"
 #include "ui/views/controls/menu/menu_2.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_listener.h"
@@ -270,7 +271,8 @@ class NativeMenuWin::MenuHostWindow {
                  data->native_menu_win->model_->IsItemCheckedAt(
                      data->model_index)) {
         // Manually render a checkbox.
-        const MenuConfig& config = MenuConfig::instance();
+        ui::NativeThemeWin* native_theme = ui::NativeThemeWin::instance();
+        const MenuConfig& config = MenuConfig::instance(native_theme);
         NativeTheme::State state;
         if (draw_item_struct->itemState & ODS_DISABLED) {
           state = NativeTheme::kDisabled;
@@ -291,10 +293,10 @@ class NativeMenuWin::MenuHostWindow {
         gfx::Rect bounds(0, 0, config.check_width, config.check_height);
 
         // Draw the background and the check.
-        NativeTheme::instance()->Paint(
+        native_theme->Paint(
             canvas.sk_canvas(), NativeTheme::kMenuCheckBackground,
             state, bounds, extra);
-        NativeTheme::instance()->Paint(
+        native_theme->Paint(
             canvas.sk_canvas(), NativeTheme::kMenuCheck, state, bounds, extra);
 
         // Draw checkbox to menu.
@@ -467,12 +469,12 @@ void NativeMenuWin::CancelMenu() {
   EndMenu();
 }
 
-void NativeMenuWin::Rebuild() {
+void NativeMenuWin::Rebuild(InsertionDelegate* delegate) {
   ResetNativeMenu();
   items_.clear();
 
   owner_draw_ = model_->HasIcons() || owner_draw_;
-  first_item_index_ = model_->GetFirstItemIndex(GetNativeMenu());
+  first_item_index_ = delegate ? delegate->GetInsertionIndex(menu_) : 0;
   for (int menu_index = first_item_index_;
         menu_index < first_item_index_ + model_->GetItemCount(); ++menu_index) {
     int model_index = menu_index - first_item_index_;
@@ -502,7 +504,7 @@ void NativeMenuWin::UpdateStates() {
   }
 }
 
-gfx::NativeMenu NativeMenuWin::GetNativeMenu() const {
+HMENU NativeMenuWin::GetNativeMenu() const {
   return menu_;
 }
 

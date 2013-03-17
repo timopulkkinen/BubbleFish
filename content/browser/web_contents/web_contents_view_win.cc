@@ -19,21 +19,14 @@
 #include "ui/base/win/hwnd_subclass.h"
 #include "ui/gfx/screen.h"
 
-using content::RenderViewHost;
-using content::RenderWidgetHostView;
-using content::RenderWidgetHostViewWin;
-using content::WebContents;
-using content::WebContentsViewDelegate;
-
 namespace content {
-WebContentsView* CreateWebContentsView(
+WebContentsViewPort* CreateWebContentsView(
     WebContentsImpl* web_contents,
     WebContentsViewDelegate* delegate,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
   WebContentsViewWin* rv = new WebContentsViewWin(web_contents, delegate);
   *render_view_host_delegate_view = rv;
   return rv;
-}
 }
 
 namespace {
@@ -59,7 +52,7 @@ BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM lParam) {
   RenderWidgetHostViewWin* rwhv = static_cast<RenderWidgetHostViewWin*>(
       wcv->web_contents()->GetRenderWidgetHostView());
   if (rwhv)
-    rwhv->UpdateScreenInfo();
+    rwhv->UpdateScreenInfo(rwhv->GetNativeView());
 
   return TRUE;  // must return TRUE to continue enumeration.
 }
@@ -75,7 +68,7 @@ class PositionChangedMessageFilter : public ui::HWNDMessageFilter {
                              WPARAM w_param,
                              LPARAM l_param,
                              LRESULT* l_result) OVERRIDE {
-    if (message == WM_WINDOWPOSCHANGED)
+    if (message == WM_WINDOWPOSCHANGED || message == WM_SETTINGCHANGE)
       EnumChildWindows(hwnd, EnumChildProc, 0);
 
     return false;
@@ -97,7 +90,6 @@ void AddFilterToParentHwndSubclass(HWND hwnd, ui::HWNDMessageFilter* filter) {
 WebContentsViewWin::WebContentsViewWin(WebContentsImpl* web_contents,
                                        WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
-      view_(NULL),
       delegate_(delegate),
       hwnd_message_filter_(new PositionChangedMessageFilter) {
 }
@@ -107,43 +99,6 @@ WebContentsViewWin::~WebContentsViewWin() {
 
   if (IsWindow(hwnd()))
     DestroyWindow(hwnd());
-}
-
-void WebContentsViewWin::CreateView(const gfx::Size& initial_size) {
-  initial_size_ = initial_size;
-
-  set_window_style(WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-
-  Init(ui::GetHiddenWindow(), gfx::Rect(initial_size_));
-
-  // Remove the root view drop target so we can register our own.
-  RevokeDragDrop(GetNativeView());
-  drag_dest_ = new WebDragDest(hwnd(), web_contents_);
-  if (delegate_.get()) {
-    content::WebDragDestDelegate* delegate = delegate_->GetDragDestDelegate();
-    if (delegate)
-      drag_dest_->set_delegate(delegate);
-  }
-}
-
-RenderWidgetHostView* WebContentsViewWin::CreateViewForWidget(
-    content::RenderWidgetHost* render_widget_host)  {
-  if (render_widget_host->GetView()) {
-    // During testing, the view will already be set up in most cases to the
-    // test view, so we don't want to clobber it with a real one. To verify that
-    // this actually is happening (and somebody isn't accidentally creating the
-    // view twice), we check for the RVH Factory, which will be set when we're
-    // making special ones (which go along with the special views).
-    DCHECK(RenderViewHostFactory::has_factory());
-    return render_widget_host->GetView();
-  }
-
-  view_ = static_cast<RenderWidgetHostViewWin*>(
-      RenderWidgetHostView::CreateViewForWidget(render_widget_host));
-  view_->CreateWnd(GetNativeView());
-  view_->ShowWindow(SW_SHOW);
-  view_->SetSize(initial_size_);
-  return view_;
 }
 
 gfx::NativeView WebContentsViewWin::GetNativeView() const {
@@ -168,17 +123,8 @@ void WebContentsViewWin::GetContainerBounds(gfx::Rect *out) const {
   *out = gfx::Rect(point.x, point.y, r.right - r.left, r.bottom - r.top);
 }
 
-void WebContentsViewWin::SetPageTitle(const string16& title) {
-  // It's possible to get this after the hwnd has been destroyed.
-  if (GetNativeView())
-    ::SetWindowText(GetNativeView(), title.c_str());
-}
-
 void WebContentsViewWin::OnTabCrashed(base::TerminationStatus status,
                                       int error_code) {
-  // TODO(avi): No other TCV implementation does anything in this callback. Can
-  // this be moved elsewhere so that |OnTabCrashed| can be removed everywhere?
-  view_ = NULL;
 }
 
 void WebContentsViewWin::SizeContents(const gfx::Size& size) {
@@ -198,7 +144,22 @@ void WebContentsViewWin::SizeContents(const gfx::Size& size) {
   }
 }
 
-void WebContentsViewWin::RenderViewCreated(RenderViewHost* host) {
+void WebContentsViewWin::CreateView(
+    const gfx::Size& initial_size, gfx::NativeView context) {
+  initial_size_ = initial_size;
+
+  set_window_style(WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+
+  Init(ui::GetHiddenWindow(), gfx::Rect(initial_size_));
+
+  // Remove the root view drop target so we can register our own.
+  RevokeDragDrop(GetNativeView());
+  drag_dest_ = new WebDragDest(hwnd(), web_contents_);
+  if (delegate_.get()) {
+    WebDragDestDelegate* delegate = delegate_->GetDragDestDelegate();
+    if (delegate)
+      drag_dest_->set_delegate(delegate);
+  }
 }
 
 void WebContentsViewWin::Focus() {
@@ -236,22 +197,52 @@ WebDropData* WebContentsViewWin::GetDropData() const {
   return drag_dest_->current_drop_data();
 }
 
-bool WebContentsViewWin::IsEventTracking() const {
-  return false;
-}
-
-void WebContentsViewWin::CloseTabAfterEventTracking() {
-}
-
 gfx::Rect WebContentsViewWin::GetViewBounds() const {
   RECT r;
   GetWindowRect(hwnd(), &r);
   return gfx::Rect(r);
 }
 
+RenderWidgetHostView* WebContentsViewWin::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host)  {
+  if (render_widget_host->GetView()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->GetView();
+  }
+
+  RenderWidgetHostViewWin* view = static_cast<RenderWidgetHostViewWin*>(
+      RenderWidgetHostView::CreateViewForWidget(render_widget_host));
+  view->CreateWnd(GetNativeView());
+  view->ShowWindow(SW_SHOW);
+  view->SetSize(initial_size_);
+  return view;
+}
+
+RenderWidgetHostView* WebContentsViewWin::CreateViewForPopupWidget(
+    RenderWidgetHost* render_widget_host) {
+  return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
+}
+
+void WebContentsViewWin::SetPageTitle(const string16& title) {
+  // It's possible to get this after the hwnd has been destroyed.
+  if (GetNativeView())
+    ::SetWindowText(GetNativeView(), title.c_str());
+}
+
+void WebContentsViewWin::RenderViewCreated(RenderViewHost* host) {
+}
+
+void WebContentsViewWin::RenderViewSwappedIn(RenderViewHost* host) {
+}
+
 void WebContentsViewWin::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const ContextMenuParams& params,
+    ContextMenuSourceType type) {
   if (delegate_.get())
     delegate_->ShowContextMenu(params, type);
 }
@@ -270,7 +261,8 @@ void WebContentsViewWin::ShowPopupMenu(const gfx::Rect& bounds,
 void WebContentsViewWin::StartDragging(const WebDropData& drop_data,
                                        WebKit::WebDragOperationsMask operations,
                                        const gfx::ImageSkia& image,
-                                       const gfx::Point& image_offset) {
+                                       const gfx::Vector2d& image_offset,
+                                       const DragEventSourceInfo& event_info) {
   drag_handler_ = new WebContentsDragWin(
       GetNativeView(),
       web_contents_,
@@ -346,7 +338,7 @@ LRESULT WebContentsViewWin::OnWindowPosChanged(
   RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (rwhv) {
     RenderWidgetHostViewWin* view = static_cast<RenderWidgetHostViewWin*>(rwhv);
-    view->UpdateScreenInfo();
+    view->UpdateScreenInfo(view->GetNativeView());
   }
 
   // Unless we were specifically told not to size, cause the renderer to be
@@ -382,23 +374,9 @@ LRESULT WebContentsViewWin::OnMouseMove(
   // bubble state).
   if (web_contents_->GetDelegate()) {
     web_contents_->GetDelegate()->ContentsMouseEvent(
-        web_contents_, gfx::Screen::GetCursorScreenPoint(), true);
-  }
-  return 0;
-}
-
-LRESULT WebContentsViewWin::OnReflectedMessage(
-    UINT msg, WPARAM wparam, LPARAM lparam, BOOL& handled) {
-  MSG* message = reinterpret_cast<MSG*>(lparam);
-  switch (message->message) {
-    case WM_MOUSEWHEEL:
-      // This message is reflected from the view() to this window.
-      if (GET_KEYSTATE_WPARAM(message->wParam) & MK_CONTROL) {
-        web_contents_->GetDelegate()->ContentsZoomChange(
-            GET_WHEEL_DELTA_WPARAM(message->wParam) > 0);
-        return 1;
-      }
-    break;
+        web_contents_,
+        gfx::Screen::GetNativeScreen()->GetCursorScreenPoint(),
+        true);
   }
   return 0;
 }
@@ -481,3 +459,5 @@ LRESULT WebContentsViewWin::OnSize(
 
   return 1;
 }
+
+}  // namespace content

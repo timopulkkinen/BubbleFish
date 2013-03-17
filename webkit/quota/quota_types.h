@@ -13,6 +13,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "webkit/quota/quota_status_code.h"
 
 class GURL;
 
@@ -23,17 +24,6 @@ enum StorageType {
   kStorageTypePersistent,
   kStorageTypeSyncable,
   kStorageTypeUnknown,
-};
-
-// The numbers should match with the error code defined in
-// third_party/WebKit/Source/WebCore/dom/ExceptionCode.h.
-enum QuotaStatusCode {
-  kQuotaStatusOk = 0,
-  kQuotaErrorNotSupported = 9,          // NOT_SUPPORTED_ERR
-  kQuotaErrorInvalidModification = 13,  // INVALID_MODIFICATION_ERR
-  kQuotaErrorInvalidAccess = 15,        // INVALID_ACCESS_ERR
-  kQuotaErrorAbort = 20,                // ABORT_ERR
-  kQuotaStatusUnknown = -1,
 };
 
 struct UsageInfo;
@@ -166,29 +156,6 @@ class CallbackQueueMap1
       return;
     Queue& queue = this->callback_map_[key];
     queue.Run(arg);
-    this->callback_map_.erase(key);
-  }
-};
-
-template <typename CallbackType2, typename KEY, typename ARG1, typename ARG2>
-class CallbackQueueMap2
-    : public CallbackQueueMapBase<CallbackType2,
-                                  CallbackQueue2<CallbackType2, ARG1, ARG2>,
-                                  KEY> {
- public:
-  typedef typename CallbackQueueMapBase<
-      CallbackType2,
-      CallbackQueue2<CallbackType2, ARG1, ARG2>,
-      KEY>::iterator iterator;
-  typedef CallbackQueue2<CallbackType2, ARG1, ARG2> Queue;
-
-  // Runs the callbacks added for the given |key| and clears the key
-  // from the map.
-  void Run(const KEY& key, ARG1 arg1, ARG2 arg2) {
-    if (!this->HasCallbacks(key))
-      return;
-    Queue& queue = this->callback_map_[key];
-    queue.Run(arg1, arg2);
     this->callback_map_.erase(key);
   }
 };

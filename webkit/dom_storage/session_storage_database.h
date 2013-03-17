@@ -8,12 +8,13 @@
 #include <map>
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 #include "webkit/dom_storage/dom_storage_types.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 
@@ -30,11 +31,12 @@ namespace dom_storage {
 // SessionStorageDatabase.
 
 // Only one thread is allowed to call the public functions other than
-// ReadAreaValues. Other threads area allowed to call ReadAreaValues.
-class SessionStorageDatabase :
+// ReadAreaValues and ReadNamespacesAndOrigins. Other threads are allowed to
+// call ReadAreaValues and ReadNamespacesAndOrigins.
+class WEBKIT_STORAGE_EXPORT SessionStorageDatabase :
     public base::RefCountedThreadSafe<SessionStorageDatabase> {
  public:
-  explicit SessionStorageDatabase(const FilePath& file_path);
+  explicit SessionStorageDatabase(const base::FilePath& file_path);
 
   // Reads the (key, value) pairs for |namespace_id| and |origin|. |result| is
   // assumed to be empty and any duplicate keys will be overwritten. If the
@@ -66,12 +68,9 @@ class SessionStorageDatabase :
   // Deletes the data for |namespace_id|.
   bool DeleteNamespace(const std::string& namespace_id);
 
-  // Reads all namespace IDs from the database.
-  bool ReadNamespaceIds(std::vector<std::string>* namespace_ids);
-
-  // Reads all origins which have data stored in |namespace_id|.
-  bool ReadOriginsInNamespace(const std::string& namespace_id,
-                              std::vector<GURL>* origins);
+  // Reads the namespace IDs and origins present in the database.
+  bool ReadNamespacesAndOrigins(
+      std::map<std::string, std::vector<GURL> >* namespaces_and_origins);
 
  private:
   friend class base::RefCountedThreadSafe<SessionStorageDatabase>;
@@ -188,7 +187,7 @@ class SessionStorageDatabase :
   static const char* NextMapIdKey();
 
   scoped_ptr<leveldb::DB> db_;
-  FilePath file_path_;
+  base::FilePath file_path_;
 
   // For protecting the database opening code.
   base::Lock db_lock_;

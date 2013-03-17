@@ -720,7 +720,7 @@ TEST_F(HttpPipelinedNetworkTransactionTest, PipelinesImmediatelyIfKnownGood) {
             second_one_transaction.Start(
                 GetRequestInfo("second-pipeline-one.html"),
                 second_one_callback.callback(), BoundNetLog()));
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   HttpNetworkTransaction second_two_transaction(session_.get());
   TestCompletionCallback second_two_callback;
@@ -749,7 +749,7 @@ class DataRunnerObserver : public MessageLoop::TaskObserver {
         run_before_task_(run_before_task),
         current_task_(0) { }
 
-  virtual void WillProcessTask(base::TimeTicks) OVERRIDE {
+  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
     ++current_task_;
     if (current_task_ == run_before_task_) {
       data_->Run();
@@ -757,7 +757,7 @@ class DataRunnerObserver : public MessageLoop::TaskObserver {
     }
   }
 
-  virtual void DidProcessTask(base::TimeTicks) OVERRIDE { }
+  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {}
 
  private:
   DeterministicSocketData* data_;
@@ -826,7 +826,7 @@ TEST_F(HttpPipelinedNetworkTransactionTest, OpenPipelinesWhileBinding) {
   DataRunnerObserver observer(data_vector_[0], 3);
   MessageLoop::current()->AddTaskObserver(&observer);
   data_vector_[0]->SetStop(4);
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   data_vector_[0]->SetStop(10);
 
   EXPECT_EQ(OK, one_callback.WaitForResult());

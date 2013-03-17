@@ -4,7 +4,7 @@
 
 #include "content/public/browser/content_browser_client.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -15,7 +15,7 @@ BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
   return NULL;
 }
 
-WebContentsView* ContentBrowserClient::OverrideCreateWebContentsView(
+WebContentsViewPort* ContentBrowserClient::OverrideCreateWebContentsView(
     WebContents* web_contents,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
   return NULL;
@@ -23,10 +23,6 @@ WebContentsView* ContentBrowserClient::OverrideCreateWebContentsView(
 
 WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
-  return NULL;
-}
-
-WebUIControllerFactory* ContentBrowserClient::GetWebUIControllerFactory() {
   return NULL;
 }
 
@@ -38,6 +34,39 @@ GURL ContentBrowserClient::GetEffectiveURL(BrowserContext* browser_context,
 bool ContentBrowserClient::ShouldUseProcessPerSite(
     BrowserContext* browser_context, const GURL& effective_url) {
   return false;
+}
+
+net::URLRequestContextGetter* ContentBrowserClient::CreateRequestContext(
+    BrowserContext* browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+ContentBrowserClient::CreateRequestContextForStoragePartition(
+    BrowserContext* browser_context,
+    const base::FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
 }
 
 bool ContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -55,6 +84,7 @@ bool ContentBrowserClient::ShouldTryToUseExistingProcessHost(
 }
 
 bool ContentBrowserClient::ShouldSwapProcessesForNavigation(
+    SiteInstance* site_instance,
     const GURL& current_url,
     const GURL& new_url) {
   return false;
@@ -109,19 +139,6 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
   return true;
 }
 
-bool ContentBrowserClient::AllowPluginLocalDataAccess(
-    const GURL& document_url,
-    const GURL& plugin_url,
-    content::ResourceContext* context) {
-  return true;
-}
-
-bool ContentBrowserClient::AllowPluginLocalDataSessionOnly(
-    const GURL& url,
-    content::ResourceContext* context) {
-  return false;
-}
-
 bool ContentBrowserClient::AllowSaveLocalState(ResourceContext* context) {
   return true;
 }
@@ -160,12 +177,6 @@ net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
   return NULL;
 }
 
-std::string ContentBrowserClient::GetStoragePartitionIdForChildProcess(
-    BrowserContext* browser_context,
-    int child_process_id) {
-  return std::string();
-}
-
 std::string ContentBrowserClient::GetStoragePartitionIdForSite(
     BrowserContext* browser_context,
     const GURL& site) {
@@ -178,6 +189,18 @@ bool ContentBrowserClient::IsValidStoragePartitionId(
   // Since the GetStoragePartitionIdForChildProcess() only generates empty
   // strings, we should only ever see empty strings coming back.
   return partition_id.empty();
+}
+
+void ContentBrowserClient::GetStoragePartitionConfigForSite(
+    BrowserContext* browser_context,
+    const GURL& site,
+    bool can_be_default,
+    std::string* partition_domain,
+    std::string* partition_name,
+    bool* in_memory) {
+  partition_domain->clear();
+  partition_name->clear();
+  *in_memory = false;
 }
 
 MediaObserver* ContentBrowserClient::GetMediaObserver() {
@@ -224,21 +247,33 @@ bool ContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
-  return FilePath();
+base::FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
+  return base::FilePath();
 }
 
 std::string ContentBrowserClient::GetDefaultDownloadName() {
   return std::string();
 }
 
+BrowserPpapiHost*
+    ContentBrowserClient::GetExternalBrowserPpapiHost(int plugin_process_id) {
+  return NULL;
+}
+
 bool ContentBrowserClient::AllowPepperSocketAPI(
-    BrowserContext* browser_context, const GURL& url) {
+    BrowserContext* browser_context,
+    const GURL& url,
+    const SocketPermissionRequest& params) {
   return false;
 }
 
-bool ContentBrowserClient::AllowPepperPrivateFileAPI() {
-  return false;
+base::FilePath ContentBrowserClient::GetHyphenDictionaryDirectory() {
+  return base::FilePath();
+}
+
+ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
+    WebContents* web_contents) {
+  return NULL;
 }
 
 #if defined(OS_WIN)

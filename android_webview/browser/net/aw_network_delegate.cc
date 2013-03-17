@@ -38,7 +38,7 @@ void AwNetworkDelegate::OnSendHeaders(net::URLRequest* request,
 int AwNetworkDelegate::OnHeadersReceived(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
-    net::HttpResponseHeaders* original_response_headers,
+    const net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
   return net::OK;
 }
@@ -87,7 +87,7 @@ bool AwNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
 }
 
 bool AwNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
-                                        const FilePath& path) const {
+                                        const base::FilePath& path) const {
   return true;
 }
 

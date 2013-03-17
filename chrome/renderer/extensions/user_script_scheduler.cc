@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/renderer/extensions/dispatcher.h"
@@ -15,8 +14,9 @@
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "extensions/common/error_utils.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -159,6 +159,8 @@ void UserScriptScheduler::ExecuteCodeImpl(
   if (params.all_frames)
     GetAllChildFrames(frame_, &frame_vector);
 
+  std::string error;
+
   for (std::vector<WebFrame*>::iterator frame_it = frame_vector.begin();
        frame_it != frame_vector.end(); ++frame_it) {
     WebFrame* child_frame = *frame_it;
@@ -173,7 +175,8 @@ void UserScriptScheduler::ExecuteCodeImpl(
       //
       // For child frames, we just skip ones the extension doesn't have access
       // to and carry on.
-      if (!extension->CanExecuteScriptOnPage(child_frame->document().url(),
+      if (!params.is_web_view &&
+          !extension->CanExecuteScriptOnPage(child_frame->document().url(),
                                              frame_->document().url(),
                                              extension_helper->tab_id(),
                                              NULL,
@@ -181,16 +184,10 @@ void UserScriptScheduler::ExecuteCodeImpl(
         if (child_frame->parent()) {
           continue;
         } else {
-          render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-              render_view->GetRoutingID(),
-              params.request_id,
-              ExtensionErrorUtils::FormatErrorMessage(
-                  extension_manifest_errors::kCannotAccessPage,
-                  child_frame->document().url().spec()),
-              -1,
-              GURL(""),
-              execution_results));
-          return;
+          error = ErrorUtils::FormatErrorMessage(
+              extension_manifest_errors::kCannotAccessPage,
+              child_frame->document().url().spec());
+          break;
         }
       }
 
@@ -199,7 +196,7 @@ void UserScriptScheduler::ExecuteCodeImpl(
       v8::Persistent<v8::Context> persistent_context = v8::Context::New();
       v8::Local<v8::Context> context =
           v8::Local<v8::Context>::New(persistent_context);
-      persistent_context.Dispose();
+      persistent_context.Dispose(context->GetIsolate());
 
       scoped_ptr<content::V8ValueConverter> v8_converter(
           content::V8ValueConverter::create());
@@ -239,7 +236,7 @@ void UserScriptScheduler::ExecuteCodeImpl(
   render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
       render_view->GetRoutingID(),
       params.request_id,
-      "",  // no error
+      error,
       render_view->GetPageId(),
       UserScriptSlave::GetDataSourceURLForFrame(frame_),
       execution_results));

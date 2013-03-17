@@ -6,7 +6,9 @@
 
 #include <shellapi.h>
 #include <shlobj.h>
+#include <propkey.h>
 
+#include "base/file_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
@@ -51,6 +53,13 @@ bool CreateOrUpdateShortcutLink(const FilePath& shortcut_path,
     return false;
   }
 
+  bool shortcut_existed = file_util::PathExists(shortcut_path);
+
+  // Interfaces to the old shortcut when replacing an existing shortcut.
+  ScopedComPtr<IShellLink> old_i_shell_link;
+  ScopedComPtr<IPersistFile> old_i_persist_file;
+
+  // Interfaces to the shortcut being created/updated.
   ScopedComPtr<IShellLink> i_shell_link;
   ScopedComPtr<IPersistFile> i_persist_file;
   switch (operation) {
@@ -62,13 +71,13 @@ bool CreateOrUpdateShortcutLink(const FilePath& shortcut_path,
                                    &i_persist_file);
       break;
     case SHORTCUT_REPLACE_EXISTING:
-      InitializeShortcutInterfaces(shortcut_path.value().c_str(), &i_shell_link,
-                                   &i_persist_file);
+      InitializeShortcutInterfaces(shortcut_path.value().c_str(),
+                                   &old_i_shell_link, &old_i_persist_file);
       // Confirm |shortcut_path| exists and is a shortcut by verifying
-      // |i_persist_file| was successfully initialized in the call above. If so,
-      // re-initialize the interfaces to begin writing a new shortcut (to
+      // |old_i_persist_file| was successfully initialized in the call above. If
+      // so, initialize the interfaces to begin writing a new shortcut (to
       // overwrite the current one if successful).
-      if (i_persist_file.get())
+      if (old_i_persist_file.get())
         InitializeShortcutInterfaces(NULL, &i_shell_link, &i_persist_file);
       break;
     default:
@@ -90,9 +99,15 @@ bool CreateOrUpdateShortcutLink(const FilePath& shortcut_path,
     return false;
   }
 
-  if ((properties.options & ShortcutProperties::PROPERTIES_ARGUMENTS) &&
-      FAILED(i_shell_link->SetArguments(properties.arguments.c_str()))) {
-    return false;
+  if (properties.options & ShortcutProperties::PROPERTIES_ARGUMENTS) {
+    if (FAILED(i_shell_link->SetArguments(properties.arguments.c_str())))
+      return false;
+  } else if (old_i_persist_file.get()) {
+    wchar_t current_arguments[MAX_PATH] = {0};
+    if (SUCCEEDED(old_i_shell_link->GetArguments(current_arguments,
+                                                 MAX_PATH))) {
+      i_shell_link->SetArguments(current_arguments);
+    }
   }
 
   if ((properties.options & ShortcutProperties::PROPERTIES_DESCRIPTION) &&
@@ -121,24 +136,40 @@ bool CreateOrUpdateShortcutLink(const FilePath& shortcut_path,
       return false;
     }
     if (has_dual_mode &&
-        !SetDualModeForPropertyStore(property_store, properties.dual_mode)) {
+        !SetBooleanValueForPropertyStore(property_store,
+                                         PKEY_AppUserModel_IsDualMode,
+                                         properties.dual_mode)) {
       return false;
     }
   }
 
+  // Release the interfaces to the old shortcut to make sure it doesn't prevent
+  // overwriting it if needed.
+  old_i_persist_file.Release();
+  old_i_shell_link.Release();
+
   HRESULT result = i_persist_file->Save(shortcut_path.value().c_str(), TRUE);
 
-  // If we successfully updated the icon, notify the shell that we have done so.
-  if (operation == SHORTCUT_UPDATE_EXISTING && SUCCEEDED(result)) {
-    // Release the interfaces in case the SHChangeNotify call below depends on
-    // the operations above being fully completed.
-    i_persist_file.Release();
-    i_shell_link.Release();
+  // Release the interfaces in case the SHChangeNotify call below depends on
+  // the operations above being fully completed.
+  i_persist_file.Release();
+  i_shell_link.Release();
 
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+  // If we successfully created/updated the icon, notify the shell that we have
+  // done so.
+  const bool succeeded = SUCCEEDED(result);
+  if (succeeded) {
+    if (shortcut_existed) {
+      // TODO(gab): SHCNE_UPDATEITEM might be sufficient here; further testing
+      // required.
+      SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+    } else {
+      SHChangeNotify(SHCNE_CREATE, SHCNF_PATH, shortcut_path.value().c_str(),
+                     NULL);
+    }
   }
 
-  return SUCCEEDED(result);
+  return succeeded;
 }
 
 bool ResolveShortcut(const FilePath& shortcut_path,
@@ -169,7 +200,7 @@ bool ResolveShortcut(const FilePath& shortcut_path,
   WCHAR temp[MAX_PATH];
   if (target_path) {
     // Try to find the target of a shortcut.
-    result = i_shell_link->Resolve(0, SLR_NO_UI);
+    result = i_shell_link->Resolve(0, SLR_NO_UI | SLR_NOSEARCH);
     if (FAILED(result))
       return false;
 

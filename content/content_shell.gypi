@@ -5,12 +5,27 @@
 {
   'variables': {
     'content_shell_product_name': 'Content Shell',
+    # The "19" is so that sites that sniff for version think that this is
+    # something reasonably current; the "77.34.5" is a hint that this isn't a
+    # standard Chrome.
+    'content_shell_version': '19.77.34.5',
+    'conditions': [
+      # TODO(glider): enable the custom freetype under ASan once we figure out
+      # how to use it with non-instrumented Python.
+      # See http://crbug.com/179814.
+      ['OS=="linux" and asan==0', {
+       'use_custom_freetype%': 1,
+      }, {
+       'use_custom_freetype%': 0,
+      }],
+    ],
   },
   'targets': [
     {
       'target_name': 'content_shell_lib',
       'type': 'static_library',
       'defines!': ['CONTENT_IMPLEMENTATION'],
+      'defines': ['CONTENT_SHELL_VERSION="<(content_shell_version)"'],
       'variables': {
         'chromium_code': 1,
       },
@@ -25,6 +40,7 @@
         'content_shell_resources',
         'content_utility',
         'content_worker',
+        'test_support_content',
         'content_resources.gyp:content_resources',
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -34,17 +50,27 @@
         '../net/net.gyp:net',
         '../net/net.gyp:net_resources',
         '../skia/skia.gyp:skia',
+        '../ui/gl/gl.gyp:gl',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
+        '../webkit/support/webkit_support.gyp:webkit_resources',
         '../webkit/support/webkit_support.gyp:webkit_support',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit_test_support',
+        '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:TestRunner',
       ],
       'include_dirs': [
         '..',
       ],
       'sources': [
+        'shell/android/shell_jni_registrar.cc',
+        'shell/android/shell_jni_registrar.h',
+        'shell/android/shell_manager.cc',
+        'shell/android/shell_manager.h',
         'shell/geolocation/shell_access_token_store.cc',
         'shell/geolocation/shell_access_token_store.h',
+        'shell/minimal_ash.cc',
+        'shell/minimal_ash.h',
         'shell/paths_mac.h',
         'shell/paths_mac.mm',
         'shell/shell.cc',
@@ -70,12 +96,13 @@
         'shell/shell_content_renderer_client.cc',
         'shell/shell_content_renderer_client.h',
         'shell/shell_devtools_delegate.cc',
-        'shell/shell_devtools_delegate_android.cc',
         'shell/shell_devtools_delegate.h',
+        'shell/shell_devtools_frontend.cc',
+        'shell/shell_devtools_frontend.h',
         'shell/shell_download_manager_delegate.cc',
         'shell/shell_download_manager_delegate.h',
-        'shell/shell_javascript_dialog_creator.cc',
-        'shell/shell_javascript_dialog_creator.h',
+        'shell/shell_javascript_dialog_manager.cc',
+        'shell/shell_javascript_dialog_manager.h',
         'shell/shell_javascript_dialog_gtk.cc',
         'shell/shell_javascript_dialog_mac.mm',
         'shell/shell_javascript_dialog_win.cc',
@@ -86,31 +113,37 @@
         'shell/shell_login_dialog.h',
         'shell/shell_main_delegate.cc',
         'shell/shell_main_delegate.h',
+        'shell/shell_message_filter.cc',
+        'shell/shell_message_filter.h',
         'shell/shell_messages.cc',
         'shell/shell_messages.h',
         'shell/shell_network_delegate.cc',
         'shell/shell_network_delegate.h',
         'shell/shell_render_process_observer.cc',
         'shell/shell_render_process_observer.h',
-        'shell/shell_resource_context.cc',
-        'shell/shell_resource_context.h',
         'shell/shell_resource_dispatcher_host_delegate.cc',
         'shell/shell_resource_dispatcher_host_delegate.h',
         'shell/shell_switches.cc',
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
+        'shell/shell_web_contents_view_delegate_android.cc',
         'shell/shell_web_contents_view_delegate_creator.h',
         'shell/shell_web_contents_view_delegate_gtk.cc',
         'shell/shell_web_contents_view_delegate_mac.mm',
         'shell/shell_web_contents_view_delegate_win.cc',
         'shell/shell_web_contents_view_delegate.h',
+        'shell/webkit_test_controller.cc',
+        'shell/webkit_test_controller.h',
+        'shell/webkit_test_helpers.cc',
+        'shell/webkit_test_helpers.h',
+        'shell/webkit_test_platform_support.h',
+        'shell/webkit_test_platform_support_android.cc',
+        'shell/webkit_test_platform_support_linux.cc',
+        'shell/webkit_test_platform_support_mac.mm',
+        'shell/webkit_test_platform_support_win.cc',
         'shell/webkit_test_runner.cc',
         'shell/webkit_test_runner.h',
-        'shell/webkit_test_runner_bindings.cc',
-        'shell/webkit_test_runner_bindings.h',
-        'shell/webkit_test_runner_host.cc',
-        'shell/webkit_test_runner_host.h',
       ],
       'msvs_settings': {
         'VCLinkerTool': {
@@ -128,7 +161,6 @@
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
           'dependencies': [
-            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
           ],
           'configurations': {
@@ -140,16 +172,17 @@
               },
             },
           },
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],  # OS=="win"
+        ['OS=="linux"', {
+          'dependencies': [
+            '../build/linux/system.gyp:fontconfig',
+          ],
+        }],
         ['OS=="android"', {
           'dependencies': [
             'content_shell_jni_headers',
-          ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/content/shell',
-          ],
-          'sources!': [
-            'shell/shell_devtools_delegate.cc',
           ],
         }, {  # else: OS!="android"
           'dependencies': [
@@ -170,7 +203,7 @@
             '../ui/base/strings/ui_strings.gyp:ui_strings',
             '../ui/views/controls/webview/webview.gyp:webview',
             '../ui/views/views.gyp:views',
-            '../ui/views/views.gyp:test_support_views',
+            '../ui/views/views.gyp:views_test_support',
             '../ui/ui.gyp:ui_resources',
           ],
           'sources/': [
@@ -180,26 +213,13 @@
         }],  # use_aura==1
         ['chromeos==1', {
           'dependencies': [
+            '../ash/ash.gyp:ash',
             '../chromeos/chromeos.gyp:chromeos',
            ],
         }], # chromeos==1
-        ['inside_chromium_build==0 or component!="shared_library"', {
+        ['use_custom_freetype==1', {
           'dependencies': [
-            '<(webkit_src_dir)/Source/WebCore/WebCore.gyp/WebCore.gyp:webcore_test_support',
-            '<(webkit_src_dir)/Source/WTF/WTF.gyp/WTF.gyp:wtf',
-          ],
-          'include_dirs': [
-            # Required for WebTestingSupport.cpp to find our custom config.h.
-            'shell/',
-            '<(webkit_src_dir)/Source/WebKit/chromium/public',
-            # WARNING: Do not view this particular case as a precedent for
-            # including WebCore headers in the content shell.
-            '<(webkit_src_dir)/Source/WebCore/testing/v8', # for WebCoreTestSupport.h needed  to link in window.internals code.
-          ],
-          'sources': [
-            'shell/config.h',
-            '<(webkit_src_dir)/Source/WebKit/chromium/src/WebTestingSupport.cpp',
-            '<(webkit_src_dir)/Source/WebKit/chromium/public/WebTestingSupport.h',
+             '../third_party/freetype2/freetype2.gyp:freetype2',
           ],
         }],
       ],
@@ -245,7 +265,7 @@
       'target_name': 'content_shell_pak',
       'type': 'none',
       'dependencies': [
-        'browser/debugger/devtools_resources.gyp:devtools_resources',
+        'browser/devtools/devtools_resources.gyp:devtools_resources',
         'content_shell_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
       ],
@@ -262,6 +282,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings/app_locale_settings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/webui_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
@@ -300,6 +321,7 @@
       'dependencies': [
         'content_shell_lib',
         'content_shell_pak',
+        '../third_party/mesa/mesa.gyp:osmesa',
       ],
       'include_dirs': [
         '..',
@@ -396,7 +418,8 @@
               # Modify the Info.plist as needed.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['../build/mac/tweak_info_plist.py',
-                         '--scm=1'],
+                         '--scm=1',
+                         '--version=<(content_shell_version)'],
             },
             {
               # This postbuid step is responsible for creating the following
@@ -431,7 +454,6 @@
       'type': 'none',
       'dependencies': [
         'content_shell',
-        '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:DumpRenderTree',
       ],
     },
   ],
@@ -521,7 +543,8 @@
               'action': ['../build/mac/tweak_info_plist.py',
                          '--breakpad=0',
                          '--keystone=0',
-                         '--scm=0'],
+                         '--scm=0',
+                         '--version=<(content_shell_version)'],
             },
             {
               # Make sure there isn't any Objective-C in the helper app's
@@ -554,9 +577,16 @@
           'target_name': 'content_shell_jni_headers',
           'type': 'none',
           'sources': [
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/BrowserTestSystemMessageHandler.java',
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/ContentBrowserTestsActivity.java',
             'shell/android/java/src/org/chromium/content_shell/ShellManager.java',
             'shell/android/java/src/org/chromium/content_shell/Shell.java',
           ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)/content/shell',
+            ],
+          },
           'variables': {
             'jni_gen_dir': 'content/shell',
           },
@@ -574,18 +604,9 @@
             '../skia/skia.gyp:skia',
             '<(DEPTH)/media/media.gyp:player_android',
           ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/content/shell',
-          ],
           'sources': [
             'shell/android/shell_library_loader.cc',
             'shell/android/shell_library_loader.h',
-            'shell/android/shell_manager.cc',
-            'shell/android/shell_manager.h',
-          ],
-          'sources!': [
-            'shell/shell_main.cc',
-            'shell/shell_main.h',
           ],
           'conditions': [
             ['android_build_type==1', {
@@ -596,32 +617,36 @@
           ],
         },
         {
-          # content_shell_apk creates a .jar as a side effect. Any java targets
-          # that need that .jar in their classpath should depend on this target,
-          # content_shell_java.
           'target_name': 'content_shell_java',
           'type': 'none',
-          'outputs': [
-            '<(PRODUCT_DIR)/lib.java/chromium_content_shell.jar',
-          ],
           'dependencies': [
             'content_java',
+          ],
+          'variables': {
+            'java_in_dir': '../content/shell/android/java',
+            'has_java_resources': 1,
+            'R_package': 'org.chromium.content_shell',
+            'R_package_relpath': 'org/chromium/content_shell',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+        {
+          # content_shell_apk creates a .jar as a side effect. Any java targets
+          # that need that .jar in their classpath should depend on this target,
+          # content_shell_apk_java. Dependents of content_shell_apk receive its
+          # jar path in the variable 'apk_output_jar_path'. This target should
+          # only be used by targets which instrument content_shell_apk.
+          'target_name': 'content_shell_apk_java',
+          'type': 'none',
+          'dependencies': [
             'content_shell_apk',
-            '../base/base.gyp:base_java',
-            '../media/media.gyp:media_java',
-            '../net/net.gyp:net_java',
-            '../ui/ui.gyp:ui_java',
           ],
-          'export_dependent_settings': [
-            'content_java',
-            '../base/base.gyp:base_java',
-            '../media/media.gyp:media_java',
-            '../net/net.gyp:net_java',
-            '../ui/ui.gyp:ui_java',
-          ],
-          'direct_dependent_settings': {
+          # This all_dependent_settings is used for java targets only. This will
+          # add the content_shell jar to the classpath of dependent java
+          # targets.
+          'all_dependent_settings': {
             'variables': {
-              'input_jars_paths': ['<(PRODUCT_DIR)/lib.java/chromium_content_shell.jar'],
+              'input_jars_paths': ['>(apk_output_jar_path)'],
             },
           },
           # Add an action with the appropriate output. This allows the generated
@@ -630,7 +655,7 @@
             {
               'action_name': 'fake_generate_jar',
               'inputs': [],
-              'outputs': ['<(PRODUCT_DIR)/lib.java/chromium_content_shell.jar'],
+              'outputs': ['>(apk_output_jar_path)'],
               'action': [],
             },
           ],
@@ -640,35 +665,22 @@
           'type': 'none',
           'dependencies': [
             'content_java',
+            'content_shell_java',
+            'libcontent_shell_content_view',
             '../base/base.gyp:base_java',
             '../media/media.gyp:media_java',
             '../net/net.gyp:net_java',
             '../ui/ui.gyp:ui_java',
           ],
           'variables': {
-            'package_name': 'content_shell',
             'apk_name': 'ContentShell',
-            'java_in_dir': 'shell/android/java',
-            # TODO(cjhopman): The resource directory of all apks should be in
-            # <java_in_dir>/res.
-            'resource_dir': '../res',
-            'native_libs_paths': ['<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so'],
+            'manifest_package_name': 'org.chromium.content_shell_apk',
+            'java_in_dir': 'shell/android/shell_apk',
+            'resource_dir': 'res',
+            'native_libs_paths': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
             'additional_input_paths': ['<(PRODUCT_DIR)/content_shell/assets/content_shell.pak'],
+            'asset_location': '<(ant_build_out)/content_shell/assets',
           },
-          'actions': [
-            {
-              'action_name': 'copy_and_strip_so',
-              'inputs': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so'],
-              'action': [
-                '<(android_strip)',
-                '--strip-unneeded',  # All symbols not needed for relocation.
-                '<@(_inputs)',
-                '-o',
-                '<@(_outputs)',
-              ],
-            },
-          ],
           'includes': [ '../build/java_apk.gypi' ],
         },
       ],

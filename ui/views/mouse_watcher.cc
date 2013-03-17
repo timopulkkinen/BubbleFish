@@ -10,6 +10,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/screen.h"
 
 namespace views {
@@ -26,7 +27,7 @@ class MouseWatcher::Observer : public MessageLoopForUI::Observer {
     MessageLoopForUI::current()->AddObserver(this);
   }
 
-  ~Observer() {
+  virtual ~Observer() {
     MessageLoopForUI::current()->RemoveObserver(this);
   }
 
@@ -86,7 +87,9 @@ class MouseWatcher::Observer : public MessageLoopForUI::Observer {
   // Called from the message loop observer when a mouse movement has occurred.
   void HandleGlobalMouseMoveEvent(MouseWatcherHost::MouseEventType event_type) {
     bool contained = host()->Contains(
-        gfx::Screen::GetCursorScreenPoint(), event_type);
+        // TODO(scottmg): Native is wrong http://crbug.com/133312
+        gfx::Screen::GetNativeScreen()->GetCursorScreenPoint(),
+        event_type);
     if (!contained) {
       // Mouse moved outside the host's zone, start a timer to notify the
       // listener.

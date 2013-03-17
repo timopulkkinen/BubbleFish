@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/pickle.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/child_thread.h"
@@ -43,20 +44,23 @@ bool ChildHistogramMessageFilter::OnMessageReceived(
 
 void ChildHistogramMessageFilter::SendHistograms(int sequence_number) {
   ChildProcess::current()->io_message_loop_proxy()->PostTask(
-      FROM_HERE, base::Bind(&ChildHistogramMessageFilter::UploadAllHistrograms,
+      FROM_HERE, base::Bind(&ChildHistogramMessageFilter::UploadAllHistograms,
                             this, sequence_number));
 }
 
 void ChildHistogramMessageFilter::OnGetChildHistogramData(int sequence_number) {
-  UploadAllHistrograms(sequence_number);
+  UploadAllHistograms(sequence_number);
 }
 
-void ChildHistogramMessageFilter::UploadAllHistrograms(int sequence_number) {
+void ChildHistogramMessageFilter::UploadAllHistograms(int sequence_number) {
   DCHECK_EQ(0u, pickled_histograms_.size());
 
   base::StatisticsRecorder::CollectHistogramStats("ChildProcess");
 
   // Push snapshots into our pickled_histograms_ vector.
+  // Note: Before serializing, we set the kIPCSerializationSourceFlag for all
+  // the histograms, so that the receiving process can distinguish them from the
+  // local histograms.
   histogram_snapshot_manager_.PrepareDeltas(
       base::Histogram::kIPCSerializationSourceFlag, false);
 
@@ -70,25 +74,28 @@ void ChildHistogramMessageFilter::UploadAllHistrograms(int sequence_number) {
 }
 
 void ChildHistogramMessageFilter::RecordDelta(
-    const base::Histogram& histogram,
+    const base::HistogramBase& histogram,
     const base::HistogramSamples& snapshot) {
   DCHECK_NE(0, snapshot.TotalCount());
-  std::string histogram_info =
-      base::Histogram::SerializeHistogramInfo(histogram, snapshot);
 
-  pickled_histograms_.push_back(histogram_info);
+  Pickle pickle;
+  histogram.SerializeInfo(&pickle);
+  snapshot.Serialize(&pickle);
+
+  pickled_histograms_.push_back(
+      std::string(static_cast<const char*>(pickle.data()), pickle.size()));
 }
 
 void ChildHistogramMessageFilter::InconsistencyDetected(
-    base::Histogram::Inconsistencies problem) {
+    base::HistogramBase::Inconsistency problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesChildProcess",
-                            problem, base::Histogram::NEVER_EXCEEDED_VALUE);
+                            problem, base::HistogramBase::NEVER_EXCEEDED_VALUE);
 }
 
 void ChildHistogramMessageFilter::UniqueInconsistencyDetected(
-    base::Histogram::Inconsistencies problem) {
+    base::HistogramBase::Inconsistency problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesChildProcessUnique",
-                            problem, base::Histogram::NEVER_EXCEEDED_VALUE);
+                            problem, base::HistogramBase::NEVER_EXCEEDED_VALUE);
 }
 
 void ChildHistogramMessageFilter::InconsistencyDetectedInLoggedCount(

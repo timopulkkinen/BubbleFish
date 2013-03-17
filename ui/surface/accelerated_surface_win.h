@@ -9,8 +9,10 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time.h"
 #include "base/win/scoped_comptr.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
@@ -20,6 +22,10 @@ class PresentThread;
 
 namespace gfx {
 class Rect;
+}
+
+namespace media {
+class VideoFrame;
 }
 
 class SURFACE_EXPORT AcceleratedPresenter
@@ -53,15 +59,26 @@ class SURFACE_EXPORT AcceleratedPresenter
   // Indicates that the presenter has become invisible.
   void WasHidden();
 
+  // Called when the Windows session is locked or unlocked.
+  void SetIsSessionLocked(bool locked);
+
   // Schedule the presenter to release its reference to the shared surface.
   void ReleaseSurface();
 
   // The public member functions are called on the main thread.
-  bool Present(HDC dc);
-  bool CopyTo(const gfx::Rect& src_subrect,
-              const gfx::Size& dst_size,
-              void* buf);
+  void Present(HDC dc);
+  void AsyncCopyTo(const gfx::Rect& src_subrect,
+                   const gfx::Size& dst_size,
+                   const base::Callback<void(bool, const SkBitmap&)>& callback);
+  void AsyncCopyToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback);
   void Invalidate();
+
+  // Destroy any D3D resources owned by the given present thread. Called on
+  // the given present thread.
+  void ResetPresentThread(PresentThread* present_thread);
 
 #if defined(USE_AURA)
   // TODO(scottmg): This is a temporary hack until we have a two-worlds ash/aura
@@ -81,20 +98,38 @@ class SURFACE_EXPORT AcceleratedPresenter
       int64 surface_handle,
       const CompletionTask& completion_task);
   void DoSuspend();
-  void DoPresent(HDC dc, bool* presented);
-  bool DoRealPresent(HDC dc);
+  void DoPresent(const base::Closure& composite_task);
   void DoReleaseSurface();
+  void DoCopyToAndAcknowledge(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      scoped_refptr<base::SingleThreadTaskRunner> callback_runner,
+      const base::Callback<void(bool, const SkBitmap&)>& callback);
+  void DoCopyToVideoFrameAndAcknowledge(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const scoped_refptr<base::SingleThreadTaskRunner>& callback_runner,
+      const base::Callback<void(bool)>& callback);
+  bool DoCopyToYUV(const gfx::Rect& src_subrect,
+                   const scoped_refptr<media::VideoFrame>& frame);
+  bool DoCopyToARGB(const gfx::Rect& src_subrect,
+                    const gfx::Size& dst_size,
+                    SkBitmap* bitmap);
+
+  void PresentWithGDI(HDC dc);
+  gfx::Size GetWindowSize();
+
+  // This function tries to guess whether Direct3D will be able to reliably
+  // present to the window. When the window is resizing, presenting with
+  // Direct3D causes other regions of the window rendered with GDI to
+  // flicker transparent / non-transparent.
+  bool CheckDirect3DWillWork();
 
   // The thread with which this presenter has affinity.
   PresentThread* const present_thread_;
 
   // The window that is presented to.
   gfx::PluginWindowHandle window_;
-
-  // The lock is taken while any thread is calling the object, except those that
-  // simply post from the main thread to the present thread via the immutable
-  // present_thread_ member.
-  base::Lock lock_;
 
   // UI thread can wait on this event to ensure a present is finished.
   base::WaitableEvent event_;
@@ -120,6 +155,20 @@ class SURFACE_EXPORT AcceleratedPresenter
   // last hidden.
   bool hidden_;
 
+  // Set to true if the first present after the tab is unhidden needs to be done
+  // with GDI.
+  bool do_present_with_GDI_;
+
+  // Set to true when the Windows session is locked.
+  bool is_session_locked_;
+
+  // These are used to detect when the window is resizing. For some reason,
+  // presenting with D3D while the window resizes causes those parts not
+  // drawn with D3D (e.g. with GDI) to flicker visible / invisible.
+  // http://crbug.com/120904
+  gfx::Size last_window_size_;
+  base::Time last_window_resize_time_;
+
   DISALLOW_COPY_AND_ASSIGN(AcceleratedPresenter);
 };
 
@@ -129,16 +178,20 @@ class SURFACE_EXPORT AcceleratedSurface {
   ~AcceleratedSurface();
 
   // Synchronously present a frame with no acknowledgement.
-  bool Present(HDC dc);
+  void Present(HDC dc);
 
-  // Copies the surface data to |buf|. The copied region is specified with
-  // |src_subrect| and the image data is transformed so that it fits in
-  // |dst_size|.
-  // Caller must ensure that |buf| is allocated with the size no less than
-  // |4 * dst_size.width() * dst_size.height()| bytes.
-  bool CopyTo(const gfx::Rect& src_subrect,
-              const gfx::Size& dst_size,
-              void* buf);
+  // Transfer the contents of the surface to an SkBitmap, and invoke a callback
+  // with the result.
+  void AsyncCopyTo(const gfx::Rect& src_subrect,
+                   const gfx::Size& dst_size,
+                   const base::Callback<void(bool, const SkBitmap&)>& callback);
+
+  // Transfer the contents of the surface to an already-allocated YV12
+  // VideoFrame, and invoke a callback to indicate success or failure.
+  void AsyncCopyToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback);
 
   // Temporarily release resources until a new surface is asynchronously
   // presented. Present will not be able to represent the last surface after
@@ -147,6 +200,9 @@ class SURFACE_EXPORT AcceleratedSurface {
 
   // Indicates that the surface has become invisible.
   void WasHidden();
+
+  // Called when the Windows session in locked or unlocked.
+  void SetIsSessionLocked(bool locked);
 
  private:
   const scoped_refptr<AcceleratedPresenter> presenter_;

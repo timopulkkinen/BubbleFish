@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/time.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/enum_set.h"
 
@@ -50,31 +49,35 @@ enum ModelType {
   // can be represented in the protocol using a specific Message type in the
   // EntitySpecifics protocol buffer.
   //
+  // WARNING: Modifying the order of these types or inserting a new type above
+  // these will affect numerous histograms that rely on the enum values being
+  // consistent. When adding a new type, add it to the end of the user model
+  // types section, but before the proxy types.
+  //
   // A bookmark folder or a bookmark URL object.
   BOOKMARKS,
   FIRST_USER_MODEL_TYPE = BOOKMARKS,  // Declared 2nd, for debugger prettiness.
   FIRST_REAL_MODEL_TYPE = FIRST_USER_MODEL_TYPE,
 
-  // A preference folder or a preference object.
+  // A preference object.
   PREFERENCES,
-  // A password folder or password object.
+  // A password object.
   PASSWORDS,
-    // An AutofillProfile Object
+  // An AutofillProfile Object
   AUTOFILL_PROFILE,
-  // An autofill folder or an autofill object.
+  // An autofill object.
   AUTOFILL,
-
-  // A themes folder or a themes object.
+  // A themes object.
   THEMES,
-  // A typed_url folder or a typed_url object.
+  // A typed_url object.
   TYPED_URLS,
-  // An extension folder or an extension object.
+  // An extension object.
   EXTENSIONS,
   // An object representing a custom search engine.
   SEARCH_ENGINES,
   // An object representing a browser session.
   SESSIONS,
-  // An app folder or an app object.
+  // An app object.
   APPS,
   // An app setting from the extension settings API.
   APP_SETTINGS,
@@ -82,12 +85,43 @@ enum ModelType {
   EXTENSION_SETTINGS,
   // App notifications.
   APP_NOTIFICATIONS,
-  LAST_USER_MODEL_TYPE = APP_NOTIFICATIONS,
+  // History delete directives.
+  HISTORY_DELETE_DIRECTIVES,
+  // Synced push notifications.
+  SYNCED_NOTIFICATIONS,
+  // Custom spelling dictionary.
+  DICTIONARY,
+  // Favicon images.
+  FAVICON_IMAGES,
+  // Favicon tracking information.
+  FAVICON_TRACKING,
 
+  // ---- Proxy types ----
+  // Proxy types are excluded from the sync protocol, but are still considered
+  // real user types. By convention, we prefix them with 'PROXY_' to distinguish
+  // them from normal protocol types.
+
+  // Tab sync. This is a placeholder type, so that Sessions can be implicitly
+  // enabled for history sync and tabs sync.
+  PROXY_TABS,
+
+  FIRST_PROXY_TYPE = PROXY_TABS,
+  LAST_PROXY_TYPE = PROXY_TABS,
+
+  LAST_USER_MODEL_TYPE = PROXY_TABS,
+
+  // ---- Control Types ----
   // An object representing a set of Nigori keys.
   NIGORI,
   FIRST_CONTROL_MODEL_TYPE = NIGORI,
-  LAST_CONTROL_MODEL_TYPE = NIGORI,
+  // Client-specific metadata.
+  DEVICE_INFO,
+  // Flags to enable experimental features.
+  EXPERIMENTS,
+  // These preferences are never encrypted so that they can be applied before
+  // the encryption system is fully initialized.
+  PRIORITY_PREFERENCES,
+  LAST_CONTROL_MODEL_TYPE = PRIORITY_PREFERENCES,
 
   LAST_REAL_MODEL_TYPE = LAST_CONTROL_MODEL_TYPE,
 
@@ -95,6 +129,8 @@ enum ModelType {
   // sync preferences UI, be sure to update the list in
   // chrome/browser/sync/user_selectable_sync_type.h so that the UMA histograms
   // for sync include your new type.
+  // In this case, be sure to also update the UserSelectableTypes() definition
+  // in sync/syncable/model_type.cc.
 
   MODEL_TYPE_COUNT,
 };
@@ -118,7 +154,8 @@ SYNC_EXPORT void AddDefaultFieldValue(ModelType datatype,
 // local concept: the enum is not in the protocol.  The SyncEntity's ModelType
 // is inferred from the presence of particular datatype field in the
 // entity specifics.
-ModelType GetModelType(const sync_pb::SyncEntity& sync_entity);
+SYNC_EXPORT_PRIVATE ModelType GetModelType(
+    const sync_pb::SyncEntity& sync_entity);
 
 // Extract the model type from an EntitySpecifics field.  Note that there
 // are some ModelTypes (like TOP_LEVEL_FOLDER) that can't be inferred this way;
@@ -130,9 +167,27 @@ SYNC_EXPORT ModelType GetModelTypeFromSpecifics(
 // value (sibling ordering) for this item.
 bool ShouldMaintainPosition(ModelType model_type);
 
-// These are the user-selectable data types.  Note that some of these share a
+// Protocol types are those types that have actual protocol buffer
+// representations. This distinguishes them from Proxy types, which have no
+// protocol representation and are never sent to the server.
+SYNC_EXPORT ModelTypeSet ProtocolTypes();
+
+// These are the normal user-controlled types. This is to distinguish from
+// ControlTypes which are always enabled.  Note that some of these share a
 // preference flag, so not all of them are individually user-selectable.
-ModelTypeSet UserTypes();
+SYNC_EXPORT ModelTypeSet UserTypes();
+
+// These are the user-selectable data types.
+SYNC_EXPORT ModelTypeSet UserSelectableTypes();
+SYNC_EXPORT bool IsUserSelectableType(ModelType model_type);
+
+// This is the subset of UserTypes() that can be encrypted.
+SYNC_EXPORT_PRIVATE ModelTypeSet EncryptableUserTypes();
+
+// Proxy types are placeholder types for handling implicitly enabling real
+// types. They do not exist at the server, and are simply used for
+// UI/Configuration logic.
+SYNC_EXPORT ModelTypeSet ProxyTypes();
 
 // Returns a list of all control types.
 //
@@ -144,16 +199,35 @@ ModelTypeSet UserTypes();
 // - Their contents are not encrypted automatically.
 // - They support custom update application and conflict resolution logic.
 // - All change processing occurs on the sync thread (GROUP_PASSIVE).
-ModelTypeSet ControlTypes();
+SYNC_EXPORT ModelTypeSet ControlTypes();
 
 // Returns true if this is a control type.
 //
 // See comment above for more information on what makes these types special.
-bool IsControlType(ModelType model_type);
+SYNC_EXPORT bool IsControlType(ModelType model_type);
 
 // Determine a model type from the field number of its associated
-// EntitySpecifics field.
-ModelType GetModelTypeFromSpecificsFieldNumber(int field_number);
+// EntitySpecifics field.  Returns UNSPECIFIED if the field number is
+// not recognized.
+//
+// If you're putting the result in a ModelTypeSet, you should use the
+// following pattern:
+//
+//   ModelTypeSet model_types;
+//   // Say we're looping through a list of items, each of which has a
+//   // field number.
+//   for (...) {
+//     int field_number = ...;
+//     ModelType model_type =
+//         GetModelTypeFromSpecificsFieldNumber(field_number);
+//     if (!IsRealDataType(model_type)) {
+//       DLOG(WARNING) << "Unknown field number " << field_number;
+//       continue;
+//     }
+//     model_types.Put(model_type);
+//   }
+SYNC_EXPORT_PRIVATE ModelType GetModelTypeFromSpecificsFieldNumber(
+    int field_number);
 
 // Return the field number of the EntitySpecifics field associated with
 // a model type.
@@ -173,10 +247,10 @@ SYNC_EXPORT const char* ModelTypeToString(ModelType model_type);
 // Handles all model types, and not just real ones.
 //
 // Caller takes ownership of returned value.
-base::StringValue* ModelTypeToValue(ModelType model_type);
+SYNC_EXPORT_PRIVATE base::StringValue* ModelTypeToValue(ModelType model_type);
 
 // Converts a Value into a ModelType - complement to ModelTypeToValue().
-ModelType ModelTypeFromValue(const base::Value& value);
+SYNC_EXPORT_PRIVATE ModelType ModelTypeFromValue(const base::Value& value);
 
 // Returns the ModelType corresponding to the name |model_type_string|.
 SYNC_EXPORT ModelType ModelTypeFromString(
@@ -207,6 +281,12 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
 
 // Returns true if |model_type| is a real datatype
 SYNC_EXPORT bool IsRealDataType(ModelType model_type);
+
+// Returns true if |model_type| is an act-once type. Act once types drop
+// entities after applying them. Drops are deletes that are not synced to other
+// clients.
+// TODO(haitaol): Make entries of act-once data types immutable.
+SYNC_EXPORT bool IsActOnceDataType(ModelType model_type);
 
 }  // namespace syncer
 

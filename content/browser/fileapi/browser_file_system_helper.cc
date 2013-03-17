@@ -4,20 +4,20 @@
 
 #include "content/browser/fileapi/browser_file_system_helper.h"
 
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_options.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/quota/quota_manager.h"
 
-using content::BrowserThread;
-
+namespace content {
 namespace {
 
 const char kChromeScheme[] = "chrome";
@@ -42,12 +42,13 @@ FileSystemOptions CreateBrowserFileSystemOptions(bool is_incognito) {
 }  // anonymous namespace
 
 scoped_refptr<fileapi::FileSystemContext> CreateFileSystemContext(
-        const FilePath& profile_path, bool is_incognito,
+        const base::FilePath& profile_path, bool is_incognito,
+        fileapi::ExternalMountPoints* external_mount_points,
         quota::SpecialStoragePolicy* special_storage_policy,
         quota::QuotaManagerProxy* quota_manager_proxy) {
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   base::SequencedWorkerPool::SequenceToken media_sequence_token =
-      pool->GetSequenceToken();
+      pool->GetNamedSequenceToken(fileapi::kMediaTaskRunnerName);
 
   scoped_ptr<fileapi::FileSystemTaskRunners> task_runners(
       new fileapi::FileSystemTaskRunners(
@@ -57,8 +58,11 @@ scoped_refptr<fileapi::FileSystemContext> CreateFileSystemContext(
 
   return new fileapi::FileSystemContext(
       task_runners.Pass(),
+      external_mount_points,
       special_storage_policy,
       quota_manager_proxy,
       profile_path,
       CreateBrowserFileSystemOptions(is_incognito));
 }
+
+}  // namespace content

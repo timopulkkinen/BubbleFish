@@ -43,22 +43,22 @@ class TransportClientSocketTest
         close_server_socket_on_next_send_(false) {
   }
 
-  ~TransportClientSocketTest() {
+  virtual ~TransportClientSocketTest() {
   }
 
   // Implement StreamListenSocket::Delegate methods
   virtual void DidAccept(StreamListenSocket* server,
-                         StreamListenSocket* connection) {
+                         StreamListenSocket* connection) OVERRIDE {
     connected_sock_ = reinterpret_cast<TCPListenSocket*>(connection);
   }
-  virtual void DidRead(StreamListenSocket*, const char* str, int len) {
+  virtual void DidRead(StreamListenSocket*, const char* str, int len) OVERRIDE {
     // TODO(dkegel): this might not be long enough to tickle some bugs.
     connected_sock_->Send(kServerReply, arraysize(kServerReply) - 1,
                           false /* Don't append line feed */);
     if (close_server_socket_on_next_send_)
       CloseServerSocket();
   }
-  virtual void DidClose(StreamListenSocket* sock) {}
+  virtual void DidClose(StreamListenSocket* sock) OVERRIDE {}
 
   // Testcase hooks
   virtual void SetUp();
@@ -257,9 +257,15 @@ TEST_P(TransportClientSocketTest, IsConnected) {
                                  &callback);
   ASSERT_EQ(bytes_read, arraysize(kServerReply) - 2);
 
-  // Once the data is drained, the socket should now be seen as
-  // closed.
-  EXPECT_FALSE(sock_->IsConnected());
+  // Once the data is drained, the socket should now be seen as not
+  // connected.
+  if (sock_->IsConnected()) {
+    // In the unlikely event that the server's connection closure is not
+    // processed in time, wait for the connection to be closed.
+    rv = sock_->Read(buf, 4096, callback.callback());
+    EXPECT_EQ(0, callback.GetResult(rv));
+    EXPECT_FALSE(sock_->IsConnected());
+  }
   EXPECT_FALSE(sock_->IsConnectedAndIdle());
 }
 

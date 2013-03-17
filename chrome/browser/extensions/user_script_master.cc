@@ -9,16 +9,18 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -181,7 +183,7 @@ void UserScriptMaster::ScriptReloader::NotifyMaster(
 static bool LoadScriptContent(UserScript::File* script_file,
                               const SubstitutionMap* localization_messages) {
   std::string content;
-  const FilePath& path = ExtensionResource::GetFilePath(
+  const base::FilePath& path = ExtensionResource::GetFilePath(
       script_file->extension_root(), script_file->relative_path(),
       ExtensionResource::SYMLINKS_MUST_RESOLVE_WITHIN_ROOT);
   if (path.empty()) {
@@ -358,9 +360,9 @@ void UserScriptMaster::Observe(int type,
           content::Details<const Extension>(details).ptr();
       extensions_info_[extension->id()] =
           ExtensionSet::ExtensionPathAndDefaultLocale(
-              extension->path(), extension->default_locale());
-      bool incognito_enabled = profile_->GetExtensionService()->
-          IsIncognitoEnabled(extension->id());
+              extension->path(), LocaleInfo::GetDefaultLocale(extension));
+      bool incognito_enabled = extensions::ExtensionSystem::Get(profile_)->
+          extension_service()->IsIncognitoEnabled(extension->id());
       const UserScriptList& scripts = extension->content_scripts();
       for (UserScriptList::const_iterator iter = scripts.begin();
            iter != scripts.end(); ++iter) {
@@ -384,10 +386,6 @@ void UserScriptMaster::Observe(int type,
       }
       user_scripts_ = new_user_scripts;
       should_start_load = true;
-
-      // TODO(aa): Do we want to do something smarter for the scripts that have
-      // already been injected?
-
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_CREATED: {

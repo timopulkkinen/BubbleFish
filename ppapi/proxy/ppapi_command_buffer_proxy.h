@@ -32,37 +32,22 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public CommandBufferProxy {
   // CommandBufferProxy implementation:
   virtual int GetRouteID() const OVERRIDE;
   virtual bool Echo(const base::Closure& callback) OVERRIDE;
-  virtual bool SetSurfaceVisible(bool visible) OVERRIDE;
-  virtual bool DiscardBackbuffer() OVERRIDE;
-  virtual bool EnsureBackbuffer() OVERRIDE;
-  virtual uint32 InsertSyncPoint() OVERRIDE;
-  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE;
-  virtual bool SignalSyncPoint(uint32 sync_point,
-                               const base::Closure& callback) OVERRIDE;
-  virtual void SetMemoryAllocationChangedCallback(
-      const base::Callback<void(const GpuMemoryAllocationForRenderer&)>&
-          callback) OVERRIDE;
   virtual bool SetParent(CommandBufferProxy* parent_command_buffer,
                          uint32 parent_texture_id) OVERRIDE;
   virtual void SetChannelErrorCallback(const base::Closure& callback) OVERRIDE;
-  virtual void SetNotifyRepaintTask(const base::Closure& callback) OVERRIDE;
-  virtual void SetOnConsoleMessageCallback(
-      const GpuConsoleMessageCallback& callback) OVERRIDE;
 
   // gpu::CommandBuffer implementation:
   virtual bool Initialize();
   virtual State GetState();
   virtual State GetLastState();
+  virtual int32 GetLastToken();
   virtual void Flush(int32 put_offset);
   virtual State FlushSync(int32 put_offset, int32 last_known_get);
   virtual void SetGetBuffer(int32 transfer_buffer_id);
   virtual void SetGetOffset(int32 get_offset);
-  virtual int32 CreateTransferBuffer(size_t size, int32 id_request);
-  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
-                                       size_t size,
-                                       int32 id_request);
+  virtual gpu::Buffer CreateTransferBuffer(size_t size, int32* id);
   virtual void DestroyTransferBuffer(int32 id);
-  virtual gpu::Buffer GetTransferBuffer(int32 handle);
+  virtual gpu::Buffer GetTransferBuffer(int32 id);
   virtual void SetToken(int32 token);
   virtual void SetParseError(gpu::error::Error error);
   virtual void SetContextLostReason(gpu::error::ContextLostReason reason);

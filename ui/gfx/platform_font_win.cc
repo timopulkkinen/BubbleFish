@@ -55,7 +55,7 @@ int AdjustFontSize(int lf_height, int size_delta) {
 
 // Sets style properties on |font_info| based on |font_style|.
 void SetLogFontStyle(int font_style, LOGFONT* font_info) {
-  font_info->lfUnderline = (font_style & gfx::Font::UNDERLINED) != 0;
+  font_info->lfUnderline = (font_style & gfx::Font::UNDERLINE) != 0;
   font_info->lfItalic = (font_style & gfx::Font::ITALIC) != 0;
   font_info->lfWeight = (font_style & gfx::Font::BOLD) ? FW_BOLD : FW_NORMAL;
 }
@@ -98,8 +98,14 @@ Font PlatformFontWin::DeriveFontWithHeight(int height, int style) {
   if (GetHeight() > height) {
     const int min_font_size = GetMinimumFontSize();
     Font font = DeriveFont(-1, style);
-    while (font.GetHeight() > height && font.GetFontSize() != min_font_size) {
+    int font_height = font.GetHeight();
+    int font_size = font.GetFontSize();
+    while (font_height > height && font_size != min_font_size) {
       font = font.DeriveFont(-1, style);
+      if (font_height == font.GetHeight() && font_size == font.GetFontSize())
+        break;
+      font_height = font.GetHeight();
+      font_size = font.GetFontSize();
     }
     return font;
   }
@@ -236,7 +242,7 @@ PlatformFontWin::HFontRef* PlatformFontWin::CreateHFontRef(HFONT font) {
   if (font_metrics.tmItalic)
     style |= Font::ITALIC;
   if (font_metrics.tmUnderlined)
-    style |= Font::UNDERLINED;
+    style |= Font::UNDERLINE;
   if (font_metrics.tmWeight >= kTextMetricWeightBold)
     style |= Font::BOLD;
 

@@ -6,11 +6,12 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,7 +32,7 @@ namespace policy {
 namespace {
 
 // Maximum filters per policy. Filters over this index are ignored.
-const size_t kMaxFiltersPerPolicy = 100;
+const size_t kMaxFiltersPerPolicy = 1000;
 
 const char* kStandardSchemes[] = {
   "http",
@@ -139,6 +140,10 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
     return false;
 
   return !max->allow;
+}
+
+size_t URLBlacklist::Size() const {
+  return filters_.size();
 }
 
 // static
@@ -278,8 +283,10 @@ URLBlacklistManager::URLBlacklistManager(PrefService* pref_service)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   pref_change_registrar_.Init(pref_service_);
-  pref_change_registrar_.Add(prefs::kUrlBlacklist, this);
-  pref_change_registrar_.Add(prefs::kUrlWhitelist, this);
+  base::Closure callback = base::Bind(&URLBlacklistManager::ScheduleUpdate,
+                                      base::Unretained(this));
+  pref_change_registrar_.Add(prefs::kUrlBlacklist, callback);
+  pref_change_registrar_.Add(prefs::kUrlWhitelist, callback);
 
   // Start enforcing the policies without a delay when they are present at
   // startup.
@@ -295,19 +302,6 @@ void URLBlacklistManager::ShutdownOnUIThread() {
 }
 
 URLBlacklistManager::~URLBlacklistManager() {
-}
-
-void URLBlacklistManager::Observe(int type,
-                                  const content::NotificationSource& source,
-                                  const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(type == chrome::NOTIFICATION_PREF_CHANGED);
-  PrefService* prefs = content::Source<PrefService>(source).ptr();
-  DCHECK(prefs == pref_service_);
-  std::string* pref_name = content::Details<std::string>(details).ptr();
-  DCHECK(*pref_name == prefs::kUrlBlacklist ||
-         *pref_name == prefs::kUrlWhitelist);
-  ScheduleUpdate();
 }
 
 void URLBlacklistManager::ScheduleUpdate() {
@@ -366,11 +360,11 @@ bool URLBlacklistManager::IsURLBlocked(const GURL& url) const {
 }
 
 // static
-void URLBlacklistManager::RegisterPrefs(PrefService* pref_service) {
-  pref_service->RegisterListPref(prefs::kUrlBlacklist,
-                                 PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterListPref(prefs::kUrlWhitelist,
-                                 PrefService::UNSYNCABLE_PREF);
+void URLBlacklistManager::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kUrlBlacklist,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kUrlWhitelist,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 }  // namespace policy

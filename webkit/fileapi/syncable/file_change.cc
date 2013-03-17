@@ -9,11 +9,11 @@
 
 #include "base/logging.h"
 
-namespace fileapi {
+namespace sync_file_system {
 
 FileChange::FileChange(
     ChangeType change,
-    FileType file_type)
+    SyncFileType file_type)
     : change_(change),
       file_type_(file_type) {}
 
@@ -27,13 +27,16 @@ std::string FileChange::DebugString() const {
       change_string = "DELETE";
       break;
   }
-  const char* type_string = NULL;
+  const char* type_string = "UNKNOWN";
   switch (file_type()) {
-    case FILE_TYPE_FILE:
+    case SYNC_FILE_TYPE_FILE:
       type_string = "FILE";
       break;
-    case FILE_TYPE_DIRECTORY:
+    case SYNC_FILE_TYPE_DIRECTORY:
       type_string = "DIRECTORY";
+      break;
+    case SYNC_FILE_TYPE_UNKNOWN:
+      type_string = "UNKNOWN";
       break;
   }
   return base::StringPrintf("%s:%s", change_string, type_string);
@@ -68,6 +71,13 @@ void FileChangeList::Update(const FileChange& new_change) {
   last = new_change;
 }
 
+FileChangeList FileChangeList::PopAndGetNewList() const {
+  FileChangeList changes;
+  changes.list_ = this->list_;
+  changes.list_.pop_front();
+  return changes;
+}
+
 std::string FileChangeList::DebugString() const {
   std::ostringstream ss;
   ss << "{ ";
@@ -77,4 +87,4 @@ std::string FileChangeList::DebugString() const {
   return ss.str();
 }
 
-}  // namespace fileapi
+}  // namespace sync_file_system

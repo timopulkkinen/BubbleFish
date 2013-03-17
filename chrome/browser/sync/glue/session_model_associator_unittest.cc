@@ -129,7 +129,7 @@ TEST_F(SyncSessionModelAssociatorTest,
 TEST_F(SyncSessionModelAssociatorTest, PopulateSessionHeader) {
   sync_pb::SessionHeader header_s;
   header_s.set_client_name("Client 1");
-  header_s.set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_WIN);
+  header_s.set_device_type(sync_pb::SyncEnums_DeviceType_TYPE_WIN);
 
   SyncedSession session;
   base::Time time = base::Time::Now();
@@ -157,54 +157,6 @@ TEST_F(SyncSessionModelAssociatorTest, PopulateSessionWindow) {
   ASSERT_EQ(1, session->windows[0]->type);
   ASSERT_EQ(1U, tracker.num_synced_sessions());
   ASSERT_EQ(1U, tracker.num_synced_tabs(std::string("tag")));
-}
-
-TEST_F(SyncSessionModelAssociatorTest, TabNodePool) {
-  SessionModelAssociator::TabNodePool pool(NULL);
-  pool.set_machine_tag("tag");
-  ASSERT_TRUE(pool.empty());
-  ASSERT_TRUE(pool.full());
-  ASSERT_EQ(0U, pool.capacity());
-  pool.AddTabNode(5);
-  pool.AddTabNode(10);
-  ASSERT_FALSE(pool.empty());
-  ASSERT_TRUE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  ASSERT_EQ(10, pool.GetFreeTabNode());  // Returns last free tab.
-  ASSERT_FALSE(pool.empty());
-  ASSERT_FALSE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  ASSERT_EQ(5, pool.GetFreeTabNode());  // Returns last free tab.
-  ASSERT_TRUE(pool.empty());
-  ASSERT_FALSE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  // Release them in reverse order.
-  pool.FreeTabNode(10);
-  pool.FreeTabNode(5);
-  ASSERT_EQ(2U, pool.capacity());
-  ASSERT_FALSE(pool.empty());
-  ASSERT_TRUE(pool.full());
-  ASSERT_EQ(5, pool.GetFreeTabNode());  // Returns last free tab.
-  ASSERT_FALSE(pool.empty());
-  ASSERT_FALSE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  ASSERT_FALSE(pool.empty());
-  ASSERT_FALSE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  ASSERT_EQ(10, pool.GetFreeTabNode());  // Returns last free tab.
-  ASSERT_TRUE(pool.empty());
-  ASSERT_FALSE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  // Release them again.
-  pool.FreeTabNode(10);
-  pool.FreeTabNode(5);
-  ASSERT_FALSE(pool.empty());
-  ASSERT_TRUE(pool.full());
-  ASSERT_EQ(2U, pool.capacity());
-  pool.clear();
-  ASSERT_TRUE(pool.empty());
-  ASSERT_TRUE(pool.full());
-  ASSERT_EQ(0U, pool.capacity());
 }
 
 namespace {
@@ -235,9 +187,9 @@ class SyncRefreshListener : public content::NotificationObserver {
         content::NotificationService::AllSources());
   }
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_SYNC_REFRESH_LOCAL) {
       notified_of_refresh_ = true;
     }
@@ -608,9 +560,12 @@ TEST_F(SyncSessionModelAssociatorTest, SetSessionTabFromDelegate) {
             session_tab.navigations[1].virtual_url());
   EXPECT_EQ(entry3->GetVirtualURL(),
             session_tab.navigations[2].virtual_url());
-  EXPECT_EQ(kTime1, session_tab.navigations[0].timestamp());
-  EXPECT_EQ(kTime2, session_tab.navigations[1].timestamp());
-  EXPECT_EQ(kTime3, session_tab.navigations[2].timestamp());
+  EXPECT_EQ(kTime1,
+            SessionTypesTestHelper::GetTimestamp(session_tab.navigations[0]));
+  EXPECT_EQ(kTime2,
+            SessionTypesTestHelper::GetTimestamp(session_tab.navigations[1]));
+  EXPECT_EQ(kTime3,
+            SessionTypesTestHelper::GetTimestamp(session_tab.navigations[2]));
   EXPECT_TRUE(session_tab.session_storage_persistent_id.empty());
 }
 

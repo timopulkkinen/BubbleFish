@@ -11,13 +11,12 @@ namespace content {
 
 namespace {
 
-ppapi::DeviceRefData FromStreamDeviceInfo(
-    const media_stream::StreamDeviceInfo& info) {
+ppapi::DeviceRefData FromStreamDeviceInfo(const StreamDeviceInfo& info) {
   ppapi::DeviceRefData data;
-  data.id = info.device_id;
-  data.name = info.name;
+  data.id = info.device.id;
+  data.name = info.device.name;
   data.type = PepperDeviceEnumerationEventHandler::FromMediaStreamType(
-      info.stream_type);
+      info.device.type);
   return data;
 }
 
@@ -38,6 +37,11 @@ int PepperDeviceEnumerationEventHandler::RegisterEnumerateDevicesCallback(
   return next_id_++;
 }
 
+void PepperDeviceEnumerationEventHandler::UnregisterEnumerateDevicesCallback(
+    int request_id) {
+  enumerate_callbacks_.erase(request_id);
+}
+
 int PepperDeviceEnumerationEventHandler::RegisterOpenDeviceCallback(
     const PepperPluginDelegateImpl::OpenDeviceCallback& callback) {
   open_callbacks_[next_id_] = callback;
@@ -47,40 +51,29 @@ int PepperDeviceEnumerationEventHandler::RegisterOpenDeviceCallback(
 void PepperDeviceEnumerationEventHandler::OnStreamGenerated(
     int request_id,
     const std::string& label,
-    const media_stream::StreamDeviceInfoArray& audio_device_array,
-    const media_stream::StreamDeviceInfoArray& video_device_array) {
+    const StreamDeviceInfoArray& audio_device_array,
+    const StreamDeviceInfoArray& video_device_array) {
 }
 
 void PepperDeviceEnumerationEventHandler::OnStreamGenerationFailed(
     int request_id) {
 }
 
-void PepperDeviceEnumerationEventHandler::OnVideoDeviceFailed(
-    const std::string& label,
-    int index) {
-}
-
-void PepperDeviceEnumerationEventHandler::OnAudioDeviceFailed(
-    const std::string& label,
-    int index) {
-}
-
 void PepperDeviceEnumerationEventHandler::OnDevicesEnumerated(
     int request_id,
-    const media_stream::StreamDeviceInfoArray& device_array) {
+    const StreamDeviceInfoArray& device_array) {
   NotifyDevicesEnumerated(request_id, true, device_array);
 }
 
 void PepperDeviceEnumerationEventHandler::OnDevicesEnumerationFailed(
     int request_id) {
-  NotifyDevicesEnumerated(request_id, false,
-                          media_stream::StreamDeviceInfoArray());
+  NotifyDevicesEnumerated(request_id, false, StreamDeviceInfoArray());
 }
 
 void PepperDeviceEnumerationEventHandler::OnDeviceOpened(
     int request_id,
     const std::string& label,
-    const media_stream::StreamDeviceInfo& device_info) {
+    const StreamDeviceInfo& device_info) {
   NotifyDeviceOpened(request_id, true, label);
 }
 
@@ -89,8 +82,7 @@ void PepperDeviceEnumerationEventHandler::OnDeviceOpenFailed(int request_id) {
 }
 
 // static
-media_stream::MediaStreamType
-PepperDeviceEnumerationEventHandler::FromPepperDeviceType(
+MediaStreamType PepperDeviceEnumerationEventHandler::FromPepperDeviceType(
     PP_DeviceType_Dev type) {
   switch (type) {
     case PP_DEVICETYPE_DEV_INVALID:
@@ -107,7 +99,7 @@ PepperDeviceEnumerationEventHandler::FromPepperDeviceType(
 
 // static
 PP_DeviceType_Dev PepperDeviceEnumerationEventHandler::FromMediaStreamType(
-    media_stream::MediaStreamType type) {
+    MediaStreamType type) {
   switch (type) {
     case MEDIA_NO_SERVICE:
       return PP_DEVICETYPE_DEV_INVALID;
@@ -124,7 +116,7 @@ PP_DeviceType_Dev PepperDeviceEnumerationEventHandler::FromMediaStreamType(
 void PepperDeviceEnumerationEventHandler::NotifyDevicesEnumerated(
     int request_id,
     bool succeeded,
-    const media_stream::StreamDeviceInfoArray& device_array) {
+    const StreamDeviceInfoArray& device_array) {
   EnumerateCallbackMap::iterator iter = enumerate_callbacks_.find(request_id);
   if (iter == enumerate_callbacks_.end()) {
     // This might be enumerated result sent before StopEnumerateDevices is
@@ -134,12 +126,11 @@ void PepperDeviceEnumerationEventHandler::NotifyDevicesEnumerated(
 
   webkit::ppapi::PluginDelegate::EnumerateDevicesCallback callback =
       iter->second;
-  enumerate_callbacks_.erase(iter);
 
   std::vector<ppapi::DeviceRefData> devices;
   if (succeeded) {
     devices.reserve(device_array.size());
-    for (media_stream::StreamDeviceInfoArray::const_iterator info =
+    for (StreamDeviceInfoArray::const_iterator info =
              device_array.begin(); info != device_array.end(); ++info) {
       devices.push_back(FromStreamDeviceInfo(*info));
     }

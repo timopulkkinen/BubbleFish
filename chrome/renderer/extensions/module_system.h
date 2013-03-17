@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace extensions {
 
@@ -37,8 +38,15 @@ class ModuleSystem : public NativeHandler {
  public:
   class SourceMap {
    public:
+    virtual ~SourceMap() {}
     virtual v8::Handle<v8::Value> GetSource(const std::string& name) = 0;
     virtual bool Contains(const std::string& name) = 0;
+  };
+
+  class ExceptionHandler {
+   public:
+    virtual ~ExceptionHandler() {}
+    virtual void HandleUncaughtException() = 0;
   };
 
   // Enables native bindings for the duration of its lifetime.
@@ -74,6 +82,13 @@ class ModuleSystem : public NativeHandler {
   void CallModuleMethod(const std::string& module_name,
                         const std::string& method_name);
 
+  // Calls the specified method exported by the specified module. This is
+  // equivalent to calling require('module_name').method_name(args) from JS.
+  v8::Local<v8::Value> CallModuleMethod(
+      const std::string& module_name,
+      const std::string& method_name,
+      std::vector<v8::Handle<v8::Value> >* args);
+
   // Register |native_handler| as a potential target for requireNative(), so
   // calls to requireNative(|name|) from JS will return a new object created by
   // |native_handler|.
@@ -99,8 +114,15 @@ class ModuleSystem : public NativeHandler {
                     const std::string& module_name,
                     const std::string& module_field);
 
+  void set_exception_handler(scoped_ptr<ExceptionHandler> handler) {
+    exception_handler_ = handler.Pass();
+  }
+
  private:
   typedef std::map<std::string, linked_ptr<NativeHandler> > NativeHandlerMap;
+
+  // Called when an exception is thrown but not caught.
+  void HandleException(const v8::TryCatch& try_catch);
 
   // Ensure that require_ has been evaluated from require.js.
   void EnsureRequireLoaded();
@@ -138,6 +160,9 @@ class ModuleSystem : public NativeHandler {
   // When 0, natives are disabled, otherwise indicates how many callers have
   // pinned natives as enabled.
   int natives_enabled_;
+
+  // Called when an exception is thrown but not caught in JS.
+  scoped_ptr<ExceptionHandler> exception_handler_;
 
   std::set<std::string> overridden_native_handlers_;
 

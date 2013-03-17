@@ -25,7 +25,7 @@ using base::android::ClearException;
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::GetClass;
-using base::android::GetMethodID;
+using base::android::MethodID;
 using base::android::ScopedJavaLocalRef;
 
 namespace ui {
@@ -38,7 +38,9 @@ const char kRTFFormat[] = "rtf";
 const char kBitmapFormat[] = "bitmap";
 const char kWebKitSmartPasteFormat[] = "webkit_smart";
 const char kBookmarkFormat[] = "bookmark";
+const char kMimeTypePepperCustomData[] = "chromium/x-pepper-custom-data";
 const char kMimeTypeWebCustomData[] = "chromium/x-web-custom-data";
+const char kSourceTagFormat[] = "source_tag";
 
 class ClipboardMap {
  public:
@@ -75,8 +77,9 @@ ClipboardMap::ClipboardMap() {
       GetClass(env, "android/content/Context");
 
   // Get the system service method.
-  jmethodID get_system_service = GetMethodID(env, context_class,
-      "getSystemService",  "(Ljava/lang/String;)Ljava/lang/Object;");
+  jmethodID get_system_service = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, context_class.obj(), "getSystemService",
+      "(Ljava/lang/String;)Ljava/lang/Object;");
 
   // Retrieve the system service.
   ScopedJavaLocalRef<jstring> service_name(env, env->NewStringUTF("clipboard"));
@@ -87,18 +90,18 @@ ClipboardMap::ClipboardMap() {
   // Retain a few methods we'll keep using.
   ScopedJavaLocalRef<jclass> clipboard_class =
       GetClass(env, "android/text/ClipboardManager");
-  set_text_ = GetMethodID(env, clipboard_class,
-                          "setText", "(Ljava/lang/CharSequence;)V");
-  get_text_ = GetMethodID(env, clipboard_class,
-                          "getText", "()Ljava/lang/CharSequence;");
-  has_text_ = GetMethodID(env, clipboard_class,
-                          "hasText", "()Z");
+  set_text_ = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, clipboard_class.obj(), "setText", "(Ljava/lang/CharSequence;)V");
+  get_text_ = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, clipboard_class.obj(), "getText", "()Ljava/lang/CharSequence;");
+  has_text_ = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, clipboard_class.obj(), "hasText", "()Z");
 
   // Will need to call toString as CharSequence is not always a String.
   ScopedJavaLocalRef<jclass> charsequence_class =
       GetClass(env, "java/lang/CharSequence");
-  to_string_ = GetMethodID(env, charsequence_class,
-                           "toString", "()Ljava/lang/String;");
+  to_string_ = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, charsequence_class.obj(), "toString", "()Ljava/lang/String;");
 }
 
 std::string ClipboardMap::Get(const std::string& format) {
@@ -196,13 +199,16 @@ Clipboard::~Clipboard() {
 }
 
 // Main entry point used to write several values in the clipboard.
-void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
+void Clipboard::WriteObjectsImpl(Buffer buffer,
+                                 const ObjectMap& objects,
+                                 SourceTag tag) {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
   g_map.Get().Clear();
   for (ObjectMap::const_iterator iter = objects.begin();
        iter != objects.end(); ++iter) {
     DispatchObject(static_cast<ObjectType>(iter->first), iter->second);
   }
+  WriteSourceTag(tag);
 }
 
 uint64 Clipboard::GetSequenceNumber(Clipboard::Buffer /* buffer */) {
@@ -248,6 +254,7 @@ void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
 void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
+  ReportAction(buffer, READ_TEXT);
   *result = g_map.Get().Get(kPlainTextFormat);
 }
 
@@ -308,6 +315,13 @@ void Clipboard::ReadData(const Clipboard::FormatType& format,
   *result = g_map.Get().Get(format.data());
 }
 
+Clipboard::SourceTag Clipboard::ReadSourceTag(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+  std::string result;
+  ReadData(GetSourceTagFormatType(), &result);
+  return Binary2SourceTag(result);
+}
+
 // static
 Clipboard::FormatType Clipboard::GetFormatType(
     const std::string& format_string) {
@@ -356,6 +370,18 @@ const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
   return type;
 }
 
+// static
+const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypePepperCustomData));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetSourceTagFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kSourceTagFormat));
+  return type;
+}
+
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
   g_map.Get().Set(kPlainTextFormat, std::string(text_data, text_len));
 }
@@ -400,6 +426,13 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 void Clipboard::WriteData(const Clipboard::FormatType& format,
                           const char* data_data, size_t data_len) {
   g_map.Get().Set(format.data(), std::string(data_data, data_len));
+}
+
+void Clipboard::WriteSourceTag(SourceTag tag) {
+  if (tag != SourceTag()) {
+    ObjectMapParam binary = SourceTag2Binary(tag);
+    WriteData(GetSourceTagFormatType(), &binary[0], binary.size());
+  }
 }
 
 } // namespace ui

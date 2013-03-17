@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/run_loop.h"
@@ -18,7 +19,8 @@
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/invalidator.h"
 #include "sync/notifier/invalidator_state.h"
-#include "sync/notifier/object_id_state_map.h"
+#include "sync/notifier/object_id_invalidation_map.h"
+#include "sync/syncable/directory.h"
 #include "sync/test/fake_sync_encryption_handler.h"
 
 namespace syncer {
@@ -52,12 +54,12 @@ ModelTypeSet FakeSyncManager::GetAndResetEnabledTypes() {
   return enabled_types;
 }
 
-void FakeSyncManager::Invalidate(const ObjectIdStateMap& id_state_map,
-                                 IncomingInvalidationSource source) {
+void FakeSyncManager::Invalidate(
+    const ObjectIdInvalidationMap& invalidation_map) {
   if (!sync_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&FakeSyncManager::InvalidateOnSyncThread,
-                 base::Unretained(this), id_state_map, source))) {
+                 base::Unretained(this), invalidation_map))) {
     NOTREACHED();
   }
 }
@@ -71,18 +73,12 @@ void FakeSyncManager::UpdateInvalidatorState(InvalidatorState state) {
   }
 }
 
-namespace {
-
-void DoNothing() {}
-
-}  // namespace
-
 void FakeSyncManager::WaitForSyncThread() {
   // Post a task to |sync_task_runner_| and block until it runs.
   base::RunLoop run_loop;
   if (!sync_task_runner_->PostTaskAndReply(
       FROM_HERE,
-      base::Bind(&DoNothing),
+      base::Bind(&base::DoNothing),
       run_loop.QuitClosure())) {
     NOTREACHED();
   }
@@ -90,12 +86,11 @@ void FakeSyncManager::WaitForSyncThread() {
 }
 
 void FakeSyncManager::Init(
-    const FilePath& database_location,
+    const base::FilePath& database_location,
     const WeakHandle<JsEventHandler>& event_handler,
     const std::string& sync_server_and_path,
     int sync_server_port,
     bool use_ssl,
-    const scoped_refptr<base::TaskRunner>& blocking_task_runner,
     scoped_ptr<HttpPostProviderFactory> post_factory,
     const std::vector<ModelSafeWorker*>& workers,
     ExtensionsActivityMonitor* extensions_activity_monitor,
@@ -111,9 +106,18 @@ void FakeSyncManager::Init(
         report_unrecoverable_error_function) {
   sync_task_runner_ = base::ThreadTaskRunnerHandle::Get();
   PurgePartiallySyncedTypes();
+
+  test_user_share_.SetUp();
+  UserShare* share = test_user_share_.user_share();
+  for (ModelTypeSet::Iterator it = initial_sync_ended_types_.First();
+       it.Good(); it.Inc()) {
+    TestUserShare::CreateRoot(it.Get(), share);
+  }
+
   FOR_EACH_OBSERVER(SyncManager::Observer, observers_,
                     OnInitializationComplete(
-                        syncer::WeakHandle<syncer::JsBackend>(),
+                        WeakHandle<JsBackend>(),
+                        WeakHandle<DataTypeDebugInfoListener>(),
                         true, initial_sync_ended_types_));
 }
 
@@ -168,6 +172,11 @@ void FakeSyncManager::UnregisterInvalidationHandler(
   registrar_.UnregisterHandler(handler);
 }
 
+void FakeSyncManager::AcknowledgeInvalidation(const invalidation::ObjectId& id,
+                                              const AckHandle& ack_handle) {
+  // Do nothing.
+}
+
 void FakeSyncManager::StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) {
   // Do nothing.
@@ -176,6 +185,7 @@ void FakeSyncManager::StartSyncingNormally(
 void FakeSyncManager::ConfigureSyncer(
     ConfigureReason reason,
     ModelTypeSet types_to_config,
+    ModelTypeSet failed_types,
     const ModelSafeRoutingInfo& new_routing_info,
     const base::Closure& ready_task,
     const base::Closure& retry_task) {
@@ -188,6 +198,16 @@ void FakeSyncManager::ConfigureSyncer(
   DVLOG(1) << "Faking configuration. Downloading: "
            << ModelTypeSetToString(success_types) << ". Cleaning: "
            << ModelTypeSetToString(disabled_types);
+
+  // Update our fake directory by clearing and fake-downloading as necessary.
+  UserShare* share = GetUserShare();
+  share->directory->PurgeEntriesWithTypeIn(disabled_types, ModelTypeSet());
+  for (ModelTypeSet::Iterator it = success_types.First(); it.Good(); it.Inc()) {
+    // We must be careful to not create the same root node twice.
+    if (!initial_sync_ended_types_.Has(it.Get())) {
+      TestUserShare::CreateRoot(it.Get(), share);
+    }
+  }
 
   // Simulate cleaning up disabled types.
   // TODO(sync): consider only cleaning those types that were recently disabled,
@@ -231,10 +251,15 @@ void FakeSyncManager::StopSyncingForShutdown(const base::Closure& callback) {
 
 void FakeSyncManager::ShutdownOnSyncThread() {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
+  test_user_share_.TearDown();
 }
 
 UserShare* FakeSyncManager::GetUserShare() {
-  return NULL;
+  return test_user_share_.user_share();
+}
+
+const std::string FakeSyncManager::cache_guid() {
+  return test_user_share_.user_share()->directory->cache_guid();
 }
 
 bool FakeSyncManager::ReceivedExperiment(Experiments* experiments) {
@@ -250,17 +275,24 @@ SyncEncryptionHandler* FakeSyncManager::GetEncryptionHandler() {
   return fake_encryption_handler_.get();
 }
 
+void FakeSyncManager::RefreshTypes(ModelTypeSet types) {
+  last_refresh_request_types_ = types;
+}
+
 void FakeSyncManager::InvalidateOnSyncThread(
-    const ObjectIdStateMap& id_state_map,
-    IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
-  registrar_.DispatchInvalidationsToHandlers(id_state_map, source);
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void FakeSyncManager::UpdateInvalidatorStateOnSyncThread(
     InvalidatorState state) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
   registrar_.UpdateInvalidatorState(state);
+}
+
+ModelTypeSet FakeSyncManager::GetLastRefreshRequestTypes() {
+  return last_refresh_request_types_;
 }
 
 }  // namespace syncer

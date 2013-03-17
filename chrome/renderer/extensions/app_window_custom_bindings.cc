@@ -15,6 +15,7 @@
 #include "content/public/renderer/render_view_visitor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedMicrotaskSuppression.h"
 #include "v8/include/v8.h"
 
 namespace extensions {
@@ -53,30 +54,78 @@ AppWindowCustomBindings::AppWindowCustomBindings(Dispatcher* dispatcher)
   RouteFunction("GetView",
       base::Bind(&AppWindowCustomBindings::GetView,
                  base::Unretained(this)));
+  RouteFunction("OnContextReady",
+      base::Bind(&AppWindowCustomBindings::OnContextReady,
+                 base::Unretained(this)));
 }
 
 namespace {
-class FindViewByID : public content::RenderViewVisitor {
+class LoadWatcher : public content::RenderViewObserver {
  public:
-  explicit FindViewByID(int route_id) : route_id_(route_id), view_(NULL) {
+  LoadWatcher(v8::Isolate* isolate,
+              content::RenderView* view,
+              v8::Handle<v8::Function> cb)
+      : content::RenderViewObserver(view),
+        isolate_(isolate),
+        callback_(v8::Persistent<v8::Function>::New(isolate, cb)) {
   }
 
-  content::RenderView* view() { return view_; }
+  virtual void DidCreateDocumentElement(WebKit::WebFrame* frame) OVERRIDE {
+    CallbackAndDie(frame, true);
+  }
 
-  // Returns false to terminate the iteration.
-  virtual bool Visit(content::RenderView* render_view) {
-    if (render_view->GetRoutingID() == route_id_) {
-      view_ = render_view;
-      return false;
-    }
-    return true;
+  virtual void DidFailProvisionalLoad(
+      WebKit::WebFrame* frame,
+      const WebKit::WebURLError& error) OVERRIDE {
+    CallbackAndDie(frame, false);
+  }
+
+  virtual ~LoadWatcher() {
+    callback_.Dispose(isolate_);
   }
 
  private:
-  int route_id_;
-  content::RenderView* view_;
+  v8::Isolate* isolate_;
+  v8::Persistent<v8::Function> callback_;
+
+  void CallbackAndDie(WebKit::WebFrame* frame, bool succeeded) {
+    v8::HandleScope handle_scope;
+    v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+    v8::Context::Scope scope(context);
+    v8::Local<v8::Object> global = context->Global();
+    {
+      WebKit::WebScopedMicrotaskSuppression suppression;
+      v8::Handle<v8::Value> args[] = {
+        succeeded ? v8::True() : v8::False()
+      };
+      callback_->Call(global, 1, args);
+    }
+    delete this;
+  }
 };
 }  // namespace
+
+v8::Handle<v8::Value> AppWindowCustomBindings::OnContextReady(
+    const v8::Arguments& args) {
+  if (args.Length() != 2)
+    return v8::Undefined();
+
+  if (!args[0]->IsInt32())
+    return v8::Undefined();
+  if (!args[1]->IsFunction())
+    return v8::Undefined();
+
+  int view_id = args[0]->Int32Value();
+
+  content::RenderView* view = content::RenderView::FromRoutingID(view_id);
+  if (!view)
+    return v8::Undefined();
+
+  v8::Handle<v8::Function> func = v8::Handle<v8::Function>::Cast(args[1]);
+  new LoadWatcher(args.GetIsolate(), view, func);
+
+  return v8::True();
+}
 
 v8::Handle<v8::Value> AppWindowCustomBindings::GetView(
     const v8::Arguments& args) {
@@ -98,14 +147,7 @@ v8::Handle<v8::Value> AppWindowCustomBindings::GetView(
   if (view_id == MSG_ROUTING_NONE)
     return v8::Undefined();
 
-  // TODO(jeremya): there exists a direct map of routing_id -> RenderView as
-  // ChildThread::current()->ResolveRoute(), but ResolveRoute returns an
-  // IPC::Listener*, which RenderView doesn't inherit from (RenderViewImpl
-  // does, indirectly, via RenderWidget, but the link isn't exposed outside of
-  // content/.)
-  FindViewByID view_finder(view_id);
-  content::RenderView::ForEach(&view_finder);
-  content::RenderView* view = view_finder.view();
+  content::RenderView* view = content::RenderView::FromRoutingID(view_id);
   if (!view)
     return v8::Undefined();
 

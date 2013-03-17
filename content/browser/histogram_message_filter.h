@@ -18,10 +18,10 @@ class HistogramMessageFilter : public BrowserMessageFilter {
  public:
   HistogramMessageFilter();
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
@@ -31,6 +31,8 @@ class HistogramMessageFilter : public BrowserMessageFilter {
   // Message handlers.
   void OnChildHistogramData(int sequence_number,
                             const std::vector<std::string>& pickled_histograms);
+  void OnGetBrowserHistogram(const std::string& name,
+                             std::string* histogram_json);
 
   DISALLOW_COPY_AND_ASSIGN(HistogramMessageFilter);
 };

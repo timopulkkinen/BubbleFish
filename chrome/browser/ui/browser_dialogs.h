@@ -10,7 +10,6 @@
 
 class Browser;
 class SkBitmap;
-class TabContents;
 class TabModalConfirmDialogDelegate;
 
 namespace content {
@@ -48,7 +47,7 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
                                 ui::WebDialogDelegate* delegate);
 
 // Shows the collected cookies dialog box.
-void ShowCollectedCookiesDialog(TabContents* tab_contents);
+void ShowCollectedCookiesDialog(content::WebContents* web_contents);
 
 // Creates the ExtensionInstalledBubble and schedules it to be shown once
 // the extension has loaded. |extension| is the installed extension. |browser|
@@ -67,7 +66,7 @@ void HideHungRendererDialog(content::WebContents* contents);
 #if !defined(OS_MACOSX)
 // Shows the create web app shortcut dialog box.
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
-                                     TabContents* tab_contents);
+                                     content::WebContents* web_contents);
 #endif
 
 }  // namespace chrome

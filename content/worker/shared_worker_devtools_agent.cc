@@ -6,12 +6,14 @@
 
 #include "content/common/devtools_messages.h"
 #include "content/worker/worker_thread.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using WebKit::WebSharedWorker;
 using WebKit::WebString;
+
+namespace content {
 
 SharedWorkerDevToolsAgent::SharedWorkerDevToolsAgent(
     int route_id,
@@ -82,3 +84,5 @@ void SharedWorkerDevToolsAgent::OnResumeWorkerContext() {
 bool SharedWorkerDevToolsAgent::Send(IPC::Message* message) {
   return WorkerThread::current()->Send(message);
 }
+
+}  // namespace content

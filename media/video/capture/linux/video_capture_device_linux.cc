@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
+#include <list>
 #include <string>
 
 #include "base/bind.h"
@@ -43,9 +44,12 @@ enum { kCaptureTimeoutUs = 200000 };
 // Time to wait in milliseconds before v4l2_thread_ reschedules OnCaptureTask
 // if an event is triggered (select) but no video frame is read.
 enum { kCaptureSelectWaitMs = 10 };
+// MJPEG is prefered if the width or height is larger than this.
+enum { kMjpegWidth = 640 };
+enum { kMjpegHeight = 480 };
 
 // V4L2 color formats VideoCaptureDeviceLinux support.
-static const int32 kV4l2Fmts[] = {
+static const int32 kV4l2RawFmts[] = {
   V4L2_PIX_FMT_YUV420,
   V4L2_PIX_FMT_YUYV
 };
@@ -60,9 +64,39 @@ static VideoCaptureCapability::Format V4l2ColorToVideoCaptureColorFormat(
     case V4L2_PIX_FMT_YUYV:
       result = VideoCaptureCapability::kYUY2;
       break;
+    case V4L2_PIX_FMT_MJPEG:
+      result = VideoCaptureCapability::kMJPEG;
   }
   DCHECK_NE(result, VideoCaptureCapability::kColorUnknown);
   return result;
+}
+
+static void GetListOfUsableFourCCs(bool favour_mjpeg, std::list<int>* fourccs) {
+  for (size_t i = 0; i < arraysize(kV4l2RawFmts); ++i)
+    fourccs->push_back(kV4l2RawFmts[i]);
+  if (favour_mjpeg)
+    fourccs->push_front(V4L2_PIX_FMT_MJPEG);
+  else
+    fourccs->push_back(V4L2_PIX_FMT_MJPEG);
+}
+
+static bool HasUsableFormats(int fd) {
+  v4l2_fmtdesc fmtdesc;
+  std::list<int> usable_fourccs;
+
+  GetListOfUsableFourCCs(false, &usable_fourccs);
+
+  memset(&fmtdesc, 0, sizeof(v4l2_fmtdesc));
+  fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+  while (ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0) {
+    if (std::find(usable_fourccs.begin(), usable_fourccs.end(),
+                  fmtdesc.pixelformat) != usable_fourccs.end())
+      return true;
+
+    fmtdesc.index++;
+  }
+  return false;
 }
 
 void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
@@ -71,7 +105,7 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
   // Empty the name list.
   device_names->clear();
 
-  FilePath path("/dev/");
+  base::FilePath path("/dev/");
   file_util::FileEnumerator enumerator(
       path, false, file_util::FileEnumerator::FILES, "video*");
 
@@ -91,8 +125,12 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
         (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
         !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT)) {
       // This is a V4L2 video capture device
-      name.device_name = StringPrintf("%s", cap.card);
-      device_names->push_back(name);
+      if (HasUsableFormats(fd)) {
+        name.device_name = StringPrintf("%s", cap.card);
+        device_names->push_back(name);
+      } else {
+        DVLOG(1) << "No usable formats reported by " << info.filename;
+      }
     }
     close(fd);
   }
@@ -227,9 +265,16 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
   // But second VIDIOC_TRY_FMT succeeds.
   // See http://crbug.com/94134.
   bool format_match = false;
-  for (unsigned int i = 0; i < arraysize(kV4l2Fmts) && !format_match; i++) {
-    video_fmt.fmt.pix.pixelformat = kV4l2Fmts[i];
-    for (int attempt = 0; attempt < 2 && !format_match; attempt++) {
+  std::list<int> v4l2_formats;
+
+  // For large resolutions, favour mjpeg over raw formats.
+  GetListOfUsableFourCCs(width > kMjpegWidth || height > kMjpegHeight,
+                         &v4l2_formats);
+
+  for (std::list<int>::const_iterator it = v4l2_formats.begin();
+       it != v4l2_formats.end() && !format_match; ++it) {
+    video_fmt.fmt.pix.pixelformat = *it;
+    for (int attempt = 0; attempt < 2 && !format_match; ++attempt) {
       ResetCameraByEnumeratingIoctlsHACK(device_fd_);
       if (ioctl(device_fd_, VIDIOC_TRY_FMT, &video_fmt) < 0) {
         if (errno != EIO)
@@ -369,7 +414,7 @@ void VideoCaptureDeviceLinux::OnCaptureTask() {
     if (ioctl(device_fd_, VIDIOC_DQBUF, &buffer) == 0) {
       observer_->OnIncomingCapturedFrame(
           static_cast<uint8*> (buffer_pool_[buffer.index].start),
-          buffer.bytesused, base::Time::Now());
+          buffer.bytesused, base::Time::Now(), 0, false, false);
 
       // Enqueue the buffer again.
       if (ioctl(device_fd_, VIDIOC_QBUF, &buffer) == -1) {

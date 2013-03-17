@@ -8,13 +8,12 @@
 #import "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #import "chrome/app/chrome_command_ids.h"  // For translate menu command ids.
-#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #import "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/infobars/before_translate_infobar_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar.h"
 #import "chrome/browser/ui/cocoa/infobars/translate_infobar_base.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #import "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
 #import "testing/gmock/include/gmock/gmock.h"
@@ -22,14 +21,6 @@
 #import "testing/platform_test.h"
 
 using content::WebContents;
-
-// TODO(avi): Kill this when TabContents goes away.
-class TranslationInfoBarTestContentsCreator {
- public:
-  static TabContents* CreateTabContents(content::WebContents* contents) {
-    return TabContents::Factory::CreateTabContents(contents);
-  }
-};
 
 namespace {
 
@@ -45,13 +36,10 @@ class MockTranslateInfoBarDelegate : public TranslateInfoBarDelegate {
  public:
   MockTranslateInfoBarDelegate(TranslateInfoBarDelegate::Type type,
                                TranslateErrors::Type error,
-                               InfoBarTabHelper* infobar_helper,
+                               InfoBarService* infobar_service,
                                PrefService* prefs)
-      : TranslateInfoBarDelegate(type, error, infobar_helper, prefs,
+      : TranslateInfoBarDelegate(type, error, infobar_service, prefs,
                                  "en", "es") {
-    // Start out in the "Before Translate" state.
-    type_ = type;
-
   }
 
   MOCK_METHOD0(Translate, void());
@@ -73,9 +61,9 @@ class TranslationInfoBarTest : public CocoaProfileTest {
   // the test.
   virtual void SetUp() {
     CocoaProfileTest::SetUp();
-    tab_contents_.reset(
-        TranslationInfoBarTestContentsCreator::CreateTabContents(
-            WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL)));
+    web_contents_.reset(
+        WebContents::Create(WebContents::CreateParams(profile())));
+    InfoBarService::CreateForWebContents(web_contents_.get());
     CreateInfoBar();
   }
 
@@ -87,15 +75,19 @@ class TranslationInfoBarTest : public CocoaProfileTest {
     TranslateErrors::Type error = TranslateErrors::NONE;
     if (type == TranslateInfoBarDelegate::TRANSLATION_ERROR)
       error = TranslateErrors::NETWORK;
+    InfoBarService* infobar_service =
+        InfoBarService::FromWebContents(web_contents_.get());
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents_->GetBrowserContext());
     infobar_delegate_.reset(new MockTranslateInfoBarDelegate(
         type,
         error,
-        tab_contents_->infobar_tab_helper(),
-        tab_contents_->profile()->GetPrefs()));
+        infobar_service,
+        profile->GetPrefs()));
     [[infobar_controller_ view] removeFromSuperview];
     scoped_ptr<InfoBar> infobar(
         static_cast<InfoBarDelegate*>(infobar_delegate_.get())->
-            CreateInfoBar(tab_contents_->infobar_tab_helper()));
+            CreateInfoBar(infobar_service));
     infobar_controller_.reset(
         reinterpret_cast<TranslateInfoBarControllerBase*>(
             infobar->controller()));
@@ -106,7 +98,7 @@ class TranslationInfoBarTest : public CocoaProfileTest {
     [[test_window() contentView] addSubview:[infobar_controller_ view]];
   }
 
-  scoped_ptr<TabContents> tab_contents_;
+  scoped_ptr<WebContents> web_contents_;
   scoped_ptr<MockTranslateInfoBarDelegate> infobar_delegate_;
   scoped_nsobject<TranslateInfoBarControllerBase> infobar_controller_;
 };

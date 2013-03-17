@@ -7,6 +7,7 @@
 #include "base/string_number_conversions.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "cc/switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -14,7 +15,8 @@
 
 namespace content {
 
-void SetContentCommandLineFlags(int max_render_process_count) {
+void SetContentCommandLineFlags(int max_render_process_count,
+                                const std::string& plugin_descriptor) {
   // May be called multiple times, to cover all possible program entry points.
   static bool already_initialized = false;
   if (already_initialized)
@@ -45,12 +47,17 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   }
 
   parsed_command_line->AppendSwitch(switches::kForceCompositingMode);
+  parsed_command_line->AppendSwitch(switches::kAllowWebUICompositing);
   parsed_command_line->AppendSwitch(switches::kEnableThreadedCompositing);
   parsed_command_line->AppendSwitch(
       switches::kEnableCompositingForFixedPosition);
+  parsed_command_line->AppendSwitch(switches::kEnableAcceleratedOverflowScroll);
+  parsed_command_line->AppendSwitch(
+      switches::kEnableAcceleratedScrollableFrames);
+  parsed_command_line->AppendSwitch(
+      switches::kEnableCompositedScrollingForFrames);
 
   parsed_command_line->AppendSwitch(switches::kEnableGestureTapHighlight);
-  parsed_command_line->AppendSwitch(switches::kEnableTouchEvents);
   parsed_command_line->AppendSwitch(switches::kEnablePinch);
 
   // Run the GPU service as a thread in the browser instead of as a
@@ -60,6 +67,14 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   // Always use fixed layout and viewport tag.
   parsed_command_line->AppendSwitch(switches::kEnableFixedLayout);
   parsed_command_line->AppendSwitch(switches::kEnableViewport);
+
+  parsed_command_line->AppendSwitch(
+      cc::switches::kEnableCompositorFrameMessage);
+
+  if (!plugin_descriptor.empty()) {
+    parsed_command_line->AppendSwitchNative(
+      switches::kRegisterPepperPlugins, plugin_descriptor);
+  }
 }
 
 }  // namespace content

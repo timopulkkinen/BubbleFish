@@ -10,8 +10,11 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_error_handler.h"
+#include "sync/api/sync_merge_result.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
+#include "sync/internal_api/public/util/weak_handle.h"
 
+class FailedDatatypesHandler;
 class PasswordStore;
 class ProfileSyncService;
 class WebDataService;
@@ -28,6 +31,7 @@ class DataTypeErrorHandler;
 }
 
 namespace syncer {
+class DataTypeDebugInfoListener;
 class SyncableService;
 }
 
@@ -69,15 +73,19 @@ class ProfileSyncComponentsFactory {
   // type controllers and a DataTypeManagerObserver.  The return pointer is
   // owned by the caller.
   virtual browser_sync::DataTypeManager* CreateDataTypeManager(
+      const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
+          debug_info_listener,
       browser_sync::SyncBackendHost* backend,
       const browser_sync::DataTypeController::TypeMap* controllers,
-      browser_sync::DataTypeManagerObserver* observer) = 0;
+      browser_sync::DataTypeManagerObserver* observer,
+      const FailedDatatypesHandler* failed_datatypes_handler) = 0;
 
   // Creating this in the factory helps us mock it out in testing.
   virtual browser_sync::GenericChangeProcessor* CreateGenericChangeProcessor(
       ProfileSyncService* profile_sync_service,
       browser_sync::DataTypeErrorHandler* error_handler,
-      const base::WeakPtr<syncer::SyncableService>& local_service) = 0;
+      const base::WeakPtr<syncer::SyncableService>& local_service,
+      const base::WeakPtr<syncer::SyncMergeResult>& merge_result) = 0;
 
   virtual browser_sync::SharedChangeProcessor*
       CreateSharedChangeProcessor() = 0;

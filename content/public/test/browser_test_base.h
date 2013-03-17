@@ -11,6 +11,10 @@
 
 class CommandLine;
 
+namespace base {
+class FilePath;
+}
+
 namespace content {
 
 class BrowserTestBase : public testing::Test {
@@ -76,7 +80,7 @@ class BrowserTestBase : public testing::Test {
   // this.
   // |test_server_base| is the path, relative to src, to give to the test HTTP
   // server.
-  void CreateTestServer(const char* test_server_base);
+  void CreateTestServer(const base::FilePath& test_server_base);
 
  private:
   void ProxyRunTestOnMainThreadLoop();

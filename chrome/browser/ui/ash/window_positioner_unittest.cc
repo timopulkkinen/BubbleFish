@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -59,7 +60,7 @@ TestBrowserWindowAura::~TestBrowserWindowAura() {}
 class WindowPositionerTest : public AshTestBase {
  public:
   WindowPositionerTest();
-  ~WindowPositionerTest();
+  virtual ~WindowPositionerTest();
 
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
@@ -121,28 +122,31 @@ WindowPositionerTest::~WindowPositionerTest() {
 void WindowPositionerTest::SetUp() {
   AshTestBase::SetUp();
   // Create some default dummy windows.
-  window_.reset(aura::test::CreateTestWindowWithId(0, NULL));
+  window_.reset(CreateTestWindowInShellWithId(0));
   window_->SetBounds(gfx::Rect(16, 32, 640, 320));
-  popup_.reset(aura::test::CreateTestWindowWithId(1, NULL));
+  popup_.reset(CreateTestWindowInShellWithId(1));
   popup_->SetBounds(gfx::Rect(16, 32, 128, 256));
-  panel_.reset(aura::test::CreateTestWindowWithId(2, NULL));
+  panel_.reset(CreateTestWindowInShellWithId(2));
   panel_->SetBounds(gfx::Rect(32, 48, 256, 512));
 
   // Create a browser for the window.
   browser_window_.reset(new TestBrowserWindowAura(window_.get()));
-  Browser::CreateParams window_params(profile_.get());
+  Browser::CreateParams window_params(profile_.get(),
+                                      chrome::HOST_DESKTOP_TYPE_ASH);
   window_params.window = browser_window_.get();
   window_owning_browser_.reset(new Browser(window_params));
 
   // Creating a browser for the popup.
   browser_popup_.reset(new TestBrowserWindowAura(popup_.get()));
-  Browser::CreateParams popup_params(Browser::TYPE_POPUP, profile_.get());
+  Browser::CreateParams popup_params(Browser::TYPE_POPUP, profile_.get(),
+                                     chrome::HOST_DESKTOP_TYPE_ASH);
   popup_params.window = browser_popup_.get();
   popup_owning_browser_.reset(new Browser(popup_params));
 
   // Creating a browser for the panel.
   browser_panel_.reset(new TestBrowserWindowAura(panel_.get()));
-  Browser::CreateParams panel_params(Browser::TYPE_PANEL, profile_.get());
+  Browser::CreateParams panel_params(Browser::TYPE_PANEL, profile_.get(),
+                                     chrome::HOST_DESKTOP_TYPE_ASH);
   panel_params.window = browser_panel_.get();
   panel_owning_browser_.reset(new Browser(panel_params));
   // We hide all windows upon start - each user is required to set it up
@@ -180,7 +184,8 @@ int AlignToGridRoundDown(int location, int grid_size) {
 }
 
 TEST_F(WindowPositionerTest, cascading) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+  const gfx::Rect work_area =
+      Shell::GetScreen()->GetPrimaryDisplay().work_area();
 
   // First see that the window will cascade down when there is no space.
   window()->SetBounds(work_area);
@@ -240,7 +245,8 @@ TEST_F(WindowPositionerTest, cascading) {
 }
 
 TEST_F(WindowPositionerTest, filling) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+  const gfx::Rect work_area =
+      Shell::GetScreen()->GetPrimaryDisplay().work_area();
   gfx::Rect popup_position(0, 0, 256, 128);
   // Leave space on the left and the right and see if we fill top to bottom.
   window()->SetBounds(gfx::Rect(work_area.x() + popup_position.width(),
@@ -294,7 +300,8 @@ TEST_F(WindowPositionerTest, filling) {
 }
 
 TEST_F(WindowPositionerTest, blockedByPanel) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+  const gfx::Rect work_area =
+      Shell::GetScreen()->GetPrimaryDisplay().work_area();
 
   gfx::Rect pop_position(0, 0, 200, 200);
   // Let the panel cover everything.
@@ -309,7 +316,8 @@ TEST_F(WindowPositionerTest, blockedByPanel) {
 }
 
 TEST_F(WindowPositionerTest, biggerThenBorder) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+  const gfx::Rect work_area =
+      Shell::GetScreen()->GetPrimaryDisplay().work_area();
 
   gfx::Rect pop_position(0, 0, work_area.width(), work_area.height());
 

@@ -11,21 +11,23 @@
 #include "base/string16.h"
 #include "content/common/content_export.h"
 
-class WebContentsImpl;
+struct BrowserPluginHostMsg_CreateGuest_Params;
 
 namespace content {
 
 class BrowserPluginEmbedder;
 class BrowserPluginGuest;
 class RenderViewHost;
+class WebContentsImpl;
 
 // Factory to create BrowserPlugin embedder and guest.
 class CONTENT_EXPORT BrowserPluginHostFactory {
  public:
   virtual BrowserPluginGuest* CreateBrowserPluginGuest(
       int instance_id,
+      WebContentsImpl* embedder_web_contents,
       WebContentsImpl* web_contents,
-      RenderViewHost* render_view_host) = 0;
+      const BrowserPluginHostMsg_CreateGuest_Params& params) = 0;
 
   virtual BrowserPluginEmbedder* CreateBrowserPluginEmbedder(
       WebContentsImpl* web_contents,

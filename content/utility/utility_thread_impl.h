@@ -14,14 +14,15 @@
 #include "content/common/content_export.h"
 #include "content/public/utility/utility_thread.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace content {
 class WebKitPlatformSupportImpl;
-}
 
 // This class represents the background thread where the utility task runs.
-class UtilityThreadImpl : public content::UtilityThread,
+class UtilityThreadImpl : public UtilityThread,
                           public ChildThread {
  public:
   UtilityThreadImpl();
@@ -43,15 +44,17 @@ class UtilityThreadImpl : public content::UtilityThread,
   void OnBatchModeFinished();
 
 #if defined(OS_POSIX)
-  void OnLoadPlugins(const std::vector<FilePath>& plugin_paths);
+  void OnLoadPlugins(const std::vector<base::FilePath>& plugin_paths);
 #endif  // OS_POSIX
 
   // True when we're running in batch mode.
   bool batch_mode_;
 
-  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
+  scoped_ptr<WebKitPlatformSupportImpl> webkit_platform_support_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThreadImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_

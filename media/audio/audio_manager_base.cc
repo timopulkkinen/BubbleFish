@@ -5,8 +5,10 @@
 #include "media/audio/audio_manager_base.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/message_loop_proxy.h"
+#include "base/threading/thread.h"
 #include "media/audio/audio_output_dispatcher_impl.h"
 #include "media/audio/audio_output_proxy.h"
 #include "media/audio/audio_output_resampler.h"
@@ -14,12 +16,6 @@
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "media/base/media_switches.h"
-
-// TODO(dalecurtis): Temporarily disabled while switching pipeline to use float,
-// http://crbug.com/114700
-#if defined(ENABLE_AUDIO_MIXER)
-#include "media/audio/audio_output_mixer.h"
-#endif
 
 namespace media {
 
@@ -38,29 +34,27 @@ static const int kMaxInputChannels = 2;
 const char AudioManagerBase::kDefaultDeviceName[] = "Default";
 const char AudioManagerBase::kDefaultDeviceId[] = "default";
 
-#if defined(OS_WIN)
-AudioThread::AudioThread(const char* name) : base::Thread(name) {
-}
-
-AudioThread::~AudioThread() {
-}
-
-void AudioThread::Init() {
-  com_initializer_.reset(new base::win::ScopedCOMInitializer(
-      base::win::ScopedCOMInitializer::kMTA));
-}
-
-void AudioThread::CleanUp() {
-  com_initializer_.reset();
-}
-#endif
-
 AudioManagerBase::AudioManagerBase()
     : num_active_input_streams_(0),
       max_num_output_streams_(kDefaultMaxOutputStreams),
       max_num_input_streams_(kDefaultMaxInputStreams),
       num_output_streams_(0),
-      num_input_streams_(0) {
+      num_input_streams_(0),
+      output_listeners_(
+          ObserverList<AudioDeviceListener>::NOTIFY_EXISTING_ONLY),
+      audio_thread_(new base::Thread("AudioThread")) {
+#if defined(OS_WIN)
+  audio_thread_->init_com_with_mta(true);
+#endif
+#if defined(OS_MACOSX)
+  // On Mac, use a UI loop to get native message pump so that CoreAudio property
+  // listener callbacks fire.
+  CHECK(audio_thread_->StartWithOptions(
+      base::Thread::Options(MessageLoop::TYPE_UI, 0)));
+#else
+  CHECK(audio_thread_->Start());
+#endif
+  message_loop_ = audio_thread_->message_loop_proxy();
 }
 
 AudioManagerBase::~AudioManagerBase() {
@@ -76,24 +70,20 @@ AudioManagerBase::~AudioManagerBase() {
   DCHECK_EQ(0, num_input_streams_);
 }
 
-void AudioManagerBase::Init() {
-  base::AutoLock lock(audio_thread_lock_);
-  DCHECK(!audio_thread_.get());
-  audio_thread_.reset(new AudioThread("AudioThread"));
-  CHECK(audio_thread_->Start());
-}
-
 string16 AudioManagerBase::GetAudioInputDeviceModel() {
   return string16();
 }
 
 scoped_refptr<base::MessageLoopProxy> AudioManagerBase::GetMessageLoop() {
-  base::AutoLock lock(audio_thread_lock_);
-  return audio_thread_.get() ? audio_thread_->message_loop_proxy() : NULL;
+  return message_loop_;
 }
 
 AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
     const AudioParameters& params) {
+  // TODO(miu): Fix ~50 call points across several unit test modules to call
+  // this method on the audio thread, then uncomment the following:
+  // DCHECK(message_loop_->BelongsToCurrentThread());
+
   if (!params.IsValid()) {
     DLOG(ERROR) << "Audio parameters are invalid";
     return NULL;
@@ -111,13 +101,20 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
     return NULL;
   }
 
-  AudioOutputStream* stream = NULL;
-  if (params.format() == AudioParameters::AUDIO_MOCK) {
-    stream = FakeAudioOutputStream::MakeFakeStream(this, params);
-  } else if (params.format() == AudioParameters::AUDIO_PCM_LINEAR) {
-    stream = MakeLinearOutputStream(params);
-  } else if (params.format() == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
-    stream = MakeLowLatencyOutputStream(params);
+  AudioOutputStream* stream;
+  switch (params.format()) {
+    case AudioParameters::AUDIO_PCM_LINEAR:
+      stream = MakeLinearOutputStream(params);
+      break;
+    case AudioParameters::AUDIO_PCM_LOW_LATENCY:
+      stream = MakeLowLatencyOutputStream(params);
+      break;
+    case AudioParameters::AUDIO_FAKE:
+      stream = FakeAudioOutputStream::MakeFakeStream(this, params);
+      break;
+    default:
+      stream = NULL;
+      break;
   }
 
   if (stream)
@@ -128,6 +125,10 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
 
 AudioInputStream* AudioManagerBase::MakeAudioInputStream(
     const AudioParameters& params, const std::string& device_id) {
+  // TODO(miu): Fix ~20 call points across several unit test modules to call
+  // this method on the audio thread, then uncomment the following:
+  // DCHECK(message_loop_->BelongsToCurrentThread());
+
   if (!params.IsValid() || (params.channels() > kMaxInputChannels) ||
       device_id.empty()) {
     DLOG(ERROR) << "Audio parameters are invalid for device " << device_id;
@@ -141,13 +142,20 @@ AudioInputStream* AudioManagerBase::MakeAudioInputStream(
     return NULL;
   }
 
-  AudioInputStream* stream = NULL;
-  if (params.format() == AudioParameters::AUDIO_MOCK) {
-    stream = FakeAudioInputStream::MakeFakeStream(this, params);
-  } else if (params.format() == AudioParameters::AUDIO_PCM_LINEAR) {
-    stream = MakeLinearInputStream(params, device_id);
-  } else if (params.format() == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
-    stream = MakeLowLatencyInputStream(params, device_id);
+  AudioInputStream* stream;
+  switch (params.format()) {
+    case AudioParameters::AUDIO_PCM_LINEAR:
+      stream = MakeLinearInputStream(params, device_id);
+      break;
+    case AudioParameters::AUDIO_PCM_LOW_LATENCY:
+      stream = MakeLowLatencyInputStream(params, device_id);
+      break;
+    case AudioParameters::AUDIO_FAKE:
+      stream = FakeAudioInputStream::MakeFakeStream(this, params);
+      break;
+    default:
+      stream = NULL;
+      break;
   }
 
   if (stream)
@@ -163,46 +171,62 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
   NOTIMPLEMENTED();
   return NULL;
 #else
-  DCHECK(GetMessageLoop()->BelongsToCurrentThread());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
-  AudioOutputDispatchersMap::iterator it = output_dispatchers_.find(params);
+  bool use_audio_output_resampler =
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableAudioOutputResampler) &&
+      params.format() == AudioParameters::AUDIO_PCM_LOW_LATENCY;
+
+  // If we're not using AudioOutputResampler our output parameters are the same
+  // as our input parameters.
+  AudioParameters output_params = params;
+  if (use_audio_output_resampler) {
+    output_params = GetPreferredLowLatencyOutputStreamParameters(params);
+
+    // Ensure we only pass on valid output parameters.
+    if (!output_params.IsValid()) {
+      // We've received invalid audio output parameters, so switch to a mock
+      // output device based on the input parameters.  This may happen if the OS
+      // provided us junk values for the hardware configuration.
+      LOG(ERROR) << "Invalid audio output parameters received; using fake "
+                 << "audio path. Channels: " << output_params.channels() << ", "
+                 << "Sample Rate: " << output_params.sample_rate() << ", "
+                 << "Bits Per Sample: " << output_params.bits_per_sample()
+                 << ", Frames Per Buffer: "
+                 << output_params.frames_per_buffer();
+
+      // Tell the AudioManager to create a fake output device.
+      output_params = AudioParameters(
+          AudioParameters::AUDIO_FAKE, params.channel_layout(),
+          params.sample_rate(), params.bits_per_sample(),
+          params.frames_per_buffer());
+    }
+  }
+
+  std::pair<AudioParameters, AudioParameters> dispatcher_key =
+      std::make_pair(params, output_params);
+  AudioOutputDispatchersMap::iterator it =
+      output_dispatchers_.find(dispatcher_key);
   if (it != output_dispatchers_.end())
     return new AudioOutputProxy(it->second);
 
   base::TimeDelta close_delay =
       base::TimeDelta::FromSeconds(kStreamCloseDelaySeconds);
 
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  if (!cmd_line->HasSwitch(switches::kDisableAudioOutputResampler) &&
-      params.format() == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
-    scoped_refptr<AudioOutputDispatcher> dispatcher = new AudioOutputResampler(
-        this, params, GetPreferredLowLatencyOutputStreamParameters(params),
-        close_delay);
-    output_dispatchers_[params] = dispatcher;
-    return new AudioOutputProxy(dispatcher);
-  }
-
-#if defined(ENABLE_AUDIO_MIXER)
-  // TODO(dalecurtis): Browser side mixing has a couple issues that must be
-  // fixed before it can be turned on by default: http://crbug.com/138098 and
-  // http://crbug.com/140247
-  if (cmd_line->HasSwitch(switches::kEnableAudioMixer)) {
+  if (use_audio_output_resampler &&
+      output_params.format() != AudioParameters::AUDIO_FAKE) {
     scoped_refptr<AudioOutputDispatcher> dispatcher =
-        new AudioOutputMixer(this, params, close_delay);
-    output_dispatchers_[params] = dispatcher;
+        new AudioOutputResampler(this, params, output_params, close_delay);
+    output_dispatchers_[dispatcher_key] = dispatcher;
     return new AudioOutputProxy(dispatcher);
   }
-#endif
 
   scoped_refptr<AudioOutputDispatcher> dispatcher =
-      new AudioOutputDispatcherImpl(this, params, close_delay);
-  output_dispatchers_[params] = dispatcher;
+      new AudioOutputDispatcherImpl(this, output_params, close_delay);
+  output_dispatchers_[dispatcher_key] = dispatcher;
   return new AudioOutputProxy(dispatcher);
 #endif  // defined(OS_IOS)
-}
-
-bool AudioManagerBase::CanShowAudioInputSettings() {
-  return false;
 }
 
 void AudioManagerBase::ShowAudioInputSettings() {
@@ -217,14 +241,14 @@ void AudioManagerBase::ReleaseOutputStream(AudioOutputStream* stream) {
   // TODO(xians) : Have a clearer destruction path for the AudioOutputStream.
   // For example, pass the ownership to AudioManager so it can delete the
   // streams.
-  num_output_streams_--;
+  --num_output_streams_;
   delete stream;
 }
 
 void AudioManagerBase::ReleaseInputStream(AudioInputStream* stream) {
   DCHECK(stream);
   // TODO(xians) : Have a clearer destruction path for the AudioInputStream.
-  num_input_streams_--;
+  --num_input_streams_;
   delete stream;
 }
 
@@ -244,7 +268,7 @@ bool AudioManagerBase::IsRecordingInProcess() {
 void AudioManagerBase::Shutdown() {
   // To avoid running into deadlocks while we stop the thread, shut it down
   // via a local variable while not holding the audio thread lock.
-  scoped_ptr<AudioThread> audio_thread;
+  scoped_ptr<base::Thread> audio_thread;
   {
     base::AutoLock lock(audio_thread_lock_);
     audio_thread_.swap(audio_thread);
@@ -303,9 +327,28 @@ AudioParameters AudioManagerBase::GetPreferredLowLatencyOutputStreamParameters(
   // TODO(dalecurtis): This should include bits per channel and channel layout
   // eventually.
   return AudioParameters(
-      AudioParameters::AUDIO_PCM_LOW_LATENCY, input_params.channel_layout(),
+      AudioParameters::AUDIO_PCM_LOW_LATENCY,
+      input_params.channel_layout(), input_params.input_channels(),
       GetAudioHardwareSampleRate(), 16, GetAudioHardwareBufferSize());
 #endif  // defined(OS_IOS)
+}
+
+void AudioManagerBase::AddOutputDeviceChangeListener(
+    AudioDeviceListener* listener) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  output_listeners_.AddObserver(listener);
+}
+
+void AudioManagerBase::RemoveOutputDeviceChangeListener(
+    AudioDeviceListener* listener) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  output_listeners_.RemoveObserver(listener);
+}
+
+void AudioManagerBase::NotifyAllOutputDeviceChangeListeners() {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  DVLOG(1) << "Firing OnDeviceChange() notifications.";
+  FOR_EACH_OBSERVER(AudioDeviceListener, output_listeners_, OnDeviceChange());
 }
 
 }  // namespace media

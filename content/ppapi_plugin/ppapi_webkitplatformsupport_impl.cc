@@ -12,19 +12,19 @@
 #include "build/build_config.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/child_thread.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "ppapi/proxy/plugin_globals.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/win/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/win/WebSandboxSupport.h"
 #elif defined(OS_MACOSX)
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/mac/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/mac/WebSandboxSupport.h"
 #elif defined(OS_POSIX)
 #if !defined(OS_ANDROID)
 #include "content/common/child_process_sandbox_support_impl_linux.h"
 #endif
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebFontFamily.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/linux/WebFontFamily.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/linux/WebSandboxSupport.h"
 
 #endif
 
@@ -34,7 +34,10 @@ using WebKit::WebUChar;
 
 typedef struct CGFont* CGFontRef;
 
-class PpapiWebKitPlatformSupportImpl::SandboxSupport : public WebSandboxSupport {
+namespace content {
+
+class PpapiWebKitPlatformSupportImpl::SandboxSupport
+    : public WebSandboxSupport {
  public:
   virtual ~SandboxSupport() {}
 
@@ -69,7 +72,9 @@ bool PpapiWebKitPlatformSupportImpl::SandboxSupport::ensureFontLoaded(
   LOGFONT logfont;
   GetObject(font, sizeof(LOGFONT), &logfont);
 
-  return ChildThread::current()->Send(
+  // Use the proxy sender rather than going directly to the ChildThread since
+  // the proxy browser sender will properly unlock during sync messages.
+  return ppapi::proxy::PluginGlobals::Get()->GetBrowserSender()->Send(
       new ChildProcessHostMsg_PreCacheFont(logfont));
 }
 
@@ -81,6 +86,7 @@ bool PpapiWebKitPlatformSupportImpl::SandboxSupport::loadFont(
     uint32_t* font_id) {
   // TODO(brettw) this should do the something similar to what
   // RendererWebKitClientImpl does and request that the browser load the font.
+  // Note: need to unlock the proxy lock like ensureFontLoaded does.
   NOTIMPLEMENTED();
   return false;
 }
@@ -122,7 +128,7 @@ PpapiWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
     return;
   }
 
-  content::GetFontFamilyForCharacters(
+  GetFontFamilyForCharacters(
       characters,
       num_characters,
       preferred_locale,
@@ -132,7 +138,7 @@ PpapiWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
 
 void PpapiWebKitPlatformSupportImpl::SandboxSupport::getRenderStyleForStrike(
     const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out) {
-  content::GetRenderStyleForStrike(family, sizeAndStyle, out);
+  GetRenderStyleForStrike(family, sizeAndStyle, out);
 }
 
 #endif
@@ -174,7 +180,8 @@ unsigned long long PpapiWebKitPlatformSupportImpl::visitedLinkHash(
   return 0;
 }
 
-bool PpapiWebKitPlatformSupportImpl::isLinkVisited(unsigned long long link_hash) {
+bool PpapiWebKitPlatformSupportImpl::isLinkVisited(
+    unsigned long long link_hash) {
   NOTREACHED();
   return false;
 }
@@ -199,7 +206,8 @@ WebKit::WebString PpapiWebKitPlatformSupportImpl::cookies(
   return WebKit::WebString();
 }
 
-void PpapiWebKitPlatformSupportImpl::prefetchHostName(const WebKit::WebString&) {
+void PpapiWebKitPlatformSupportImpl::prefetchHostName(
+    const WebKit::WebString&) {
   NOTREACHED();
 }
 
@@ -248,14 +256,10 @@ void PpapiWebKitPlatformSupportImpl::dispatchStorageEvent(
   NOTREACHED();
 }
 
-WebKit::WebSharedWorkerRepository*
-PpapiWebKitPlatformSupportImpl::sharedWorkerRepository() {
-  NOTREACHED();
-  return NULL;
-}
-
 int PpapiWebKitPlatformSupportImpl::databaseDeleteFile(
     const WebKit::WebString& vfs_file_name, bool sync_dir) {
   NOTREACHED();
   return 0;
 }
+
+}  // namespace content

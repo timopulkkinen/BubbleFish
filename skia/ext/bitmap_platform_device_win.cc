@@ -6,12 +6,83 @@
 #include <psapi.h>
 
 #include "skia/ext/bitmap_platform_device_win.h"
-
 #include "skia/ext/bitmap_platform_device_data.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkUtils.h"
+
+namespace {
+
+// PlatformBitmapPixelRef is an SkPixelRef that, on Windows, is backed by an
+// HBITMAP.
+class SK_API PlatformBitmapPixelRef : public SkPixelRef {
+ public:
+  PlatformBitmapPixelRef(HBITMAP bitmap_handle, void* pixels);
+  virtual ~PlatformBitmapPixelRef();
+
+  SK_DECLARE_UNFLATTENABLE_OBJECT();
+
+ protected:
+  virtual void* onLockPixels(SkColorTable**) SK_OVERRIDE;
+  virtual void onUnlockPixels() SK_OVERRIDE;
+
+ private:
+  HBITMAP bitmap_handle_;
+  void* pixels_;
+};
+
+HBITMAP CreateHBitmap(int width, int height, bool is_opaque,
+                             HANDLE shared_section, void** data) {
+  // CreateDIBSection appears to get unhappy if we create an empty bitmap, so
+  // just create a minimal bitmap
+  if ((width == 0) || (height == 0)) {
+    width = 1;
+    height = 1;
+  }
+
+  BITMAPINFOHEADER hdr = {0};
+  hdr.biSize = sizeof(BITMAPINFOHEADER);
+  hdr.biWidth = width;
+  hdr.biHeight = -height;  // minus means top-down bitmap
+  hdr.biPlanes = 1;
+  hdr.biBitCount = 32;
+  hdr.biCompression = BI_RGB;  // no compression
+  hdr.biSizeImage = 0;
+  hdr.biXPelsPerMeter = 1;
+  hdr.biYPelsPerMeter = 1;
+  hdr.biClrUsed = 0;
+  hdr.biClrImportant = 0;
+
+  HBITMAP hbitmap = CreateDIBSection(NULL, reinterpret_cast<BITMAPINFO*>(&hdr),
+                                     0, data, shared_section, 0);
+  return hbitmap;
+}
+
+PlatformBitmapPixelRef::PlatformBitmapPixelRef(HBITMAP bitmap_handle,
+                                               void* pixels)
+    : bitmap_handle_(bitmap_handle),
+      pixels_(pixels) {
+  setPreLocked(pixels, NULL);
+}
+
+PlatformBitmapPixelRef::~PlatformBitmapPixelRef() {
+  if (bitmap_handle_)
+    DeleteObject(bitmap_handle_);
+}
+
+void* PlatformBitmapPixelRef::onLockPixels(SkColorTable** color_table) {
+  *color_table = NULL;
+  return pixels_;
+}
+
+void PlatformBitmapPixelRef::onUnlockPixels() {
+  // Nothing to do.
+  return;
+}
+
+}  // namespace
 
 namespace skia {
 
@@ -92,36 +163,14 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(
     int height,
     bool is_opaque,
     HANDLE shared_section) {
-  SkBitmap bitmap;
 
-  // CreateDIBSection appears to get unhappy if we create an empty bitmap, so
-  // just create a minimal bitmap
-  if ((width == 0) || (height == 0)) {
-    width = 1;
-    height = 1;
-  }
-
-  BITMAPINFOHEADER hdr = {0};
-  hdr.biSize = sizeof(BITMAPINFOHEADER);
-  hdr.biWidth = width;
-  hdr.biHeight = -height;  // minus means top-down bitmap
-  hdr.biPlanes = 1;
-  hdr.biBitCount = 32;
-  hdr.biCompression = BI_RGB;  // no compression
-  hdr.biSizeImage = 0;
-  hdr.biXPelsPerMeter = 1;
-  hdr.biYPelsPerMeter = 1;
-  hdr.biClrUsed = 0;
-  hdr.biClrImportant = 0;
-
-  void* data = NULL;
-  HBITMAP hbitmap = CreateDIBSection(NULL,
-                                     reinterpret_cast<BITMAPINFO*>(&hdr), 0,
-                                     &data,
-                                     shared_section, 0);
+  void* data;
+  HBITMAP hbitmap = CreateHBitmap(width, height, is_opaque, shared_section,
+                                  &data);
   if (!hbitmap)
     return NULL;
 
+  SkBitmap bitmap;
   bitmap.setConfig(SkBitmap::kARGB_8888_Config, width, height);
   bitmap.setPixels(data);
   bitmap.setIsOpaque(is_opaque);
@@ -136,8 +185,8 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(
 
   // The device object will take ownership of the HBITMAP. The initial refcount
   // of the data object will be 1, which is what the constructor expects.
-  return new BitmapPlatformDevice(new BitmapPlatformDeviceData(hbitmap),
-                                  bitmap);
+  return new BitmapPlatformDevice(
+      skia::AdoptRef(new BitmapPlatformDeviceData(hbitmap)), bitmap);
 }
 
 // static
@@ -160,7 +209,7 @@ BitmapPlatformDevice* BitmapPlatformDevice::CreateAndClear(int width,
 // The device will own the HBITMAP, which corresponds to also owning the pixel
 // data. Therefore, we do not transfer ownership to the SkDevice's bitmap.
 BitmapPlatformDevice::BitmapPlatformDevice(
-    BitmapPlatformDeviceData* data,
+    const skia::RefPtr<BitmapPlatformDeviceData>& data,
     const SkBitmap& bitmap)
     : SkDevice(bitmap),
       data_(data) {
@@ -171,7 +220,6 @@ BitmapPlatformDevice::BitmapPlatformDevice(
 
 BitmapPlatformDevice::~BitmapPlatformDevice() {
   SkASSERT(begin_paint_count_ == 0);
-  data_->unref();
 }
 
 HDC BitmapPlatformDevice::BeginPlatformPaint() {
@@ -254,12 +302,55 @@ const SkBitmap& BitmapPlatformDevice::onAccessBitmap(SkBitmap* bitmap) {
 }
 
 SkDevice* BitmapPlatformDevice::onCreateCompatibleDevice(
-    SkBitmap::Config config, int width, int height, bool isOpaque,
-    Usage /*usage*/) {
+    SkBitmap::Config config, int width, int height, bool isOpaque, Usage) {
   SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  SkDevice* bitmap_device = BitmapPlatformDevice::CreateAndClear(width, height,
-                                                                 isOpaque);
-  return bitmap_device;
+  return BitmapPlatformDevice::CreateAndClear(width, height, isOpaque);
+}
+
+// PlatformCanvas impl
+
+SkCanvas* CreatePlatformCanvas(int width,
+                               int height,
+                               bool is_opaque,
+                               HANDLE shared_section,
+                               OnFailureType failureType) {
+  skia::RefPtr<SkDevice> dev = skia::AdoptRef(
+      BitmapPlatformDevice::Create(width, height, is_opaque, shared_section));
+  return CreateCanvas(dev, failureType);
+}
+
+// Port of PlatformBitmap to win
+
+PlatformBitmap::~PlatformBitmap() {
+  if (surface_) {
+    if (platform_extra_)
+      SelectObject(surface_, reinterpret_cast<HGDIOBJ>(platform_extra_));
+    DeleteDC(surface_);
+  }
+}
+
+bool PlatformBitmap::Allocate(int width, int height, bool is_opaque) {
+  void* data;
+  HBITMAP hbitmap = CreateHBitmap(width, height, is_opaque, 0, &data);
+  if (!hbitmap)
+    return false;
+
+  surface_ = CreateCompatibleDC(NULL);
+  InitializeDC(surface_);
+  // When the memory DC is created, its display surface is exactly one
+  // monochrome pixel wide and one monochrome pixel high. Save this object
+  // off, we'll restore it just before deleting the memory DC.
+  HGDIOBJ stock_bitmap = SelectObject(surface_, hbitmap);
+  platform_extra_ = reinterpret_cast<intptr_t>(stock_bitmap);
+
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width, height);
+  // PlatformBitmapPixelRef takes ownership of |hbitmap|.
+  bitmap_.setPixelRef(
+      skia::AdoptRef(new PlatformBitmapPixelRef(hbitmap, data)).get());
+  bitmap_.setIsOpaque(is_opaque);
+  bitmap_.lockPixels();
+
+  return true;
 }
 
 }  // namespace skia

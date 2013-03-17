@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/gfx/screen.h"
+#include "ui/gfx/screen_win.h"
 
 #include <windows.h>
 
@@ -29,40 +29,53 @@ gfx::Display GetDisplay(MONITORINFO& monitor_info) {
 
 namespace gfx {
 
-// static
-bool Screen::IsDIPEnabled() {
-  return false;
+ScreenWin::ScreenWin() {
 }
 
-// static
-gfx::Point Screen::GetCursorScreenPoint() {
+ScreenWin::~ScreenWin() {
+}
+
+bool ScreenWin::IsDIPEnabled() {
+#if defined(ENABLE_HIDPI)
+  return true;
+#else
+  return false;
+#endif
+}
+
+gfx::Point ScreenWin::GetCursorScreenPoint() {
   POINT pt;
   GetCursorPos(&pt);
   return gfx::Point(pt);
 }
 
-// static
-gfx::NativeWindow Screen::GetWindowAtCursorScreenPoint() {
+gfx::NativeWindow ScreenWin::GetWindowAtCursorScreenPoint() {
   POINT location;
-  return GetCursorPos(&location) ? WindowFromPoint(location) : NULL;
+  HWND window_hwnd = GetCursorPos(&location) ? WindowFromPoint(location) : NULL;
+  return GetNativeWindowFromHWND(window_hwnd);
 }
 
-// static
-int Screen::GetNumDisplays() {
+int ScreenWin::GetNumDisplays() {
   return GetSystemMetrics(SM_CMONITORS);
 }
 
-// static
-gfx::Display Screen::GetDisplayNearestWindow(gfx::NativeView window) {
+gfx::Display ScreenWin::GetDisplayNearestWindow(gfx::NativeView window) const {
+  HWND window_hwnd = GetHWNDFromNativeView(window);
+  if (!window_hwnd) {
+    // When |window| isn't rooted to a display, we should just return the
+    // default display so we get some correct display information like the
+    // scaling factor.
+    return GetPrimaryDisplay();
+  }
+
   MONITORINFO monitor_info;
   monitor_info.cbSize = sizeof(monitor_info);
-  GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+  GetMonitorInfo(MonitorFromWindow(window_hwnd, MONITOR_DEFAULTTONEAREST),
                  &monitor_info);
   return GetDisplay(monitor_info);
 }
 
-// static
-gfx::Display Screen::GetDisplayNearestPoint(const gfx::Point& point) {
+gfx::Display ScreenWin::GetDisplayNearestPoint(const gfx::Point& point) const {
   POINT initial_loc = { point.x(), point.y() };
   HMONITOR monitor = MonitorFromPoint(initial_loc, MONITOR_DEFAULTTONEAREST);
   MONITORINFO mi = {0};
@@ -72,22 +85,56 @@ gfx::Display Screen::GetDisplayNearestPoint(const gfx::Point& point) {
   return gfx::Display();
 }
 
-// static
-gfx::Display Screen::GetDisplayMatching(const gfx::Rect& match_rect) {
+gfx::Display ScreenWin::GetDisplayMatching(const gfx::Rect& match_rect) const {
   RECT other_bounds_rect = match_rect.ToRECT();
   MONITORINFO monitor_info = GetMonitorInfoForMonitor(MonitorFromRect(
       &other_bounds_rect, MONITOR_DEFAULTTONEAREST));
   return GetDisplay(monitor_info);
 }
 
-// static
-gfx::Display Screen::GetPrimaryDisplay() {
+gfx::Display ScreenWin::GetPrimaryDisplay() const {
   MONITORINFO mi = GetMonitorInfoForMonitor(
       MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY));
   gfx::Display display = GetDisplay(mi);
+#if !defined(ENABLE_HIDPI)
+  // TODO(kevers|girard): Test if these checks can be reintroduced for high-DIP
+  // once more of the app is DIP-aware.
   DCHECK_EQ(GetSystemMetrics(SM_CXSCREEN), display.size().width());
   DCHECK_EQ(GetSystemMetrics(SM_CYSCREEN), display.size().height());
+#endif
   return display;
 }
+
+void ScreenWin::AddObserver(DisplayObserver* observer) {
+  // TODO(oshima): crbug.com/122863.
+}
+
+void ScreenWin::RemoveObserver(DisplayObserver* observer) {
+  // TODO(oshima): crbug.com/122863.
+}
+
+HWND ScreenWin::GetHWNDFromNativeView(NativeView window) const {
+#if defined(USE_AURA)
+  NOTREACHED();
+  return NULL;
+#else
+  return window;
+#endif  // USE_AURA
+}
+
+NativeWindow ScreenWin::GetNativeWindowFromHWND(HWND hwnd) const {
+#if defined(USE_AURA)
+  NOTREACHED();
+  return NULL;
+#else
+  return hwnd;
+#endif  // USE_AURA
+}
+
+#if !defined(USE_AURA)
+Screen* CreateNativeScreen() {
+  return new ScreenWin;
+}
+#endif  // !USE_AURA
 
 }  // namespace gfx

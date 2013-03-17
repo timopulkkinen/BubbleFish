@@ -5,7 +5,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "sql/connection.h"
 #include "sql/meta_table.h"
@@ -20,6 +20,9 @@ const base::Time kZeroTime;
 
 class TestErrorDelegate : public sql::ErrorDelegate {
  public:
+  TestErrorDelegate() {}
+  virtual ~TestErrorDelegate() {}
+
   virtual int OnError(int error,
                       sql::Connection* connection,
                       sql::Statement* stmt) OVERRIDE {
@@ -27,7 +30,7 @@ class TestErrorDelegate : public sql::ErrorDelegate {
   }
 
  private:
-  virtual ~TestErrorDelegate() {}
+  DISALLOW_COPY_AND_ASSIGN(TestErrorDelegate);
 };
 
 }  // namespace
@@ -38,7 +41,7 @@ class AppCacheDatabaseTest {};
 
 TEST(AppCacheDatabaseTest, LazyOpen) {
   // Use an empty file path to use an in-memory sqlite database.
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
 
   EXPECT_FALSE(db.LazyOpen(false));
@@ -60,11 +63,11 @@ TEST(AppCacheDatabaseTest, LazyOpen) {
 
 TEST(AppCacheDatabaseTest, ReCreate) {
   // Real files on disk for this test.
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  const FilePath kDbFile = temp_dir.path().AppendASCII("appcache.db");
-  const FilePath kNestedDir = temp_dir.path().AppendASCII("nested");
-  const FilePath kOtherFile =  kNestedDir.AppendASCII("other_file");
+  const base::FilePath kDbFile = temp_dir.path().AppendASCII("appcache.db");
+  const base::FilePath kNestedDir = temp_dir.path().AppendASCII("nested");
+  const base::FilePath kOtherFile =  kNestedDir.AppendASCII("other_file");
   EXPECT_TRUE(file_util::CreateDirectory(kNestedDir));
   EXPECT_EQ(3, file_util::WriteFile(kOtherFile, "foo", 3));
 
@@ -84,13 +87,12 @@ TEST(AppCacheDatabaseTest, ReCreate) {
 }
 
 TEST(AppCacheDatabaseTest, EntryRecords) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
   // Set an error delegate that will make all operations return false on error.
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   AppCacheDatabase::EntryRecord entry;
 
@@ -159,12 +161,11 @@ TEST(AppCacheDatabaseTest, EntryRecords) {
 }
 
 TEST(AppCacheDatabaseTest, CacheRecords) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   const AppCacheDatabase::CacheRecord kZeroRecord;
   AppCacheDatabase::CacheRecord record;
@@ -202,12 +203,11 @@ TEST(AppCacheDatabaseTest, CacheRecords) {
 }
 
 TEST(AppCacheDatabaseTest, GroupRecords) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   const GURL kManifestUrl("http://blah/manifest");
   const GURL kOrigin(kManifestUrl.GetOrigin());
@@ -330,12 +330,11 @@ TEST(AppCacheDatabaseTest, GroupRecords) {
 }
 
 TEST(AppCacheDatabaseTest, NamespaceRecords) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   const GURL kFooNameSpace1("http://foo/namespace1");
   const GURL kFooNameSpace2("http://foo/namespace2");
@@ -431,12 +430,11 @@ TEST(AppCacheDatabaseTest, NamespaceRecords) {
 }
 
 TEST(AppCacheDatabaseTest, OnlineWhiteListRecords) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   const GURL kFooNameSpace1("http://foo/namespace1");
   const GURL kFooNameSpace2("http://foo/namespace2");
@@ -478,12 +476,11 @@ TEST(AppCacheDatabaseTest, OnlineWhiteListRecords) {
 }
 
 TEST(AppCacheDatabaseTest, DeletableResponseIds) {
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   std::vector<int64> ids;
 
@@ -555,12 +552,11 @@ TEST(AppCacheDatabaseTest, OriginUsage) {
   const GURL kOtherOriginManifestUrl("http://other/manifest");
   const GURL kOtherOrigin(kOtherOriginManifestUrl.GetOrigin());
 
-  const FilePath kEmptyPath;
+  const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
 
-  scoped_refptr<TestErrorDelegate> error_delegate(new TestErrorDelegate);
-  db.db_->set_error_delegate(error_delegate);
+  db.db_->set_error_delegate(new TestErrorDelegate());
 
   std::vector<AppCacheDatabase::CacheRecord> cache_records;
   EXPECT_EQ(0, db.GetOriginUsage(kOrigin));
@@ -623,9 +619,9 @@ TEST(AppCacheDatabaseTest, OriginUsage) {
 
 TEST(AppCacheDatabaseTest, UpgradeSchema3to4) {
   // Real file on disk for this test.
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  const FilePath kDbFile = temp_dir.path().AppendASCII("upgrade.db");
+  const base::FilePath kDbFile = temp_dir.path().AppendASCII("upgrade.db");
 
   const GURL kMockOrigin("http://mockorigin/");
   const char kNamespaceUrlFormat[] = "namespace%d";

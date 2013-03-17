@@ -18,9 +18,7 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
-namespace skia {
-class PlatformCanvas;
-}
+class SkCanvas;
 
 // -----------------------------------------------------------------------------
 // A TransportDIB is a block of memory that is used to transport pixels
@@ -168,7 +166,7 @@ class SURFACE_EXPORT TransportDIB {
   //
   // Will return NULL on allocation failure. This could be because the image
   // is too large to map into the current process' address space.
-  skia::PlatformCanvas* GetPlatformCanvas(int w, int h);
+  SkCanvas* GetPlatformCanvas(int w, int h);
 
   // Map the DIB into the current process if it is not already. This is used to
   // map a DIB that has already been created. Returns true if the DIB is mapped.
@@ -194,6 +192,15 @@ class SURFACE_EXPORT TransportDIB {
   // Map the shared memory into the X server and return an id for the shared
   // segment.
   XID MapToX(Display* connection);
+
+  void IncreaseInFlightCounter() { inflight_counter_++; }
+  // Decreases the inflight counter, and deletes the transport DIB if it is
+  // detached.
+  void DecreaseInFlightCounter();
+
+  // Deletes this transport DIB and detaches the shared memory once the
+  // |inflight_counter_| is zero.
+  void Detach();
 #endif
 
  private:
@@ -207,6 +214,8 @@ class SURFACE_EXPORT TransportDIB {
   void* address_;  // mapped address
   XSharedMemoryId x_shm_;  // X id for the shared segment
   Display* display_;  // connection to the X server
+  size_t inflight_counter_;  // How many requests to the X server are in flight
+  bool detached_;  // If true, delete the transport DIB when it is idle
 #endif
   size_t size_;  // length, in bytes
 

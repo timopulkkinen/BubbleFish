@@ -53,9 +53,9 @@ bool TestNotifyPassFunction::RunImpl() {
   return true;
 }
 
-TestFailFunction::~TestFailFunction() {}
+TestNotifyFailFunction::~TestNotifyFailFunction() {}
 
-bool TestFailFunction::RunImpl() {
+bool TestNotifyFailFunction::RunImpl() {
   std::string message;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &message));
   content::NotificationService::current()->Notify(
@@ -90,7 +90,8 @@ TestCreateIncognitoTabFunction::
 bool TestCreateIncognitoTabFunction::RunImpl() {
   std::string url;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url));
-  chrome::OpenURLOffTheRecord(profile(), GURL(url));
+  chrome::OpenURLOffTheRecord(profile(), GURL(url),
+                              chrome::HOST_DESKTOP_TYPE_NATIVE);
   return true;
 }
 

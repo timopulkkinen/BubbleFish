@@ -4,21 +4,18 @@
 
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/geolocation/gps_location_provider_linux.h"
-#include "content/browser/geolocation/libgps_wrapper_linux.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/bind.h"
 
-using content::BrowserThread;
-using content::BrowserThreadImpl;
+namespace content {
 
-namespace {
 class MockLibGps : public LibGps {
  public:
   MockLibGps();
-  ~MockLibGps();
+  virtual ~MockLibGps();
 
-  virtual bool GetPositionIfFixed(content::Geoposition* position) {
+  virtual bool GetPositionIfFixed(Geoposition* position) OVERRIDE {
     CHECK(position);
     ++get_position_calls_;
     *position = get_position_;
@@ -47,14 +44,15 @@ class MockLibGps : public LibGps {
   int gps_open_ret_;
   int gps_read_calls_;
   int gps_read_ret_;
-  content::Geoposition get_position_;
+  Geoposition get_position_;
   static MockLibGps* g_instance_;
 };
 
 class LocaionProviderListenerLoopQuitter
     : public LocationProviderBase::ListenerInterface {
   // LocationProviderBase::ListenerInterface
-  virtual void LocationUpdateAvailable(LocationProviderBase* provider) {
+  virtual void LocationUpdateAvailable(
+      LocationProviderBase* provider) OVERRIDE {
     MessageLoop::current()->Quit();
   }
 };
@@ -62,7 +60,7 @@ class LocaionProviderListenerLoopQuitter
 class GeolocationGpsProviderLinuxTests : public testing::Test {
  public:
   GeolocationGpsProviderLinuxTests();
-  ~GeolocationGpsProviderLinuxTests();
+  virtual ~GeolocationGpsProviderLinuxTests();
 
   static LibGps* NewMockLibGps() {
     return new MockLibGps();
@@ -78,8 +76,8 @@ class GeolocationGpsProviderLinuxTests : public testing::Test {
   scoped_ptr<GpsLocationProviderLinux> provider_;
 };
 
-void CheckValidPosition(const content::Geoposition& expected,
-                        const content::Geoposition& actual) {
+void CheckValidPosition(const Geoposition& expected,
+                        const Geoposition& actual) {
   EXPECT_TRUE(actual.Validate());
   EXPECT_DOUBLE_EQ(expected.latitude, actual.latitude);
   EXPECT_DOUBLE_EQ(expected.longitude, actual.longitude);
@@ -89,17 +87,20 @@ void CheckValidPosition(const content::Geoposition& expected,
 MockLibGps* MockLibGps::g_instance_ = NULL;
 
 MockLibGps::MockLibGps()
-    : LibGps(NULL, gps_open_stub, gps_close_stub, gps_read_stub),
-      get_position_calls_(0),
+    : get_position_calls_(0),
       get_position_ret_(true),
       gps_open_calls_(0),
       gps_open_ret_(0),
       gps_read_calls_(0),
       gps_read_ret_(0) {
-  get_position_.error_code =
-      content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+  get_position_.error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
   EXPECT_FALSE(g_instance_);
   g_instance_ = this;
+#if defined(USE_LIBGPS)
+  libgps_loader_.gps_open = gps_open_stub;
+  libgps_loader_.gps_close = gps_close_stub;
+  libgps_loader_.gps_read = gps_read_stub;
+#endif  // defined(USE_LIBGPS)
 }
 
 MockLibGps::~MockLibGps() {
@@ -122,11 +123,10 @@ TEST_F(GeolocationGpsProviderLinuxTests, NoLibGpsInstalled) {
   ASSERT_TRUE(provider_.get());
   const bool ok = provider_->StartProvider(true);
   EXPECT_FALSE(ok);
-  content::Geoposition position;
+  Geoposition position;
   provider_->GetPosition(&position);
   EXPECT_FALSE(position.Validate());
-  EXPECT_EQ(content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE,
-            position.error_code);
+  EXPECT_EQ(Geoposition::ERROR_CODE_POSITION_UNAVAILABLE, position.error_code);
 }
 
 #if defined(OS_CHROMEOS)
@@ -139,13 +139,12 @@ TEST_F(GeolocationGpsProviderLinuxTests, GetPosition) {
   EXPECT_EQ(0, MockLibGps::g_instance_->get_position_calls_);
   EXPECT_EQ(0, MockLibGps::g_instance_->gps_open_calls_);
   EXPECT_EQ(0, MockLibGps::g_instance_->gps_read_calls_);
-  content::Geoposition position;
+  Geoposition position;
   provider_->GetPosition(&position);
   EXPECT_FALSE(position.Validate());
-  EXPECT_EQ(content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE,
-            position.error_code);
+  EXPECT_EQ(Geoposition::ERROR_CODE_POSITION_UNAVAILABLE, position.error_code);
   MockLibGps::g_instance_->get_position_.error_code =
-      content::Geoposition::ERROR_CODE_NONE;
+      Geoposition::ERROR_CODE_NONE;
   MockLibGps::g_instance_->get_position_.latitude = 4.5;
   MockLibGps::g_instance_->get_position_.longitude = -34.1;
   MockLibGps::g_instance_->get_position_.accuracy = 345;
@@ -184,9 +183,9 @@ TEST_F(GeolocationGpsProviderLinuxTests, LibGpsReconnect) {
   // Let gps_open() fails, and so will LibGps::Start().
   // Reconnect will happen in 1000ms.
   MockLibGps::g_instance_->gps_open_ret_ = 1;
-  content::Geoposition position;
+  Geoposition position;
   MockLibGps::g_instance_->get_position_.error_code =
-      content::Geoposition::ERROR_CODE_NONE;
+      Geoposition::ERROR_CODE_NONE;
   MockLibGps::g_instance_->get_position_.latitude = 4.5;
   MockLibGps::g_instance_->get_position_.longitude = -34.1;
   MockLibGps::g_instance_->get_position_.accuracy = 345;
@@ -210,4 +209,4 @@ TEST_F(GeolocationGpsProviderLinuxTests, LibGpsReconnect) {
 
 #endif  // #if defined(OS_CHROMEOS)
 
-}  // namespace
+}  // namespace content

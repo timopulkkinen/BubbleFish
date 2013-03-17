@@ -56,6 +56,18 @@ class JSChecker(object):
         "Use $('id'), from chrome://resources/js/util.js, instead of "
         "document.getElementById('id'))")
 
+  def InheritDocCheck(self, i, line):
+    """Checks for use of '@inheritDoc' instead of '@override'."""
+    return self.RegexCheck(i, line, r"\* (@inheritDoc)",
+        "@inheritDoc is deprecated, use @override instead.")
+
+  def WrapperTypeCheck(self, i, line):
+    """Check for wrappers (new String()) instead of builtins (string)."""
+    return self.RegexCheck(i, line,
+        r"(?:/\*)?\*.*?@(?:param|return|type) ?"     # /** @param/@return/@type
+        r"{[^}]*\b(String|Boolean|Number)\b[^}]*}",  # {(Boolean|Number|String)}
+        "Don't use wrapper types (i.e. new String() or @type {String}).")
+
   def error_highlight(self, start, length):
     """Takes a start position and a length, and produces a row of '^'s to
        highlight the corresponding part of a string.
@@ -73,9 +85,13 @@ class JSChecker(object):
     path = self.input_api.os_path
     resources = self.input_api.PresubmitLocalPath()
     dirs = (
+        path.join(resources, 'bookmark_manager'),
         path.join(resources, 'extensions'),
+        path.join(resources, 'file_manager'),
         path.join(resources, 'help'),
         path.join(resources, 'history'),
+        path.join(resources, 'memory_internals'),
+        path.join(resources, 'net_export'),
         path.join(resources, 'net_internals'),
         path.join(resources, 'network_action_predictor'),
         path.join(resources, 'ntp4'),
@@ -179,6 +195,7 @@ class JSChecker(object):
             self.ChromeSendCheck(i, line),
             self.ConstCheck(i, line),
             self.GetElementByIdCheck(i, line),
+            self.InheritDocCheck(i, line),
         ])
 
       # Use closure_linter to check for several different errors
@@ -211,6 +228,7 @@ class JSChecker(object):
           'See the JavaScript style guide at '
           'http://www.chromium.org/developers/web-development-style-guide'
           '#TOC-JavaScript and if you have any feedback about the JavaScript '
-          'PRESUBMIT check, contact tbreisacher@chromium.org'))
+          'PRESUBMIT check, contact tbreisacher@chromium.org or '
+          'dbeam@chromium.org'))
 
     return results

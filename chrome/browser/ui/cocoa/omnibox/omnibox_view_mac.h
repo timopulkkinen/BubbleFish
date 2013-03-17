@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 
-class OmniboxPopupViewMac;
+class OmniboxPopupView;
 
 namespace ui {
 class Clipboard;
@@ -48,9 +48,11 @@ class OmniboxViewMac : public OmniboxView,
   virtual void UpdatePopup() OVERRIDE;
   virtual void CloseOmniboxPopup() OVERRIDE;
   virtual void SetFocus() OVERRIDE;
+  virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
-      bool save_original_selection) OVERRIDE;
+      bool save_original_selection,
+      bool notify_text_changed) OVERRIDE;
   virtual bool OnInlineAutocompleteTextMaybeChanged(
       const string16& display_text, size_t user_text_length) OVERRIDE;
   virtual void OnStartingIME() OVERRIDE;
@@ -59,8 +61,7 @@ class OmniboxViewMac : public OmniboxView,
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
-  virtual void SetInstantSuggestion(const string16& input,
-                                    bool animate_to_complete) OVERRIDE;
+  virtual void SetInstantSuggestion(const string16& input) OVERRIDE;
   virtual string16 GetInstantSuggestion() const OVERRIDE;
   virtual int TextWidth() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
@@ -86,6 +87,7 @@ class OmniboxViewMac : public OmniboxView,
   virtual bool OnDoCommandBySelector(SEL cmd) OVERRIDE;
   virtual void OnSetFocus(bool control_down) OVERRIDE;
   virtual void OnKillFocus() OVERRIDE;
+  virtual void OnMouseDown(NSInteger button_number) OVERRIDE;
 
   // Helper for LocationBarViewMac.  Optionally selects all in |field_|.
   void FocusLocation(bool select_all);
@@ -97,6 +99,11 @@ class OmniboxViewMac : public OmniboxView,
   // If |resource_id| has a PDF image which can be used, return it.
   // Otherwise return the PNG image from the resource bundle.
   static NSImage* ImageForResource(int resource_id);
+
+  // Color used to draw suggest text.
+  static NSColor* SuggestTextColor();
+
+  AutocompleteTextField* field() const { return field_; }
 
  private:
   // Called when the user hits backspace in |field_|.  Checks whether
@@ -158,7 +165,7 @@ class OmniboxViewMac : public OmniboxView,
   // Returns true if the caret is at the end of the content.
   bool IsCaretAtEnd() const;
 
-  scoped_ptr<OmniboxPopupViewMac> popup_view_;
+  scoped_ptr<OmniboxPopupView> popup_view_;
 
   AutocompleteTextField* field_;  // owned by tab controller
 

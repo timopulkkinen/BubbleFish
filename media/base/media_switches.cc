@@ -6,6 +6,9 @@
 
 namespace switches {
 
+// Allow users to specify a custom buffer size for debugging purpose.
+const char kAudioBufferSize[] = "audio-buffer-size";
+
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_SOLARIS)
 // The Alsa device to use when opening an audio stream.
 const char kAlsaOutputDevice[] = "alsa-output-device";
@@ -38,6 +41,9 @@ const char kDisableAudioFallback[] = "disable-audio-fallback";
 // Disable AudioOutputResampler for automatic audio resampling and rebuffering.
 const char kDisableAudioOutputResampler[] = "disable-audio-output-resampler";
 
+// Controls renderer side mixing and low latency audio path for media elements.
+const char kDisableRendererSideMixing[] = "disable-renderer-side-mixing";
+
 // Enable browser-side audio mixer.
 const char kEnableAudioMixer[] = "enable-audio-mixer";
 
@@ -46,5 +52,18 @@ const char kEnableWebAudioInput[] = "enable-webaudio-input";
 
 // Set number of threads to use for video decoding.
 const char kVideoThreads[] = "video-threads";
+
+// Disables support for Encrypted Media Extensions.
+const char kDisableEncryptedMedia[] = "disable-encrypted-media";
+
+// Enables Opus playback in media elements.
+const char kEnableOpusPlayback[] = "enable-opus-playback";
+
+// Enables VP9 playback in media elements.
+const char kEnableVp9Playback[] = "enable-vp9-playback";
+
+#if defined(OS_WIN)
+const char kWaveOutBuffers[] = "waveout-buffers";
+#endif
 
 }  // namespace switches

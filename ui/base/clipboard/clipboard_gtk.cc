@@ -13,7 +13,7 @@
 #include <utility>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/utf_string_conversions.h"
@@ -23,6 +23,7 @@
 #include "ui/base/gtk/scoped_gobject.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/gtk_util.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -105,8 +106,10 @@ GdkFilterReturn SelectionChangeObserver::OnXEvent(GdkXEvent* xevent,
   return GDK_FILTER_CONTINUE;
 }
 
+const char kSourceTagType[] = "org.chromium.source-tag";
 const char kMimeTypeBitmap[] = "image/bmp";
 const char kMimeTypeMozillaURL[] = "text/x-moz-url";
+const char kMimeTypePepperCustomData[] = "chromium/x-pepper-custom-data";
 const char kMimeTypeWebkitSmartPaste[] = "chromium/x-webkit-paste";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
@@ -150,7 +153,7 @@ void GetData(GtkClipboard* clipboard,
 // GtkClipboardClearFunc callback.
 // We are guaranteed this will be called exactly once for each call to
 // gtk_clipboard_set_with_data.
-void ClearData(GtkClipboard* clipboard,
+void ClearData(GtkClipboard* /*clipboard*/,
                gpointer user_data) {
   Clipboard::TargetMap* map =
       reinterpret_cast<Clipboard::TargetMap*>(user_data);
@@ -172,34 +175,6 @@ void ClearData(GtkClipboard* clipboard,
   }
 
   delete map;
-}
-
-// Called on GdkPixbuf destruction; see WriteBitmap().
-void GdkPixbufFree(guchar* pixels, gpointer data) {
-  free(pixels);
-}
-
-// Makes a copy of |pixels| with the ordering changed from BGRA to RGBA.
-// The caller is responsible for free()ing the data. If |stride| is 0, it's
-// assumed to be 4 * |width|.
-uint8_t* BGRAToRGBA(const uint8_t* pixels, int width, int height, int stride) {
-  if (stride == 0)
-    stride = width * 4;
-
-  uint8_t* new_pixels = static_cast<uint8_t*>(malloc(height * stride));
-
-  // We have to copy the pixels and swap from BGRA to RGBA.
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      int idx = i * stride + j * 4;
-      new_pixels[idx] = pixels[idx + 2];
-      new_pixels[idx + 1] = pixels[idx + 1];
-      new_pixels[idx + 2] = pixels[idx];
-      new_pixels[idx + 3] = pixels[idx + 3];
-    }
-  }
-
-  return new_pixels;
 }
 
 }  // namespace
@@ -243,7 +218,9 @@ Clipboard::~Clipboard() {
   gtk_clipboard_store(clipboard_);
 }
 
-void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
+void Clipboard::WriteObjectsImpl(Buffer buffer,
+                                 const ObjectMap& objects,
+                                 SourceTag tag) {
   DCHECK(CalledOnValidThread());
   clipboard_data_ = new TargetMap();
 
@@ -251,17 +228,19 @@ void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
        iter != objects.end(); ++iter) {
     DispatchObject(static_cast<ObjectType>(iter->first), iter->second);
   }
-
+  WriteSourceTag(tag);
   SetGtkClipboard(buffer);
-}
 
-// When a URL is copied from a render view context menu (via "copy link
-// location", for example), we additionally stick it in the X clipboard. This
-// matches other linux browsers.
-void Clipboard::DidWriteURL(const std::string& utf8_text) {
-  DCHECK(CalledOnValidThread());
-  gtk_clipboard_set_text(primary_selection_, utf8_text.c_str(),
-                         utf8_text.length());
+  if (buffer == BUFFER_STANDARD) {
+    ObjectMap::const_iterator text_iter = objects.find(CBF_TEXT);
+    if (text_iter != objects.end()) {
+      // Copy text and SourceTag to the selection clipboard.
+      ObjectMap::const_iterator next_iter = text_iter;
+      WriteObjectsImpl(BUFFER_SELECTION,
+                       ObjectMap(text_iter, ++next_iter),
+                       tag);
+    }
+  }
 }
 
 // Take ownership of the GTK clipboard and inform it of the targets we support.
@@ -335,13 +314,13 @@ void Clipboard::WriteWebSmartPaste() {
 void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
   const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
 
-  guchar* data = BGRAToRGBA(reinterpret_cast<const uint8_t*>(pixel_data),
-                            size->width(), size->height(), 0);
+  // Adopt the pixels into a SkBitmap. Note that the pixel order in memory is
+  // actually BGRA.
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, size->width(), size->height());
+  bitmap.setPixels(const_cast<char*>(pixel_data));
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bitmap);
 
-  GdkPixbuf* pixbuf =
-      gdk_pixbuf_new_from_data(data, GDK_COLORSPACE_RGB, TRUE,
-                               8, size->width(), size->height(),
-                               size->width() * 4, GdkPixbufFree, NULL);
   // We store the GdkPixbuf*, and the size_t half of the pair is meaningless.
   // Note that this contrasts with the vast majority of entries in our target
   // map, which directly store the data and its length.
@@ -353,7 +332,10 @@ void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
   // Write as a mozilla url (UTF16: URL, newline, title).
   string16 url = UTF8ToUTF16(std::string(url_data, url_len) + "\n");
   string16 title = UTF8ToUTF16(std::string(title_data, title_len));
-  int data_len = 2 * (title.length() + url.length());
+  if (title.length() >= std::numeric_limits<size_t>::max() / 4 ||
+      url.length() >= std::numeric_limits<size_t>::max() / 4)
+    return;
+  size_t data_len = 2 * (title.length() + url.length());
 
   char* data = new char[data_len];
   memcpy(data, url.data(), 2 * url.length());
@@ -372,6 +354,13 @@ void Clipboard::WriteData(const FormatType& format,
   memcpy(data, data_data, data_len);
   // TODO(dcheng): Maybe this map should use GdkAtoms...
   InsertMapping(GdkAtomToString(format.ToGdkAtom()).c_str(), data, data_len);
+}
+
+void Clipboard::WriteSourceTag(SourceTag tag) {
+  if (tag != SourceTag()) {
+    ObjectMapParam binary = SourceTag2Binary(tag);
+    WriteData(GetSourceTagFormatType(), &binary[0], binary.size());
+  }
 }
 
 // We do not use gtk_clipboard_wait_is_target_available because of
@@ -474,6 +463,7 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
 
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK(CalledOnValidThread());
+  ReportAction(buffer, READ_TEXT);
   GtkClipboard* clipboard = LookupBackingClipboard(buffer);
   if (clipboard == NULL)
     return;
@@ -492,6 +482,7 @@ void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
 void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
                               std::string* result) const {
   DCHECK(CalledOnValidThread());
+  ReportAction(buffer, READ_TEXT);
   GtkClipboard* clipboard = LookupBackingClipboard(buffer);
   if (clipboard == NULL)
     return;
@@ -553,6 +544,7 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
 
 void Clipboard::ReadRTF(Buffer buffer, std::string* result) const {
   DCHECK(CalledOnValidThread());
+  ReportAction(buffer, READ_TEXT);
   ReadData(GetRtfFormatType(), result);
 }
 
@@ -600,15 +592,29 @@ void Clipboard::ReadBookmark(string16* title, std::string* url) const {
 }
 
 void Clipboard::ReadData(const FormatType& format, std::string* result) const {
+  ReadDataImpl(BUFFER_STANDARD, format, result);
+}
+
+void Clipboard::ReadDataImpl(Buffer buffer,
+                             const FormatType& format,
+                             std::string* result) const {
   DCHECK(CalledOnValidThread());
+  result->clear();
+  GtkClipboard* clipboard = LookupBackingClipboard(buffer);
   GtkSelectionData* data =
-      gtk_clipboard_wait_for_contents(clipboard_, format.ToGdkAtom());
+      gtk_clipboard_wait_for_contents(clipboard, format.ToGdkAtom());
   if (!data)
     return;
   result->assign(reinterpret_cast<const char*>(
                      gtk_selection_data_get_data(data)),
                  gtk_selection_data_get_length(data));
   gtk_selection_data_free(data);
+}
+
+Clipboard::SourceTag Clipboard::ReadSourceTag(Buffer buffer) const {
+  std::string result;
+  ReadDataImpl(buffer, GetSourceTagFormatType(), &result);
+  return Binary2SourceTag(result);
 }
 
 uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
@@ -674,6 +680,18 @@ const Clipboard::FormatType& Clipboard::GetWebKitSmartPasteFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
   CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeWebCustomData));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypePepperCustomData));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetSourceTagFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kSourceTagType));
   return type;
 }
 

@@ -8,31 +8,42 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 class GURL;
 
 namespace content {
 
-class WebContents;
+class RenderViewHost;
 
 class DevToolsHttpHandlerDelegate {
  public:
+  enum TargetType {
+    kTargetTypeTab = 0,
+    kTargetTypeOther,
+  };
+
   virtual ~DevToolsHttpHandlerDelegate() {}
 
   // Should return discovery page HTML that should list available tabs
-  // and provide attach links. Called on the IO thread.
+  // and provide attach links.
   virtual std::string GetDiscoveryPageHTML() = 0;
 
   // Returns true if and only if frontend resources are bundled.
   virtual bool BundlesFrontendResources() = 0;
 
   // Returns path to the front-end files on the local filesystem for debugging.
-  virtual FilePath GetDebugFrontendDir() = 0;
+  virtual base::FilePath GetDebugFrontendDir() = 0;
 
   // Get a thumbnail for a given page. Returns non-empty string iff we have the
   // thumbnail.
   virtual std::string GetPageThumbnailData(const GURL& url) = 0;
+
+  // Creates new inspectable target and returns its render view host.
+  virtual RenderViewHost* CreateNewTarget() = 0;
+
+  // Returns the type of the target.
+  virtual TargetType GetTargetType(RenderViewHost*) = 0;
 };
 
 }  // namespace content

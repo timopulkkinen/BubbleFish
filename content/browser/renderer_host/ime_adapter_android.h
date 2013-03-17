@@ -36,10 +36,9 @@ class ImeAdapterAndroid {
                              int native_key_code,
                              int unicode_char);
   void SetComposingText(JNIEnv*, jobject, jstring text, int new_cursor_pos);
+  void ImeBatchStateChanged(JNIEnv*, jobject, jboolean is_begin);
   void CommitText(JNIEnv*, jobject, jstring text);
   void AttachImeAdapter(JNIEnv*, jobject java_object);
-  void ReplaceText(JNIEnv*, jobject, jstring text);
-  void ClearFocus(JNIEnv*, jobject);
   void SetEditableSelectionOffsets(JNIEnv*, jobject, int start, int end);
   void SetComposingRegion(JNIEnv*, jobject, int start, int end);
   void DeleteSurroundingText(JNIEnv*, jobject, int before, int after);

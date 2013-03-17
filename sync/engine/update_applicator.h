@@ -17,12 +17,12 @@
 #include "base/port.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/syncable/syncable_id.h"
+#include "sync/sessions/status_controller.h"
 
 namespace syncer {
 
 namespace sessions {
-class ConflictProgress;
-class UpdateProgress;
+class StatusController;
 }
 
 namespace syncable {
@@ -35,8 +35,6 @@ class Cryptographer;
 
 class UpdateApplicator {
  public:
-  typedef std::vector<int64>::iterator UpdateIterator;
-
   UpdateApplicator(Cryptographer* cryptographer,
                    const ModelSafeRoutingInfo& routes,
                    ModelSafeGroup group_filter);
@@ -46,38 +44,23 @@ class UpdateApplicator {
   void AttemptApplications(syncable::WriteTransaction* trans,
                            const std::vector<int64>& handles);
 
-  // This class does not automatically save its progress into the
-  // SyncSession -- to get that to happen, call this method after update
-  // application is finished (i.e., when AttemptOneAllocation stops returning
-  // true).
-  void SaveProgressIntoSessionState(
-      sessions::ConflictProgress* conflict_progress,
-      sessions::UpdateProgress* update_progress);
+  int updates_applied() {
+    return updates_applied_;
+  }
+
+  int encryption_conflicts() {
+    return encryption_conflicts_;
+  }
+
+  int hierarchy_conflicts() {
+    return hierarchy_conflicts_;
+  }
+
+  const std::set<syncable::Id>& simple_conflict_ids() {
+    return simple_conflict_ids_;
+  }
 
  private:
-  // Track the status of all applications.
-  class ResultTracker {
-   public:
-     explicit ResultTracker();
-     virtual ~ResultTracker();
-     void AddSimpleConflict(syncable::Id);
-     void AddEncryptionConflict(syncable::Id);
-     void AddHierarchyConflict(syncable::Id);
-     void AddSuccess(syncable::Id);
-     void SaveProgress(sessions::ConflictProgress* conflict_progress,
-                       sessions::UpdateProgress* update_progress);
-     void ClearHierarchyConflicts();
-
-     // Returns true iff conflicting_ids_ is empty. Does not check
-     // encryption_conflict_ids_.
-     bool no_conflicts() const;
-   private:
-    std::set<syncable::Id> conflicting_ids_;
-    std::set<syncable::Id> successful_ids_;
-    std::set<syncable::Id> encryption_conflict_ids_;
-    std::set<syncable::Id> hierarchy_conflict_ids_;
-  };
-
   // If true, AttemptOneApplication will skip over |entry| and return true.
   bool SkipUpdate(const syncable::Entry& entry);
 
@@ -88,10 +71,12 @@ class UpdateApplicator {
 
   const ModelSafeRoutingInfo routing_info_;
 
-  // Track the result of the attempts to update applications.
-  ResultTracker application_results_;
-
   DISALLOW_COPY_AND_ASSIGN(UpdateApplicator);
+
+  int updates_applied_;
+  int encryption_conflicts_;
+  int hierarchy_conflicts_;
+  std::set<syncable::Id> simple_conflict_ids_;
 };
 
 }  // namespace syncer

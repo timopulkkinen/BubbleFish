@@ -32,24 +32,25 @@ int32_t PepperPrintingHost::OnResourceMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(PepperPrintingHost, msg)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(
         PpapiHostMsg_Printing_GetDefaultPrintSettings,
-        OnMsgGetDefaultPrintSettings)
+        OnGetDefaultPrintSettings)
   IPC_END_MESSAGE_MAP()
   return PP_ERROR_FAILED;
 }
 
-int32_t PepperPrintingHost::OnMsgGetDefaultPrintSettings(
+int32_t PepperPrintingHost::OnGetDefaultPrintSettings(
     ppapi::host::HostMessageContext* context) {
   print_settings_manager_->GetDefaultPrintSettings(
       base::Bind(&PepperPrintingHost::PrintSettingsCallback,
-                 weak_factory_.GetWeakPtr(), context->MakeReplyParams()));
+                 weak_factory_.GetWeakPtr(),
+                 context->MakeReplyMessageContext()));
   return PP_OK_COMPLETIONPENDING;
 }
 
 void PepperPrintingHost::PrintSettingsCallback(
-    ppapi::proxy::ResourceMessageReplyParams reply_params,
+    ppapi::host::ReplyMessageContext reply_context,
     PepperPrintSettingsManager::Result result) {
-  reply_params.set_result(result.second);
-  host()->SendReply(reply_params,
+  reply_context.params.set_result(result.second);
+  host()->SendReply(reply_context,
       PpapiPluginMsg_Printing_GetDefaultPrintSettingsReply(result.first));
 }
 

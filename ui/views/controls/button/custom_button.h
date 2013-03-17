@@ -5,6 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/views/controls/button/button.h"
@@ -14,6 +15,8 @@ class ThrobAnimation;
 }
 
 namespace views {
+
+class CustomButtonStateChangedDelegate;
 
 // A button with custom rendering. The common base class of ImageButton and
 // TextButton.
@@ -27,15 +30,6 @@ class VIEWS_EXPORT CustomButton : public Button,
   static const char kViewClassName[];
 
   virtual ~CustomButton();
-
-  // Possible states
-  enum ButtonState {
-    BS_NORMAL = 0,
-    BS_HOT,
-    BS_PUSHED,
-    BS_DISABLED,
-    BS_COUNT
-  };
 
   // Get/sets the current display state of the button.
   ButtonState state() const { return state_; }
@@ -87,8 +81,7 @@ class VIEWS_EXPORT CustomButton : public Button,
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
@@ -97,6 +90,11 @@ class VIEWS_EXPORT CustomButton : public Button,
 
   // Overridden from ui::AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+
+  // Takes ownership of the delegate.
+  void set_state_changed_delegate(CustomButtonStateChangedDelegate* delegate) {
+    state_changed_delegate_.reset(delegate);
+  }
 
  protected:
   // Construct the Button with a Listener. See comment for Button's ctor.
@@ -142,7 +140,22 @@ class VIEWS_EXPORT CustomButton : public Button,
   // See description above setter.
   bool request_focus_on_press_;
 
+  scoped_ptr<CustomButtonStateChangedDelegate> state_changed_delegate_;
+
   DISALLOW_COPY_AND_ASSIGN(CustomButton);
+};
+
+// Delegate for actions taken on state changes by CustomButton.
+class VIEWS_EXPORT CustomButtonStateChangedDelegate {
+public:
+  virtual ~CustomButtonStateChangedDelegate() {}
+  virtual void StateChanged(Button::ButtonState state) = 0;
+
+protected:
+  CustomButtonStateChangedDelegate() {}
+
+private:
+  DISALLOW_COPY_AND_ASSIGN(CustomButtonStateChangedDelegate);
 };
 
 }  // namespace views

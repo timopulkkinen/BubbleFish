@@ -65,7 +65,17 @@ class VIEWS_EXPORT BubbleBorder : public Border {
     ALIGN_EDGE_TO_ANCHOR_EDGE
   };
 
-  BubbleBorder(ArrowLocation arrow_location, Shadow shadow);
+  // The way the arrow should be painted.
+  enum ArrowPaintType {
+    // Fully render the arrow.
+    PAINT_NORMAL,
+    // Leave space for the arrow, but do not paint it.
+    PAINT_TRANSPARENT,
+    // Neither paint nor leave space for the arrow.
+    PAINT_NONE,
+  };
+
+  BubbleBorder(ArrowLocation arrow, Shadow shadow, SkColor color);
 
   // Returns the radius of the corner of the border.
   // TODO(xiyuan): Get rid of this since it's part of BorderImages now?
@@ -130,6 +140,9 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   // location to make that happen.
   void set_arrow_offset(int offset) { override_arrow_offset_ = offset; }
 
+  // Sets the way the arrow is actually painted.  Default is PAINT_NORMAL.
+  void set_paint_arrow(ArrowPaintType value) { arrow_paint_type_ = value; }
+
   // For borders with an arrow, gives the desired bounds (in screen coordinates)
   // given the rect to point to and the size of the contained contents.  This
   // depends on the arrow location, so if you change that, you should call this
@@ -144,7 +157,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   int GetArrowOffset(const gfx::Size& border_size) const;
 
   // Overridden from Border:
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
 
   // How many pixels the bubble border is from the edge of the images.
   virtual int GetBorderThickness() const;
@@ -155,8 +168,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   // Calculates the insets for a specific arrow location. Normally called from
   // GetInsets(arrow_location()), but may be called by specialized BubbleBorder
   // implementations.
-  virtual void GetInsetsForArrowLocation(gfx::Insets* insets,
-                                         ArrowLocation arrow_loc) const;
+  virtual gfx::Insets GetInsetsForArrowLocation(ArrowLocation arrow_loc) const;
 
  private:
   struct BorderImages;
@@ -164,9 +176,10 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   // Loads images if necessary.
   static BorderImages* GetBorderImages(Shadow shadow);
 
+  int GetArrowSize() const;
+
   // Overridden from Border:
-  virtual void Paint(const View& view,
-                     gfx::Canvas* canvas) const OVERRIDE;
+  virtual void Paint(const View& view, gfx::Canvas* canvas) OVERRIDE;
 
   void DrawEdgeWithArrow(gfx::Canvas* canvas,
                          bool is_horizontal,
@@ -193,6 +206,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   int override_arrow_offset_;
 
   ArrowLocation arrow_location_;
+  ArrowPaintType arrow_paint_type_;
   BubbleAlignment alignment_;
   SkColor background_color_;
 

@@ -12,7 +12,7 @@
 #include "dbus/exported_object.h"
 
 namespace base {
-class MessageLoopProxy;
+class SequencedTaskRunner;
 }
 
 namespace dbus {
@@ -35,13 +35,13 @@ class TestService : public base::Thread {
     ~Options();
 
     // NULL by default (i.e. don't use the D-Bus thread).
-    scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy;
+    scoped_refptr<base::SequencedTaskRunner> dbus_task_runner;
   };
 
   // The number of methods we'll export.
   static const int kNumMethodsToExport;
 
-  TestService(const Options& options);
+  explicit TestService(const Options& options);
   virtual ~TestService();
 
   // Starts the service in a separate thread.
@@ -65,6 +65,14 @@ class TestService : public base::Thread {
   // This function emulates dbus-send's behavior.
   void SendTestSignalFromRoot(const std::string& message);
 
+  // Request the ownership of a well-known name "TestService".
+  // |callback| will be called with the result when an ownership request is
+  // completed.
+  void RequestOwnership(base::Callback<void(bool)> callback);
+
+  // Returns whether this instance has the name ownership or not.
+  bool has_ownership() const { return has_ownership_; }
+
  private:
   // Helper function for SendTestSignal().
   void SendTestSignalInternal(const std::string& message);
@@ -76,7 +84,12 @@ class TestService : public base::Thread {
   void ShutdownAndBlockInternal();
 
   // Called when an ownership request is completed.
-  void OnOwnership(const std::string& service_name,
+  // |callback| is the callback to be called with the result. |service_name| is
+  // the requested well-known bus name. |callback| and |service_name| are bound
+  // when the service requests the ownership. |success| is the result of the
+  // completed request, and is propagated to |callback|.
+  void OnOwnership(base::Callback<void(bool)> callback,
+                   const std::string& service_name,
                    bool success);
 
   // Called when a method is exported.
@@ -127,10 +140,16 @@ class TestService : public base::Thread {
   // Helper function for SendPropertyChangedSignal().
   void SendPropertyChangedSignalInternal(const std::string& name);
 
-  scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy_;
+  // Helper function for RequestOwnership().
+  void RequestOwnershipInternal(base::Callback<void(bool)> callback);
+
+  scoped_refptr<base::SequencedTaskRunner> dbus_task_runner_;
   base::WaitableEvent on_all_methods_exported_;
   // The number of methods actually exported.
   int num_exported_methods_;
+
+  // True iff this instance has successfully acquired the name ownership.
+  bool has_ownership_;
 
   scoped_refptr<Bus> bus_;
   ExportedObject* exported_object_;

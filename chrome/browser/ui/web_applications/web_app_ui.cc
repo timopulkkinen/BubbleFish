@@ -10,17 +10,25 @@
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "googleurl/src/gurl.h"
+#include "grit/theme_resources.h"
+#include "skia/ext/image_operations.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/environment.h"
@@ -37,6 +45,16 @@ using content::WebContents;
 
 namespace {
 
+#if defined(OS_MACOSX)
+const int kDesiredSizes[] = {16, 32, 128, 256, 512};
+#elif defined(OS_LINUX)
+// Linux supports icons of any size. FreeDesktop Icon Theme Specification states
+// that "Minimally you should install a 48x48 icon in the hicolor theme."
+const int kDesiredSizes[] = {16, 32, 48, 128, 256, 512};
+#else
+const int kDesiredSizes[] = {32};
+#endif
+
 #if defined(OS_WIN)
 // UpdateShortcutWorker holds all context data needed for update shortcut.
 // It schedules a pre-update check to find all shortcuts that needs to be
@@ -45,7 +63,7 @@ namespace {
 // and cancels all the work when the underlying tab is closing.
 class UpdateShortcutWorker : public content::NotificationObserver {
  public:
-  explicit UpdateShortcutWorker(TabContents* tab_contents);
+  explicit UpdateShortcutWorker(WebContents* web_contents);
 
   void Run();
 
@@ -55,11 +73,15 @@ class UpdateShortcutWorker : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details);
 
-  // Downloads icon via TabContents.
+  // Downloads icon via the FaviconTabHelper.
   void DownloadIcon();
 
-  // Callback when icon downloaded.
-  void OnIconDownloaded(int download_id, bool errored, const SkBitmap& image);
+  // Favicon download callback.
+  void DidDownloadFavicon(
+      int id,
+      const GURL& image_url,
+      int requested_size,
+      const std::vector<SkBitmap>& bitmaps);
 
   // Checks if shortcuts exists on desktop, start menu and quick launch.
   void CheckExistingShortcuts();
@@ -77,33 +99,34 @@ class UpdateShortcutWorker : public content::NotificationObserver {
 
   content::NotificationRegistrar registrar_;
 
-  // Underlying TabContents whose shortcuts will be updated.
-  TabContents* tab_contents_;
+  // Underlying WebContents whose shortcuts will be updated.
+  WebContents* web_contents_;
 
-  // Icons info from tab_contents_'s web app data.
+  // Icons info from web_contents_'s web app data.
   web_app::IconInfoList unprocessed_icons_;
 
-  // Cached shortcut data from the tab_contents_.
+  // Cached shortcut data from the web_contents_.
   ShellIntegration::ShortcutInfo shortcut_info_;
 
   // Our copy of profile path.
-  FilePath profile_path_;
+  base::FilePath profile_path_;
 
   // File name of shortcut/ico file based on app title.
-  FilePath file_name_;
+  base::FilePath file_name_;
 
   // Existing shortcuts.
-  std::vector<FilePath> shortcut_files_;
+  std::vector<base::FilePath> shortcut_files_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateShortcutWorker);
 };
 
-UpdateShortcutWorker::UpdateShortcutWorker(TabContents* tab_contents)
-    : tab_contents_(tab_contents),
-      profile_path_(tab_contents->profile()->GetPath()) {
+UpdateShortcutWorker::UpdateShortcutWorker(WebContents* web_contents)
+    : web_contents_(web_contents),
+      profile_path_(Profile::FromBrowserContext(
+          web_contents->GetBrowserContext())->GetPath()) {
   extensions::TabHelper* extensions_tab_helper =
-      extensions::TabHelper::FromWebContents(tab_contents->web_contents());
-  web_app::GetShortcutInfoForTab(tab_contents_, &shortcut_info_);
+      extensions::TabHelper::FromWebContents(web_contents);
+  web_app::GetShortcutInfoForTab(web_contents_, &shortcut_info_);
   web_app::GetIconsInfo(extensions_tab_helper->web_app_info(),
                         &unprocessed_icons_);
   file_name_ = web_app::internals::GetSanitizedFileName(shortcut_info_.title);
@@ -111,8 +134,7 @@ UpdateShortcutWorker::UpdateShortcutWorker(TabContents* tab_contents)
   registrar_.Add(
       this,
       chrome::NOTIFICATION_TAB_CLOSING,
-      content::Source<NavigationController>(
-          &tab_contents_->web_contents()->GetController()));
+      content::Source<NavigationController>(&web_contents->GetController()));
 }
 
 void UpdateShortcutWorker::Run() {
@@ -126,9 +148,9 @@ void UpdateShortcutWorker::Observe(
     const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_TAB_CLOSING &&
       content::Source<NavigationController>(source).ptr() ==
-        &tab_contents_->web_contents()->GetController()) {
+        &web_contents_->GetController()) {
     // Underlying tab is closing.
-    tab_contents_ = NULL;
+    web_contents_ = NULL;
   }
 }
 
@@ -137,7 +159,7 @@ void UpdateShortcutWorker::DownloadIcon() {
   // to download the icon.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (tab_contents_ == NULL) {
+  if (web_contents_ == NULL) {
     DeleteMe();  // We are done if underlying WebContents is gone.
     return;
   }
@@ -148,30 +170,35 @@ void UpdateShortcutWorker::DownloadIcon() {
     return;
   }
 
-  FaviconTabHelper::FromWebContents(tab_contents_->web_contents())->
-      DownloadImage(unprocessed_icons_.back().url,
-                    std::max(unprocessed_icons_.back().width,
-                             unprocessed_icons_.back().height),
-                    history::FAVICON,
-                    base::Bind(&UpdateShortcutWorker::OnIconDownloaded,
-                               base::Unretained(this)));
+  web_contents_->DownloadFavicon(
+      unprocessed_icons_.back().url,
+      std::max(unprocessed_icons_.back().width,
+               unprocessed_icons_.back().height),
+      base::Bind(&UpdateShortcutWorker::DidDownloadFavicon,
+                 base::Unretained(this)));
   unprocessed_icons_.pop_back();
 }
 
-void UpdateShortcutWorker::OnIconDownloaded(int download_id,
-                                            bool errored,
-                                            const SkBitmap& image) {
-  if (tab_contents_ == NULL) {
-    DeleteMe();  // We are done if underlying WebContents is gone.
-    return;
-  }
+void UpdateShortcutWorker::DidDownloadFavicon(
+    int id,
+    const GURL& image_url,
+    int requested_size,
+    const std::vector<SkBitmap>& bitmaps) {
+  std::vector<ui::ScaleFactor> scale_factors;
+  scale_factors.push_back(ui::SCALE_FACTOR_100P);
 
-  if (!errored && !image.isNull()) {
+  size_t closest_index =
+      FaviconUtil::SelectBestFaviconFromBitmaps(bitmaps,
+                                                scale_factors,
+                                                requested_size);
+
+  if (!bitmaps.empty() && !bitmaps[closest_index].isNull()) {
     // Update icon with download image and update shortcut.
-    shortcut_info_.favicon = gfx::Image(image);
+    shortcut_info_.favicon =
+        gfx::Image::CreateFrom1xBitmap(bitmaps[closest_index]);
     extensions::TabHelper* extensions_tab_helper =
-        extensions::TabHelper::FromWebContents(tab_contents_->web_contents());
-    extensions_tab_helper->SetAppIcon(image);
+        extensions::TabHelper::FromWebContents(web_contents_);
+    extensions_tab_helper->SetAppIcon(bitmaps[closest_index]);
     UpdateShortcuts();
   } else {
     // Try the next icon otherwise.
@@ -184,20 +211,16 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
 
   // Locations to check to shortcut_paths.
   struct {
-    bool& use_this_location;
     int location_id;
     const wchar_t* sub_dir;
   } locations[] = {
     {
-      shortcut_info_.create_on_desktop,
       base::DIR_USER_DESKTOP,
       NULL
     }, {
-      shortcut_info_.create_in_applications_menu,
       base::DIR_START_MENU,
       NULL
     }, {
-      shortcut_info_.create_in_quick_launch_bar,
       // For Win7, create_in_quick_launch_bar means pinning to taskbar.
       base::DIR_APP_DATA,
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
@@ -207,9 +230,7 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
   };
 
   for (int i = 0; i < arraysize(locations); ++i) {
-    locations[i].use_this_location = false;
-
-    FilePath path;
+    base::FilePath path;
     if (!PathService::Get(locations[i].location_id, &path)) {
       NOTREACHED();
       continue;
@@ -218,10 +239,9 @@ void UpdateShortcutWorker::CheckExistingShortcuts() {
     if (locations[i].sub_dir != NULL)
       path = path.Append(locations[i].sub_dir);
 
-    FilePath shortcut_file = path.Append(file_name_).
+    base::FilePath shortcut_file = path.Append(file_name_).
         ReplaceExtension(FILE_PATH_LITERAL(".lnk"));
     if (file_util::PathExists(shortcut_file)) {
-      locations[i].use_this_location = true;
       shortcut_files_.push_back(shortcut_file);
     }
   }
@@ -236,7 +256,7 @@ void UpdateShortcutWorker::UpdateShortcuts() {
 void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  FilePath web_app_path = web_app::GetWebAppDataDirectory(
+  base::FilePath web_app_path = web_app::GetWebAppDataDirectory(
       profile_path_, shortcut_info_.extension_id, shortcut_info_.url);
 
   // Ensure web_app_path exists. web_app_path could be missing for a legacy
@@ -247,7 +267,7 @@ void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
     return;
   }
 
-  FilePath icon_file = web_app_path.Append(file_name_).ReplaceExtension(
+  base::FilePath icon_file = web_app_path.Append(file_name_).ReplaceExtension(
       FILE_PATH_LITERAL(".ico"));
   web_app::internals::CheckAndSaveIcon(icon_file,
                                        *shortcut_info_.favicon.ToSkBitmap());
@@ -299,14 +319,40 @@ void UpdateShortcutWorker::DeleteMeOnUIThread() {
 }
 #endif  // defined(OS_WIN)
 
+void OnImageLoaded(ShellIntegration::ShortcutInfo shortcut_info,
+                   web_app::ShortcutInfoCallback callback,
+                   const gfx::Image& image) {
+  // If the image failed to load (e.g. if the resource being loaded was empty)
+  // use the standard application icon.
+  if (image.IsEmpty()) {
+    gfx::Image default_icon =
+        ResourceBundle::GetSharedInstance().GetImageNamed(IDR_APP_DEFAULT_ICON);
+    int size = kDesiredSizes[arraysize(kDesiredSizes) - 1];
+    SkBitmap bmp = skia::ImageOperations::Resize(
+          *default_icon.ToSkBitmap(), skia::ImageOperations::RESIZE_BEST,
+          size, size);
+    shortcut_info.favicon = gfx::Image::CreateFrom1xBitmap(bmp);
+  } else {
+    shortcut_info.favicon = image;
+  }
+
+  callback.Run(shortcut_info);
+}
+
 }  // namespace
 
 namespace web_app {
 
-void GetShortcutInfoForTab(TabContents* tab_contents,
+ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
+    const extensions::Extension* extension, Profile* profile) {
+  ShellIntegration::ShortcutInfo shortcut_info;
+  web_app::UpdateShortcutInfoForApp(*extension, profile, &shortcut_info);
+  return shortcut_info;
+}
+
+void GetShortcutInfoForTab(WebContents* web_contents,
                            ShellIntegration::ShortcutInfo* info) {
   DCHECK(info);  // Must provide a valid info.
-  const WebContents* web_contents = tab_contents->web_contents();
 
   const FaviconTabHelper* favicon_tab_helper =
       FaviconTabHelper::FromWebContents(web_contents);
@@ -323,15 +369,77 @@ void GetShortcutInfoForTab(TabContents* tab_contents,
   info->description = app_info.description;
   info->favicon = gfx::Image(favicon_tab_helper->GetFavicon());
 
-  info->profile_path = tab_contents->profile()->GetPath();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  info->profile_path = profile->GetPath();
 }
 
-void UpdateShortcutForTabContents(TabContents* tab_contents) {
+void UpdateShortcutForTabContents(WebContents* web_contents) {
 #if defined(OS_WIN)
   // UpdateShortcutWorker will delete itself when it's done.
-  UpdateShortcutWorker* worker = new UpdateShortcutWorker(tab_contents);
+  UpdateShortcutWorker* worker = new UpdateShortcutWorker(web_contents);
   worker->Run();
 #endif  // defined(OS_WIN)
+}
+
+void UpdateShortcutInfoForApp(const extensions::Extension& app,
+                              Profile* profile,
+                              ShellIntegration::ShortcutInfo* shortcut_info) {
+  shortcut_info->extension_id = app.id();
+  shortcut_info->is_platform_app = app.is_platform_app();
+  shortcut_info->url = GURL(app.launch_web_url());
+  shortcut_info->title = UTF8ToUTF16(app.name());
+  shortcut_info->description = UTF8ToUTF16(app.description());
+  shortcut_info->extension_path = app.path();
+  shortcut_info->profile_path = profile->GetPath();
+}
+
+void UpdateShortcutInfoAndIconForApp(
+    const extensions::Extension& extension,
+    Profile* profile,
+    const web_app::ShortcutInfoCallback& callback) {
+  ShellIntegration::ShortcutInfo shortcut_info =
+      ShortcutInfoForExtensionAndProfile(&extension, profile);
+
+  std::vector<extensions::ImageLoader::ImageRepresentation> info_list;
+  for (size_t i = 0; i < arraysize(kDesiredSizes); ++i) {
+    int size = kDesiredSizes[i];
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_EXACTLY);
+    if (!resource.empty()) {
+      info_list.push_back(extensions::ImageLoader::ImageRepresentation(
+          resource,
+          extensions::ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
+          gfx::Size(size, size),
+          ui::SCALE_FACTOR_100P));
+    }
+  }
+
+  if (info_list.empty()) {
+    size_t i = arraysize(kDesiredSizes) - 1;
+    int size = kDesiredSizes[i];
+
+    // If there is no icon at the desired sizes, we will resize what we can get.
+    // Making a large icon smaller is preferred to making a small icon larger,
+    // so look for a larger icon first:
+    ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+        &extension, size, ExtensionIconSet::MATCH_BIGGER);
+    if (resource.empty()) {
+      resource = extensions::IconsInfo::GetIconResource(
+          &extension, size, ExtensionIconSet::MATCH_SMALLER);
+    }
+    info_list.push_back(extensions::ImageLoader::ImageRepresentation(
+        resource,
+        extensions::ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
+        gfx::Size(size, size),
+        ui::SCALE_FACTOR_100P));
+  }
+
+  // |info_list| may still be empty at this point, in which case LoadImage
+  // will call the OnImageLoaded callback with an empty image and exit
+  // immediately.
+  extensions::ImageLoader::Get(profile)->LoadImagesAsync(&extension, info_list,
+      base::Bind(&OnImageLoaded, shortcut_info, callback));
 }
 
 }  // namespace web_app

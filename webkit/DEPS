@@ -12,6 +12,7 @@ include_rules = [
   "+grit",  # For generated headers
   "+skia",
   "+third_party/angle",
+  "+third_party/hyphen",
   "+third_party/leveldatabase",
   "+third_party/skia",
   "+third_party/sqlite",
@@ -29,6 +30,7 @@ include_rules = [
   "+gpu/command_buffer/client",
   "+gpu/command_buffer/common",
   "+gpu/command_buffer/service",
+  "+gpu/GLES2",
   "+third_party/khronos/GLES2",
 
   # For shared USB keycode conversion tables used by ppapi plugin code.

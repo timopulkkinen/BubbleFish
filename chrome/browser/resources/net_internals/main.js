@@ -16,6 +16,7 @@ var LogLevelType = null;
 var ClientInfo = null;
 var NetError = null;
 var LoadFlag = null;
+var LoadState = null;
 var AddressFamily = null;
 
 /**
@@ -89,6 +90,7 @@ var MainView = (function() {
     tabs.addTab(SocketsView.TAB_HANDLE_ID, SocketsView.getInstance(),
                 false, true);
     tabs.addTab(SpdyView.TAB_HANDLE_ID, SpdyView.getInstance(), false, true);
+    tabs.addTab(QuicView.TAB_HANDLE_ID, QuicView.getInstance(), false, true);
     tabs.addTab(HttpPipelineView.TAB_HANDLE_ID, HttpPipelineView.getInstance(),
                 false, true);
     tabs.addTab(HttpCacheView.TAB_HANDLE_ID, HttpCacheView.getInstance(),
@@ -99,6 +101,8 @@ var MainView = (function() {
     tabs.addTab(HSTSView.TAB_HANDLE_ID, HSTSView.getInstance(), false, true);
     tabs.addTab(LogsView.TAB_HANDLE_ID, LogsView.getInstance(),
                 false, cr.isChromeOS);
+    tabs.addTab(BandwidthView.TAB_HANDLE_ID, BandwidthView.getInstance(),
+                false, true);
     tabs.addTab(PrerenderView.TAB_HANDLE_ID, PrerenderView.getInstance(),
                 false, true);
     tabs.addTab(CrosView.TAB_HANDLE_ID, CrosView.getInstance(),
@@ -166,7 +170,7 @@ var MainView = (function() {
      * without reloading the page.  Must be called before passing loaded data
      * to the individual views.
      *
-     * @param {String} opt_fileName The name of the log file that has been
+     * @param {string} opt_fileName The name of the log file that has been
      *     loaded, if we're loading a log file.
      */
     onLoadLog: function(opt_fileName) {
@@ -178,6 +182,7 @@ var MainView = (function() {
         // bar to indicate we're no longer capturing events.  Also disable
         // hiding cookies, so if the log dump has them, they'll be displayed.
         this.statusView_.switchToSubView('loaded').setFileName(opt_fileName);
+        $(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID).checked = false;
         SourceTracker.getInstance().setPrivacyStripping(false);
       } else {
         // Otherwise, the "Stop Capturing" button was presumably pressed.
@@ -257,6 +262,7 @@ ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
   LoadFlag = Constants.loadFlag;
   NetError = Constants.netError;
   AddressFamily = Constants.addressFamily;
+  LoadState = Constants.loadState;
 
   timeutil.setTimeTickOffset(Constants.timeTickOffset);
 };

@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "skia/ext/bitmap_platform_device_linux.h"
-
 #include "skia/ext/bitmap_platform_device_data.h"
+#include "skia/ext/platform_canvas.h"
 
 #if defined(OS_OPENBSD)
 #include <cairo.h>
@@ -107,7 +107,7 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(int width, int height,
   BitmapPlatformDevice* device = Create(width, height, is_opaque, surface);
 
 #ifndef NDEBUG
-  if (is_opaque)  // Fill with bright bluish green
+  if (device && is_opaque)  // Fill with bright bluish green
     device->eraseColor(SkColorSetARGB(255, 0, 255, 128));
 #endif
 
@@ -174,6 +174,46 @@ void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
                                          const SkRegion& region,
                                          const SkClipStack&) {
   data_->SetMatrixClip(transform, region);
+}
+
+// PlatformCanvas impl
+
+SkCanvas* CreatePlatformCanvas(int width, int height, bool is_opaque,
+                               uint8_t* data, OnFailureType failureType) {
+  skia::RefPtr<SkDevice> dev = skia::AdoptRef(
+      BitmapPlatformDevice::Create(width, height, is_opaque, data));
+  return CreateCanvas(dev, failureType);
+}
+
+// Port of PlatformBitmap to linux
+PlatformBitmap::~PlatformBitmap() {
+  cairo_destroy(surface_);
+}
+
+bool PlatformBitmap::Allocate(int width, int height, bool is_opaque) {
+  // The SkBitmap allocates and owns the bitmap memory; PlatformBitmap owns the
+  // cairo drawing context tied to the bitmap. The SkBitmap's pixelRef can
+  // outlive the PlatformBitmap if additional copies are made.
+  int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width, height, stride);
+  if (!bitmap_.allocPixels())  // Using the default allocator.
+    return false;
+  bitmap_.setIsOpaque(is_opaque);
+
+  cairo_surface_t* surf = cairo_image_surface_create_for_data(
+      reinterpret_cast<unsigned char*>(bitmap_.getPixels()),
+      CAIRO_FORMAT_ARGB32,
+      width,
+      height,
+      stride);
+  if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+    cairo_surface_destroy(surf);
+    return false;
+  }
+
+  surface_ = cairo_create(surf);
+  cairo_surface_destroy(surf);
+  return true;
 }
 
 }  // namespace skia

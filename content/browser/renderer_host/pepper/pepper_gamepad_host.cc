@@ -47,12 +47,12 @@ int32_t PepperGamepadHost::OnResourceMessageReceived(
     ppapi::host::HostMessageContext* context) {
   IPC_BEGIN_MESSAGE_MAP(PepperGamepadHost, msg)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_Gamepad_RequestMemory,
-                                        OnMsgRequestMemory)
+                                        OnRequestMemory)
   IPC_END_MESSAGE_MAP()
   return PP_ERROR_FAILED;
 }
 
-int32_t PepperGamepadHost::OnMsgRequestMemory(
+int32_t PepperGamepadHost::OnRequestMemory(
     ppapi::host::HostMessageContext* context) {
   if (is_started_)
     return PP_ERROR_FAILED;
@@ -66,22 +66,19 @@ int32_t PepperGamepadHost::OnMsgRequestMemory(
   gamepad_service_->RegisterForUserGesture(
       base::Bind(&PepperGamepadHost::GotUserGesture,
                  weak_factory_.GetWeakPtr(),
-                 context->MakeReplyParams()));
+                 context->MakeReplyMessageContext()));
   return PP_OK_COMPLETIONPENDING;
 }
 
 void PepperGamepadHost::GotUserGesture(
-    const ppapi::proxy::ResourceMessageReplyParams& in_params) {
+    const ppapi::host::ReplyMessageContext& context) {
   base::SharedMemoryHandle handle =
       gamepad_service_->GetSharedMemoryHandleForProcess(
           browser_ppapi_host_->GetPluginProcessHandle());
 
-  // The shared memory handle is sent in the params struct, so we have to make
-  // a copy to mutate it.
-  ppapi::proxy::ResourceMessageReplyParams params = in_params;
-  params.AppendHandle(ppapi::proxy::SerializedHandle(
+  context.params.AppendHandle(ppapi::proxy::SerializedHandle(
       handle, sizeof(ppapi::ContentGamepadHardwareBuffer)));
-  host()->SendReply(params, PpapiPluginMsg_Gamepad_SendMemory());
+  host()->SendReply(context, PpapiPluginMsg_Gamepad_SendMemory());
 }
 
 }  // namespace content

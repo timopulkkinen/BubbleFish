@@ -9,9 +9,9 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/common/url_database/url_database.h"
 #include "chrome/browser/history/download_database.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/history/url_database.h"
 #include "chrome/browser/history/visit_database.h"
 #include "chrome/browser/history/visitsegment_database.h"
 #include "sql/connection.h"
@@ -23,7 +23,9 @@
 #include "chrome/browser/history/android/android_urls_database.h"
 #endif
 
+namespace base {
 class FilePath;
+}
 
 namespace history {
 
@@ -67,7 +69,12 @@ class HistoryDatabase : public DownloadDatabase,
   // Must call this function to complete initialization. Will return
   // sql::INIT_OK on success. Otherwise, no other function should be called. You
   // may want to call BeginExclusiveMode after this when you are ready.
-  sql::InitStatus Init(const FilePath& history_name);
+  sql::InitStatus Init(const base::FilePath& history_name,
+                       sql::ErrorDelegate* error_delegate);
+
+  // Computes and records various metrics for the database. Should only be
+  // called once and only upon successful Init.
+  void ComputeDatabaseMetrics(const base::FilePath& filename);
 
   // Call to set the mode on the database to exclusive. The default locking mode
   // is "normal" but we want to run in exclusive mode for slightly better
@@ -115,6 +122,9 @@ class HistoryDatabase : public DownloadDatabase,
   // Vacuums the database. This will cause sqlite to defragment and collect
   // unused space in the file. It can be VERY SLOW.
   void Vacuum();
+
+  // Razes the database. Returns true if successful.
+  bool Raze();
 
   // Returns true if the history backend should erase the full text search
   // and archived history files as part of version 16 -> 17 migration. The

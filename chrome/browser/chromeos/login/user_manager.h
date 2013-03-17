@@ -7,63 +7,51 @@
 
 #include <string>
 
-#include "ash/desktop_background/desktop_background_resources.h"
 #include "base/memory/singleton.h"
-#include "base/time.h"
 #include "chrome/browser/chromeos/login/user.h"
-#include "chrome/browser/ui/webui/options/chromeos/set_wallpaper_options_handler.h"
+#include "chrome/browser/chromeos/login/user_flow.h"
 
-class FilePath;
-class PrefService;
-
-namespace gfx {
-class ImageSkia;
-}
+class PrefRegistrySimple;
 
 namespace chromeos {
 
 class RemoveUserDelegate;
-class UserImage;
+class UserImageManager;
 
 // Base class for UserManagerImpl - provides a mechanism for discovering users
 // who have logged into this Chrome OS device before and updating that list.
 class UserManager {
  public:
+  // Status of merge sessions process which is responsible for exchanging
+  // user OAuth2 refresh token for GAIA cookies.
+  enum MergeSessionState {
+    // Session merge hasn't started yet.
+    MERGE_STATUS_NOT_STARTED,
+    // Session merge is in process.
+    MERGE_STATUS_IN_PROCESS,
+    // Session merge is completed.
+    MERGE_STATUS_DONE,
+  };
+
   // Interface that observers of UserManager must implement in order
   // to receive notification when local state preferences is changed
   class Observer {
    public:
-    // Called when the local state preferences is changed
+    // Called when the local state preferences is changed.
     virtual void LocalStateChanged(UserManager* user_manager) = 0;
+
+    // Called when merge session state is changed.
+    virtual void MergeSessionStateChanged(MergeSessionState state) {}
 
    protected:
     virtual ~Observer() {}
   };
 
-  // A vector pref of the users who have logged into the device.
-  static const char kLoggedInUsers[];
-
   // Username for stub login when not running on ChromeOS.
   static const char kStubUser[];
 
-  // A dictionary that maps usernames to file paths to their wallpapers.
-  // Deprecated. Will remove this const char after done migration.
-  static const char kUserWallpapers[];
-
-  // A dictionary that maps usernames to wallpaper properties.
-  static const char kUserWallpapersProperties[];
-
-  // A dictionary that maps usernames to file paths to their images.
-  static const char kUserImages[];
-
-  // A dictionary that maps usernames to the displayed name.
-  static const char kUserDisplayName[];
-
-  // A dictionary that maps usernames to the displayed (non-canonical) emails.
-  static const char kUserDisplayEmail[];
-
-  // A dictionary that maps usernames to OAuth token presence flag.
-  static const char kUserOAuthTokenStatus[];
+  // Domain that is used for all locally managed users.
+  static const char kLocallyManagedUserDomain[];
 
   // Returns a shared instance of a UserManager. Not thread-safe, should only be
   // called from the main UI thread.
@@ -90,9 +78,15 @@ class UserManager {
   static UserManager* Set(UserManager* mock);
 
   // Registers user manager preferences.
-  static void RegisterPrefs(PrefService* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+
+  // Indicates imminent shutdown, allowing the UserManager to remove any
+  // observers it has registered.
+  virtual void Shutdown() = 0;
 
   virtual ~UserManager();
+
+  virtual UserImageManager* GetUserImageManager() = 0;
 
   // Returns a list of users who have logged into this device previously. This
   // is sorted by last login date with the most recent user at the beginning.
@@ -104,14 +98,24 @@ class UserManager {
   // from normal sign in flow.
   virtual void UserLoggedIn(const std::string& email, bool browser_restart) = 0;
 
-  // Indicates that user just logged on as the demo user.
-  virtual void DemoUserLoggedIn() = 0;
+  // Indicates that user just logged on as the retail mode user.
+  virtual void RetailModeUserLoggedIn() = 0;
 
   // Indicates that user just started incognito session.
   virtual void GuestUserLoggedIn() = 0;
 
-  // Indicates that a user just logged in as ephemeral.
-  virtual void EphemeralUserLoggedIn(const std::string& email) = 0;
+  // Indicates that a locally managed user just logged in.
+  virtual void LocallyManagedUserLoggedIn(const std::string& username) = 0;
+
+  // Indicates that a user just logged into a public account.
+  virtual void PublicAccountUserLoggedIn(User* user) = 0;
+
+  // Indicates that a regular user just logged in.
+  virtual void RegularUserLoggedIn(const std::string& email,
+                                   bool browser_restart) = 0;
+
+  // Indicates that a regular user just logged in as ephemeral.
+  virtual void RegularUserLoggedInAsEphemeral(const std::string& email) = 0;
 
   // Called when browser session is started i.e. after
   // browser_creator.LaunchBrowser(...) was called after user sign in.
@@ -119,6 +123,17 @@ class UserManager {
   // but SessionStarted() will return false.
   // Fires NOTIFICATION_SESSION_STARTED.
   virtual void SessionStarted() = 0;
+
+  // Creates locally managed user with given display name, and id (e-mail), and
+  // sets |display_name| for created user and stores it to
+  // persistent list. Returns created user, or existing user if there already
+  // was locally managed user with such display name.
+  virtual const User* CreateLocallyManagedUserRecord(
+      const std::string& e_mail,
+      const string16& display_name) = 0;
+
+  // Generates unique username for locally managed user.
+  virtual std::string GenerateUniqueLocallyManagedUserId() = 0;
 
   // Removes the user from the device. Note, it will verify that the given user
   // isn't the owner, so calling this method for the owner will take no effect.
@@ -138,9 +153,14 @@ class UserManager {
   // list or currently logged in as ephemeral. Returns |NULL| otherwise.
   virtual const User* FindUser(const std::string& email) const = 0;
 
+  // Returns the locally managed user with the given |display_name| if found in
+  // the persistent list. Returns |NULL| otherwise.
+  virtual const User* FindLocallyManagedUser(
+      const string16& display_name) const = 0;
+
   // Returns the logged-in user.
-  virtual const User& GetLoggedInUser() const = 0;
-  virtual User& GetLoggedInUser() = 0;
+  virtual const User* GetLoggedInUser() const = 0;
+  virtual User* GetLoggedInUser() = 0;
 
   // Saves user's oauth token status in local state preferences.
   virtual void SaveUserOAuthStatus(
@@ -169,61 +189,38 @@ class UserManager {
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const = 0;
 
-  // Saves |type| and |index| chose by logged in user to Local State.
-  virtual void SaveLoggedInUserWallpaperProperties(User::WallpaperType type,
-                                                   int index) = 0;
-
-  // Sets user image to the default image with index |image_index|, sends
-  // LOGIN_USER_IMAGE_CHANGED notification and updates Local State.
-  virtual void SaveUserDefaultImageIndex(const std::string& username,
-                                         int image_index) = 0;
-
-  // Saves image to file, sends LOGIN_USER_IMAGE_CHANGED notification and
-  // updates Local State.
-  virtual void SaveUserImage(const std::string& username,
-                             const UserImage& user_image) = 0;
-
-  // Updates custom wallpaper to selected layout and saves layout to Local
-  // State.
-  virtual void SetLoggedInUserCustomWallpaperLayout(
-      ash::WallpaperLayout layout) = 0;
-
-  // Tries to load user image from disk; if successful, sets it for the user,
-  // sends LOGIN_USER_IMAGE_CHANGED notification and updates Local State.
-  virtual void SaveUserImageFromFile(const std::string& username,
-                                     const FilePath& path) = 0;
-
-  // Sets profile image as user image for |username|, sends
-  // LOGIN_USER_IMAGE_CHANGED notification and updates Local State. If the user
-  // is not logged-in or the last |DownloadProfileImage| call has failed, a
-  // default grey avatar will be used until the user logs in and profile image
-  // is downloaded successfully.
-  virtual void SaveUserImageFromProfileImage(const std::string& username) = 0;
-
-  // Starts downloading the profile image for the logged-in user.
-  // If user's image index is |kProfileImageIndex|, newly downloaded image
-  // is immediately set as user's current picture.
-  // |reason| is an arbitrary string (used to report UMA histograms with
-  // download times).
-  virtual void DownloadProfileImage(const std::string& reason) = 0;
-
   // Returns true if current user is an owner.
   virtual bool IsCurrentUserOwner() const = 0;
 
   // Returns true if current user is not existing one (hasn't signed in before).
   virtual bool IsCurrentUserNew() const = 0;
 
-  // Returns true if the current user is ephemeral.
-  virtual bool IsCurrentUserEphemeral() const = 0;
+  // Returns true if data stored or cached for the current user outside that
+  // user's cryptohome (wallpaper, avatar, OAuth token status, display name,
+  // display email) is ephemeral.
+  virtual bool IsCurrentUserNonCryptohomeDataEphemeral() const = 0;
+
+  // Returns true if the current user's session can be locked (i.e. the user has
+  // a password with which to unlock the session).
+  virtual bool CanCurrentUserLock() const = 0;
 
   // Returns true if user is signed in.
   virtual bool IsUserLoggedIn() const = 0;
 
+  // Returns true if we're logged in as a regular user.
+  virtual bool IsLoggedInAsRegularUser() const = 0;
+
   // Returns true if we're logged in as a demo user.
   virtual bool IsLoggedInAsDemoUser() const = 0;
 
+  // Returns true if we're logged in as a public account.
+  virtual bool IsLoggedInAsPublicAccount() const = 0;
+
   // Returns true if we're logged in as a Guest.
   virtual bool IsLoggedInAsGuest() const = 0;
+
+  // Returns true if we're logged in as a locally managed user.
+  virtual bool IsLoggedInAsLocallyManagedUser() const = 0;
 
   // Returns true if we're logged in as the stub user used for testing on Linux.
   virtual bool IsLoggedInAsStub() const = 0;
@@ -233,18 +230,56 @@ class UserManager {
   // or restart after crash.
   virtual bool IsSessionStarted() const = 0;
 
-  // Returns true if the user with the given email address is to be treated as
-  // ephemeral.
-  virtual bool IsEphemeralUser(const std::string& email) const = 0;
+  // Returns merge session status.
+  virtual MergeSessionState GetMergeSessionState() const = 0;
+
+  // Changes merge session status.
+  virtual void SetMergeSessionState(MergeSessionState status) = 0;
+
+  // Returns true when the browser has crashed and restarted during the current
+  // user's session.
+  virtual bool HasBrowserRestarted() const = 0;
+
+  // Returns true if data stored or cached for the user with the given email
+  // address outside that user's cryptohome (wallpaper, avatar, OAuth token
+  // status, display name, display email) is to be treated as ephemeral.
+  virtual bool IsUserNonCryptohomeDataEphemeral(
+      const std::string& email) const = 0;
+
+  // Create a record about starting locally managed user creation transaction.
+  virtual void StartLocallyManagedUserCreationTransaction(
+      const string16& display_name) = 0;
+
+  // Add user id to locally managed user creation transaction record.
+  virtual void SetLocallyManagedUserCreationTransactionUserId(
+      const std::string& email) = 0;
+
+  // Remove locally managed user creation transaction record.
+  virtual void CommitLocallyManagedUserCreationTransaction() = 0;
+
+  // Method that allows to set |flow| for user identified by |email|.
+  // Flow should be set before login attempt.
+  // Takes ownership of the |flow|, |flow| will be deleted in case of login
+  // failure.
+  virtual void SetUserFlow(const std::string& email, UserFlow* flow) = 0;
+
+  // Return user flow for current user. Returns instance of DefaultUserFlow if
+  // no flow was defined for current user, or user is not logged in.
+  // Returned value should not be cached.
+  virtual UserFlow* GetCurrentUserFlow() const = 0;
+
+  // Return user flow for user identified by |email|. Returns instance of
+  // DefaultUserFlow if no flow was defined for user.
+  // Returned value should not be cached.
+  virtual UserFlow* GetUserFlow(const std::string& email) const = 0;
+
+  // Resets user flow fo user idenitified by |email|.
+  virtual void ResetUserFlow(const std::string& email) = 0;
 
   virtual void AddObserver(Observer* obs) = 0;
   virtual void RemoveObserver(Observer* obs) = 0;
 
   virtual void NotifyLocalStateChanged() = 0;
-
-  // Returns the result of the last successful profile image download, if any.
-  // Otherwise, returns an empty bitmap.
-  virtual const gfx::ImageSkia& DownloadedProfileImage() const = 0;
 };
 
 }  // namespace chromeos

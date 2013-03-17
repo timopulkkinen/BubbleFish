@@ -6,17 +6,20 @@
 #define REMOTING_HOST_WIN_HOST_SERVICE_H_
 
 #include <windows.h>
+#include <winternl.h>
+
+#include <list>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
-#include "base/observer_list.h"
 #include "base/synchronization/waitable_event.h"
-#include "remoting/host/win/wts_console_monitor.h"
+#include "net/base/ip_endpoint.h"
+#include "remoting/host/win/wts_terminal_monitor.h"
 
 class CommandLine;
-class MessageLoop;
 
 namespace base {
+class ScopedNativeLibrary;
 class SingleThreadTaskRunner;
 }  // namespace base
 
@@ -24,15 +27,9 @@ namespace remoting {
 
 class AutoThreadTaskRunner;
 class Stoppable;
-class WtsConsoleObserver;
+class WtsTerminalObserver;
 
-#if defined(REMOTING_MULTI_PROCESS)
-class DaemonProcess;
-#else  // !defined(REMOTING_MULTI_PROCESS)
-class WtsSessionProcessLauncher;
-#endif  // !defined(REMOTING_MULTI_PROCESS)
-
-class HostService : public WtsConsoleMonitor {
+class HostService : public WtsTerminalMonitor {
  public:
   static HostService* GetInstance();
 
@@ -42,34 +39,47 @@ class HostService : public WtsConsoleMonitor {
   // Invoke the choosen action routine.
   int Run();
 
-  // WtsConsoleMonitor implementation
-  virtual void AddWtsConsoleObserver(WtsConsoleObserver* observer) OVERRIDE;
-  virtual void RemoveWtsConsoleObserver(
-                   WtsConsoleObserver* observer) OVERRIDE;
+  // WtsTerminalMonitor implementation
+  virtual bool AddWtsTerminalObserver(const net::IPEndPoint& client_endpoint,
+                                      WtsTerminalObserver* observer) OVERRIDE;
+  virtual void RemoveWtsTerminalObserver(
+      WtsTerminalObserver* observer) OVERRIDE;
 
  private:
   HostService();
   ~HostService();
 
-  void OnChildStopped();
+  // Sets |*endpoint| to the endpoint of the client attached to |session_id|.
+  // If |session_id| is attached to the physical console net::IPEndPoint() is
+  // used. Returns false if the endpoint cannot be queried (if there is no
+  // client attached to |session_id| for instance).
+  bool GetEndpointForSessionId(uint32 session_id, net::IPEndPoint* endpoint);
+
+  // Returns id of the session that |client_endpoint| is attached.
+  // |kInvalidSessionId| is returned if none of the sessions is currently
+  // attahced to |client_endpoint|.
+  uint32 GetSessionIdForEndpoint(const net::IPEndPoint& client_endpoint);
+
+  // Gets the pointer to winsta!WinStationQueryInformationW(). Returns false if
+  // en error occurs.
+  bool LoadWinStationLibrary();
 
   // Notifies the service of changes in session state.
-  void OnSessionChange();
+  void OnSessionChange(uint32 event, uint32 session_id);
 
   // Creates the process launcher.
-  void CreateLauncher(
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+  void CreateLauncher(scoped_refptr<AutoThreadTaskRunner> task_runner);
 
-  // This is a common entry point to the main service loop called by both
-  // RunAsService() and RunInConsole().
-  void RunMessageLoop(MessageLoop* message_loop);
-
-  // Runs the binary specified by the command line, elevated.
-  int Elevate();
+  void OnChildStopped();
 
   // This function handshakes with the service control manager and starts
   // the service.
   int RunAsService();
+
+  // Runs the service on the service thread. A separate routine is used to make
+  // sure all local objects are destoyed by the time |stopped_event_| is
+  // signalled.
+  void RunAsServiceImpl();
 
   // This function starts the service in interactive mode (i.e. as a plain
   // console application).
@@ -91,17 +101,33 @@ class HostService : public WtsConsoleMonitor {
                                                         WPARAM wparam,
                                                         LPARAM lparam);
 
-  // Current physical console session id.
-  uint32 console_session_id_;
+  struct RegisteredObserver {
+    // Specifies the client address of an RDP connection or IPEndPoint() for
+    // the physical console.
+    net::IPEndPoint client_endpoint;
 
-  // The list of observers receiving notifications about any session attached
-  // to the physical console.
-  ObserverList<WtsConsoleObserver> console_observers_;
+    // Specifies ID of the attached session or |kInvalidSession| if no session
+    // is attached to the WTS console.
+    uint32 session_id;
+
+    // Points to the observer receiving notifications about the WTS console
+    // identified by |client_endpoint|.
+    WtsTerminalObserver* observer;
+  };
+
+  // The list of observers receiving session notifications.
+  std::list<RegisteredObserver> observers_;
+
+  // Handle of dynamically loaded winsta.dll.
+  scoped_ptr<base::ScopedNativeLibrary> winsta_;
+
+  // Points to winsta!WinStationQueryInformationW().
+  PWINSTATIONQUERYINFORMATIONW win_station_query_information_;
 
   scoped_ptr<Stoppable> child_;
 
   // Service message loop.
-  scoped_refptr<AutoThreadTaskRunner> main_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
   // The action routine to be executed.
   int (HostService::*run_routine_)();

@@ -15,10 +15,24 @@ import org.chromium.base.test.util.Feature;
  */
 public class HttpAuthDatabaseTest extends AndroidTestCase {
 
+    private static final String TEST_DATABASE = "http_auth_for_HttpAuthDatabaseTest.db";
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        getContext().deleteDatabase(TEST_DATABASE);
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        getContext().deleteDatabase(TEST_DATABASE);
+        super.tearDown();
+    }
+
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testAccessHttpAuthUsernamePassword() throws Exception {
-        HttpAuthDatabase instance = HttpAuthDatabase.getInstance(getContext());
+        HttpAuthDatabase instance = new HttpAuthDatabase(getContext(), TEST_DATABASE);
 
         String host = "http://localhost:8080";
         String realm = "testrealm";

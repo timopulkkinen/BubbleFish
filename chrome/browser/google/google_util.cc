@@ -9,22 +9,22 @@
 
 #include "base/command_line.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
-#include "googleurl/src/url_parse.h"
-#include "net/base/escape.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/url_util.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/mac/keystone_glue.h"
+#elif defined(OS_CHROMEOS)
+#include "chrome/browser/google/google_util_chromeos.h"
 #endif
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -57,30 +57,6 @@ bool HasQueryParameter(const std::string& str) {
 
 bool gUseMockLinkDoctorBaseURLForTesting = false;
 
-// Finds the first key-value pair where the key matches |query_key|. Returns
-// true if a match is found and sets |search_terms| to the value.
-bool ExtractSearchTermsFromComponent(const std::string& url,
-                                     url_parse::Component* component,
-                                     string16* search_terms) {
-  const std::string query_key = "q";
-  url_parse::Component key, value;
-
-  while (url_parse::ExtractQueryKeyValue(url.c_str(), component,
-                                         &key, &value)) {
-    if (url.compare(key.begin, key.len, query_key) != 0)
-      continue;
-    std::string value_str = url.substr(value.begin, value.len);
-    *search_terms = net::UnescapeAndDecodeUTF8URLComponent(
-        value_str,
-        net::UnescapeRule::SPACES |
-            net::UnescapeRule::URL_SPECIAL_CHARS |
-            net::UnescapeRule::REPLACE_PLUS_WITH_SPACE,
-        NULL);
-    return true;
-  }
-  return false;
-}
-
 }  // anonymous namespace
 
 namespace google_util {
@@ -110,7 +86,7 @@ GURL AppendGoogleLocaleParam(const GURL& url) {
   std::string locale = g_browser_process->GetApplicationLocale();
   if (locale == "nb")
     locale = "no";
-  return chrome_common_net::AppendQueryParameter(url, "hl", locale);
+  return net::AppendQueryParameter(url, "hl", locale);
 }
 
 std::string StringAppendGoogleLocaleParam(const std::string& url) {
@@ -129,8 +105,8 @@ GURL AppendGoogleTLDParam(Profile* profile, const GURL& url) {
     NOTREACHED();
     return url;
   }
-  return chrome_common_net::AppendQueryParameter(
-      url, "sd", google_domain.substr(first_dot + 1));
+  return net::AppendQueryParameter(url, "sd",
+                                   google_domain.substr(first_dot + 1));
 }
 
 #if defined(OS_WIN)
@@ -166,6 +142,8 @@ bool GetBrand(std::string* brand) {
 
 #if defined(OS_MACOSX)
   brand->assign(keystone_glue::BrandCode());
+#elif defined(OS_CHROMEOS)
+  brand->assign(google_util::chromeos::GetBrand());
 #else
   brand->clear();
 #endif
@@ -178,25 +156,6 @@ bool GetReactivationBrand(std::string* brand) {
 }
 
 #endif
-
-string16 GetSearchTermsFromGoogleSearchURL(const std::string& url) {
-  if (!IsInstantExtendedAPIGoogleSearchUrl(url))
-    return string16();
-
-  url_parse::Parsed parsed_url;
-  url_parse::ParseStandardURL(url.c_str(), url.length(), &parsed_url);
-
-  string16 search_terms;
-  // The search terms can be in either the query or ref component - for
-  // instance, in a regular Google search they'll be in the query but in a
-  // Google Instant search they can be in both. The ref is the correct one to
-  // return in this case, so test the ref component first.
-  if (ExtractSearchTermsFromComponent(url, &parsed_url.ref, &search_terms) ||
-      ExtractSearchTermsFromComponent(url, &parsed_url.query, &search_terms)) {
-    return search_terms;
-  }
-  return string16();
-}
 
 bool IsGoogleDomainUrl(const std::string& url,
                        SubdomainPermission subdomain_permission,
@@ -281,29 +240,6 @@ bool IsGoogleSearchUrl(const std::string& url) {
   std::string ref(original_url.ref());
   return HasQueryParameter(ref) ||
       (!is_home_page_base && HasQueryParameter(query));
-}
-
-bool IsInstantExtendedAPIGoogleSearchUrl(const std::string& url) {
-  if (!IsGoogleSearchUrl(url))
-    return false;
-
-  const std::string embedded_search_key = kInstantExtendedAPIParam;
-
-  url_parse::Parsed parsed_url;
-  url_parse::ParseStandardURL(url.c_str(), url.length(), &parsed_url);
-  url_parse::Component key, value;
-  while (url_parse::ExtractQueryKeyValue(
-      url.c_str(), &parsed_url.query, &key, &value)) {
-    // If the parameter key is |embedded_search_key| and the value is not 0 this
-    // is an Instant Extended API Google search URL.
-    if (!url.compare(key.begin, key.len, embedded_search_key)) {
-      int int_value = 0;
-      if (value.is_nonempty())
-        base::StringToInt(url.substr(value.begin, value.len), &int_value);
-      return int_value != 0;
-    }
-  }
-  return false;
 }
 
 bool IsOrganic(const std::string& brand) {

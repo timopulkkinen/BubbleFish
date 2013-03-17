@@ -14,12 +14,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process.h"
 #include "build/build_config.h"
-#include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_instance.h"
+#include "ppapi/c/ppb_console.h"
 #include "ppapi/proxy/dispatcher.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
+#include "ppapi/shared_impl/singleton_resource_id.h"
 #include "ppapi/shared_impl/tracked_callback.h"
 
 namespace ppapi {
@@ -34,7 +35,6 @@ class ResourceCreationAPI;
 
 namespace proxy {
 
-class GamepadResource;
 class ResourceMessageReplyParams;
 
 // Used to keep track of per-instance data.
@@ -44,13 +44,13 @@ struct InstanceData {
 
   ViewData view;
 
-  PP_Bool flash_fullscreen;  // Used for PPB_FlashFullscreen.
-
   // When non-NULL, indicates the callback to execute when mouse lock is lost.
   scoped_refptr<TrackedCallback> mouse_lock_callback;
 
-  // Lazily created the first time the plugin requests gamepad data.
-  scoped_refptr<GamepadResource> gamepad_resource;
+  // A map of singleton resources which are lazily created.
+  typedef std::map<SingletonResourceID, scoped_refptr<Resource> >
+      SingletonResourceMap;
+  SingletonResourceMap singleton_resources;
 
   // Calls to |RequestSurroundingText()| are done by posted tasks. Track whether
   // a) a task is pending, to avoid redundant calls, and b) whether we should
@@ -83,8 +83,18 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   // will be automatically called when requested by the renderer side. The
   // module ID will be set upon receipt of the InitializeModule message.
   //
+  // Note about permissions: On the plugin side, the dispatcher and the plugin
+  // run in the same address space (including in nacl). This means that the
+  // permissions here are subject to malicious modification and bypass, and
+  // an exploited or malicious plugin could send any IPC messages and just
+  // bypass the permissions. All permissions must be checked "for realz" in the
+  // host process when receiving messages. We check them on the plugin side
+  // primarily to keep honest plugins honest, especially with respect to
+  // dev interfaces that they "shouldn't" be using.
+  //
   // You must call InitPluginWithChannel after the constructor.
   PluginDispatcher(PP_GetInterface_Func get_interface,
+                   const PpapiPermissions& permissions,
                    bool incognito);
   virtual ~PluginDispatcher();
 
@@ -106,7 +116,7 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   // invalid, to all instances associated with all dispatchers. Used for
   // global log messages.
   static void LogWithSource(PP_Instance instance,
-                            PP_LogLevel_Dev level,
+                            PP_LogLevel level,
                             const std::string& source,
                             const std::string& value);
 
@@ -116,6 +126,7 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   // The delegate pointer must outlive this class, ownership is not
   // transferred.
   bool InitPluginWithChannel(PluginDelegate* delegate,
+                             base::ProcessId peer_pid,
                              const IPC::ChannelHandle& channel_handle,
                              bool is_client);
 
@@ -167,6 +178,11 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
       const IPC::Message& nested_msg);
   void OnMsgSupportsInterface(const std::string& interface_name, bool* result);
   void OnMsgSetPreferences(const Preferences& prefs);
+
+  // Internal backed for DispatchResourceReply.
+  static void LockedDispatchResourceReply(
+      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+      const IPC::Message& nested_msg);
 
   PluginDelegate* plugin_delegate_;
 

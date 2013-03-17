@@ -13,15 +13,16 @@
 #include "base/win/metro.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/toolbar/wrench_menu_model.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/system_menu_model.h"
-#include "chrome/browser/ui/views/frame/system_menu_model_delegate.h"
+#include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,18 +33,19 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/layout.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/menu/native_menu_win.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_win.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "win8/util/win8_util.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -76,12 +78,12 @@ views::Button* MakeWindowSwitcherButton(views::ButtonListener* listener,
   // The button in the incognito window has the hot-cold images inverted
   // with respect to the regular browser window.
   switcher_button->SetImage(
-      views::ImageButton::BS_NORMAL,
+      views::ImageButton::STATE_NORMAL,
       ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
           is_off_the_record ? IDR_INCOGNITO_SWITCH_ON :
                               IDR_INCOGNITO_SWITCH_OFF));
   switcher_button->SetImage(
-      views::ImageButton::BS_HOT,
+      views::ImageButton::STATE_HOVERED,
       ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
           is_off_the_record ? IDR_INCOGNITO_SWITCH_OFF :
                               IDR_INCOGNITO_SWITCH_ON));
@@ -90,20 +92,6 @@ views::Button* MakeWindowSwitcherButton(views::ButtonListener* listener,
   return switcher_button;
 }
 
-static int GetMinimizeButtonOffsetForWindow(gfx::NativeView window) {
-  // The WM_GETTITLEBARINFOEX message can fail if we are not active/visible.
-  TITLEBARINFOEX titlebar_info = {0};
-  titlebar_info.cbSize = sizeof(TITLEBARINFOEX);
-  SendMessage(window, WM_GETTITLEBARINFOEX, 0,
-              reinterpret_cast<WPARAM>(&titlebar_info));
-
-  CPoint minimize_button_corner(titlebar_info.rgrect[2].left,
-                                titlebar_info.rgrect[2].top);
-  MapWindowPoints(HWND_DESKTOP, window, &minimize_button_corner, 1);
-  return minimize_button_corner.x;
-}
-
-
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrameWin, public:
 
@@ -111,11 +99,8 @@ BrowserFrameWin::BrowserFrameWin(BrowserFrame* browser_frame,
                                  BrowserView* browser_view)
     : views::NativeWidgetWin(browser_frame),
       browser_view_(browser_view),
-      browser_frame_(browser_frame),
-      system_menu_delegate_(new SystemMenuModelDelegate(browser_view,
-          browser_view->browser())),
-      cached_minimize_button_x_delta_(0) {
-  if (base::win::IsMetroProcess()) {
+      browser_frame_(browser_frame) {
+  if (win8::IsSingleWindowMetroMode()) {
     browser_view->SetWindowSwitcherButton(
         MakeWindowSwitcherButton(this, browser_view->IsOffTheRecord()));
   }
@@ -156,6 +141,17 @@ void BrowserFrameWin::CloseImmersiveFrame() {
 }
 
 
+views::NativeMenuWin* BrowserFrameWin::GetSystemMenu() {
+  if (!system_menu_.get()) {
+    SystemMenuInsertionDelegateWin insertion_delegate;
+    system_menu_.reset(
+        new views::NativeMenuWin(browser_frame_->GetSystemMenuModel(),
+                                 GetNativeView()));
+    system_menu_->Rebuild(&insertion_delegate);
+  }
+  return system_menu_.get();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrameWin, views::NativeWidgetWin overrides:
 
@@ -190,10 +186,9 @@ bool BrowserFrameWin::GetClientAreaInsets(gfx::Insets* insets) const {
 }
 
 void BrowserFrameWin::HandleFrameChanged() {
-  // We need to update the glass region on or off before the base class adjusts
-  // the window region.
-  UpdateDWMFrame();
+  // Handle window frame layout changes, then set the updated glass region.
   NativeWidgetWin::HandleFrameChanged();
+  UpdateDWMFrame();
 }
 
 bool BrowserFrameWin::PreHandleMSG(UINT message,
@@ -217,10 +212,10 @@ bool BrowserFrameWin::PreHandleMSG(UINT message,
   switch (message) {
   case WM_ACTIVATE:
     if (LOWORD(w_param) != WA_INACTIVE)
-      CacheMinimizeButtonDelta();
+      minimize_button_metrics_.OnHWNDActivated();
     return false;
   case WM_PRINT:
-    if (base::win::IsMetroProcess()) {
+    if (win8::IsSingleWindowMetroMode()) {
       // This message is sent by the AnimateWindow API which is used in metro
       // mode to flip between active chrome windows.
       RECT client_rect = {0};
@@ -237,10 +232,10 @@ bool BrowserFrameWin::PreHandleMSG(UINT message,
     }
     return false;
   case WM_ENDSESSION:
-    browser::SessionEnding();
+    chrome::SessionEnding();
     return true;
   case WM_INITMENUPOPUP:
-    system_menu_->UpdateStates();
+    GetSystemMenu()->UpdateStates();
     return true;
   }
   return false;
@@ -250,6 +245,9 @@ void BrowserFrameWin::PostHandleMSG(UINT message,
                                     WPARAM w_param,
                                     LPARAM l_param) {
   switch (message) {
+  case WM_CREATE:
+    minimize_button_metrics_.Init(GetNativeView());
+    break;
   case WM_WINDOWPOSCHANGED:
     UpdateDWMFrame();
 
@@ -274,26 +272,15 @@ void BrowserFrameWin::PostHandleMSG(UINT message,
 }
 
 void BrowserFrameWin::OnScreenReaderDetected() {
-  BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
+  content::BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
   NativeWidgetWin::OnScreenReaderDetected();
 }
 
 bool BrowserFrameWin::ShouldUseNativeFrame() const {
-  // App panel windows draw their own frame.
-  if (browser_view_->IsPanel())
+  if (!NativeWidgetWin::ShouldUseNativeFrame())
     return false;
-
-  // We don't theme popup or app windows, so regardless of whether or not a
-  // theme is active for normal browser windows, we don't want to use the custom
-  // frame for popups/apps.
-  if (!browser_view_->IsBrowserTypeNormal() &&
-      NativeWidgetWin::ShouldUseNativeFrame()) {
-    return true;
-  }
-
-  // Otherwise, we use the native frame when we're told we should by the theme
-  // provider (e.g. no custom theme is active).
-  return GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
+  return chrome::ShouldUseNativeFrame(browser_view_,
+                                      GetWidget()->GetThemeProvider());
 }
 
 void BrowserFrameWin::Show() {
@@ -321,7 +308,7 @@ void BrowserFrameWin::FrameTypeChanged() {
   // In Windows 8 metro mode the frame type is set to FRAME_TYPE_FORCE_CUSTOM
   // by default. We reset it back to FRAME_TYPE_DEFAULT to ensure that we
   // don't end up defaulting to BrowserNonClientFrameView in all cases.
-  if (base::win::IsMetroProcess())
+  if (win8::IsSingleWindowMetroMode())
     browser_frame_->set_frame_type(views::Widget::FRAME_TYPE_DEFAULT);
 
   views::NativeWidgetWin::FrameTypeChanged();
@@ -329,12 +316,12 @@ void BrowserFrameWin::FrameTypeChanged() {
   // In Windows 8 metro mode we call Show on the BrowserFrame instance to
   // ensure that the window can be styled appropriately, i.e. no sysmenu,
   // etc.
-  if (base::win::IsMetroProcess())
+  if (win8::IsSingleWindowMetroMode())
     Show();
 }
 
 void BrowserFrameWin::SetFullscreen(bool fullscreen) {
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     HMODULE metro = base::win::GetMetroModule();
     if (metro) {
       MetroSetFullscreen set_full_screen = reinterpret_cast<MetroSetFullscreen>(
@@ -356,7 +343,7 @@ void BrowserFrameWin::Activate() {
   // being displayed is hidden and the new window being activated becomes
   // visible. This is achieved by calling AdjustFrameForImmersiveMode()
   // followed by ShowWindow().
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     AdjustFrameForImmersiveMode();
     ::ShowWindow(browser_frame_->GetNativeWindow(), SW_SHOWNORMAL);
   } else {
@@ -376,39 +363,12 @@ const views::NativeWidget* BrowserFrameWin::AsNativeWidget() const {
   return this;
 }
 
-void BrowserFrameWin::InitSystemContextMenu() {
-  system_menu_contents_.reset(new SystemMenuModel(system_menu_delegate_.get()));
-  // We add the menu items in reverse order so that insertion_index never needs
-  // to change.
-  if (browser_view_->IsBrowserTypeNormal())
-    BuildSystemMenuForBrowserWindow();
-  else
-    BuildSystemMenuForAppOrPopupWindow();
-  system_menu_.reset(
-      new views::NativeMenuWin(system_menu_contents_.get(), GetNativeWindow()));
-  system_menu_->Rebuild();
+bool BrowserFrameWin::UsesNativeSystemMenu() const {
+  return true;
 }
 
 int BrowserFrameWin::GetMinimizeButtonOffset() const {
-  int minimize_button_offset =
-      GetMinimizeButtonOffsetForWindow(GetNativeView());
-
-  if (minimize_button_offset > 0)
-    return minimize_button_offset;
-
-  // If we fail to get the minimize button offset via the WM_GETTITLEBARINFOEX
-  // message then calculate and return this via the
-  // cached_minimize_button_x_delta_ member value. Please see
-  // CacheMinimizeButtonDelta() for more details.
-  DCHECK(cached_minimize_button_x_delta_);
-
-  RECT client_rect = {0};
-  GetClientRect(GetNativeView(), &client_rect);
-
-  if (base::i18n::IsRTL())
-    return cached_minimize_button_x_delta_;
-  else
-    return client_rect.right - cached_minimize_button_x_delta_;
+  return minimize_button_metrics_.GetMinimizeButtonOffsetX();
 }
 
 void BrowserFrameWin::TabStripDisplayModeChanged() {
@@ -420,12 +380,35 @@ void BrowserFrameWin::ButtonPressed(views::Button* sender,
   HMODULE metro = base::win::GetMetroModule();
   if (!metro)
     return;
-  // Tell the metro_driver to flip our window. This causes the current
-  // browser window to be hidden and the next window to be shown.
-  static FlipFrameWindows flip_window_fn = reinterpret_cast<FlipFrameWindows>(
-      ::GetProcAddress(metro, "FlipFrameWindows"));
-  if (flip_window_fn)
-    flip_window_fn();
+
+  // Toggle the profile and switch to the corresponding browser window in the
+  // profile. The GetOffTheRecordProfile function is documented to create an
+  // incognito profile if one does not exist. That is not a concern as the
+  // windows 8 window switcher button shows up on the caption only when a
+  // normal window and an incognito window are open simultaneously.
+  Profile* profile_to_switch_to = NULL;
+  Profile* current_profile = browser_view()->browser()->profile();
+  if (current_profile->IsOffTheRecord())
+    profile_to_switch_to = current_profile->GetOriginalProfile();
+  else
+    profile_to_switch_to = current_profile->GetOffTheRecordProfile();
+
+  DCHECK(profile_to_switch_to);
+
+  Browser* browser_to_switch_to = chrome::FindTabbedBrowser(
+      profile_to_switch_to, false, chrome::HOST_DESKTOP_TYPE_NATIVE);
+
+  DCHECK(browser_to_switch_to);
+
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(
+      browser_to_switch_to);
+
+  // Tell the metro_driver to switch to the Browser we found above. This
+  // causes the current browser window to be hidden.
+  SetFrameWindow set_frame_window = reinterpret_cast<SetFrameWindow>(
+      ::GetProcAddress(metro, "SetFrameWindow"));
+  set_frame_window(browser_view->frame()->GetNativeWindow());
+  ::ShowWindow(browser_view->frame()->GetNativeWindow(), SW_SHOWNORMAL);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -460,7 +443,7 @@ void BrowserFrameWin::UpdateDWMFrame() {
     }
     // In maximized mode, we only have a titlebar strip of glass, no side/bottom
     // borders.
-    if (!browser_view_->IsFullscreen()) {
+    if (!IsFullscreen()) {
       gfx::Rect tabstrip_bounds(
           browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
       margins.cyTopHeight = tabstrip_bounds.bottom() + kDWMFrameTopOffset;
@@ -468,68 +451,6 @@ void BrowserFrameWin::UpdateDWMFrame() {
   }
 
   DwmExtendFrameIntoClientArea(GetNativeView(), &margins);
-}
-
-void BrowserFrameWin::BuildSystemMenuForBrowserWindow() {
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-
-  if (chrome::CanOpenTaskManager()) {
-    system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
-                                               IDS_TASK_MANAGER);
-  }
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-  system_menu_contents_->AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
-  system_menu_contents_->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
-  AddFrameToggleItems();
-  // If it's a regular browser window with tabs, we don't add any more items,
-  // since it already has menus (Page, Chrome).
-}
-
-void BrowserFrameWin::BuildSystemMenuForAppOrPopupWindow() {
-  Browser* browser = browser_view()->browser();
-  if (browser->is_app() && chrome::CanOpenTaskManager()) {
-    system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-    system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
-                                               IDS_TASK_MANAGER);
-  }
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-  encoding_menu_contents_.reset(new EncodingMenuModel(browser));
-  system_menu_contents_->AddSubMenuWithStringId(IDC_ENCODING_MENU,
-                                                IDS_ENCODING_MENU,
-                                                encoding_menu_contents_.get());
-  zoom_menu_contents_.reset(new ZoomMenuModel(system_menu_delegate_.get()));
-  system_menu_contents_->AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_ZOOM_MENU,
-                                                zoom_menu_contents_.get());
-  system_menu_contents_->AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-  system_menu_contents_->AddItemWithStringId(IDC_FIND, IDS_FIND);
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-  system_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
-  system_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
-  system_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-  if (browser->is_app()) {
-    system_menu_contents_->AddItemWithStringId(IDC_NEW_TAB,
-                                               IDS_APP_MENU_NEW_WEB_PAGE);
-  } else {
-    system_menu_contents_->AddItemWithStringId(IDC_SHOW_AS_TAB,
-                                               IDS_SHOW_AS_TAB);
-  }
-  system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-  system_menu_contents_->AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
-  system_menu_contents_->AddItemWithStringId(IDC_FORWARD,
-                                             IDS_CONTENT_CONTEXT_FORWARD);
-  system_menu_contents_->AddItemWithStringId(IDC_BACK,
-                                             IDS_CONTENT_CONTEXT_BACK);
-  AddFrameToggleItems();
-}
-
-void BrowserFrameWin::AddFrameToggleItems() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDebugEnableFrameToggle)) {
-    system_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
-    system_menu_contents_->AddItem(IDC_DEBUG_FRAME_TOGGLE,
-                                   L"Toggle Frame Type");
-  }
 }
 
 void BrowserFrameWin::HandleMetroNavSearchRequest(WPARAM w_param,
@@ -593,29 +514,11 @@ void BrowserFrameWin::GetMetroCurrentTabInfo(WPARAM w_param) {
   current_tab_info->title = base::win::LocalAllocAndCopyString(
       browser->GetWindowTitleForCurrentTab());
 
-  WebContents* current_tab = chrome::GetActiveWebContents(browser);
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   DCHECK(current_tab);
 
   current_tab_info->url = base::win::LocalAllocAndCopyString(
       UTF8ToWide(current_tab->GetURL().spec()));
-}
-
-void BrowserFrameWin::CacheMinimizeButtonDelta() {
-  int minimize_offset = GetMinimizeButtonOffsetForWindow(GetNativeView());
-  if (!minimize_offset)
-    return;
-
-  RECT rect = {0};
-  GetClientRect(GetNativeView(), &rect);
-  // Calculate and cache the value of the minimize button delta, i.e. the
-  // offset to be applied to the left or right edge of the client rect
-  // depending on whether the language is RTL or not.
-  // This cached value is only used if the WM_GETTITLEBARINFOEX message fails
-  // to get the offset of the minimize button.
-  if (base::i18n::IsRTL())
-    cached_minimize_button_x_delta_ = minimize_offset;
-  else
-    cached_minimize_button_x_delta_ = rect.right - minimize_offset;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -629,7 +532,7 @@ const gfx::Font& BrowserFrame::GetTitleFont() {
 }
 
 bool BrowserFrame::ShouldLeaveOffsetNearTopBorder() {
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     if (ui::GetDisplayLayout() == ui::LAYOUT_DESKTOP)
       return false;
   }

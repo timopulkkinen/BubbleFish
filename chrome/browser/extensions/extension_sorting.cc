@@ -7,12 +7,16 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/extensions/default_app_order.h"
+#endif
 
 using extensions::ExtensionPrefs;
 
@@ -360,7 +364,7 @@ syncer::StringOrdinal ExtensionSorting::GetNaturalAppPageOrdinal() const {
 
   for (PageOrdinalMap::const_iterator it = ntp_ordinal_map_.begin();
        it != ntp_ordinal_map_.end(); ++it) {
-    if (it->second.size() < kNaturalAppPageSize)
+    if (CountItemsVisibleOnNtp(it->second) < kNaturalAppPageSize)
       return it->first;
   }
 
@@ -439,6 +443,10 @@ syncer::StringOrdinal ExtensionSorting::PageIntegerAsStringOrdinal(
 
   CreateOrdinalsIfNecessary(page_index + 1);
   return ntp_ordinal_map_.rbegin()->first;
+}
+
+void ExtensionSorting::MarkExtensionAsHidden(const std::string& extension_id) {
+  ntp_hidden_extensions_.insert(extension_id);
 }
 
 syncer::StringOrdinal ExtensionSorting::GetMinOrMaxAppLaunchOrdinalsOnPage(
@@ -541,42 +549,21 @@ void ExtensionSorting::SyncIfNeeded(const std::string& extension_id) {
 void ExtensionSorting::CreateDefaultOrdinals() {
   // The following defines the default order of apps.
 #if defined(OS_CHROMEOS)
-  const char* kDefaultAppOrder[] = {
-    extension_misc::kChromeAppId,
-    extension_misc::kWebStoreAppId,
-    "coobgpohoikkiipiblmjeljniedjpjpf",  // Search
-    "blpcfgokakmgnkcojhhkbfbldkacnbeo",  // Youtube
-    "pjkljhegncpnkpknbcohdijeoejaedia",  // Gmail
-    "ejjicmeblgpmajnghnpcppodonldlgfn",  // Calendar
-    "kjebfhglflhjjjiceimfkgicifkhjlnm",  // Scratchpad
-    "lneaknkopdijkpnocmklfnjbeapigfbh",  // Google Maps
-    "apdfllckaahabafndbhieahigkjlhalf",  // Drive
-    "aohghmighlieiainnegkcijnfilokake",  // Docs
-    "felcaaldnbdncclmgdcncolpebgiejap",  // Sheets
-    "aapocclcgogkmnckokdopfmhonfmgoek",  // Slides
-    "dlppkpafhbajpcmmoheippocdidnckmm",  // Google+
-    "kbpgddbgniojgndnhlkjbkpknjhppkbk",  // Google+ Hangouts
-    "hhaomjibdihmijegdhdafkllkbggdgoj",  // Files
-    "hkhhlkdconhgemhegnplaldnmnmkaemd",  // Tips & Tricks
-    "icppfcnhkcmnfdhfhphakoifcfokfdhg",  // Play Music
-    "mmimngoggfoobjdlefbcabngfnmieonb",  // Play Books
-    "fppdphmgcddhjeddoeghpjefkdlccljb",  // Play Movies
-    "fobcpibfeplaikcclojfdhfdmbbeofai",  // Games
-    "joodangkbfjnajiiifokapkpmhfnpleo",  // Calculator
-    "cmbmjjimlbmpkonhnfabflhampihgnea",  // Camera
-    "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
-  };
+  std::vector<std::string> app_ids;
+  chromeos::default_app_order::Get(&app_ids);
 #else
   const char* kDefaultAppOrder[] = {
     extension_misc::kWebStoreAppId,
   };
+  const std::vector<const char*> app_ids(
+      kDefaultAppOrder, kDefaultAppOrder + arraysize(kDefaultAppOrder));
 #endif
 
   syncer::StringOrdinal page_ordinal = CreateFirstAppPageOrdinal();
   syncer::StringOrdinal app_launch_ordinal =
       CreateFirstAppLaunchOrdinal(page_ordinal);
-  for (size_t i = 0; i < arraysize(kDefaultAppOrder); ++i) {
-    const std::string extension_id = kDefaultAppOrder[i];
+  for (size_t i = 0; i < app_ids.size(); ++i) {
+    const std::string extension_id = app_ids[i];
     default_ordinals_[extension_id].page_ordinal = page_ordinal;
     default_ordinals_[extension_id].app_launch_ordinal = app_launch_ordinal;
     app_launch_ordinal = app_launch_ordinal.CreateAfter();
@@ -612,11 +599,29 @@ syncer::StringOrdinal ExtensionSorting::ResolveCollision(
   if (app_it == page.end())
     return app_launch_ordinal;
 
+  // Finds the next app launcher ordinal. This is done by the following loop
+  // because this function could be called before FixNTPOrdinalCollisions and
+  // thus |page| might contains multiple entries with the same app launch
+  // ordinal. See http://crbug.com/155603
+  while (app_it != page.end() && app_launch_ordinal.Equals(app_it->first))
+    ++app_it;
+
   // If there is no next after the collision, returns the next ordinal.
-  if (++app_it == page.end())
+  if (app_it == page.end())
     return app_launch_ordinal.CreateAfter();
 
   // Otherwise, returns the ordinal between the collision and the next ordinal.
   return app_launch_ordinal.CreateBetween(app_it->first);
 }
 
+size_t ExtensionSorting::CountItemsVisibleOnNtp(
+    const AppLaunchOrdinalMap& m) const {
+  size_t result = 0;
+  for (AppLaunchOrdinalMap::const_iterator it = m.begin(); it != m.end();
+       ++it) {
+    const std::string& id = it->second;
+    if (ntp_hidden_extensions_.count(id) == 0)
+      result++;
+  }
+  return result;
+}

@@ -6,55 +6,62 @@
 
 #include "base/logging.h"
 
-namespace media_stream {
+namespace content {
+
+const char kMediaStreamSource[] = "chromeMediaSource";
+const char kMediaStreamSourceId[] = "chromeMediaSourceId";
+const char kMediaStreamSourceTab[] = "tab";
+const char kMediaStreamSourceScreen[] = "screen";
 
 StreamOptions::StreamOptions()
-    : audio_type(content::MEDIA_NO_SERVICE),
-      video_type(content::MEDIA_NO_SERVICE) {}
-
-StreamOptions::StreamOptions(bool user_audio, bool user_video)
-    : audio_type(user_audio ?
-                     content::MEDIA_DEVICE_AUDIO_CAPTURE :
-                     content::MEDIA_NO_SERVICE),
-      video_type(user_video ?
-                     content::MEDIA_DEVICE_VIDEO_CAPTURE :
-                     content::MEDIA_NO_SERVICE) {}
+    : audio_type(MEDIA_NO_SERVICE),
+      video_type(MEDIA_NO_SERVICE) {}
 
 StreamOptions::StreamOptions(MediaStreamType audio_type,
                              MediaStreamType video_type)
     : audio_type(audio_type), video_type(video_type) {
-  DCHECK(IsAudioMediaType(audio_type) ||
-         audio_type == content::MEDIA_NO_SERVICE);
-  DCHECK(IsVideoMediaType(video_type) ||
-         video_type == content::MEDIA_NO_SERVICE);
+  DCHECK(IsAudioMediaType(audio_type) || audio_type == MEDIA_NO_SERVICE);
+  DCHECK(IsVideoMediaType(video_type) || video_type == MEDIA_NO_SERVICE);
 }
 
 // static
 const int StreamDeviceInfo::kNoId = -1;
 
 StreamDeviceInfo::StreamDeviceInfo()
-    : stream_type(content::MEDIA_NO_SERVICE),
-      in_use(false),
+    : in_use(false),
       session_id(kNoId) {}
 
 StreamDeviceInfo::StreamDeviceInfo(MediaStreamType service_param,
                                    const std::string& name_param,
                                    const std::string& device_param,
                                    bool opened)
-    : stream_type(service_param),
-      name(name_param),
-      device_id(device_param),
+    : device(service_param, device_param, name_param),
       in_use(opened),
-      session_id(kNoId) {}
+      session_id(kNoId) {
+}
+
+StreamDeviceInfo::StreamDeviceInfo(MediaStreamType service_param,
+                                   const std::string& name_param,
+                                   const std::string& device_param,
+                                   int sample_rate,
+                                   int channel_layout,
+                                   bool opened)
+    : device(service_param, device_param, name_param, sample_rate,
+             channel_layout),
+      in_use(opened),
+      session_id(kNoId) {
+}
 
 // static
 bool StreamDeviceInfo::IsEqual(const StreamDeviceInfo& first,
                                const StreamDeviceInfo& second) {
-  return first.stream_type == second.stream_type &&
-      first.name == second.name &&
-      first.device_id == second.device_id &&
+  return first.device.type == second.device.type &&
+      first.device.name == second.device.name &&
+      first.device.id == second.device.id &&
+      first.device.sample_rate == second.device.sample_rate &&
+      first.device.channel_layout == second.device.channel_layout &&
       first.in_use == second.in_use &&
       first.session_id == second.session_id;
 }
 
-}  // namespace media_stream
+}  // namespace content

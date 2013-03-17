@@ -16,22 +16,26 @@
 #include "content/worker/websharedworker_stub.h"
 #include "content/worker/worker_webkitplatformsupport_impl.h"
 #include "ipc/ipc_sync_channel.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebBlobRegistry.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebBlobRegistry.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebRuntimeFeatures;
 
+namespace content {
+
 static base::LazyInstance<base::ThreadLocalPointer<WorkerThread> > lazy_tls =
     LAZY_INSTANCE_INITIALIZER;
-
 
 WorkerThread::WorkerThread() {
   lazy_tls.Pointer()->Set(this);
   webkit_platform_support_.reset(new WorkerWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
+  WebKit::setIDBFactory(
+      webkit_platform_support_.get()->idbFactory());
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(this));
 
@@ -126,3 +130,5 @@ void WorkerThread::RemoveWorkerStub(WebSharedWorkerStub* stub) {
 void WorkerThread::AddWorkerStub(WebSharedWorkerStub* stub) {
   worker_stubs_.insert(stub);
 }
+
+}  // namespace content

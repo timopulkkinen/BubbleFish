@@ -6,22 +6,18 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 
 namespace extensions {
 
 const char kSerialConnectionNotFoundError[] = "Serial connection not found";
 
-SerialConnection::SerialConnection(const std::string& port,
-                                   int bitrate,
-                                   const std::string& owner_extension_id,
-                                   ApiResourceEventNotifier* event_notifier)
-    : ApiResource(owner_extension_id, event_notifier),
-      port_(port),
-      bitrate_(bitrate),
+SerialConnection::SerialConnection(const std::string& port, int bitrate,
+                                   const std::string& owner_extension_id)
+    : ApiResource(owner_extension_id), port_(port), bitrate_(bitrate),
       file_(base::kInvalidPlatformFileValue) {
-  CHECK(bitrate >= 0);
+  CHECK_GE(bitrate, 0);
 }
 
 SerialConnection::~SerialConnection() {
@@ -35,7 +31,8 @@ bool SerialConnection::Open() {
   // validate the supplied path against the set of valid port names, and
   // it is a reasonable assumption that serial port names are ASCII.
   CHECK(IsStringASCII(port_));
-  FilePath file_path(FilePath::FromUTF8Unsafe(port_));
+  base::FilePath file_path(
+      base::FilePath::FromUTF8Unsafe(MaybeFixUpPortName(port_)));
 
   file_ = base::CreatePlatformFile(file_path,
     base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ |
@@ -57,17 +54,16 @@ void SerialConnection::Close() {
 
 int SerialConnection::Read(scoped_refptr<net::IOBufferWithSize> io_buffer) {
   DCHECK(io_buffer->data());
-  return base::ReadPlatformFileAtCurrentPos(file_,
-                                            io_buffer->data(),
+  return base::ReadPlatformFileAtCurrentPos(file_, io_buffer->data(),
                                             io_buffer->size());
 }
 
 int SerialConnection::Write(scoped_refptr<net::IOBuffer> io_buffer,
                             int byte_count) {
   DCHECK(io_buffer->data());
-  DCHECK(byte_count >= 0);
-  return base::WritePlatformFileAtCurrentPos(file_,
-                                             io_buffer->data(), byte_count);
+  DCHECK_GE(byte_count, 0);
+  return base::WritePlatformFileAtCurrentPos(file_, io_buffer->data(),
+                                             byte_count);
 }
 
 void SerialConnection::Flush() {

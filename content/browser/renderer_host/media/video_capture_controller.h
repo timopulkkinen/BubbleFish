@@ -29,16 +29,14 @@
 #include "media/video/capture/video_capture_device.h"
 #include "media/video/capture/video_capture_types.h"
 
-namespace media_stream {
+namespace content {
 class VideoCaptureManager;
-}  // namespace media_stream
 
 class CONTENT_EXPORT VideoCaptureController
     : public base::RefCountedThreadSafe<VideoCaptureController>,
       public media::VideoCaptureDevice::EventHandler {
  public:
-  VideoCaptureController(
-      media_stream::VideoCaptureManager* video_capture_manager);
+  VideoCaptureController(VideoCaptureManager* video_capture_manager);
 
   // Start video capturing and try to use the resolution specified in
   // |params|.
@@ -69,7 +67,12 @@ class CONTENT_EXPORT VideoCaptureController
   // Implement media::VideoCaptureDevice::EventHandler.
   virtual void OnIncomingCapturedFrame(const uint8* data,
                                        int length,
-                                       base::Time timestamp) OVERRIDE;
+                                       base::Time timestamp,
+                                       int rotation,
+                                       bool flip_vert,
+                                       bool flip_horiz) OVERRIDE;
+  virtual void OnIncomingCapturedVideoFrame(media::VideoFrame* frame,
+                                            base::Time timestamp) OVERRIDE;
   virtual void OnError() OVERRIDE;
   virtual void OnFrameInfo(
       const media::VideoCaptureCapability& info) OVERRIDE;
@@ -95,21 +98,32 @@ class CONTENT_EXPORT VideoCaptureController
   // Send frame info and init buffers to |client|.
   void SendFrameInfoAndBuffers(ControllerClient* client, int buffer_size);
 
-  // Helpers.
   // Find a client of |id| and |handler| in |clients|.
   ControllerClient* FindClient(
       const VideoCaptureControllerID& id,
       VideoCaptureControllerEventHandler* handler,
       const ControllerClients& clients);
+
   // Find a client of |session_id| in |clients|.
   ControllerClient* FindClient(
       int session_id,
       const ControllerClients& clients);
+
   // Decide what to do after kStopping state. Dependent on events, controller
   // can stay in kStopping state, or go to kStopped, or restart capture.
   void PostStopping();
+
   // Check if any DIB is used by client.
   bool ClientHasDIB();
+
+  // DIB reservation. Locate an available DIB object, reserve it, and provide
+  // the caller the reserved DIB's buffer_id as well as pointers to its color
+  // planes. Returns true if successful.
+  bool ReserveSharedMemory(int* buffer_id_out,
+                           uint8** yplane,
+                           uint8** uplane,
+                           uint8** vplane,
+                           int rotation);
 
   // Lock to protect free_dibs_ and owned_dibs_.
   base::Lock lock_;
@@ -140,12 +154,14 @@ class CONTENT_EXPORT VideoCaptureController
   // It's accessed only on IO thread.
   bool frame_info_available_;
 
-  media_stream::VideoCaptureManager* video_capture_manager_;
+  VideoCaptureManager* video_capture_manager_;
 
   bool device_in_use_;
-  video_capture::State state_;
+  VideoCaptureState state_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoCaptureController);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_VIDEO_CAPTURE_CONTROLLER_H_

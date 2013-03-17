@@ -13,7 +13,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/resource_dispatcher_host_login_delegate.h"
 
-class ConstrainedWindow;
 class GURL;
 
 namespace content {
@@ -50,7 +49,7 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
 
   // Sets information about the authentication type (|form|) and the
   // |password_manager| for this profile.
-  void SetPasswordForm(const webkit::forms::PasswordForm& form);
+  void SetPasswordForm(const content::PasswordForm& form);
   void SetPasswordManager(PasswordManager* password_manager);
 
   // Returns the WebContents that needs authentication.
@@ -83,13 +82,14 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
 
   void SetModel(LoginModel* model);
 
-  void SetDialog(ConstrainedWindow* dialog);
-
   // Notify observers that authentication is needed.
   void NotifyAuthNeeded();
 
   // Performs necessary cleanup before deletion.
   void ReleaseSoon();
+
+  // Closes the native dialog.
+  virtual void CloseDialog() = 0;
 
  private:
   // Starts observing notifications from other LoginHandlers.
@@ -123,10 +123,6 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
   bool handled_auth_;
   mutable base::Lock handled_auth_lock_;
 
-  // The ConstrainedWindow that is hosting our LoginView.
-  // This should only be accessed on the UI loop.
-  ConstrainedWindow* dialog_;
-
   // Who/where/what asked for the authentication.
   scoped_refptr<net::AuthChallengeInfo> auth_info_;
 
@@ -141,7 +137,7 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
   // when later notifying the password manager if the credentials were accepted
   // or rejected.
   // This should only be accessed on the UI loop.
-  webkit::forms::PasswordForm password_form_;
+  content::PasswordForm password_form_;
 
   // Points to the password manager owned by the WebContents requesting auth.
   // This should only be accessed on the UI loop.

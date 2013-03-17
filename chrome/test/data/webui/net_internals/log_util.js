@@ -113,6 +113,7 @@ function checkViewsAfterLogLoaded() {
     dns: true,
     sockets: true,
     spdy: true,
+    quic: true,
     httpPipeline: false,
     httpCache: true,
     serviceProviders: cr.isWindows,
@@ -120,6 +121,7 @@ function checkViewsAfterLogLoaded() {
     hsts: false,
     logs: false,
     prerender: true,
+    bandwidth: true,
     chromeos: false
   };
   NetInternalsTest.checkTabHandleVisibility(tabVisibilityState, false);

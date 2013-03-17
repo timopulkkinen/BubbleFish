@@ -8,9 +8,9 @@
 
 #include "base/lazy_instance.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/tab_contents/web_drag_bookmark_handler_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents/render_view_context_menu_gtk.h"
+#include "chrome/browser/ui/gtk/tab_contents/web_drag_bookmark_handler_gtk.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -20,15 +20,29 @@
 #include "ui/base/gtk/focus_store_gtk.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 
-static base::LazyInstance<std::map<
-    content::WebContents*, ChromeWebContentsViewDelegateGtk*> >
-        g_instances = LAZY_INSTANCE_INITIALIZER;
+namespace {
+
+const char kViewDelegateUserDataKey[] = "ChromeWebContentsViewDelegateGtk";
+
+class ViewDelegateUserData : public base::SupportsUserData::Data {
+ public:
+  explicit ViewDelegateUserData(ChromeWebContentsViewDelegateGtk* view_delegate)
+      : view_delegate_(view_delegate) {}
+  virtual ~ViewDelegateUserData() {}
+  ChromeWebContentsViewDelegateGtk* view_delegate() { return view_delegate_; }
+
+ private:
+  ChromeWebContentsViewDelegateGtk* view_delegate_;  // unowned
+};
+
+}  // namespace
 
 ChromeWebContentsViewDelegateGtk* ChromeWebContentsViewDelegateGtk::GetFor(
     content::WebContents* web_contents) {
-  if (!g_instances.Get().count(web_contents))
-    return 0;
-  return g_instances.Get()[web_contents];
+  ViewDelegateUserData* user_data = static_cast<ViewDelegateUserData*>(
+      web_contents->GetUserData(&kViewDelegateUserDataKey));
+
+  return user_data ? user_data->view_delegate() : NULL;
 }
 
 ChromeWebContentsViewDelegateGtk::ChromeWebContentsViewDelegateGtk(
@@ -41,14 +55,14 @@ ChromeWebContentsViewDelegateGtk::ChromeWebContentsViewDelegateGtk(
   gtk_widget_set_name(floating_.get(), "chrome-tab-contents-view");
   g_signal_connect(floating_.get(), "set-floating-position",
                    G_CALLBACK(OnSetFloatingPositionThunk), this);
-  DCHECK_EQ(g_instances.Get().count(web_contents), 0u);
-  g_instances.Get()[web_contents] = this;
+
+  // Stash this in the WebContents.
+  web_contents->SetUserData(&kViewDelegateUserDataKey,
+                            new ViewDelegateUserData(this));
 }
 
 ChromeWebContentsViewDelegateGtk::~ChromeWebContentsViewDelegateGtk() {
   floating_.Destroy();
-  DCHECK_EQ(g_instances.Get().count(web_contents_), 1u);
-  g_instances.Get().erase(web_contents_);
 }
 
 void ChromeWebContentsViewDelegateGtk::AttachConstrainedWindow(
@@ -141,6 +155,10 @@ void ChromeWebContentsViewDelegateGtk::ShowContextMenu(
       new RenderViewContextMenuGtk(web_contents_, params, view));
   context_menu_->Init();
 
+  // Don't show empty menus.
+  if (context_menu_->menu_model().GetItemCount() == 0)
+    return;
+
   gfx::Rect bounds;
   web_contents_->GetView()->GetContainerBounds(&bounds);
   gfx::Point point = bounds.origin();
@@ -158,7 +176,7 @@ void ChromeWebContentsViewDelegateGtk::OnSetFloatingPosition(
   if (!constrained_window_)
     return;
 
-  // Place each ConstrainedWindow in the center of the view.
+  // Place each ConstrainedWindowGtk in the center of the view.
   GtkWidget* widget = constrained_window_->widget();
   DCHECK(gtk_widget_get_parent(widget) == floating_.get());
 

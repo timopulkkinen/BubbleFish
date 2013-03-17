@@ -9,6 +9,7 @@
 #include "base/path_service.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome_frame/test/net/test_automation_resource_message_filter.h"
+#include "net/url_request/url_request_context.h"
 
 namespace {
 
@@ -93,6 +94,7 @@ net::URLRequestJob* TestAutomationProvider::Factory(
       static int new_id = 0x00100000;
       URLRequestAutomationJob* job = new URLRequestAutomationJob(
           request, network_delegate,
+          request->context()->http_user_agent_settings(),
           g_provider_instance_->tab_handle_, new_id++,
           g_provider_instance_->automation_resource_message_filter_, false);
       return job;
@@ -111,7 +113,7 @@ std::string TestAutomationProvider::GetProtocolVersion() {
   // updated in one module but does in another, so better to use the
   // exact same version to avoid hard-to-debug problems in development
   // builds.
-  FilePath path;
+  base::FilePath path;
   PathService::Get(base::DIR_MODULE, &path);
   path = path.AppendASCII("npchrome_frame.dll");
 

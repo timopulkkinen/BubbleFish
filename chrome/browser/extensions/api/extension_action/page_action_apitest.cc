@@ -3,25 +3,35 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/browser_event_router.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 
-using extensions::Extension;
+namespace extensions {
+namespace {
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
+class PageActionApiTest : public ExtensionApiTest {
+ protected:
+  ExtensionAction* GetPageAction(const Extension& extension) {
+    return ExtensionActionManager::Get(browser()->profile())->
+        GetPageAction(extension);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, Basic) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("page_action/basics")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
@@ -36,17 +46,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
 
   // Test that we received the changes.
   int tab_id = SessionTabHelper::FromWebContents(
-      chrome::GetActiveWebContents(browser()))->session_id().id();
-  ExtensionAction* action = extension->page_action();
+      browser()->tab_strip_model()->GetActiveWebContents())->session_id().id();
+  ExtensionAction* action = GetPageAction(*extension);
   ASSERT_TRUE(action);
   EXPECT_EQ("Modified", action->GetTitle(tab_id));
 
   {
     // Simulate the page action being clicked.
     ResultCatcher catcher;
-    int tab_id =
-        ExtensionTabUtil::GetTabId(chrome::GetActiveWebContents(browser()));
-    ExtensionService* service = browser()->profile()->GetExtensionService();
+    int tab_id = ExtensionTabUtil::GetTabId(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
     service->browser_event_router()->PageActionExecuted(
         browser()->profile(), *action, tab_id, "", 0);
     EXPECT_TRUE(catcher.GetNextResult());
@@ -62,25 +73,25 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
 
   // We should not be creating icons asynchronously, so we don't need an
   // observer.
-  ExtensionActionIconFactory icon_factory(extension, action, NULL);
+  ExtensionActionIconFactory icon_factory(profile(), extension, action, NULL);
 
   // Test that we received the changes.
   tab_id = SessionTabHelper::FromWebContents(
-      chrome::GetActiveWebContents(browser()))->session_id().id();
+      browser()->tab_strip_model()->GetActiveWebContents())->session_id().id();
   EXPECT_FALSE(icon_factory.GetIcon(tab_id).IsEmpty());
 }
 
 // Test that calling chrome.pageAction.setPopup() can enable a popup.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, AddPopup) {
   // Load the extension, which has no default popup.
   ASSERT_TRUE(RunExtensionTest("page_action/add_popup")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
-  ExtensionAction* page_action = extension->page_action();
+  ExtensionAction* page_action = GetPageAction(*extension);
   ASSERT_TRUE(page_action)
       << "Page action test extension should have a page action.";
 
@@ -90,7 +101,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
   // install a page action popup.
   {
     ResultCatcher catcher;
-    ExtensionService* service = browser()->profile()->GetExtensionService();
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
     service->browser_event_router()->PageActionExecuted(
         browser()->profile(), *page_action, tab_id, "", 1);
     ASSERT_TRUE(catcher.GetNextResult());
@@ -118,16 +130,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
 }
 
 // Test that calling chrome.pageAction.setPopup() can remove a popup.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionRemovePopup) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, RemovePopup) {
   // Load the extension, which has a page action with a default popup.
   ASSERT_TRUE(RunExtensionTest("page_action/remove_popup")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
-  ExtensionAction* page_action = extension->page_action();
+  ExtensionAction* page_action = GetPageAction(*extension);
   ASSERT_TRUE(page_action)
       << "Page action test extension should have a page action.";
 
@@ -149,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionRemovePopup) {
 
 // Tests old-style pageActions API that is deprecated but we don't want to
 // break.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, OldPageActions) {
   ASSERT_TRUE(RunExtensionTestAllowOldManifestVersion("page_action/old_api")) <<
       message_;
   const Extension* extension = GetSingleLoadedExtension();
@@ -166,18 +178,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
   // Simulate the page action being clicked.
   {
     ResultCatcher catcher;
-    int tab_id =
-        ExtensionTabUtil::GetTabId(chrome::GetActiveWebContents(browser()));
-    ExtensionService* service = browser()->profile()->GetExtensionService();
+    int tab_id = ExtensionTabUtil::GetTabId(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
+    ExtensionAction* page_action = GetPageAction(*extension);
     service->browser_event_router()->PageActionExecuted(
-        browser()->profile(), *extension->page_action(), tab_id, "", 1);
+        browser()->profile(), *page_action, tab_id, "", 1);
     EXPECT_TRUE(catcher.GetNextResult());
   }
 }
 
 // Tests popups in page actions.
 // Flaky on the trybots. See http://crbug.com/96725.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_ShowPageActionPopup) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, DISABLED_ShowPageActionPopup) {
   ASSERT_TRUE(RunExtensionTest("page_action/popup")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
@@ -195,7 +209,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_ShowPageActionPopup) {
 
 // Test http://crbug.com/57333: that two page action extensions using the same
 // icon for the page action icon and the extension icon do not crash.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TestCrash57333) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, TestCrash57333) {
   // Load extension A.
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("page_action")
                                           .AppendASCII("crash_57333")
@@ -206,7 +220,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TestCrash57333) {
                                           .AppendASCII("Extension2")));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Getters) {
+IN_PROC_BROWSER_TEST_F(PageActionApiTest, Getters) {
   ASSERT_TRUE(RunExtensionTest("page_action/getters")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
@@ -216,3 +230,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Getters) {
       GURL(extension->GetResourceURL("update.html")));
   ASSERT_TRUE(catcher.GetNextResult());
 }
+
+}  // namespace
+}  // namespace extensions

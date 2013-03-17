@@ -7,10 +7,10 @@
 
 #include <jni.h>
 
-#include "base/android/jni_helper.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback_forward.h"
 #include "base/string16.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
 
 class GURL;
 class SkBitmap;
@@ -34,7 +34,12 @@ class TabAndroid {
 
   static TabAndroid* GetNativeTab(JNIEnv* env, jobject obj);
 
+  // TODO(tedchoc): Make pure virtual once all derived classes can be updated.
+  virtual content::WebContents* GetWebContents();
+
   virtual browser_sync::SyncedTabDelegate* GetSyncedTabDelegate() = 0;
+
+  virtual ToolbarModel::SecurityLevel GetSecurityLevel();
 
   int id() const {
     return tab_id_;
@@ -52,17 +57,28 @@ class TabAndroid {
       const content::ContextMenuParams& params,
       const base::Callback<void(int)>& callback) = 0;
 
-  // --------------------------------------------------------------------------
-  // Public methods that call to Java via JNI
-  // --------------------------------------------------------------------------
   // Called when context menu option to create the bookmark shortcut on
   // homescreen is called.
   virtual void AddShortcutToBookmark(
       const GURL& url, const string16& title, const SkBitmap& skbitmap,
       int r_value, int g_value, int b_value) = 0;
 
+  // Called when a bookmark node should be edited.
+  virtual void EditBookmark(int64 node_id, bool is_folder) = 0;
+
+  // Called when the common ExternalProtocolHandler wants to
+  // run the external protocol dialog.
+  // TODO(jknotten): Remove this method. Making it non-abstract, so that
+  // derived classes may remove their implementation first.
+  virtual void RunExternalProtocolDialog(const GURL& url);
+
  protected:
   virtual ~TabAndroid();
+
+  static void InitTabHelpers(content::WebContents* web_contents);
+
+  static content::WebContents* InitWebContentsFromView(JNIEnv* env,
+                                                       jobject content_view);
 
   int tab_id_;
 };

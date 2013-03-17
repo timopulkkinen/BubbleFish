@@ -15,7 +15,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/event_types.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_export.h"
 #include "ui/gfx/point.h"
 
@@ -72,13 +74,13 @@ UI_EXPORT bool QueryRenderSupport(Display* dpy);
 // Return the default screen number for the display
 int GetDefaultScreen(Display* display);
 
-// TODO(xiyuan): Fix the stale XCursorCache problem per http://crbug.com/102759.
-// A special cursor that makes GetXCursor below to clear its XCursorCache.
-const int kCursorClearXCursorCache = -1;
-
 // Returns an X11 Cursor, sharable across the process.
 // |cursor_shape| is an X font cursor shape, see XCreateFontCursor().
 UI_EXPORT ::Cursor GetXCursor(int cursor_shape);
+
+// Resets the cache used by GetXCursor(). Only useful for tests that may delete
+// the display.
+UI_EXPORT void ResetXCursorCache();
 
 #if defined(USE_AURA)
 // Creates a custom X cursor from the image. This takes ownership of image. The
@@ -96,6 +98,12 @@ UI_EXPORT void UnrefCustomXCursor(::Cursor cursor);
 // should be non-null. Caller owns the returned object.
 UI_EXPORT XcursorImage* SkBitmapToXcursorImage(const SkBitmap* bitmap,
                                                const gfx::Point& hotspot);
+
+// Coalesce all pending motion events (touch or mouse) that are at the top of
+// the queue, and return the number eliminated, storing the last one in
+// |last_event|.
+UI_EXPORT int CoalescePendingMotionEvents(const XEvent* xev,
+                                          XEvent* last_event);
 #endif
 
 // Hides the host cursor.
@@ -135,6 +143,9 @@ enum HideTitlebarWhenMaximized {
 UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(
     XID window,
     HideTitlebarWhenMaximized property);
+
+// Clears all regions of X11's default root window by filling black pixels.
+UI_EXPORT void ClearX11DefaultRootWindow();
 
 // Return the number of bits-per-pixel for a pixmap of the given depth
 UI_EXPORT int BitsPerPixelForPixmapDepth(Display* display, int depth);
@@ -176,7 +187,7 @@ UI_EXPORT bool SetIntArrayProperty(XID window,
 Atom GetAtom(const char* atom_name);
 
 // Get |window|'s parent window, or None if |window| is the root window.
-XID GetParentWindow(XID window);
+UI_EXPORT XID GetParentWindow(XID window);
 
 // Walk up |window|'s hierarchy until we find a direct child of |root|.
 XID GetHighestAncestorWindow(XID window, XID root);
@@ -185,6 +196,9 @@ static const int kAllDesktops = -1;
 // Queries the desktop |window| is on, kAllDesktops if sticky. Returns false if
 // property not found.
 bool GetWindowDesktop(XID window, int* desktop);
+
+// Translates an X11 error code into a printable string.
+UI_EXPORT std::string GetX11ErrorString(Display* display, int err);
 
 // Implementers of this interface receive a notification for every X window of
 // the main display.
@@ -258,21 +272,36 @@ void FreePixmap(Display* display, XID pixmap);
 UI_EXPORT bool GetOutputDeviceHandles(std::vector<XID>* outputs);
 
 // Gets some useful data from the specified output device, such like
-// manufacturer's ID, serial#, and human readable name. Returns false if it
-// fails to get those data and doesn't touch manufacturer ID/serial#/name.
+// manufacturer's ID, product code, and human readable name. Returns false if it
+// fails to get those data and doesn't touch manufacturer ID/product code/name.
 // NULL can be passed for unwanted output parameters.
 UI_EXPORT bool GetOutputDeviceData(XID output,
                                    uint16* manufacturer_id,
-                                   uint32* serial_number,
+                                   uint16* product_code,
                                    std::string* human_readable_name);
 
-// Gets the names of the all displays physically connected to the system.
-UI_EXPORT std::vector<std::string> GetDisplayNames(
-    const std::vector<XID>& output_id);
+// Gets the overscan flag from |output| and stores to |flag|. Returns true if
+// the flag is found. Otherwise returns false and doesn't touch |flag|. The
+// output will produce overscan if |flag| is set to true, but the output may
+// still produce overscan even though it returns true and |flag| is set to
+// false.
+UI_EXPORT bool GetOutputOverscanFlag(XID output, bool* flag);
 
-// Gets the name of outputs given by |output_id|.
-UI_EXPORT std::vector<std::string> GetOutputNames(
-    const std::vector<XID>& output_id);
+// Parses |prop| as EDID data and stores extracted data into |manufacturer_id|,
+// |product_code|, and |human_readable_name| and returns true. NULL can be
+// passed for unwanted output parameters. This is exported for
+// x11_util_unittest.cc.
+UI_EXPORT bool ParseOutputDeviceData(const unsigned char* prop,
+                                     unsigned long nitems,
+                                     uint16* manufacturer_id,
+                                     uint16* product_code,
+                                     std::string* human_readable_name);
+
+// Parses |prop| as EDID data and stores the overscan flag to |flag|. Returns
+// true if the flag is found. This is exported for x11_util_unittest.cc.
+UI_EXPORT bool ParseOutputOverscanFlag(const unsigned char* prop,
+                                       unsigned long nitems,
+                                       bool* flag);
 
 enum WindowManagerName {
   WM_UNKNOWN,

@@ -9,7 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAnimationController.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -17,11 +18,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeCollection.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeList.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
-using WebKit::WebAnimationController;
 using WebKit::WebDocument;
 using WebKit::WebElement;
 using WebKit::WebFrame;
@@ -153,25 +151,25 @@ namespace webkit_glue {
 
 WebString GetSubResourceLinkFromElement(const WebElement& element) {
   const char* attribute_name = NULL;
-  if (element.hasTagName("img") ||
-      element.hasTagName("script")) {
+  if (element.hasHTMLTagName("img") ||
+      element.hasHTMLTagName("script")) {
     attribute_name = "src";
-  } else if (element.hasTagName("input")) {
+  } else if (element.hasHTMLTagName("input")) {
     const WebInputElement input = element.toConst<WebInputElement>();
     if (input.isImageButton()) {
       attribute_name = "src";
     }
-  } else if (element.hasTagName("body") ||
-             element.hasTagName("table") ||
-             element.hasTagName("tr") ||
-             element.hasTagName("td")) {
+  } else if (element.hasHTMLTagName("body") ||
+             element.hasHTMLTagName("table") ||
+             element.hasHTMLTagName("tr") ||
+             element.hasHTMLTagName("td")) {
     attribute_name = "background";
-  } else if (element.hasTagName("blockquote") ||
-             element.hasTagName("q") ||
-             element.hasTagName("del") ||
-             element.hasTagName("ins")) {
+  } else if (element.hasHTMLTagName("blockquote") ||
+             element.hasHTMLTagName("q") ||
+             element.hasHTMLTagName("del") ||
+             element.hasHTMLTagName("ins")) {
     attribute_name = "cite";
-  } else if (element.hasTagName("link")) {
+  } else if (element.hasHTMLTagName("link")) {
     // If the link element is not linked to css, ignore it.
     if (LowerCaseEqualsASCII(element.getAttribute("type"), "text/css")) {
       // TODO(jnd): Add support for extracting links of sub-resources which
@@ -239,48 +237,6 @@ bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
   return true;
 }
 
-bool PauseAnimationAtTimeOnElementWithId(WebView* view,
-                                         const std::string& animation_name,
-                                         double time,
-                                         const std::string& element_id) {
-  WebFrame* web_frame = view->mainFrame();
-  if (!web_frame)
-    return false;
-
-  WebAnimationController* controller = web_frame->animationController();
-  if (!controller)
-    return false;
-
-  WebElement element =
-    web_frame->document().getElementById(WebString::fromUTF8(element_id));
-  if (element.isNull())
-    return false;
-  return controller->pauseAnimationAtTime(element,
-                                          WebString::fromUTF8(animation_name),
-                                          time);
-}
-
-bool PauseTransitionAtTimeOnElementWithId(WebView* view,
-                                          const std::string& property_name,
-                                          double time,
-                                          const std::string& element_id) {
-  WebFrame* web_frame = view->mainFrame();
-  if (!web_frame)
-    return false;
-
-  WebAnimationController* controller = web_frame->animationController();
-  if (!controller)
-    return false;
-
-  WebElement element =
-      web_frame->document().getElementById(WebString::fromUTF8(element_id));
-  if (element.isNull())
-    return false;
-  return controller->pauseTransitionAtTime(element,
-                                           WebString::fromUTF8(property_name),
-                                           time);
-}
-
 bool ElementDoesAutoCompleteForElementWithId(WebView* view,
                                              const std::string& element_id) {
   WebFrame* web_frame = view->mainFrame();
@@ -289,23 +245,11 @@ bool ElementDoesAutoCompleteForElementWithId(WebView* view,
 
   WebElement element = web_frame->document().getElementById(
       WebString::fromUTF8(element_id));
-  if (element.isNull() || !element.hasTagName("input"))
+  if (element.isNull() || !element.hasHTMLTagName("input"))
     return false;
 
   WebInputElement input_element = element.to<WebInputElement>();
   return input_element.autoComplete();
-}
-
-int NumberOfActiveAnimations(WebView* view) {
-  WebFrame* web_frame = view->mainFrame();
-  if (!web_frame)
-    return -1;
-
-  WebAnimationController* controller = web_frame->animationController();
-  if (!controller)
-    return -1;
-
-  return controller->numberOfActiveAnimations();
 }
 
 void GetMetaElementsWithAttribute(WebDocument* document,

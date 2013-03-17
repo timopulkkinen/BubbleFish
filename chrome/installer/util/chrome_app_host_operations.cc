@@ -5,13 +5,15 @@
 #include "chrome/installer/util/chrome_app_host_operations.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
+#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 
 namespace installer {
@@ -39,12 +41,12 @@ void ChromeAppHostOperations::ReadOptions(
 
 void ChromeAppHostOperations::AddKeyFiles(
     const std::set<std::wstring>& options,
-    std::vector<FilePath>* key_files) const {
+    std::vector<base::FilePath>* key_files) const {
 }
 
 void ChromeAppHostOperations::AddComDllList(
     const std::set<std::wstring>& options,
-    std::vector<FilePath>* com_dll_list) const {
+    std::vector<base::FilePath>* com_dll_list) const {
 }
 
 void ChromeAppHostOperations::AppendProductFlags(
@@ -60,8 +62,8 @@ void ChromeAppHostOperations::AppendProductFlags(
   if (is_multi_install && !cmd_line->HasSwitch(switches::kMultiInstall))
     cmd_line->AppendSwitch(switches::kMultiInstall);
 
-  // --app-host is always needed.
-  cmd_line->AppendSwitch(switches::kChromeAppHost);
+  // Add --app-launcher.
+  cmd_line->AppendSwitch(switches::kChromeAppLauncher);
 }
 
 void ChromeAppHostOperations::AppendRenameFlags(
@@ -84,9 +86,7 @@ bool ChromeAppHostOperations::SetChannelFlags(
     ChannelInfo* channel_info) const {
 #if defined(GOOGLE_CHROME_BUILD)
   DCHECK(channel_info);
-  bool modified = channel_info->SetAppHost(set);
-
-  return modified;
+  return channel_info->SetAppLauncher(set);
 #else
   return false;
 #endif
@@ -94,7 +94,30 @@ bool ChromeAppHostOperations::SetChannelFlags(
 
 bool ChromeAppHostOperations::ShouldCreateUninstallEntry(
     const std::set<std::wstring>& options) const {
-  return false;
+  return true;
+}
+
+void ChromeAppHostOperations::AddDefaultShortcutProperties(
+    BrowserDistribution* dist,
+    const base::FilePath& target_exe,
+    ShellUtil::ShortcutProperties* properties) const {
+  if (!properties->has_target())
+    properties->set_target(target_exe);
+
+  if (!properties->has_arguments()) {
+    CommandLine app_host_args(CommandLine::NO_PROGRAM);
+    app_host_args.AppendSwitch(::switches::kShowAppList);
+    properties->set_arguments(app_host_args.GetCommandLineString());
+  }
+
+  if (!properties->has_icon())
+    properties->set_icon(target_exe, dist->GetIconIndex());
+
+  if (!properties->has_app_id()) {
+    std::vector<string16> components;
+    components.push_back(dist->GetBaseAppId());
+    properties->set_app_id(ShellUtil::BuildAppModelId(components));
+  }
 }
 
 }  // namespace installer

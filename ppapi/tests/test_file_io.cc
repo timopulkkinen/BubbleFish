@@ -82,6 +82,29 @@ int32_t ReadEntireFile(PP_Instance instance,
   return PP_OK;
 }
 
+int32_t ReadToArrayEntireFile(PP_Instance instance,
+                              pp::FileIO* file_io,
+                              int32_t offset,
+                              std::string* data,
+                              bool force_async) {
+  TestCompletionCallbackWithOutput< std::vector<char> > callback(
+      instance, force_async);
+
+  for (;;) {
+    callback.WaitForResult(file_io->Read(offset, 256, callback));
+    int32_t rv = callback.result();
+    if (rv < 0)
+      return rv;
+    if (rv == 0)
+      break;
+    assert(rv == static_cast<int32_t>(callback.output().size()));
+    offset += rv;
+    data->append(callback.output().begin(), callback.output().end());
+  }
+
+  return PP_OK;
+}
+
 int32_t WriteEntireBuffer(PP_Instance instance,
                           pp::FileIO* file_io,
                           int32_t offset,
@@ -114,7 +137,9 @@ bool TestFileIO::Init() {
 
 void TestFileIO::RunTests(const std::string& filter) {
   RUN_TEST_FORCEASYNC_AND_NOT(Open, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(OpenDirectory, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(ReadWriteSetLength, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(ReadToArrayWriteSetLength, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(TouchQuery, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(AbortCalls, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(ParallelReads, filter);
@@ -221,6 +246,43 @@ std::string TestFileIO::TestOpen() {
       INVALID_FLAG_COMBINATION);
   if (!result.empty())
     return result;
+
+  PASS();
+}
+
+std::string TestFileIO::TestOpenDirectory() {
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
+
+  pp::FileSystem file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
+  int32_t rv = file_system.Open(1024, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileSystem::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileSystem::Open", rv);
+
+  // Make a directory.
+  pp::FileRef dir_ref(file_system, "/test_dir_open_directory");
+  rv = dir_ref.MakeDirectory(callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileSystem::MakeDirectory force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileSystem::MakeDirectory", rv);
+
+  // Open the directory. This is expected to fail since directories cannot be
+  // opened.
+  pp::FileIO file_io(instance_);
+  rv = file_io.Open(dir_ref, PP_FILEOPENFLAG_READ, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  // Check for failing open operation for the directory.
+  if (rv != PP_ERROR_NOTAFILE)
+    return ReportError("FileIO::Open", rv);
 
   PASS();
 }
@@ -348,6 +410,150 @@ std::string TestFileIO::TestReadWriteSetLength() {
   // Read from the middle of the file.
   read_buffer.clear();
   rv = ReadEntireFile(instance_->pp_instance(), &file_io, 4, &read_buffer);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != std::string("testtest\0\0\0\0", 12))
+    return ReportMismatch("FileIO::Read", read_buffer,
+                          std::string("testtest\0\0\0\0", 12));
+
+  PASS();
+}
+
+// This is basically a copy of TestReadWriteSetLength, but with the new Read
+// API.  With this test case, we can make sure the two Read's have the same
+// behavior.
+std::string TestFileIO::TestReadToArrayWriteSetLength() {
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
+
+  pp::FileSystem file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
+  pp::FileRef file_ref(file_system, "/file_read_write_setlength");
+  int32_t rv = file_system.Open(1024, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileSystem::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileSystem::Open", rv);
+
+  pp::FileIO file_io(instance_);
+  rv = file_io.Open(file_ref,
+                    PP_FILEOPENFLAG_CREATE |
+                    PP_FILEOPENFLAG_TRUNCATE |
+                    PP_FILEOPENFLAG_READ |
+                    PP_FILEOPENFLAG_WRITE,
+                    callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileIO::Open", rv);
+
+  // Write something to the file.
+  rv = WriteEntireBuffer(instance_->pp_instance(), &file_io, 0, "test_test");
+  if (rv != PP_OK)
+    return ReportError("FileIO::Write", rv);
+
+  TestCompletionCallbackWithOutput< std::vector<char> > callback2(
+      instance_->pp_instance(), force_async_);
+  // Check for failing read operation.
+  callback2.WaitForResult(
+      file_io.Read(0, -1,  // negative number of bytes to read
+                   callback2));
+  CHECK_CALLBACK_BEHAVIOR(callback2);
+  if (callback2.result() != PP_ERROR_FAILED)
+    return ReportError("FileIO::Read", callback2.result());
+
+  // Read the entire file.
+  std::string read_buffer;
+  read_buffer.reserve(10);
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 0,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != "test_test")
+    return ReportMismatch("FileIO::Read", read_buffer, "test_test");
+
+  // Truncate the file.
+  rv = file_io.SetLength(4, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::SetLength force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileIO::SetLength", rv);
+
+  // Check the file contents.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 0,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != "test")
+    return ReportMismatch("FileIO::Read", read_buffer, "test");
+
+  // Try to read past the end of the file.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 100,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (!read_buffer.empty())
+    return ReportMismatch("FileIO::Read", read_buffer, "<empty string>");
+
+  // Write past the end of the file. The file should be zero-padded.
+  rv = WriteEntireBuffer(instance_->pp_instance(), &file_io, 8, "test");
+  if (rv != PP_OK)
+    return ReportError("FileIO::Write", rv);
+
+  // Check the contents of the file.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 0,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != std::string("test\0\0\0\0test", 12))
+    return ReportMismatch("FileIO::Read", read_buffer,
+                          std::string("test\0\0\0\0test", 12));
+
+  // Extend the file.
+  rv = file_io.SetLength(16, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::SetLength force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileIO::SetLength", rv);
+
+  // Check the contents of the file.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 0,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != std::string("test\0\0\0\0test\0\0\0\0", 16))
+    return ReportMismatch("FileIO::Read", read_buffer,
+                          std::string("test\0\0\0\0test\0\0\0\0", 16));
+
+  // Write in the middle of the file.
+  rv = WriteEntireBuffer(instance_->pp_instance(), &file_io, 4, "test");
+  if (rv != PP_OK)
+    return ReportError("FileIO::Write", rv);
+
+  // Check the contents of the file.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 0,
+                             &read_buffer, force_async_);
+  if (rv != PP_OK)
+    return ReportError("FileIO::Read", rv);
+  if (read_buffer != std::string("testtesttest\0\0\0\0", 16))
+    return ReportMismatch("FileIO::Read", read_buffer,
+                          std::string("testtesttest\0\0\0\0", 16));
+
+  // Read from the middle of the file.
+  read_buffer.clear();
+  rv = ReadToArrayEntireFile(instance_->pp_instance(), &file_io, 4,
+                             &read_buffer, force_async_);
   if (rv != PP_OK)
     return ReportError("FileIO::Read", rv);
   if (read_buffer != std::string("testtest\0\0\0\0", 12))

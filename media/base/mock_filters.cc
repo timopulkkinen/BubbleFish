@@ -44,44 +44,16 @@ MockDecryptor::MockDecryptor() {}
 
 MockDecryptor::~MockDecryptor() {}
 
-MockDecryptorClient::MockDecryptorClient() {}
-
-MockDecryptorClient::~MockDecryptorClient() {}
-
-void MockDecryptorClient::KeyMessage(const std::string& key_system,
-                                     const std::string& session_id,
-                                     scoped_array<uint8> message,
-                                     int message_length,
-                                     const std::string& default_url) {
-  KeyMessageMock(key_system, session_id, message.get(), message_length,
-                 default_url);
+void MockDecryptor::InitializeAudioDecoder(
+    scoped_ptr<AudioDecoderConfig> config,
+    const DecoderInitCB& init_cb) {
+  InitializeAudioDecoderMock(*config, init_cb);
 }
 
-void MockDecryptorClient::NeedKey(const std::string& key_system,
-                                  const std::string& session_id,
-                                  scoped_array<uint8> init_data,
-                                  int init_data_length) {
-  NeedKeyMock(key_system, session_id, init_data.get(), init_data_length);
-}
-
-MockFilterCollection::MockFilterCollection()
-    : demuxer_(new MockDemuxer()),
-      video_decoder_(new MockVideoDecoder()),
-      audio_decoder_(new MockAudioDecoder()),
-      video_renderer_(new MockVideoRenderer()),
-      audio_renderer_(new MockAudioRenderer()) {
-}
-
-MockFilterCollection::~MockFilterCollection() {}
-
-scoped_ptr<FilterCollection> MockFilterCollection::Create() {
-  scoped_ptr<FilterCollection> collection(new FilterCollection());
-  collection->SetDemuxer(demuxer_);
-  collection->GetVideoDecoders()->push_back(video_decoder_);
-  collection->AddAudioDecoder(audio_decoder_);
-  collection->AddVideoRenderer(video_renderer_);
-  collection->AddAudioRenderer(audio_renderer_);
-  return collection.Pass();
+void MockDecryptor::InitializeVideoDecoder(
+    scoped_ptr<VideoDecoderConfig> config,
+    const DecoderInitCB& init_cb) {
+  InitializeVideoDecoderMock(*config, init_cb);
 }
 
 MockStatisticsCB::MockStatisticsCB() {}

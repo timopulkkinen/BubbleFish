@@ -19,11 +19,13 @@
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_info_collector.h"
 #include "content/gpu/gpu_process.h"
+#include "content/gpu/gpu_watchdog_thread.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_switching_option.h"
 #include "content/public/common/main_function_params.h"
 #include "crypto/hmac.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -33,6 +35,7 @@
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #include "sandbox/win/src/sandbox.h"
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+#include "content/common/gpu/media/exynos_video_decode_accelerator.h"
 #include "content/common/gpu/media/omx_video_decode_accelerator.h"
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
@@ -46,15 +49,15 @@
 #include "content/public/common/sandbox_init.h"
 #endif
 
+const int kGpuTimeout = 10000;
+
+namespace content {
 namespace {
-void WarmUpSandbox(const content::GPUInfo&, bool);
-#if defined(OS_LINUX)
-void CollectGraphicsInfo(content::GPUInfo*);
-#endif
+void WarmUpSandbox(const GPUInfo&, bool);
 }
 
 // Main function for starting the Gpu process.
-int GpuMain(const content::MainFunctionParams& parameters) {
+int GpuMain(const MainFunctionParams& parameters) {
   TRACE_EVENT0("gpu", "GpuMain");
 
   base::Time start_time = base::Time::Now();
@@ -82,9 +85,9 @@ int GpuMain(const content::MainFunctionParams& parameters) {
     std::string option = command_line.GetSwitchValueASCII(
         switches::kGpuSwitching);
     if (option == switches::kGpuSwitchingOptionNameForceDiscrete)
-      gfx::GpuSwitchingManager::GetInstance()->ForceUseOfDiscreteGpu();
+      ui::GpuSwitchingManager::GetInstance()->ForceUseOfDiscreteGpu();
     else if (option == switches::kGpuSwitchingOptionNameForceIntegrated)
-      gfx::GpuSwitchingManager::GetInstance()->ForceUseOfIntegratedGpu();
+      ui::GpuSwitchingManager::GetInstance()->ForceUseOfIntegratedGpu();
   }
 
   // Initialization of the OpenGL bindings may fail, in which case we
@@ -98,7 +101,55 @@ int GpuMain(const content::MainFunctionParams& parameters) {
   // GpuMsg_Initialize message from the browser.
   bool dead_on_arrival = false;
 
-  content::GPUInfo gpu_info;
+  MessageLoop::Type message_loop_type = MessageLoop::TYPE_IO;
+#if defined(OS_WIN)
+  // Unless we're running on desktop GL, we don't need a UI message
+  // loop, so avoid its use to work around apparent problems with some
+  // third-party software.
+  if (command_line.HasSwitch(switches::kUseGL) &&
+      command_line.GetSwitchValueASCII(switches::kUseGL) ==
+          gfx::kGLImplementationDesktopName) {
+      message_loop_type = MessageLoop::TYPE_UI;
+  }
+#elif defined(OS_LINUX)
+  message_loop_type = MessageLoop::TYPE_DEFAULT;
+#endif
+
+  MessageLoop main_message_loop(message_loop_type);
+  base::PlatformThread::SetName("CrGpuMain");
+
+  // In addition to disabling the watchdog if the command line switch is
+  // present, disable the watchdog on valgrind because the code is expected
+  // to run slowly in that case.
+  bool enable_watchdog =
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableGpuWatchdog) &&
+      !RunningOnValgrind();
+
+  // Disable the watchdog in debug builds because they tend to only be run by
+  // developers who will not appreciate the watchdog killing the GPU process.
+#ifndef NDEBUG
+  enable_watchdog = false;
+#endif
+
+  bool delayed_watchdog_enable = false;
+
+#if defined(OS_CHROMEOS)
+  // Don't start watchdog immediately, to allow developers to switch to VT2 on
+  // startup.
+  delayed_watchdog_enable = true;
+#endif
+
+  scoped_refptr<GpuWatchdogThread> watchdog_thread;
+
+  // Start the GPU watchdog only after anything that is expected to be time
+  // consuming has completed, otherwise the process is liable to be aborted.
+  if (enable_watchdog && !delayed_watchdog_enable) {
+    watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
+    watchdog_thread->Start();
+  }
+
+  GPUInfo gpu_info;
   // Get vendor_id, device_id, driver_version from browser process through
   // commandline switches.
   DCHECK(command_line.HasSwitch(switches::kGpuVendorID) &&
@@ -116,25 +167,29 @@ int GpuMain(const content::MainFunctionParams& parameters) {
       command_line.GetSwitchValueASCII(switches::kGpuDriverVendor);
   gpu_info.driver_version =
       command_line.GetSwitchValueASCII(switches::kGpuDriverVersion);
-  content::GetContentClient()->SetGpuInfo(gpu_info);
+  GetContentClient()->SetGpuInfo(gpu_info);
+
+#if defined(OS_WIN)
+  // Asynchronously initialize DXVA while GL is being initialized because
+  // they both take tens of ms.
+  base::WaitableEvent dxva_initialized(true, false);
+  DXVAVideoDecodeAccelerator::PreSandboxInitialization(
+      base::Bind(&base::WaitableEvent::Signal,
+                 base::Unretained(&dxva_initialized)));
+#endif
 
   // We need to track that information for the WarmUpSandbox function.
   bool initialized_gl_context = false;
   // Load and initialize the GL implementation and locate the GL entry points.
   if (gfx::GLSurface::InitializeOneOff()) {
-#if defined(OS_LINUX)
-    // We collect full GPU info on demand in Win/Mac, i.e., when about:gpu
-    // page opens.  This is because we can make blacklist decisions based on
-    // preliminary GPU info.
-    // However, on Linux, we may not have enough info for blacklisting.
-    if (!gpu_info.gpu.vendor_id || !gpu_info.gpu.device_id ||
-        gpu_info.driver_vendor.empty() || gpu_info.driver_version.empty()) {
-      CollectGraphicsInfo(&gpu_info);
-      // We know that CollectGraphicsInfo will initialize a GLContext.
-      initialized_gl_context = true;
-    }
+    if (!gpu_info_collector::CollectContextGraphicsInfo(&gpu_info))
+      VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
+    GetContentClient()->SetGpuInfo(gpu_info);
 
-#if !defined(OS_CHROMEOS)
+    // We know that CollectGraphicsInfo will initialize a GLContext.
+    initialized_gl_context = true;
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
     if (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA
         gpu_info.driver_vendor == "NVIDIA") {
       base::ThreadRestrictions::AssertIOAllowed();
@@ -145,12 +200,25 @@ int GpuMain(const content::MainFunctionParams& parameters) {
       }
     }
 #endif  // OS_CHROMEOS
-#endif  // OS_LINUX
   } else {
     VLOG(1) << "gfx::GLSurface::InitializeOneOff failed";
     gpu_info.gpu_accessible = false;
     gpu_info.finalized = true;
     dead_on_arrival = true;
+  }
+
+  if (enable_watchdog && delayed_watchdog_enable) {
+    watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
+    watchdog_thread->Start();
+  }
+
+  // OSMesa is expected to run very slowly, so disable the watchdog in that
+  // case.
+  if (enable_watchdog &&
+      gfx::GetGLImplementation() == gfx::kGLImplementationOSMesaGL) {
+    watchdog_thread->Stop();
+
+    watchdog_thread = NULL;
   }
 
   {
@@ -172,12 +240,22 @@ int GpuMain(const content::MainFunctionParams& parameters) {
 #endif
 
     if (do_init_sandbox) {
-      gpu_info.sandboxed = content::InitializeSandbox();
+      if (watchdog_thread.get())
+        watchdog_thread->Stop();
+      gpu_info.sandboxed = InitializeSandbox();
+      if (watchdog_thread.get())
+        watchdog_thread->Start();
     }
   }
 #endif
 
 #if defined(OS_WIN)
+  {
+    // DXVA initialization must have completed before the token is lowered.
+    TRACE_EVENT0("gpu", "Wait for DXVA initialization");
+    dxva_initialized.Wait();
+  }
+
   {
     TRACE_EVENT0("gpu", "Lower token");
     // For windows, if the target_services interface is not zero, the process
@@ -192,26 +270,10 @@ int GpuMain(const content::MainFunctionParams& parameters) {
   }
 #endif
 
-  MessageLoop::Type message_loop_type = MessageLoop::TYPE_IO;
-#if defined(OS_WIN)
-  // Unless we're running on desktop GL, we don't need a UI message
-  // loop, so avoid its use to work around apparent problems with some
-  // third-party software.
-  if (command_line.HasSwitch(switches::kUseGL) &&
-      command_line.GetSwitchValueASCII(switches::kUseGL) ==
-          gfx::kGLImplementationDesktopName) {
-      message_loop_type = MessageLoop::TYPE_UI;
-  }
-#elif defined(OS_LINUX)
-  message_loop_type = MessageLoop::TYPE_DEFAULT;
-#endif
-
-  MessageLoop main_message_loop(message_loop_type);
-  base::PlatformThread::SetName("CrGpuMain");
-
   GpuProcess gpu_process;
 
-  GpuChildThread* child_thread = new GpuChildThread(dead_on_arrival, gpu_info);
+  GpuChildThread* child_thread = new GpuChildThread(watchdog_thread.get(),
+                                                    dead_on_arrival, gpu_info);
 
   child_thread->Init(start_time);
 
@@ -258,7 +320,7 @@ void CreateDummyGlContext() {
 }
 #endif
 
-void WarmUpSandbox(const content::GPUInfo& gpu_info,
+void WarmUpSandbox(const GPUInfo& gpu_info,
                    bool should_initialize_gl_context) {
   {
     TRACE_EVENT0("gpu", "Warm up rand");
@@ -277,7 +339,10 @@ void WarmUpSandbox(const content::GPUInfo& gpu_info,
   }
 
 #if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
-  OmxVideoDecodeAccelerator::PreSandboxInitialization();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseExynosVda))
+    ExynosVideoDecodeAccelerator::PreSandboxInitialization();
+  else
+    OmxVideoDecodeAccelerator::PreSandboxInitialization();
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
   VaapiVideoDecodeAccelerator::PreSandboxInitialization();
 #endif
@@ -294,32 +359,11 @@ void WarmUpSandbox(const content::GPUInfo& gpu_info,
 #endif
 
 #if defined(OS_WIN)
-  {
-    TRACE_EVENT0("gpu", "Initialize COM");
-    base::win::ScopedCOMInitializer com_initializer;
-  }
-
-  {
-    TRACE_EVENT0("gpu", "Preload setupapi.dll");
-    // Preload this DLL because the sandbox prevents it from loading.
-    LoadLibrary(L"setupapi.dll");
-  }
-
-  {
-    TRACE_EVENT0("gpu", "Initialize DXVA");
-    // Initialize H/W video decoding stuff which fails in the sandbox.
-    DXVAVideoDecodeAccelerator::PreSandboxInitialization();
-  }
+  // Preload these DLL because the sandbox prevents them from loading.
+  LoadLibrary(L"setupapi.dll");
 #endif
 }
-
-#if defined(OS_LINUX)
-void CollectGraphicsInfo(content::GPUInfo* gpu_info) {
-  if (!gpu_info_collector::CollectGraphicsInfo(gpu_info))
-    VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
-  content::GetContentClient()->SetGpuInfo(*gpu_info);
-}
-#endif
 
 }  // namespace.
 
+}  // namespace content

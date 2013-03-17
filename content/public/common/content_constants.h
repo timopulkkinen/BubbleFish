@@ -9,23 +9,20 @@
 
 #include <stddef.h>         // For size_t
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/common/content_export.h"
 
 namespace content {
 
 // The name of the directory under BrowserContext::GetPath where the AppCache is
 // put.
-CONTENT_EXPORT extern const FilePath::CharType kAppCacheDirname[];
+CONTENT_EXPORT extern const base::FilePath::CharType kAppCacheDirname[];
 // The name of the directory under BrowserContext::GetPath where Pepper plugin
 // data is put.
-CONTENT_EXPORT extern const FilePath::CharType kPepperDataDirname[];
+CONTENT_EXPORT extern const base::FilePath::CharType kPepperDataDirname[];
 
 // The MIME type used for the browser plugin.
 CONTENT_EXPORT extern const char kBrowserPluginMimeType[];
-// TODO(fsamuel): Remove this once upstreaming of the new browser plugin is
-// complete.
-CONTENT_EXPORT extern const char kBrowserPluginNewMimeType[];
 
 CONTENT_EXPORT extern const size_t kMaxRendererProcessCount;
 
@@ -60,10 +57,6 @@ CONTENT_EXPORT extern const char kGpuCompositingFieldTrialName[];
 CONTENT_EXPORT extern const char
     kGpuCompositingFieldTrialForceCompositingEnabledName[];
 CONTENT_EXPORT extern const char kGpuCompositingFieldTrialThreadEnabledName[];
-
-CONTENT_EXPORT extern const char kStage3DFieldTrialName[];
-CONTENT_EXPORT extern const char kStage3DFieldTrialBlacklistedName[];
-CONTENT_EXPORT extern const char kStage3DFieldTrialEnabledName[];
 
 }  // namespace content
 

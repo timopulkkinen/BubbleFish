@@ -14,7 +14,7 @@
 #include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
 
 class GURL;
 class SkBitmap;
@@ -99,6 +99,7 @@ class ExtensionHelper
   void OnUpdateBrowserWindowId(int window_id);
   void OnAddMessageToConsole(content::ConsoleMessageLevel level,
                              const std::string& message);
+  void OnAppWindowClosed();
 
   // Callback triggered when we finish downloading the application definition
   // file.

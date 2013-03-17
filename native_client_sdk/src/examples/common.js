@@ -19,17 +19,27 @@ var common = (function () {
    * @param {string} path Directory name where .nmf file can be found.
    * @param {number} width The width to create the plugin.
    * @param {number} height The height to create the plugin.
+   * @param {Object} optional dictionary of args to send to DidCreateInstance
    */
-  function createNaClModule(name, tool, path, width, height) {
+  function createNaClModule(name, tool, path, width, height, args) {
     var moduleEl = document.createElement('embed');
     moduleEl.setAttribute('name', 'nacl_module');
     moduleEl.setAttribute('id', 'nacl_module');
     moduleEl.setAttribute('width', width);
     moduleEl.setAttribute('height',height);
     moduleEl.setAttribute('src', path + '/' + name + '.nmf');
+
+    // Add any optional arguments
+    if (args) {
+      for (var key in args) {
+        moduleEl.setAttribute(key, args[key])
+      }
+    }
+
     // For NaCL modules use application/x-nacl.
     var mimetype = 'application/x-nacl';
-    if (tool == 'win' || tool == 'linux' || tool == 'mac') {
+    var isHost = tool == 'win' || tool == 'linux' || tool == 'mac';
+    if (isHost) {
       // For non-nacl PPAPI plugins use the x-ppapi-debug/release
       // mime type.
       if (path.toLowerCase().indexOf('release') != -1)
@@ -46,6 +56,15 @@ var common = (function () {
     // event fires.
     var listenerDiv = document.getElementById('listener');
     listenerDiv.appendChild(moduleEl);
+
+    // Host plugins don't send a moduleDidLoad message. We'll fake it here.
+    if (isHost) {
+      window.setTimeout(function () {
+        var evt = document.createEvent('Event');
+        evt.initEvent('load', true, true);  // bubbles, cancelable
+        moduleEl.dispatchEvent(evt);
+      }, 100);  // 100 ms
+    }
   }
 
   /**
@@ -236,9 +255,30 @@ document.addEventListener('DOMContentLoaded', function() {
       loadFunction = window.domContentLoaded;
     }
 
+    // From https://developer.mozilla.org/en-US/docs/DOM/window.location
+    var searchVars = {};
+    if (window.location.search.length > 1) {
+      var pairs = window.location.search.substr(1).split("&");
+      for (var key_ix = 0; key_ix < pairs.length; key_ix++) {
+        var keyValue = pairs[key_ix].split("=");
+        searchVars[unescape(keyValue[0])] =
+            keyValue.length > 1 ? unescape(keyValue[1]) : "";
+      }
+    }
+
     if (loadFunction) {
-      loadFunction(body.dataset.name, body.dataset.tc, body.dataset.path,
-          body.dataset.width, body.dataset.height);
+      var toolchains = body.dataset.tools.split(' ');
+      var configs = body.dataset.configs.split(' ');
+
+      var tc = toolchains.indexOf(searchVars.tc) !== -1 ?
+          searchVars.tc : toolchains[0];
+      var config = configs.indexOf(searchVars.config) !== -1 ?
+          searchVars.config : configs[0];
+      var pathFormat = body.dataset.path;
+      var path = pathFormat.replace('{tc}', tc).replace('{config}', config);
+
+      loadFunction(body.dataset.name, tc, path, body.dataset.width,
+                   body.dataset.height);
     }
   }
 });

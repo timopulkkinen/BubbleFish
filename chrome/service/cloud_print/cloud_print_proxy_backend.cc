@@ -8,13 +8,15 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/rand_util.h"
 #include "base/values.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/service/cloud_print/cloud_print_auth.h"
 #include "chrome/service/cloud_print/cloud_print_connector.h"
-#include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_token_store.h"
 #include "chrome/service/cloud_print/connector_settings.h"
@@ -29,6 +31,8 @@
 #include "jingle/notifier/listener/push_client.h"
 #include "jingle/notifier/listener/push_client_observer.h"
 #include "ui/base/l10n/l10n_util.h"
+
+namespace cloud_print {
 
 // The real guts of CloudPrintProxyBackend, to keep the public client API clean.
 class CloudPrintProxyBackend::Core
@@ -88,6 +92,7 @@ class CloudPrintProxyBackend::Core
       notifier::NotificationsDisabledReason reason) OVERRIDE;
   virtual void OnIncomingNotification(
       const notifier::Notification& notification) OVERRIDE;
+  virtual void OnPingResponse() OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
@@ -119,6 +124,10 @@ class CloudPrintProxyBackend::Core
   // Schedules a task to poll for jobs. Does nothing if a task is already
   // scheduled.
   void ScheduleJobPoll();
+  void PingXmppServer();
+  void ScheduleXmppPing();
+  void CheckXmppPingStatus();
+
   CloudPrintTokenStore* GetTokenStore();
 
   // Our parent CloudPrintProxyBackend
@@ -143,8 +152,13 @@ class CloudPrintProxyBackend::Core
   bool job_poll_scheduled_;
   // Indicates whether we should poll for jobs when we lose XMPP connection.
   bool enable_job_poll_;
+  // Indicates whether a task to ping xmpp server has been scheduled.
+  bool xmpp_ping_scheduled_;
+  // Number of XMPP pings pending reply from the server.
+  int pending_xmpp_pings_;
   // Connector settings.
   ConnectorSettings settings_;
+  std::string robot_email_;
   scoped_ptr<CloudPrintTokenStore> token_store_;
 
   DISALLOW_COPY_AND_ASSIGN(Core);
@@ -240,7 +254,9 @@ CloudPrintProxyBackend::Core::Core(
         oauth_client_info_(oauth_client_info),
         notifications_enabled_(false),
         job_poll_scheduled_(false),
-        enable_job_poll_(enable_job_poll) {
+        enable_job_poll_(enable_job_poll),
+        xmpp_ping_scheduled_(false),
+        pending_xmpp_pings_(0) {
   settings_.CopyFrom(settings);
 }
 
@@ -305,6 +321,7 @@ void CloudPrintProxyBackend::Core::OnAuthenticationComplete(
   CloudPrintTokenStore* token_store  = GetTokenStore();
   bool first_time = token_store->token().empty();
   token_store->SetToken(access_token);
+  robot_email_ = robot_email;
   // Let the frontend know that we have authenticated.
   backend_->frontend_loop_->PostTask(
       FROM_HERE,
@@ -350,6 +367,7 @@ void CloudPrintProxyBackend::Core::InitNotifications(
     const std::string& access_token) {
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
 
+  pending_xmpp_pings_ = 0;
   notifier::NotifierOptions notifier_options;
   notifier_options.request_context_getter =
       g_service_process->GetServiceURLRequestContextGetter();
@@ -430,6 +448,53 @@ void CloudPrintProxyBackend::Core::ScheduleJobPoll() {
   }
 }
 
+void CloudPrintProxyBackend::Core::PingXmppServer() {
+  xmpp_ping_scheduled_ = false;
+
+  if (!push_client_.get())
+    return;
+
+  push_client_->SendPing();
+
+  pending_xmpp_pings_++;
+  if (pending_xmpp_pings_ >= kMaxFailedXmppPings) {
+    // Check ping status when we close to the limit.
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&CloudPrintProxyBackend::Core::CheckXmppPingStatus, this),
+        base::TimeDelta::FromSeconds(kXmppPingCheckIntervalSecs));
+  }
+
+  // Schedule next ping if needed.
+  if (notifications_enabled_)
+    ScheduleXmppPing();
+}
+
+void CloudPrintProxyBackend::Core::ScheduleXmppPing() {
+  if (!settings_.xmpp_ping_enabled())
+    return;
+
+  if (!xmpp_ping_scheduled_) {
+    base::TimeDelta interval = base::TimeDelta::FromSeconds(
+      base::RandInt(settings_.xmpp_ping_timeout_sec() * 0.9,
+                    settings_.xmpp_ping_timeout_sec() * 1.1));
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&CloudPrintProxyBackend::Core::PingXmppServer, this),
+        interval);
+    xmpp_ping_scheduled_ = true;
+  }
+}
+
+void CloudPrintProxyBackend::Core::CheckXmppPingStatus() {
+  if (pending_xmpp_pings_ >= kMaxFailedXmppPings) {
+    // Reconnect to XMPP.
+    pending_xmpp_pings_ = 0;
+    push_client_.reset();
+    InitNotifications(robot_email_, GetTokenStore()->token());
+  }
+}
+
 CloudPrintTokenStore* CloudPrintProxyBackend::Core::GetTokenStore() {
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
   if (!token_store_.get())
@@ -476,6 +541,9 @@ void CloudPrintProxyBackend::Core::OnNotificationsEnabled() {
   // Note that ScheduleJobPoll will not schedule again if a job poll task is
   // already scheduled.
   ScheduleJobPoll();
+
+  // Schedule periodic ping for XMPP notification channel.
+  ScheduleXmppPing();
 }
 
 void CloudPrintProxyBackend::Core::OnNotificationsDisabled(
@@ -494,6 +562,10 @@ void CloudPrintProxyBackend::Core::OnNotificationsDisabled(
 
 void CloudPrintProxyBackend::Core::OnIncomingNotification(
     const notifier::Notification& notification) {
+  // Since we got some notification from the server,
+  // reset pending ping counter to 0.
+  pending_xmpp_pings_ = 0;
+
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
   VLOG(1) << "CP_CONNECTOR: Incoming notification.";
   if (0 == base::strcasecmp(kCloudPrintPushNotificationsSource,
@@ -501,3 +573,9 @@ void CloudPrintProxyBackend::Core::OnIncomingNotification(
     HandlePrinterNotification(notification.data);
 }
 
+void CloudPrintProxyBackend::Core::OnPingResponse() {
+  pending_xmpp_pings_ = 0;
+  VLOG(1) << "CP_CONNECTOR: Ping response received.";
+}
+
+}  // namespace cloud_print

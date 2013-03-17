@@ -6,6 +6,7 @@
 #define PPAPI_CPP_PRIVATE_FLASH_H_
 
 #include <string>
+#include <vector>
 
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/pp_stdint.h"
@@ -15,7 +16,8 @@ struct PP_Point;
 
 namespace pp {
 
-class FontDescription_Dev;
+class BrowserFontDescription;
+class DeviceRef_Dev;
 class ImageData;
 class InstanceHandle;
 class Module;
@@ -23,6 +25,7 @@ class Point;
 class Rect;
 class URLRequestInfo;
 class Var;
+class VideoCapture_Dev;
 
 namespace flash {
 
@@ -35,7 +38,7 @@ class Flash {
                                      bool on_top);
   static bool DrawGlyphs(const InstanceHandle& instance,
                          ImageData* image,
-                         const FontDescription_Dev& font_desc,
+                         const BrowserFontDescription& font_desc,
                          uint32_t color,
                          const Point& position,
                          const Rect& clip,
@@ -63,6 +66,9 @@ class Flash {
   static bool SetCrashData(const InstanceHandle& instance,
                            PP_FlashCrashKey key,
                            const pp::Var& value);
+  static int32_t EnumerateVideoCaptureDevices(const InstanceHandle& instance,
+      const VideoCapture_Dev& video_capture,
+      std::vector<DeviceRef_Dev>* devices_out);
 
   // PPB_Flash_Print.
   static bool InvokePrinting(const InstanceHandle& instance);

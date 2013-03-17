@@ -11,10 +11,12 @@
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
 #include "chrome/common/extensions/api/permissions.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -49,8 +51,8 @@ class OAuth2GrantRecorder : public OAuth2MintTokenFlow::Delegate,
               TokenServiceFactory::GetForProfile(profile)->
                   GetOAuth2LoginRefreshToken(),
               extension->id(),
-              extension->oauth2_info().client_id,
-              extension->oauth2_info().scopes,
+              OAuth2Info::GetOAuth2Info(extension).client_id,
+              OAuth2Info::GetOAuth2Info(extension).scopes,
               OAuth2MintTokenFlow::MODE_RECORD_GRANT))) {
     notification_registrar_.Add(this,
                                 chrome::NOTIFICATION_PROFILE_DESTROYED,
@@ -60,7 +62,7 @@ class OAuth2GrantRecorder : public OAuth2MintTokenFlow::Delegate,
   }
 
   // content::NotificationObserver:
-  void Observe(int type,
+  virtual void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) OVERRIDE {
     DCHECK_EQ(type, chrome::NOTIFICATION_PROFILE_DESTROYED);
@@ -134,12 +136,23 @@ void PermissionsUpdater::GrantActivePermissions(const Extension* extension,
 
   // We only maintain the granted permissions prefs for INTERNAL and LOAD
   // extensions.
-  if (extension->location() != Extension::LOAD &&
-      extension->location() != Extension::INTERNAL)
+  if (!Manifest::IsUnpackedLocation(extension->location()) &&
+      extension->location() != Manifest::INTERNAL)
     return;
 
-  if (record_oauth2_grant)
-    new OAuth2GrantRecorder(profile_, extension);
+  if (record_oauth2_grant) {
+    // Only record OAuth grant if:
+    // 1. The extension has client id and scopes.
+    // 2. The user is signed in to Chrome.
+    const OAuth2Info& oauth2_info = OAuth2Info::GetOAuth2Info(extension);
+    if (!oauth2_info.client_id.empty() && !oauth2_info.scopes.empty()) {
+      TokenService* token_service = TokenServiceFactory::GetForProfile(
+          profile_);
+      if (token_service && token_service->HasOAuthLoginToken()) {
+        new OAuth2GrantRecorder(profile_, extension);
+      }
+    }
+  }
 
   GetExtensionPrefs()->AddGrantedPermissions(extension->id(),
                                              extension->GetActivePermissions());
@@ -155,15 +168,18 @@ void PermissionsUpdater::DispatchEvent(
     const std::string& extension_id,
     const char* event_name,
     const PermissionSet* changed_permissions) {
-  if (!profile_ || !profile_->GetExtensionEventRouter())
+  if (!profile_ ||
+      !ExtensionSystem::Get(profile_)->event_router())
     return;
 
   scoped_ptr<ListValue> value(new ListValue());
   scoped_ptr<api::permissions::Permissions> permissions =
-    PackPermissionSet(changed_permissions);
+      PackPermissionSet(changed_permissions);
   value->Append(permissions->ToValue().release());
-  profile_->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension_id, event_name, value.Pass(), profile_, GURL());
+  scoped_ptr<Event> event(new Event(event_name, value.Pass()));
+  event->restrict_to_profile = profile_;
+  ExtensionSystem::Get(profile_)->event_router()->
+      DispatchEventToExtension(extension_id, event.Pass());
 }
 
 void PermissionsUpdater::NotifyPermissionsUpdated(
@@ -212,7 +228,7 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
 }
 
 ExtensionPrefs* PermissionsUpdater::GetExtensionPrefs() {
-  return profile_->GetExtensionService()->extension_prefs();
+  return ExtensionSystem::Get(profile_)->extension_service()->extension_prefs();
 }
 
 }  // namespace extensions

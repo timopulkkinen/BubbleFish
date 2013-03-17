@@ -15,41 +15,56 @@
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/gdata/drive_file_system_interface.h"
-#include "chrome/browser/chromeos/gdata/drive_service_interface.h"
-#include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
-#include "chrome/browser/profiles/refcounted_profile_keyed_service_factory.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_observer.h"
+#include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
+#include "chrome/browser/google_apis/drive_service_interface.h"
+#include "chrome/browser/google_apis/operation_registry.h"
 #include "chromeos/disks/disk_mount_manager.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_source.h"
 
 class FileBrowserNotifications;
 class PrefChangeRegistrar;
 class Profile;
 
+namespace drive {
+class DriveEntryProto;
+class DriveFileSystemInterface;
+}
+
 // Monitors changes in disk mounts, network connection state and preferences
 // affecting File Manager. Dispatches appropriate File Browser events.
 class FileBrowserEventRouter
-    : public RefcountedProfileKeyedService,
+    : public base::RefCountedThreadSafe<FileBrowserEventRouter>,
       public chromeos::disks::DiskMountManager::Observer,
       public chromeos::NetworkLibrary::NetworkManagerObserver,
-      public content::NotificationObserver,
-      public gdata::DriveServiceObserver,
-      public gdata::DriveFileSystemInterface::Observer {
+      public drive::DriveFileSystemObserver,
+      public google_apis::DriveServiceObserver {
  public:
-  // RefcountedProfileKeyedService overrides.
-  virtual void ShutdownOnUIThread() OVERRIDE;
+  // Interface that should keep track of the system state in regards to system
+  // suspend and resume events.
+  // When the |IsResuming()| returns true, it should be able to check if a
+  // removable device was present before the was system suspended.
+  class SuspendStateDelegate {
+   public:
+    virtual ~SuspendStateDelegate() {}
 
-  // Starts observing file system change events. Currently only
-  // CrosDisksClient events are being observed.
+    // Returns true if the system has recently woken up.
+    virtual bool SystemIsResuming() const = 0;
+    // If system is resuming, returns true if the disk was present before the
+    // system suspend. Should return false if the system is not resuming.
+    virtual bool DiskWasPresentBeforeSuspend(
+        const chromeos::disks::DiskMountManager::Disk& disk) const = 0;
+  };
+
+  void Shutdown();
+
+  // Starts observing file system change events.
   void ObserveFileSystemEvents();
 
   // File watch setup routines.
-  bool AddFileWatch(const FilePath& file_path,
-                    const FilePath& virtual_path,
+  bool AddFileWatch(const base::FilePath& file_path,
+                    const base::FilePath& virtual_path,
                     const std::string& extension_id);
-  void RemoveFileWatch(const FilePath& file_path,
+  void RemoveFileWatch(const base::FilePath& file_path,
                        const std::string& extension_id);
 
   // Mounts Drive on File browser. |callback| will be called after raising a
@@ -57,63 +72,47 @@ class FileBrowserEventRouter
   void MountDrive(const base::Closure& callback);
 
   // CrosDisksClient::Observer overrides.
-  virtual void DiskChanged(chromeos::disks::DiskMountManagerEventType event,
-                           const chromeos::disks::DiskMountManager::Disk* disk)
-      OVERRIDE;
-  virtual void DeviceChanged(chromeos::disks::DiskMountManagerEventType event,
-                             const std::string& device_path) OVERRIDE;
-  virtual void MountCompleted(
-      chromeos::disks::DiskMountManager::MountEvent event_type,
+  virtual void OnDiskEvent(
+      chromeos::disks::DiskMountManager::DiskEvent event,
+      const chromeos::disks::DiskMountManager::Disk* disk) OVERRIDE;
+  virtual void OnDeviceEvent(
+      chromeos::disks::DiskMountManager::DeviceEvent event,
+      const std::string& device_path) OVERRIDE;
+  virtual void OnMountEvent(
+      chromeos::disks::DiskMountManager::MountEvent event,
       chromeos::MountError error_code,
       const chromeos::disks::DiskMountManager::MountPointInfo& mount_info)
       OVERRIDE;
+  virtual void OnFormatEvent(
+      chromeos::disks::DiskMountManager::FormatEvent event,
+      chromeos::FormatError error_code,
+      const std::string& device_path) OVERRIDE;
 
   // chromeos::NetworkLibrary::NetworkManagerObserver override.
   virtual void OnNetworkManagerChanged(
       chromeos::NetworkLibrary* network_library) OVERRIDE;
 
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
-  // gdata::DriveServiceObserver overrides.
+  // drive::DriveServiceObserver overrides.
   virtual void OnProgressUpdate(
-      const gdata::OperationProgressStatusList& list) OVERRIDE;
-  virtual void OnAuthenticationFailed() OVERRIDE;
+      const google_apis::OperationProgressStatusList& list) OVERRIDE;
+  virtual void OnRefreshTokenInvalid() OVERRIDE;
 
-  // gdata::DriveFileSystemInterface::Observer overrides.
-  virtual void OnDirectoryChanged(const FilePath& directory_path) OVERRIDE;
-  virtual void OnDocumentFeedFetched(int num_accumulated_entries) OVERRIDE;
+  // drive::DriveFileSystemInterface::Observer overrides.
+  virtual void OnDirectoryChanged(
+      const base::FilePath& directory_path) OVERRIDE;
+  virtual void OnResourceListFetched(int num_accumulated_entries) OVERRIDE;
   virtual void OnFileSystemMounted() OVERRIDE;
   virtual void OnFileSystemBeingUnmounted() OVERRIDE;
 
  private:
-  friend class FileBrowserEventRouterFactory;
-
-  // Helper class for passing through file watch notification events.
-  class FileWatcherDelegate : public base::files::FilePathWatcher::Delegate {
-   public:
-    explicit FileWatcherDelegate(FileBrowserEventRouter* router);
-
-   protected:
-    virtual ~FileWatcherDelegate() {}
-
-   private:
-    // base::files::FilePathWatcher::Delegate overrides.
-    virtual void OnFilePathChanged(const FilePath& path) OVERRIDE;
-    virtual void OnFilePathError(const FilePath& path) OVERRIDE;
-
-    void HandleFileWatchOnUIThread(const FilePath& local_path, bool got_error);
-
-    FileBrowserEventRouter* router_;
-  };
+  friend class FileBrowserPrivateAPI;
+  friend class base::RefCountedThreadSafe<FileBrowserEventRouter>;
 
   typedef std::map<std::string, int> ExtensionUsageRegistry;
 
   class FileWatcherExtensions {
    public:
-    FileWatcherExtensions(const FilePath& path,
+    FileWatcherExtensions(const base::FilePath& path,
         const std::string& extension_id,
         bool is_remote_file_system);
 
@@ -127,20 +126,21 @@ class FileBrowserEventRouter
 
     unsigned int GetRefCount() const;
 
-    const FilePath& GetVirtualPath() const;
+    const base::FilePath& GetVirtualPath() const;
 
-    bool Watch(const FilePath& path, FileWatcherDelegate* delegate);
+    bool Watch(const base::FilePath& path,
+               const base::FilePathWatcher::Callback& callback);
 
    private:
-    linked_ptr<base::files::FilePathWatcher> file_watcher_;
-    FilePath local_path_;
-    FilePath virtual_path_;
+    linked_ptr<base::FilePathWatcher> file_watcher_;
+    base::FilePath local_path_;
+    base::FilePath virtual_path_;
     ExtensionUsageRegistry extensions_;
     unsigned int ref_count_;
     bool is_remote_file_system_;
   };
 
-  typedef std::map<FilePath, FileWatcherExtensions*> WatcherMap;
+  typedef std::map<base::FilePath, FileWatcherExtensions*> WatcherMap;
 
   explicit FileBrowserEventRouter(Profile* profile);
   virtual ~FileBrowserEventRouter();
@@ -153,36 +153,37 @@ class FileBrowserEventRouter
   void OnDeviceAdded(const std::string& device_path);
   void OnDeviceRemoved(const std::string& device_path);
   void OnDeviceScanned(const std::string& device_path);
-  void OnFormattingStarted(const std::string& device_path, bool success);
-  void OnFormattingFinished(const std::string& device_path, bool success);
+  void OnFormatStarted(const std::string& device_path, bool success);
+  void OnFormatCompleted(const std::string& device_path, bool success);
+
+  // Called on change to kExternalStorageDisabled pref.
+  void OnExternalStorageDisabledChanged();
+
+  // Called when prefs related to file browser change.
+  void OnFileBrowserPrefsChanged();
 
   // Process file watch notifications.
-  void HandleFileWatchNotification(const FilePath& path,
+  void HandleFileWatchNotification(const base::FilePath& path,
                                    bool got_error);
 
-  // Sends folder change event.
-  void DispatchFolderChangeEvent(const FilePath& path, bool error,
-                                 const ExtensionUsageRegistry& extensions);
+  // Sends directory change event.
+  void DispatchDirectoryChangeEvent(const base::FilePath& path, bool error,
+                                    const ExtensionUsageRegistry& extensions);
 
-  // Sends filesystem changed extension message to all renderers.
-  void DispatchDiskEvent(const chromeos::disks::DiskMountManager::Disk* disk,
-                         bool added);
-
-  void DispatchMountCompletedEvent(
+  void DispatchMountEvent(
       chromeos::disks::DiskMountManager::MountEvent event,
       chromeos::MountError error_code,
       const chromeos::disks::DiskMountManager::MountPointInfo& mount_info);
 
-  void RemoveBrowserFromVector(const std::string& path);
-
-  // Used to create a window of a standard size, and add it to a list
-  // of tracked browser windows in case that device goes away.
-  void OpenFileBrowse(const std::string& url,
-                      const std::string& device_path,
-                      bool small);
+  // If needed, opens a file manager window for the removable device mounted at
+  // |mount_path|. Disk.mount_path() is empty, since it is being filled out
+  // after calling notifying observers by DiskMountManager.
+  void ShowRemovableDeviceInFileManager(
+      const chromeos::disks::DiskMountManager::Disk& disk,
+      const base::FilePath& mount_path);
 
   // Returns the DriveFileSystem for the current profile.
-  gdata::DriveFileSystemInterface* GetRemoteFileSystem() const;
+  drive::DriveFileSystemInterface* GetRemoteFileSystem() const;
 
   // Handles requests to start and stop periodic updates on remote file system.
   // When |start| is set to true, this function starts periodic updates only if
@@ -191,52 +192,19 @@ class FileBrowserEventRouter
   // zero.
   void HandleRemoteUpdateRequestOnUIThread(bool start);
 
-  // Used to implement MountDrive(). Called after the authentication.
-  void OnAuthenticated(const base::Closure& callback,
-                       gdata::GDataErrorCode error,
-                       const std::string& tokeni);
-
-  scoped_refptr<FileWatcherDelegate> delegate_;
+  base::WeakPtrFactory<FileBrowserEventRouter> weak_factory_;
+  base::FilePathWatcher::Callback file_watcher_callback_;
   WatcherMap file_watchers_;
   scoped_ptr<FileBrowserNotifications> notifications_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
+  scoped_ptr<SuspendStateDelegate> suspend_state_delegate_;
   Profile* profile_;
   base::Lock lock_;
-
-  bool current_gdata_operation_failed_;
-  int last_active_gdata_operation_count_;
 
   // Number of active update requests on the remote file system.
   int num_remote_update_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(FileBrowserEventRouter);
-};
-
-// Singleton that owns all FileBrowserEventRouter and associates
-// them with Profiles.
-class FileBrowserEventRouterFactory
-    : public RefcountedProfileKeyedServiceFactory {
- public:
-  // Returns the FileBrowserEventRouter for |profile|, creating it if
-  // it is not yet created.
-  static scoped_refptr<FileBrowserEventRouter> GetForProfile(Profile* profile);
-
-  // Returns the FileBrowserEventRouterFactory instance.
-  static FileBrowserEventRouterFactory* GetInstance();
-
- protected:
-  // ProfileKeyedBasedFactory overrides:
-  virtual bool ServiceHasOwnInstanceInIncognito() const OVERRIDE;
-
- private:
-  friend struct DefaultSingletonTraits<FileBrowserEventRouterFactory>;
-
-  FileBrowserEventRouterFactory();
-  virtual ~FileBrowserEventRouterFactory();
-
-  // ProfileKeyedServiceFactory:
-  virtual scoped_refptr<RefcountedProfileKeyedService> BuildServiceInstanceFor(
-      Profile* profile) const OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_EVENT_ROUTER_H_

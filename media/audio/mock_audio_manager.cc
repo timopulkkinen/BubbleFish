@@ -28,10 +28,6 @@ string16 MockAudioManager::GetAudioInputDeviceModel() {
   return string16();
 }
 
-bool MockAudioManager::CanShowAudioInputSettings() {
-  return false;
-}
-
 void MockAudioManager::ShowAudioInputSettings() {
 }
 
@@ -66,7 +62,12 @@ scoped_refptr<base::MessageLoopProxy> MockAudioManager::GetMessageLoop() {
   return message_loop_proxy_;
 }
 
-void MockAudioManager::Init() {
+void MockAudioManager::AddOutputDeviceChangeListener(
+    AudioDeviceListener* listener) {
+}
+
+void MockAudioManager::RemoveOutputDeviceChangeListener(
+    AudioDeviceListener* listener) {
 }
 
 }  // namespace media.

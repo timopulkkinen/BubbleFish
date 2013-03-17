@@ -4,8 +4,8 @@
 
 #include "chrome/browser/sync/test/integration/sync_extension_helper.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -21,6 +21,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
+using extensions::Manifest;
 
 SyncExtensionHelper::ExtensionState::ExtensionState()
     : enabled_state(ENABLED), incognito_enabled(false) {}
@@ -64,15 +65,15 @@ void SyncExtensionHelper::SetupIfNecessary(SyncTest* test) {
 }
 
 std::string SyncExtensionHelper::InstallExtension(
-    Profile* profile, const std::string& name, Extension::Type type) {
+    Profile* profile, const std::string& name, Manifest::Type type) {
   scoped_refptr<Extension> extension = GetExtension(profile, name, type);
   if (!extension.get()) {
     NOTREACHED() << "Could not install extension " << name;
     return "";
   }
   profile->GetExtensionService()->OnExtensionInstalled(
-      extension, extension->UpdatesFromGallery(), syncer::StringOrdinal(),
-      false /* no requirement errors */);
+      extension, syncer::StringOrdinal(), false /* no requirement errors */,
+      false /* don't wait for idle to install */);
   return extension->id();
 }
 
@@ -140,8 +141,7 @@ bool SyncExtensionHelper::IsExtensionPendingInstallForSync(
   return info->is_from_sync();
 }
 
-void SyncExtensionHelper::InstallExtensionsPendingForSync(
-    Profile* profile, Extension::Type type) {
+void SyncExtensionHelper::InstallExtensionsPendingForSync(Profile* profile) {
   // TODO(akalin): Mock out the servers that the extensions auto-update
   // mechanism talk to so as to more closely match what actually happens.
   // Background networking will need to be re-enabled for extensions tests.
@@ -167,7 +167,12 @@ void SyncExtensionHelper::InstallExtensionsPendingForSync(
                     << " (profile = " << profile->GetDebugName() << ")";
       continue;
     }
-    InstallExtension(profile, iter2->second, type);
+    TypeMap::const_iterator iter3 = id_to_type_.find(*iter);
+    if (iter3 == id_to_type_.end()) {
+      ADD_FAILURE() << "Could not get type for id " << *iter
+                    << " (profile = " << profile->GetDebugName() << ")";
+    }
+    InstallExtension(profile, iter2->second, iter3->second);
   }
 }
 
@@ -261,43 +266,56 @@ std::string NameToPublicKey(const std::string& name) {
 
 // TODO(akalin): Somehow unify this with MakeExtension() in
 // extension_util_unittest.cc.
-scoped_refptr<Extension> CreateExtension(
-    const FilePath& base_dir, const std::string& name,
-    Extension::Type type) {
+scoped_refptr<Extension> CreateExtension(const base::FilePath& base_dir,
+                                         const std::string& name,
+                                         Manifest::Type type) {
   DictionaryValue source;
   source.SetString(extension_manifest_keys::kName, name);
   const std::string& public_key = NameToPublicKey(name);
   source.SetString(extension_manifest_keys::kPublicKey, public_key);
   source.SetString(extension_manifest_keys::kVersion, "0.0.0.0");
   switch (type) {
-    case Extension::TYPE_EXTENSION:
+    case Manifest::TYPE_EXTENSION:
       // Do nothing.
       break;
-    case Extension::TYPE_THEME:
+    case Manifest::TYPE_THEME:
       source.Set(extension_manifest_keys::kTheme, new DictionaryValue());
       break;
-    case Extension::TYPE_HOSTED_APP:
-    case Extension::TYPE_LEGACY_PACKAGED_APP:
+    case Manifest::TYPE_HOSTED_APP:
+    case Manifest::TYPE_LEGACY_PACKAGED_APP:
       source.Set(extension_manifest_keys::kApp, new DictionaryValue());
       source.SetString(extension_manifest_keys::kLaunchWebURL,
                        "http://www.example.com");
       break;
+    case Manifest::TYPE_PLATFORM_APP: {
+      source.Set(extension_manifest_keys::kApp, new DictionaryValue());
+      source.Set(extension_manifest_keys::kPlatformAppBackground,
+                 new DictionaryValue());
+      ListValue* scripts = new ListValue();
+      scripts->AppendString("main.js");
+      source.Set(extension_manifest_keys::kPlatformAppBackgroundScripts,
+                 scripts);
+      break;
+    }
     default:
       ADD_FAILURE();
       return NULL;
   }
-  const FilePath sub_dir = FilePath().AppendASCII(name);
-  FilePath extension_dir;
+  const base::FilePath sub_dir = base::FilePath().AppendASCII(name);
+  base::FilePath extension_dir;
   if (!file_util::PathExists(base_dir) &&
-      !file_util::CreateDirectory(base_dir) &&
-      !file_util::CreateTemporaryDirInDir(
+      !file_util::CreateDirectory(base_dir)) {
+    ADD_FAILURE();
+    return NULL;
+  }
+  if (!file_util::CreateTemporaryDirInDir(
           base_dir, sub_dir.value(), &extension_dir)) {
     ADD_FAILURE();
     return NULL;
   }
   std::string error;
   scoped_refptr<Extension> extension =
-      Extension::Create(extension_dir, Extension::INTERNAL, source,
+      Extension::Create(extension_dir, Manifest::INTERNAL, source,
                         Extension::NO_FLAGS, &error);
   if (!error.empty()) {
     ADD_FAILURE() << error;
@@ -321,8 +339,7 @@ scoped_refptr<Extension> CreateExtension(
 }  // namespace
 
 scoped_refptr<Extension> SyncExtensionHelper::GetExtension(
-    Profile* profile, const std::string& name,
-    Extension::Type type) {
+    Profile* profile, const std::string& name, Manifest::Type type) {
   if (name.empty()) {
     ADD_FAILURE();
     return NULL;
@@ -353,5 +370,6 @@ scoped_refptr<Extension> SyncExtensionHelper::GetExtension(
            << name << ", id = " << expected_id;
   (it->second)[name] = extension;
   id_to_name_[expected_id] = name;
+  id_to_type_[expected_id] = type;
   return extension;
 }

@@ -25,6 +25,13 @@ cr.define('print_preview', function() {
     this.isSelectedDestinationLocal_ = null;
 
     /**
+     * Whether the GCP promotion has been dismissed.
+     * @type {boolean}
+     * @private
+     */
+    this.isGcpPromoDismissed_ = true;
+
+    /**
      * Margins type.
      * @type {print_preview.ticket_items.MarginsType.Value}
      * @private
@@ -72,6 +79,13 @@ cr.define('print_preview', function() {
      * @private
      */
     this.isCollateEnabled_ = null;
+
+    /**
+     * Whether printing CSS backgrounds is enabled.
+     * @type {?boolean}
+     * @private
+     */
+    this.isCssBackgroundEnabled_ = null;
   };
 
   /**
@@ -92,13 +106,15 @@ cr.define('print_preview', function() {
     VERSION: 'version',
     SELECTED_DESTINATION_ID: 'selectedDestinationId',
     IS_SELECTED_DESTINATION_LOCAL: 'isSelectedDestinationLocal',
+    IS_GCP_PROMO_DISMISSED: 'isGcpPromoDismissed',
     MARGINS_TYPE: 'marginsType',
     CUSTOM_MARGINS: 'customMargins',
     IS_COLOR_ENABLED: 'isColorEnabled',
     IS_DUPLEX_ENABLED: 'isDuplexEnabled',
     IS_HEADER_FOOTER_ENABLED: 'isHeaderFooterEnabled',
     IS_LANDSCAPE_ENABLED: 'isLandscapeEnabled',
-    IS_COLLATE_ENABLED: 'isCollateEnabled'
+    IS_COLLATE_ENABLED: 'isCollateEnabled',
+    IS_CSS_BACKGROUND_ENABLED: 'isCssBackgroundEnabled'
   };
 
   /**
@@ -118,6 +134,11 @@ cr.define('print_preview', function() {
     /** @return {?boolean} Whether the selected destination is local. */
     get isSelectedDestinationLocal() {
       return this.isSelectedDestinationLocal_;
+    },
+
+    /** @return {boolean} Whether the GCP promotion has been dismissed. */
+    get isGcpPromoDismissed() {
+      return this.isGcpPromoDismissed_;
     },
 
     /** @return {print_preview.ticket_items.MarginsType.Value} Margins type. */
@@ -155,6 +176,11 @@ cr.define('print_preview', function() {
       return this.isCollateEnabled_;
     },
 
+    /** @return {?boolean} Whether printing CSS backgrounds is enabled. */
+    get isCssBackgroundEnabled() {
+      return this.isCssBackgroundEnabled_;
+    },
+
     /**
      * Initializes the app state from a serialized string returned by the native
      * layer.
@@ -163,6 +189,8 @@ cr.define('print_preview', function() {
      */
     init: function(serializedAppStateStr) {
       if (!serializedAppStateStr) {
+        // Set some state defaults.
+        this.isGcpPromoDismissed_ = false;
         return;
       }
 
@@ -175,6 +203,8 @@ cr.define('print_preview', function() {
           this.isSelectedDestinationLocal_ =
               state[AppState.Field_.IS_SELECTED_DESTINATION_LOCAL];
         }
+        this.isGcpPromoDismissed_ =
+            state[AppState.Field_.IS_GCP_PROMO_DISMISSED] || false;
         if (state.hasOwnProperty(AppState.Field_.MARGINS_TYPE)) {
           this.marginsType_ = state[AppState.Field_.MARGINS_TYPE];
         }
@@ -199,6 +229,10 @@ cr.define('print_preview', function() {
         if (state.hasOwnProperty(AppState.Field_.IS_COLLATE_ENABLED)) {
           this.isCollateEnabled_ = state[AppState.Field_.IS_COLLATE_ENABLED];
         }
+        if (state.hasOwnProperty(AppState.Field_.IS_CSS_BACKGROUND_ENABLED)) {
+          this.isCssBackgroundEnabled_ =
+              state[AppState.Field_.IS_CSS_BACKGROUND_ENABLED];
+        }
       }
     },
 
@@ -211,6 +245,16 @@ cr.define('print_preview', function() {
       this.isSelectedDestinationLocal_ = dest.isLocal;
       this.persist_();
     },
+
+   /**
+    * Persists whether the GCP promotion has been dismissed.
+    * @param {boolean} isGcpPromoDismissed Whether the GCP promotion has been
+    *     dismissed.
+    */
+   persistIsGcpPromoDismissed: function(isGcpPromoDismissed) {
+     this.isGcpPromoDismissed_ = isGcpPromoDismissed;
+     this.persist_();
+   },
 
     /**
      * Persists the margins type.
@@ -277,6 +321,16 @@ cr.define('print_preview', function() {
     },
 
     /**
+     * Persists whether printing CSS backgrounds is enabled.
+     * @param {?boolean} isCssBackgroundEnabled Whether printing CSS
+     *     backgrounds is enabled.
+     */
+    persistIsCssBackgroundEnabled: function(isCssBackgroundEnabled) {
+      this.isCssBackgroundEnabled_ = isCssBackgroundEnabled;
+      this.persist_();
+    },
+
+    /**
      * Calls into the native layer to persist the application state.
      * @private
      */
@@ -287,6 +341,7 @@ cr.define('print_preview', function() {
           this.selectedDestinationId_;
       obj[AppState.Field_.IS_SELECTED_DESTINATION_LOCAL] =
           this.isSelectedDestinationLocal_;
+      obj[AppState.Field_.IS_GCP_PROMO_DISMISSED] = this.isGcpPromoDismissed_;
       obj[AppState.Field_.MARGINS_TYPE] = this.marginsType_;
       if (this.customMargins_) {
         obj[AppState.Field_.CUSTOM_MARGINS] = this.customMargins_.serialize();
@@ -297,6 +352,8 @@ cr.define('print_preview', function() {
           this.isHeaderFooterEnabled_;
       obj[AppState.Field_.IS_LANDSCAPE_ENABLED] = this.isLandscapeEnabled_;
       obj[AppState.Field_.IS_COLLATE_ENABLED] = this.isCollateEnabled_;
+      obj[AppState.Field_.IS_CSS_BACKGROUND_ENABLED] =
+          this.isCssBackgroundEnabled_;
       chrome.send(AppState.NATIVE_FUNCTION_NAME_, [JSON.stringify(obj)]);
     }
   };

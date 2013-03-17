@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "chrome/browser/history/top_sites_database.h"
-#include "sql/connection.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace history {
@@ -19,8 +18,8 @@ class TopSitesDatabaseTest : public testing::Test {
     file_name_ = temp_dir_.path().AppendASCII("TestTopSites.db");
   }
 
-  ScopedTempDir temp_dir_;
-  FilePath file_name_;
+  base::ScopedTempDir temp_dir_;
+  base::FilePath file_name_;
 };
 
 TEST_F(TopSitesDatabaseTest, UpgradeToVersion2) {

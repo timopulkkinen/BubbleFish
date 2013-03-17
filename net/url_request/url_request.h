@@ -19,6 +19,7 @@
 #include "net/base/auth.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
+#include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/network_delegate.h"
@@ -29,11 +30,9 @@
 #include "net/http/http_response_info.h"
 #include "net/url_request/url_request_status.h"
 
-class FilePath;
 // Temporary layering violation to allow existing users of a deprecated
 // interface.
 class ChildProcessSecurityPolicyTest;
-class ComponentUpdateInterceptor;
 class TestAutomationProvider;
 class URLRequestAutomationJob;
 
@@ -62,23 +61,10 @@ class ResourceDispatcherHostTest;
 
 // Temporary layering violation to allow existing users of a deprecated
 // interface.
-namespace extensions {
-class AutoUpdateInterceptor;
-class UserScriptListenerTest;
-}
-
-// Temporary layering violation to allow existing users of a deprecated
-// interface.
 namespace fileapi {
 class FileSystemDirURLRequestJobTest;
 class FileSystemURLRequestJobTest;
 class FileWriterDelegateTest;
-}
-
-// Temporary layering violation to allow existing users of a deprecated
-// interface.
-namespace policy {
-class CannedResponseInterceptor;
 }
 
 // Temporary layering violation to allow existing users of a deprecated
@@ -92,9 +78,10 @@ namespace net {
 class CookieOptions;
 class HostPortPair;
 class IOBuffer;
+struct LoadTimingInfo;
 class SSLCertRequestInfo;
 class SSLInfo;
-class UploadData;
+class UploadDataStream;
 class URLRequestContext;
 class URLRequestJob;
 class X509Certificate;
@@ -190,9 +177,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   class NET_EXPORT Deprecated {
    private:
     // TODO(willchan): Kill off these friend declarations.
-    friend class extensions::AutoUpdateInterceptor;
     friend class ::ChildProcessSecurityPolicyTest;
-    friend class ::ComponentUpdateInterceptor;
     friend class ::TestAutomationProvider;
     friend class ::URLRequestAutomationJob;
     friend class TestInterceptor;
@@ -201,18 +186,17 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
     friend class appcache::AppCacheRequestHandlerTest;
     friend class appcache::AppCacheURLRequestJobTest;
     friend class content::ResourceDispatcherHostTest;
-    friend class extensions::UserScriptListenerTest;
     friend class fileapi::FileSystemDirURLRequestJobTest;
     friend class fileapi::FileSystemURLRequestJobTest;
     friend class fileapi::FileWriterDelegateTest;
-    friend class policy::CannedResponseInterceptor;
     friend class webkit_blob::BlobURLRequestJobTest;
 
     // Use URLRequestJobFactory::ProtocolHandler instead.
     static ProtocolFactory* RegisterProtocolFactory(const std::string& scheme,
                                                     ProtocolFactory* factory);
 
-    // Use URLRequestJobFactory::Interceptor instead.
+    // TODO(pauljensen): Remove this when AppCacheInterceptor is a
+    // ProtocolHandler, see crbug.com/161547.
     static void RegisterRequestInterceptor(Interceptor* interceptor);
     static void UnregisterRequestInterceptor(Interceptor* interceptor);
 
@@ -413,16 +397,6 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // and it is permissible for it to be null.
   void set_delegate(Delegate* delegate);
 
-  // The data comprising the request message body is specified as a sequence of
-  // data segments and/or files containing data to upload.  These methods may
-  // be called to construct the data sequence to upload, and they may only be
-  // called before Start() is called.  For POST requests, the user must call
-  // SetRequestHeaderBy{Id,Name} to set the Content-Type of the request to the
-  // appropriate value before calling Start().
-  //
-  // When uploading data, bytes_len must be non-zero.
-  void AppendBytesToUpload(const char* bytes, int bytes_len);  // takes a copy
-
   // Indicates that the request body should be sent using chunked transfer
   // encoding. This method may only be called before Start() is called.
   void EnableChunkedUpload();
@@ -436,22 +410,23 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
                            int bytes_len,
                            bool is_last_chunk);
 
-  // Set the upload data directly.
-  void set_upload(UploadData* upload);
+  // Sets the upload data.
+  void set_upload(scoped_ptr<UploadDataStream> upload);
 
-  // Get the upload data directly.
-  const UploadData* get_upload() const;
-  UploadData* get_upload_mutable();
+  // Gets the upload data.
+  const UploadDataStream* get_upload() const;
 
   // Returns true if the request has a non-empty message body to upload.
   bool has_upload() const;
 
-  // Set an extra request header by ID or name.  These methods may only be
-  // called before Start() is called.  It is an error to call it later.
+  // Set an extra request header by ID or name, or remove one by name.  These
+  // methods may only be called before Start() is called, or before a new
+  // redirect in the request chain.
   void SetExtraRequestHeaderById(int header_id, const std::string& value,
                                  bool overwrite);
   void SetExtraRequestHeaderByName(const std::string& name,
                                    const std::string& value, bool overwrite);
+  void RemoveRequestHeaderByName(const std::string& name);
 
   // Sets all extra request headers.  Any extra request headers set by other
   // methods are overwritten by this method.  This method may only be called
@@ -470,7 +445,8 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
     load_state_param_ = param;
   }
 
-  // Returns the current upload progress in bytes.
+  // Returns the current upload progress in bytes. When the upload data is
+  // chunked, size is set to zero, but position will not be.
   UploadProgress GetUploadProgress() const;
 
   // Get response header(s) by ID or name.  These methods may only be called
@@ -522,6 +498,14 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
     return response_info_.ssl_info;
   }
 
+  // Gets timing information related to the request.  Events that have not yet
+  // occurred are left uninitialized.  After a second request starts, due to
+  // a redirect or authentication, values will be reset.
+  //
+  // LoadTimingInfo only contains ConnectTiming information and socket IDs for
+  // non-cached HTTP responses.
+  void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const;
+
   // Returns the cookie values included in the response, if the request is one
   // that can have cookies.  Returns true if the request is a cookie-bearing
   // type, false otherwise.  This method may only be called once the
@@ -551,6 +535,10 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // Returns true if the request is "pending" (i.e., if Start() has been called,
   // and the response has not yet been called).
   bool is_pending() const { return is_pending_; }
+
+  // Returns true if the request is in the process of redirecting to a new
+  // URL but has not yet initiated the new request.
+  bool is_redirecting() const { return is_redirecting_; }
 
   // Returns the error status of the request.
   const URLRequestStatus& status() const { return status_; }
@@ -652,10 +640,6 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // due to HSTS. If so, |redirect_url| is rewritten to the new HTTPS URL.
   bool GetHSTSRedirect(GURL* redirect_url) const;
 
-  // This method is intended only for unit tests, but it is being used by
-  // unit tests outside of net :(.
-  URLRequestJob* job() { return job_; }
-
   // TODO(willchan): Undo this. Only temporarily public.
   bool has_delegate() const { return delegate_ != NULL; }
 
@@ -664,6 +648,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // Allows to setting debug info into the URLRequest.
   void set_stack_trace(const base::debug::StackTrace& stack_trace);
   const base::debug::StackTrace* stack_trace() const;
+
+  void set_received_response_content_length(int64 received_content_length) {
+    received_response_content_length_ = received_content_length;
+  }
+  int64 received_response_content_length() {
+    return received_response_content_length_;
+  }
 
  protected:
   // Allow the URLRequestJob class to control the is_pending() flag.
@@ -730,6 +721,10 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // passed values.
   void DoCancel(int error, const SSLInfo& ssl_info);
 
+  // Called by the URLRequestJob when the headers are received, before any other
+  // method, to allow caching of load timing information.
+  void OnHeadersComplete();
+
   // Notifies the network delegate that the request has been completed.
   // This does not imply a successful completion. Also a canceled request is
   // considered completed.
@@ -746,10 +741,14 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   void NotifyAuthRequiredComplete(NetworkDelegate::AuthRequiredResponse result);
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);
   void NotifySSLCertificateError(const SSLInfo& ssl_info, bool fatal);
+  void NotifyReadCompleted(int bytes_read);
+
+  // These functions delegate to |network_delegate_| if it is not NULL.
+  // If |network_delegate_| is NULL, cookies can be used unless
+  // SetDefaultCookiePolicyToBlock() has been called.
   bool CanGetCookies(const CookieList& cookie_list) const;
   bool CanSetCookie(const std::string& cookie_line,
                     CookieOptions* options) const;
-  void NotifyReadCompleted(int bytes_read);
 
   // Called when the delegate blocks or unblocks this request when intercepting
   // certain requests.
@@ -767,7 +766,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   BoundNetLog net_log_;
 
   scoped_refptr<URLRequestJob> job_;
-  scoped_refptr<UploadData> upload_;
+  scoped_ptr<UploadDataStream> upload_data_stream_;
   std::vector<GURL> url_chain_;
   GURL first_party_for_cookies_;
   GURL delegate_redirect_url_;
@@ -794,6 +793,11 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // Start() is called to the time we dispatch RequestComplete and indicates
   // whether the job is active.
   bool is_pending_;
+
+  // Indicates if the request is in the process of redirecting to a new
+  // location.  It is true from the time the headers complete until a
+  // new request begins.
+  bool is_redirecting_;
 
   // Number of times we're willing to redirect.  Used to guard against
   // infinite redirects.
@@ -842,7 +846,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   AuthCredentials auth_credentials_;
   scoped_refptr<AuthChallengeInfo> auth_info_;
 
+  int64 received_response_content_length_;
+
   base::TimeTicks creation_time_;
+
+  // Timing information for the most recent request.  Its start times are
+  // populated during Start(), and the rest are populated in OnResponseReceived.
+  LoadTimingInfo load_timing_info_;
 
   scoped_ptr<const base::debug::StackTrace> stack_trace_;
 

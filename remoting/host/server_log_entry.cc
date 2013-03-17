@@ -5,7 +5,7 @@
 #include "remoting/host/server_log_entry.h"
 
 #include "base/logging.h"
-#include "base/stringize_macros.h"
+#include "base/strings/stringize_macros.h"
 #include "base/sys_info.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/session.h"
@@ -110,7 +110,7 @@ void ServerLogEntry::AddHostFields() {
 #endif
 
   Set(kKeyHostVersion, STRINGIZE(VERSION));
-  Set(kKeyCpu, SysInfo::CPUArchitecture());
+  Set(kKeyCpu, SysInfo::OperatingSystemArchitecture());
 };
 
 void ServerLogEntry::AddModeField(ServerLogEntry::Mode mode) {
@@ -124,7 +124,7 @@ void ServerLogEntry::AddConnectionTypeField(
 
 // static
 const char* ServerLogEntry::GetValueMode(ServerLogEntry::Mode mode) {
-  switch(mode) {
+  switch (mode) {
     case IT2ME:
       return kValueModeIt2Me;
     case ME2ME:

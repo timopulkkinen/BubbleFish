@@ -5,20 +5,21 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_TAB_HELPER_H_
 #define CHROME_BROWSER_EXTENSIONS_TAB_HELPER_H_
 
+#include <map>
+#include <string>
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/app_notify_channel_setup.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/extensions/script_executor.h"
-#include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/common/web_apps.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 struct WebApplicationInfo;
@@ -27,19 +28,25 @@ namespace content {
 struct LoadCommittedDetails;
 }
 
+namespace gfx {
+class Image;
+}
+
 namespace extensions {
 class Extension;
 class LocationBarController;
+class RulesRegistryService;
 class ScriptBadgeController;
+class ScriptBubbleController;
+class ScriptExecutor;
 
 // Per-tab extension helper. Also handles non-extension apps.
 class TabHelper : public content::WebContentsObserver,
                   public ExtensionFunctionDispatcher::Delegate,
-                  public ImageLoadingTracker::Observer,
                   public AppNotifyChannelSetup::Delegate,
                   public base::SupportsWeakPtr<TabHelper>,
                   public content::NotificationObserver,
-                  public WebContentsUserData<TabHelper> {
+                  public content::WebContentsUserData<TabHelper> {
  public:
   // Different types of action when web app info is available.
   // OnDidGetApplicationInfo uses this to dispatch calls.
@@ -49,39 +56,44 @@ class TabHelper : public content::WebContentsObserver,
     UPDATE_SHORTCUT   // Update icon for app shortcut.
   };
 
-  // Observer base class for classes listening for content script messages
-  // from the renderer.
-  class ContentScriptObserver {
+  // Observer base class for classes that need to be notified when content
+  // scripts and/or tabs.executeScript calls run on a page.
+  class ScriptExecutionObserver {
    public:
     // Map of extensions IDs to the executing script paths.
     typedef std::map<std::string, std::set<std::string> > ExecutingScriptsMap;
 
     // Automatically observes and unobserves |tab_helper| on construction
     // and destruction. |tab_helper| must outlive |this|.
-    explicit ContentScriptObserver(TabHelper* tab_helper);
-    ContentScriptObserver();
+    explicit ScriptExecutionObserver(TabHelper* tab_helper);
+    ScriptExecutionObserver();
 
-    virtual void OnContentScriptsExecuting(
+    // Called when script(s) have executed on a page.
+    //
+    // |executing_scripts_map| contains all extensions that are executing
+    // scripts, mapped to the paths for those scripts. This may be an empty set
+    // if the script has no path associated with it (e.g. in the case of
+    // tabs.executeScript).
+    virtual void OnScriptsExecuted(
         const content::WebContents* web_contents,
         const ExecutingScriptsMap& executing_scripts_map,
         int32 on_page_id,
         const GURL& on_url) = 0;
 
    protected:
-    virtual ~ContentScriptObserver();
+    virtual ~ScriptExecutionObserver();
 
-   private:
     TabHelper* tab_helper_;
   };
 
   virtual ~TabHelper();
 
-  void AddContentScriptObserver(ContentScriptObserver* observer) {
-    content_script_observers_.AddObserver(observer);
+  void AddScriptExecutionObserver(ScriptExecutionObserver* observer) {
+    script_execution_observers_.AddObserver(observer);
   }
 
-  void RemoveContentScriptObserver(ContentScriptObserver* observer) {
-    content_script_observers_.RemoveObserver(observer);
+  void RemoveScriptExecutionObserver(ScriptExecutionObserver* observer) {
+    script_execution_observers_.RemoveObserver(observer);
   }
 
   void CreateApplicationShortcuts();
@@ -120,7 +132,7 @@ class TabHelper : public content::WebContentsObserver,
   // is returned.
   //
   // NOTE: the returned icon is larger than 16x16 (its size is
-  // Extension::EXTENSION_ICON_SMALLISH).
+  // extension_misc::EXTENSION_ICON_SMALLISH).
   SkBitmap* GetExtensionAppIcon();
 
   content::WebContents* web_contents() const {
@@ -128,7 +140,7 @@ class TabHelper : public content::WebContentsObserver,
   }
 
   ScriptExecutor* script_executor() {
-    return &script_executor_;
+    return script_executor_.get();
   }
 
   LocationBarController* location_bar_controller() {
@@ -139,13 +151,17 @@ class TabHelper : public content::WebContentsObserver,
     return active_tab_permission_granter_.get();
   }
 
+  ScriptBubbleController* script_bubble_controller() {
+    return script_bubble_controller_.get();
+  }
+
   // Sets a non-extension app icon associated with WebContents and fires an
   // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
   void SetAppIcon(const SkBitmap& app_icon);
 
  private:
   explicit TabHelper(content::WebContents* web_contents);
-  friend class WebContentsUserData<TabHelper>;
+  friend class content::WebContentsUserData<TabHelper>;
 
   // content::WebContentsObserver overrides.
   virtual void RenderViewCreated(
@@ -179,25 +195,22 @@ class TabHelper : public content::WebContentsObserver,
                             int callback_id);
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
   void OnContentScriptsExecuting(
-      const ContentScriptObserver::ExecutingScriptsMap& extension_ids,
+      const ScriptExecutionObserver::ExecutingScriptsMap& extension_ids,
       int32 page_id,
       const GURL& on_url);
+  void OnWatchedPageChange(const std::vector<std::string>& css_selectors);
 
   // App extensions related methods:
 
-  // Resets app_icon_ and if |extension| is non-null creates a new
-  // ImageLoadingTracker to load the extension's image.
+  // Resets app_icon_ and if |extension| is non-null uses ImageLoader to load
+  // the extension's image asynchronously.
   void UpdateExtensionAppIcon(const Extension* extension);
 
-  const Extension* GetExtension(
-      const std::string& extension_app_id);
+  const Extension* GetExtension(const std::string& extension_app_id);
 
-  // ImageLoadingTracker::Observer.
-  virtual void OnImageLoaded(const gfx::Image& image,
-                             const std::string& extension_id,
-                             int index) OVERRIDE;
+  void OnImageLoaded(const gfx::Image& image);
 
-  // WebstoreInlineInstaller::Callback.
+  // WebstoreStandaloneInstaller::Callback.
   virtual void OnInlineInstallComplete(int install_id,
                                        int return_route_id,
                                        bool success,
@@ -223,7 +236,7 @@ class TabHelper : public content::WebContentsObserver,
 
   // Our content script observers. Declare at top so that it will outlive all
   // other members, since they might add themselves as observers.
-  ObserverList<ContentScriptObserver> content_script_observers_;
+  ObserverList<ScriptExecutionObserver> script_execution_observers_;
 
   // If non-null this tab is an app tab and this is the extension the tab was
   // created for.
@@ -236,9 +249,6 @@ class TabHelper : public content::WebContentsObserver,
   // Process any extension messages coming from the tab.
   ExtensionFunctionDispatcher extension_function_dispatcher_;
 
-  // Used for loading extension_app_icon_.
-  scoped_ptr<ImageLoadingTracker> extension_app_image_loader_;
-
   // Cached web app info data.
   WebApplicationInfo web_app_info_;
 
@@ -248,11 +258,20 @@ class TabHelper : public content::WebContentsObserver,
 
   content::NotificationRegistrar registrar_;
 
-  ScriptExecutor script_executor_;
+  scoped_ptr<ScriptExecutor> script_executor_;
 
   scoped_ptr<LocationBarController> location_bar_controller_;
 
   scoped_ptr<ActiveTabPermissionGranter> active_tab_permission_granter_;
+
+  scoped_ptr<ScriptBubbleController> script_bubble_controller_;
+
+  RulesRegistryService* rules_registry_service_;
+
+  Profile* profile_;
+
+  // Vend weak pointers that can be invalidated to stop in-progress loads.
+  base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabHelper);
 };

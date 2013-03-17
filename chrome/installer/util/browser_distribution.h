@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string16.h"
 #include "base/version.h"
 #include "chrome/installer/util/util_constants.h"
@@ -64,8 +64,11 @@ class BrowserDistribution {
   Type GetType() const { return type_; }
 
   virtual void DoPostUninstallOperations(const Version& version,
-                                         const FilePath& local_data_path,
+                                         const base::FilePath& local_data_path,
                                          const string16& distribution_data);
+
+  // Returns the GUID to be used when registering for Active Setup.
+  virtual string16 GetActiveSetupGuid();
 
   virtual string16 GetAppGuid();
 
@@ -121,14 +124,22 @@ class BrowserDistribution {
 
   virtual bool CanCreateDesktopShortcuts();
 
+  // Returns the executable filename (not path) that contains the product icon.
+  virtual string16 GetIconFilename();
+
+  // Returns the index of the icon for the product, inside the file specified by
+  // GetIconFilename().
   virtual int GetIconIndex();
 
   virtual bool GetChromeChannel(string16* channel);
 
-  // Returns true if the distribution includes a DelegateExecute verb handler,
+  // Returns true if this distribution includes a DelegateExecute verb handler,
   // and provides the CommandExecuteImpl class UUID if |handler_class_uuid| is
   // non-NULL.
   virtual bool GetCommandExecuteImplClsid(string16* handler_class_uuid);
+
+  // Returns true if this distribution uses app_host.exe to run platform apps.
+  virtual bool AppHostIsSupported();
 
   virtual void UpdateInstallStatus(bool system_install,
       installer::ArchiveType archive_type,
@@ -143,7 +154,7 @@ class BrowserDistribution {
   // After an install or upgrade the user might qualify to participate in an
   // experiment. This function determines if the user qualifies and if so it
   // sets the wheels in motion or in simple cases does the experiment itself.
-  virtual void LaunchUserExperiment(const FilePath& setup_path,
+  virtual void LaunchUserExperiment(const base::FilePath& setup_path,
                                     installer::InstallStatus status,
                                     const Version& version,
                                     const installer::Product& product,
@@ -154,7 +165,11 @@ class BrowserDistribution {
   virtual void InactiveUserToastExperiment(int flavor,
       const string16& experiment_group,
       const installer::Product& installation,
-      const FilePath& application_path);
+      const base::FilePath& application_path);
+
+  // Returns true if this distribution should set the Omaha experiment_labels
+  // registry value.
+  virtual bool ShouldSetExperimentLabels();
 
  protected:
   explicit BrowserDistribution(Type type);

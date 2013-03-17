@@ -12,12 +12,13 @@
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_features.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -57,7 +58,8 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     ChromeRenderViewHostTestHarness::SetUp();
     profile()->CreateHistoryService(true /* delete_file */, false /* no_db */);
     service_.reset(new StrictMock<MockClientSideDetectionService>());
-    extractor_.reset(new BrowserFeatureExtractor(contents(), service_.get()));
+    extractor_.reset(
+        new BrowserFeatureExtractor(web_contents(), service_.get()));
     num_pending_ = 0;
     browse_info_.reset(new BrowseInfo);
   }
@@ -91,23 +93,23 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     NavigateAndCommit(url, GURL(), content::PAGE_TRANSITION_LINK);
   }
 
-  // This is similar to NavigateAndCommit that is in test_tab_contents, but
+  // This is similar to NavigateAndCommit that is in WebContentsTester, but
   // allows us to specify the referrer and page_transition_type.
   void NavigateAndCommit(const GURL& url,
                          const GURL& referrer,
                          content::PageTransition type) {
-    contents()->GetController().LoadURL(
+    web_contents()->GetController().LoadURL(
         url, content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
         type, std::string());
 
     static int page_id = 0;
     content::RenderViewHost* rvh =
-        WebContentsTester::For(contents())->GetPendingRenderViewHost();
+        WebContentsTester::For(web_contents())->GetPendingRenderViewHost();
     if (!rvh) {
-      rvh = contents()->GetRenderViewHost();
+      rvh = web_contents()->GetRenderViewHost();
     }
-    WebContentsTester::For(contents())->ProceedWithCrossSiteNavigation();
-    WebContentsTester::For(contents())->TestDidNavigateWithReferrer(
+    WebContentsTester::For(web_contents())->ProceedWithCrossSiteNavigation();
+    WebContentsTester::For(web_contents())->TestDidNavigateWithReferrer(
         rvh, ++page_id, url,
         content::Referrer(referrer, WebKit::WebReferrerPolicyDefault), type);
   }
@@ -499,11 +501,12 @@ TEST_F(BrowserFeatureExtractorTest, SafeBrowsingFeatures) {
   request.set_url("http://www.foo.com/malware.html");
   request.set_client_score(0.5);
 
-  browse_info_->unsafe_resource.reset(new SafeBrowsingService::UnsafeResource);
+  browse_info_->unsafe_resource.reset(
+      new SafeBrowsingUIManager::UnsafeResource);
   browse_info_->unsafe_resource->url = GURL("http://www.malware.com/");
   browse_info_->unsafe_resource->original_url = GURL("http://www.good.com/");
   browse_info_->unsafe_resource->is_subresource = true;
-  browse_info_->unsafe_resource->threat_type = SafeBrowsingService::URL_MALWARE;
+  browse_info_->unsafe_resource->threat_type = SB_THREAT_TYPE_URL_MALWARE;
 
   ExtractFeatures(&request);
   std::map<std::string, double> features;

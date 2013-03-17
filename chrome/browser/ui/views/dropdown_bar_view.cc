@@ -114,11 +114,11 @@ void DropdownBarView::OnPaint(gfx::Canvas* canvas) {
          gfx::Size(bounds().width(), kAnimatingEdgeHeight),
          canvas->scale_factor(),
          false);
-     canvas->Translate(bounds().origin());
+     canvas->Translate(bounds().OffsetFromOrigin());
      OnPaintBackground(&animating_edges);
      OnPaintBorder(&animating_edges);
-     canvas->DrawImageInt(animating_edges.ExtractImageRep(), bounds().x(),
-         animation_offset());
+     canvas->DrawImageInt(gfx::ImageSkia(animating_edges.ExtractImageRep()),
+         bounds().x(), animation_offset());
   }
 }
 
@@ -137,5 +137,5 @@ void DropdownBarView::SetBorder(int left_border_image_id,
   int border_image_ids[3] = {left_border_image_id, middle_border_image_id,
       right_border_image_id};
   set_border(views::Border::CreateBorderPainter(
-      new views::HorizontalPainter(border_image_ids)));
+      new views::HorizontalPainter(border_image_ids), gfx::Insets()));
 }

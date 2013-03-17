@@ -9,7 +9,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_to_mobile_service.h"
 #include "chrome/browser/chrome_to_mobile_service_factory.h"
-#include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
@@ -17,11 +16,15 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using extensions::ActionInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ActionBoxMenuModel
@@ -31,28 +34,23 @@ ActionBoxMenuModel::ActionBoxMenuModel(Browser* browser,
     : ui::SimpleMenuModel(delegate),
       browser_(browser) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  if (!browser_->profile()->IsOffTheRecord() &&
-      ChromeToMobileServiceFactory::GetForProfile(browser_->profile())->
-      HasMobiles()) {
+  // TODO(msw): Show the item as disabled for chrome: and file: scheme pages?
+  if (ChromeToMobileService::UpdateAndGetCommandState(browser_)) {
     AddItemWithStringId(IDC_CHROME_TO_MOBILE_PAGE,
                         IDS_CHROME_TO_MOBILE_BUBBLE_TOOLTIP);
     SetIcon(GetIndexOfCommandId(IDC_CHROME_TO_MOBILE_PAGE),
             rb.GetNativeImageNamed(IDR_MOBILE));
   }
 
-  content::WebContents* current_web_contents =
-      chrome::GetActiveWebContents(browser_);
-  BookmarkTabHelper* bookmark_tab_helper =
-      BookmarkTabHelper::FromWebContents(current_web_contents);
-  bool starred = bookmark_tab_helper->is_starred();
-  AddItemWithStringId(IDC_BOOKMARK_PAGE,
-                      starred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR);
-  SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE),
-          rb.GetNativeImageNamed(starred ? IDR_STAR_LIT : IDR_STAR));
+  // In some unit tests, GetActiveWebContents can return NULL.
+  bool starred = browser_->tab_strip_model()->GetActiveWebContents() &&
+      BookmarkTabHelper::FromWebContents(browser_->tab_strip_model()->
+          GetActiveWebContents())->is_starred();
 
-  AddItemWithStringId(IDC_SHARE_PAGE, IDS_SHARE_PAGE);
-  SetIcon(GetIndexOfCommandId(IDC_SHARE_PAGE),
-          rb.GetNativeImageNamed(IDR_SHARE));
+  AddItemWithStringId(IDC_BOOKMARK_PAGE_FROM_STAR,
+                      starred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR);
+  SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE_FROM_STAR),
+          rb.GetNativeImageNamed(starred ? IDR_STAR_LIT : IDR_STAR));
 }
 
 ActionBoxMenuModel::~ActionBoxMenuModel() {
@@ -63,7 +61,10 @@ void ActionBoxMenuModel::AddExtension(const extensions::Extension& extension,
   if (extension_ids_.empty())
     AddSeparator(ui::NORMAL_SEPARATOR);
   extension_ids_.push_back(extension.id());
-  AddItem(command_id, UTF8ToUTF16(extension.name()));
+  const ActionInfo* page_launcher_info =
+      ActionInfo::GetPageLauncherInfo(&extension);
+  DCHECK(page_launcher_info);
+  AddItem(command_id, UTF8ToUTF16(page_launcher_info->default_title));
 }
 
 bool ActionBoxMenuModel::IsItemExtension(int index) {

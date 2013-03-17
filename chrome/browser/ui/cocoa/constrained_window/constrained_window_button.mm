@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
 
 #include "base/memory/scoped_nsobject.h"
+#import "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/molokocacao/NSBezierPath+MCAdditions.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
@@ -17,6 +18,8 @@ enum ButtonState {
   BUTTON_PRESSED,
   BUTTON_DISABLED,
 };
+
+const CGFloat kButtonMinWidth = 72;
 
 }  // namespace
 
@@ -77,6 +80,7 @@ NSColor* GetButtonBorderColor(ButtonState button_state) {
 }
 
 NSAttributedString* GetButtonAttributedString(NSString* title,
+                                              NSString* key_equivalent,
                                               ButtonState button_state) {
   const SkColor text_color[] = {0xFF333333, 0XFF000000, 0xFF000000, 0xFFAAAAAA};
   // The shadow color should be 0xFFF0F0F0 but that doesn't show up so use
@@ -94,8 +98,14 @@ NSAttributedString* GetButtonAttributedString(NSString* title,
       [[NSMutableParagraphStyle alloc] init]);
   [paragraphStyle setAlignment:NSCenterTextAlignment];
 
+  NSFont* font = nil;
+  if ([key_equivalent isEqualToString:kKeyEquivalentReturn])
+    font = [NSFont boldSystemFontOfSize:12];
+  else
+    font = [NSFont systemFontOfSize:12];
+
   NSDictionary* attributes = [NSDictionary dictionaryWithObjectsAndKeys:
-      [NSFont systemFontOfSize:12], NSFontAttributeName,
+      font, NSFontAttributeName,
       gfx::SkColorToCalibratedNSColor(text_color[button_state]),
       NSForegroundColorAttributeName,
       shadow.get(), NSShadowAttributeName,
@@ -159,6 +169,15 @@ NSAttributedString* GetButtonAttributedString(NSString* title,
   return mouseInView;
 }
 
+- (void)sizeToFit {
+  [super sizeToFit];
+  NSSize size = [self frame].size;
+  if (size.width < kButtonMinWidth) {
+    size.width = kButtonMinWidth;
+    [self setFrameSize:size];
+  }
+}
+
 @end
 
 @implementation ConstrainedWindowButtonCell
@@ -201,15 +220,15 @@ NSAttributedString* GetButtonAttributedString(NSString* title,
     [GetButtonBorderColor(buttonState) set];
   [path stroke];
 
-  [self drawTitle:GetButtonAttributedString([self title], buttonState)
-        withFrame:frame
-           inView:controlView];
+  NSAttributedString* title = GetButtonAttributedString(
+      [self title], [self keyEquivalent], buttonState);
+  [self drawTitle:title withFrame:frame inView:controlView];
 }
 
 - (NSSize)cellSize {
-  NSAttributedString* attributedString =
-      GetButtonAttributedString([self title], BUTTON_NORMAL);
-  NSSize size = [attributedString size];
+  NSAttributedString* title = GetButtonAttributedString(
+      [self title], [self keyEquivalent], [self buttonState]);
+  NSSize size = [title size];
   size.height = std::max(size.height, kButtonHeight);
   size.width += kButtonPaddingX * 2;
   return size;

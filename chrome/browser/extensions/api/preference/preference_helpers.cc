@@ -5,11 +5,12 @@
 #include "chrome/browser/extensions/api/preference/preference_helpers.h"
 
 #include "base/json/json_writer.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 
 namespace extensions {
@@ -83,7 +84,8 @@ void DispatchEventToExtensions(
     extensions::APIPermission::ID permission,
     bool incognito,
     const std::string& browser_pref) {
-  extensions::EventRouter* router = profile->GetExtensionEventRouter();
+  extensions::EventRouter* router =
+      extensions::ExtensionSystem::Get(profile)->event_router();
   if (!router || !router->HasEventListener(event_name))
     return;
   ExtensionService* extension_service = profile->GetExtensionService();
@@ -126,9 +128,9 @@ void DispatchEventToExtensions(
       }
 
       scoped_ptr<ListValue> args_copy(args->DeepCopy());
-      router->DispatchEventToExtension(
-          extension_id, event_name, args_copy.Pass(), restrict_to_profile,
-          GURL());
+      scoped_ptr<Event> event(new Event(event_name, args_copy.Pass()));
+      event->restrict_to_profile = restrict_to_profile;
+      router->DispatchEventToExtension(extension_id, event.Pass());
     }
   }
 }

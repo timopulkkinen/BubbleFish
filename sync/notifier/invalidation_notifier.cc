@@ -19,16 +19,16 @@ namespace syncer {
 
 InvalidationNotifier::InvalidationNotifier(
     scoped_ptr<notifier::PushClient> push_client,
-    const InvalidationVersionMap& initial_max_invalidation_versions,
-    const std::string& initial_invalidation_state,
+    const InvalidationStateMap& initial_invalidation_state_map,
+    const std::string& invalidation_bootstrap_data,
     const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
     const std::string& client_info)
     : state_(STOPPED),
-      initial_max_invalidation_versions_(initial_max_invalidation_versions),
+      initial_invalidation_state_map_(initial_invalidation_state_map),
       invalidation_state_tracker_(invalidation_state_tracker),
       client_info_(client_info),
-      invalidation_state_(initial_invalidation_state),
-      invalidation_listener_(push_client.Pass()) {
+      invalidation_bootstrap_data_(invalidation_bootstrap_data),
+      invalidation_listener_(&tick_clock_, push_client.Pass()) {
 }
 
 InvalidationNotifier::~InvalidationNotifier() {
@@ -52,6 +52,12 @@ void InvalidationNotifier::UnregisterHandler(InvalidationHandler* handler) {
   registrar_.UnregisterHandler(handler);
 }
 
+void InvalidationNotifier::Acknowledge(const invalidation::ObjectId& id,
+                                       const AckHandle& ack_handle) {
+  DCHECK(CalledOnValidThread());
+  invalidation_listener_.Acknowledge(id, ack_handle);
+}
+
 InvalidatorState InvalidationNotifier::GetInvalidatorState() const {
   DCHECK(CalledOnValidThread());
   return registrar_.GetInvalidatorState();
@@ -64,50 +70,30 @@ void InvalidationNotifier::SetUniqueId(const std::string& unique_id) {
   CHECK(!client_id_.empty());
 }
 
-void InvalidationNotifier::SetStateDeprecated(const std::string& state) {
-  DCHECK(CalledOnValidThread());
-  DCHECK_LT(state_, STARTED);
-  if (invalidation_state_.empty()) {
-    // Migrate state from sync to invalidation state tracker (bug
-    // 124140).  We've just been handed state from the syncable::Directory, and
-    // the initial invalidation state was empty, implying we've never written
-    // to the new store. Do this here to ensure we always migrate (even if
-    // we fail to establish an initial connection or receive an initial
-    // invalidation) so that we can make the old code obsolete as soon as
-    // possible.
-    invalidation_state_ = state;
-    invalidation_state_tracker_.Call(
-        FROM_HERE, &InvalidationStateTracker::SetInvalidationState, state);
-    UMA_HISTOGRAM_BOOLEAN("InvalidationNotifier.UsefulSetState", true);
-  } else {
-    UMA_HISTOGRAM_BOOLEAN("InvalidationNotifier.UsefulSetState", false);
-  }
-}
-
 void InvalidationNotifier::UpdateCredentials(
     const std::string& email, const std::string& token) {
   if (state_ == STOPPED) {
     invalidation_listener_.Start(
         base::Bind(&invalidation::CreateInvalidationClient),
-        client_id_, client_info_, invalidation_state_,
-        initial_max_invalidation_versions_,
+        client_id_, client_info_, invalidation_bootstrap_data_,
+        initial_invalidation_state_map_,
         invalidation_state_tracker_,
         this);
-    invalidation_state_.clear();
     state_ = STARTED;
   }
   invalidation_listener_.UpdateCredentials(email, token);
 }
 
 void InvalidationNotifier::SendInvalidation(
-    const ObjectIdStateMap& id_state_map) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(CalledOnValidThread());
   // Do nothing.
 }
 
-void InvalidationNotifier::OnInvalidate(const ObjectIdStateMap& id_state_map) {
+void InvalidationNotifier::OnInvalidate(
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(CalledOnValidThread());
-  registrar_.DispatchInvalidationsToHandlers(id_state_map, REMOTE_INVALIDATION);
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void InvalidationNotifier::OnInvalidatorStateChange(InvalidatorState state) {

@@ -9,8 +9,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -18,7 +17,8 @@
 
 namespace {
 
-const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+const base::FilePath::CharType kDocRoot[] =
+    FILE_PATH_LITERAL("chrome/test/data");
 
 }  // namespace
 
@@ -37,9 +37,10 @@ IN_PROC_BROWSER_TEST_F(CollectedCookiesTest, DoubleDisplay) {
       browser(), test_server()->GetURL("files/cookie1.html"));
 
   // Click on the info link twice.
-  TabContents* tab_contents = chrome::GetActiveTabContents(browser());
-  chrome::ShowCollectedCookiesDialog(tab_contents);
-  chrome::ShowCollectedCookiesDialog(tab_contents);
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  chrome::ShowCollectedCookiesDialog(web_contents);
+  chrome::ShowCollectedCookiesDialog(web_contents);
 }
 
 // If this crashes on Windows, use http://crbug.com/79331
@@ -54,8 +55,9 @@ IN_PROC_BROWSER_TEST_F(CollectedCookiesTest, NavigateAway) {
       browser(), test_server()->GetURL("files/cookie1.html"));
 
   // Click on the info link.
-  TabContents* tab_contents = chrome::GetActiveTabContents(browser());
-  chrome::ShowCollectedCookiesDialog(tab_contents);
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  chrome::ShowCollectedCookiesDialog(web_contents);
 
   // Navigate to another page.
   ui_test_utils::NavigateToURL(

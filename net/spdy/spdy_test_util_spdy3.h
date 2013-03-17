@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_SPDY_SPDY_TEST_UTIL_H_
-#define NET_SPDY_SPDY_TEST_UTIL_H_
+#ifndef NET_SPDY_SPDY_TEST_UTIL_SPDY3_H_
+#define NET_SPDY_SPDY_TEST_UTIL_SPDY3_H_
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "crypto/ec_private_key.h"
+#include "crypto/ec_signature_creator.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/mock_host_resolver.h"
@@ -20,6 +22,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
+#include "net/spdy/spdy_session.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 
@@ -47,10 +50,42 @@ struct SpdyHeaderInfo {
   size_t credential_slot;
   SpdyControlFlags control_flags;
   bool compressed;
-  SpdyStatusCodes status;
+  SpdyRstStreamStatus status;
   const char* data;
   uint32 data_length;
   SpdyDataFlags data_flags;
+};
+
+// An ECSignatureCreator that returns deterministic signatures.
+class MockECSignatureCreator : public crypto::ECSignatureCreator {
+ public:
+  explicit MockECSignatureCreator(crypto::ECPrivateKey* key);
+
+  // crypto::ECSignatureCreator
+  virtual bool Sign(const uint8* data,
+                    int data_len,
+                    std::vector<uint8>* signature) OVERRIDE;
+  virtual bool DecodeSignature(const std::vector<uint8>& signature,
+                               std::vector<uint8>* out_raw_sig) OVERRIDE;
+
+ private:
+  crypto::ECPrivateKey* key_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreator);
+};
+
+// An ECSignatureCreatorFactory creates MockECSignatureCreator.
+class MockECSignatureCreatorFactory : public crypto::ECSignatureCreatorFactory {
+ public:
+  MockECSignatureCreatorFactory();
+  virtual ~MockECSignatureCreatorFactory();
+
+  // crypto::ECSignatureCreatorFactory
+  virtual crypto::ECSignatureCreator* Create(
+      crypto::ECPrivateKey* key) OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreatorFactory);
 };
 
 // Chop a frame into an array of MockWrites.
@@ -141,13 +176,13 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
 SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
                                      int extra_header_count,
                                      bool compressed,
-                                     int stream_id,
+                                     SpdyStreamId stream_id,
                                      RequestPriority request_priority,
                                      SpdyControlType type,
                                      SpdyControlFlags flags,
                                      const char* const* kHeaders,
                                      int kHeadersSize,
-                                     int associated_stream_id);
+                                     SpdyStreamId associated_stream_id);
 
 // Construct an expected SPDY reply string.
 // |extra_headers| are the extra header-value pairs, which typically
@@ -171,7 +206,7 @@ SpdyFrame* ConstructSpdyCredential(const SpdyCredential& credential);
 
 // Construct a SPDY PING frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyPing();
+SpdyFrame* ConstructSpdyPing(uint32 ping_id);
 
 // Construct a SPDY GOAWAY frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
@@ -184,7 +219,7 @@ SpdyFrame* ConstructSpdyWindowUpdate(SpdyStreamId, uint32 delta_window_size);
 // Construct a SPDY RST_STREAM frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
 SpdyFrame* ConstructSpdyRstStream(SpdyStreamId stream_id,
-                                  SpdyStatusCodes status);
+                                  SpdyRstStreamStatus status);
 
 // Construct a single SPDY header entry, for validation.
 // |extra_headers| are the extra header-value pairs.
@@ -204,7 +239,7 @@ int ConstructSpdyHeader(const char* const extra_headers[],
 // Returns a SpdyFrame.
 SpdyFrame* ConstructSpdyGet(const char* const url,
                             bool compressed,
-                            int stream_id,
+                            SpdyStreamId stream_id,
                             RequestPriority request_priority);
 
 // Constructs a standard SPDY GET SYN packet, optionally compressed.
@@ -345,8 +380,7 @@ int CombineFrames(const SpdyFrame** frames, int num_frames,
 
 // Helper to manage the lifetimes of the dependencies for a
 // HttpNetworkTransaction.
-class SpdySessionDependencies {
- public:
+struct SpdySessionDependencies {
   // Default set of dependencies -- "null" proxy service.
   SpdySessionDependencies();
 
@@ -359,6 +393,8 @@ class SpdySessionDependencies {
       SpdySessionDependencies* session_deps);
   static HttpNetworkSession* SpdyCreateSessionDeterministic(
       SpdySessionDependencies* session_deps);
+  static HttpNetworkSession::Params CreateSessionParams(
+      SpdySessionDependencies* session_deps);
 
   // NOTE: host_resolver must be ordered before http_auth_handler_factory.
   scoped_ptr<MockHostResolverBase> host_resolver;
@@ -369,7 +405,15 @@ class SpdySessionDependencies {
   scoped_ptr<DeterministicMockClientSocketFactory> deterministic_socket_factory;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   HttpServerPropertiesImpl http_server_properties;
+  bool enable_ip_pooling;
+  bool enable_compression;
+  bool enable_ping;
+  bool enable_user_alternate_protocol_ports;
+  bool enable_spdy_31;
+  size_t stream_initial_recv_window_size;
+  SpdySession::TimeFunc time_func;
   std::string trusted_spdy_proxy;
+  NetLog* net_log;
 };
 
 class SpdyURLRequestContext : public URLRequestContext {
@@ -417,23 +461,8 @@ class SpdySessionPoolPeer {
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
 };
 
-// Helper to manage the state of a number of SPDY global variables.
-class SpdyTestStateHelper {
- public:
-  SpdyTestStateHelper();
-  ~SpdyTestStateHelper();
-
- private:
-  // In order to make CREDENTIAL frame creation deterministic, we need to
-  // use a mock EC signature creator, which needs to live throughout
-  // the life of the test.
-  scoped_ptr<crypto::ECSignatureCreatorFactory> ec_signature_creator_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SpdyTestStateHelper);
-};
-
 }  // namespace test_spdy3
 
 }  // namespace net
 
-#endif  // NET_SPDY_SPDY_TEST_UTIL_H_
+#endif  // NET_SPDY_SPDY_TEST_UTIL_SPDY3_H_

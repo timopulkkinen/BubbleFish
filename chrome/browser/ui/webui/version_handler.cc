@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,12 +22,13 @@
 namespace {
 
 // Retrieves the executable and profile paths on the FILE thread.
-void GetFilePaths(const FilePath& profile_path,
+void GetFilePaths(const base::FilePath& profile_path,
                   string16* exec_path_out,
                   string16* profile_path_out) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
 
-  FilePath executable_path = CommandLine::ForCurrentProcess()->GetProgram();
+  base::FilePath executable_path =
+      CommandLine::ForCurrentProcess()->GetProgram();
   if (file_util::AbsolutePath(&executable_path)) {
     *exec_path_out = executable_path.LossyDisplayName();
   } else {
@@ -36,7 +36,7 @@ void GetFilePaths(const FilePath& profile_path,
         l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_PATH_NOTFOUND);
   }
 
-  FilePath profile_path_copy(profile_path);
+  base::FilePath profile_path_copy(profile_path);
   if (!profile_path.empty() && file_util::AbsolutePath(&profile_path_copy)) {
     *profile_path_out = profile_path.LossyDisplayName();
   } else {
@@ -62,11 +62,13 @@ void VersionHandler::RegisterMessages() {
 }
 
 void VersionHandler::HandleRequestVersionInfo(const ListValue* args) {
+#if defined(ENABLE_PLUGINS)
   // The Flash version information is needed in the response, so make sure
   // the plugins are loaded.
   content::PluginService::GetInstance()->GetPlugins(
       base::Bind(&VersionHandler::OnGotPlugins,
           weak_ptr_factory_.GetWeakPtr()));
+#endif
 
   // Grab the executable path on the FILE thread. It is returned in
   // OnGotFilePaths.
@@ -86,26 +88,24 @@ void VersionHandler::HandleRequestVersionInfo(const ListValue* args) {
   scoped_ptr<ListValue> variations_list(new ListValue());
   std::vector<std::string> variations;
 #if !defined(NDEBUG)
-  std::string variation_state;
-  base::FieldTrialList::StatesToString(&variation_state);
+  base::FieldTrial::ActiveGroups active_groups;
+  base::FieldTrialList::GetActiveFieldTrialGroups(&active_groups);
 
-  std::vector<std::string> tokens;
-  base::SplitString(variation_state,
-                    base::FieldTrialList::kPersistentStringSeparator,
-                    &tokens);
-  // Since StatesToString appends a separator at the end, SplitString will
-  // append an extra empty string in the vector. Drop it. There should
-  // always be an even number of tokens left.
-  tokens.pop_back();
-  DCHECK_EQ(0U, tokens.size() % 2);
-  for (size_t i = 0; i < tokens.size(); i += 2)
-    variations.push_back(tokens[i] + ":" + tokens[i + 1]);
+  const unsigned char kNonBreakingHyphenUTF8[] = { 0xE2, 0x80, 0x91, '\0' };
+  const std::string kNonBreakingHyphenUTF8String(
+      reinterpret_cast<const char*>(kNonBreakingHyphenUTF8));
+  for (size_t i = 0; i < active_groups.size(); ++i) {
+    std::string line = active_groups[i].trial_name + ":" +
+                       active_groups[i].group_name;
+    ReplaceChars(line, "-", kNonBreakingHyphenUTF8String, &line);
+    variations.push_back(line);
+  }
 #else
   // In release mode, display the hashes only.
-  std::vector<string16> selected_groups;
-  chrome_variations::GetFieldTrialSelectedGroupIdsAsStrings(&selected_groups);
-  for (size_t i = 0; i < selected_groups.size(); ++i)
-    variations.push_back(UTF16ToASCII(selected_groups[i]));
+  std::vector<string16> active_groups;
+  chrome_variations::GetFieldTrialActiveGroupIdsAsStrings(&active_groups);
+  for (size_t i = 0; i < active_groups.size(); ++i)
+    variations.push_back(UTF16ToASCII(active_groups[i]));
 #endif
 
   for (std::vector<std::string>::const_iterator it = variations.begin();
@@ -127,9 +127,9 @@ void VersionHandler::OnGotFilePaths(string16* executable_path_data,
   web_ui()->CallJavascriptFunction("returnFilePaths", exec_path, profile_path);
 }
 
+#if defined(ENABLE_PLUGINS)
 void VersionHandler::OnGotPlugins(
     const std::vector<webkit::WebPluginInfo>& plugins) {
-#if !defined(OS_ANDROID)
   // Obtain the version of the first enabled Flash plugin.
   std::vector<webkit::WebPluginInfo> info_array;
   content::PluginService::GetInstance()->GetPluginInfoArray(
@@ -149,5 +149,5 @@ void VersionHandler::OnGotPlugins(
 
   StringValue arg(flash_version);
   web_ui()->CallJavascriptFunction("returnFlashVersion", arg);
-#endif
 }
+#endif  // defined(ENABLE_PLUGINS)

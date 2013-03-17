@@ -7,6 +7,7 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
+#include "webkit/plugins/ppapi/gfx_conversion.h"
 #include "webkit/plugins/ppapi/mock_plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_interface_factory.h"
@@ -76,7 +77,7 @@ void PpapiUnittest::SetUp() {
   delegate_.reset(NewPluginDelegate());
 
   // Initialize the mock module.
-  module_ = new PluginModule("Mock plugin", FilePath(), this,
+  module_ = new PluginModule("Mock plugin", base::FilePath(), this,
                              ::ppapi::PpapiPermissions());
   PluginModule::EntryPoints entry_points;
   entry_points.get_interface = &MockGetInterface;
@@ -84,8 +85,7 @@ void PpapiUnittest::SetUp() {
   ASSERT_TRUE(module_->InitAsInternalPlugin(entry_points));
 
   // Initialize the mock instance.
-  instance_ = PluginInstance::Create(delegate_.get(), module());
-
+  instance_ = PluginInstance::Create(delegate_.get(), module(), NULL, GURL());
 }
 
 void PpapiUnittest::TearDown() {
@@ -108,6 +108,11 @@ void PpapiUnittest::ShutdownModule() {
   instance_ = NULL;
   DCHECK(module_->HasOneRef());
   module_ = NULL;
+}
+
+void PpapiUnittest::SetViewSize(int width, int height) const {
+  instance_->view_data_.rect = PP_FromGfxRect(gfx::Rect(0, 0, width, height));
+  instance_->view_data_.clip_rect = instance_->view_data_.rect;
 }
 
 void PpapiUnittest::PluginModuleDead(PluginModule* /* dead_module */) {

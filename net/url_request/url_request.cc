@@ -20,12 +20,13 @@
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
+#include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate.h"
 #include "net/base/ssl_cert_request_info.h"
-#include "net/base/upload_data.h"
+#include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request_context.h"
@@ -152,6 +153,7 @@ URLRequest::URLRequest(const GURL& url,
       load_flags_(LOAD_NORMAL),
       delegate_(delegate),
       is_pending_(false),
+      is_redirecting_(false),
       redirect_limit_(kMaxRedirects),
       priority_(LOWEST),
       identifier_(GenerateURLRequestIdentifier()),
@@ -160,6 +162,7 @@ URLRequest::URLRequest(const GURL& url,
           base::Bind(&URLRequest::BeforeRequestComplete,
                      base::Unretained(this)))),
       has_notified_completion_(false),
+      received_response_content_length_(0),
       creation_time_(base::TimeTicks::Now()) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
 
@@ -189,6 +192,7 @@ URLRequest::URLRequest(const GURL& url,
       load_flags_(LOAD_NORMAL),
       delegate_(delegate),
       is_pending_(false),
+      is_redirecting_(false),
       redirect_limit_(kMaxRedirects),
       priority_(LOWEST),
       identifier_(GenerateURLRequestIdentifier()),
@@ -197,6 +201,7 @@ URLRequest::URLRequest(const GURL& url,
           base::Bind(&URLRequest::BeforeRequestComplete,
                      base::Unretained(this)))),
       has_notified_completion_(false),
+      received_response_content_length_(0),
       creation_time_(base::TimeTicks::Now()) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
 
@@ -253,62 +258,56 @@ void URLRequest::UnregisterRequestInterceptor(Interceptor* interceptor) {
       interceptor);
 }
 
-void URLRequest::AppendBytesToUpload(const char* bytes, int bytes_len) {
-  DCHECK(bytes_len > 0 && bytes);
-  if (!upload_)
-    upload_ = new UploadData();
-  upload_->AppendBytes(bytes, bytes_len);
-}
-
 void URLRequest::EnableChunkedUpload() {
-  DCHECK(!upload_ || upload_->is_chunked());
-  if (!upload_) {
-    upload_ = new UploadData();
-    upload_->set_is_chunked(true);
+  DCHECK(!upload_data_stream_ || upload_data_stream_->is_chunked());
+  if (!upload_data_stream_) {
+    upload_data_stream_.reset(
+        new UploadDataStream(UploadDataStream::CHUNKED, 0));
   }
 }
 
 void URLRequest::AppendChunkToUpload(const char* bytes,
                                      int bytes_len,
                                      bool is_last_chunk) {
-  DCHECK(upload_);
-  DCHECK(upload_->is_chunked());
+  DCHECK(upload_data_stream_);
+  DCHECK(upload_data_stream_->is_chunked());
   DCHECK_GT(bytes_len, 0);
-  upload_->AppendChunk(bytes, bytes_len, is_last_chunk);
+  upload_data_stream_->AppendChunk(bytes, bytes_len, is_last_chunk);
 }
 
-void URLRequest::set_upload(UploadData* upload) {
-  upload_ = upload;
+void URLRequest::set_upload(scoped_ptr<UploadDataStream> upload) {
+  DCHECK(!upload->is_chunked());
+  upload_data_stream_ = upload.Pass();
 }
 
-// Get the upload data directly.
-const UploadData* URLRequest::get_upload() const {
-  return upload_.get();
-}
-
-UploadData* URLRequest::get_upload_mutable() {
-  return upload_.get();
+const UploadDataStream* URLRequest::get_upload() const {
+  return upload_data_stream_.get();
 }
 
 bool URLRequest::has_upload() const {
-  return upload_ != NULL;
+  return upload_data_stream_.get() != NULL;
 }
 
 void URLRequest::SetExtraRequestHeaderById(int id, const string& value,
                                            bool overwrite) {
-  DCHECK(!is_pending_);
+  DCHECK(!is_pending_ || is_redirecting_);
   NOTREACHED() << "implement me!";
 }
 
 void URLRequest::SetExtraRequestHeaderByName(const string& name,
                                              const string& value,
                                              bool overwrite) {
-  DCHECK(!is_pending_);
+  DCHECK(!is_pending_ || is_redirecting_);
   if (overwrite) {
     extra_request_headers_.SetHeader(name, value);
   } else {
     extra_request_headers_.SetHeaderIfMissing(name, value);
   }
+}
+
+void URLRequest::RemoveRequestHeaderByName(const string& name) {
+  DCHECK(!is_pending_ || is_redirecting_);
+  extra_request_headers_.RemoveHeader(name);
 }
 
 void URLRequest::SetExtraRequestHeaders(
@@ -321,7 +320,8 @@ void URLRequest::SetExtraRequestHeaders(
 }
 
 LoadStateWithParam URLRequest::GetLoadState() const {
-  if (blocked_on_delegate_) {
+  // Only return LOAD_STATE_WAITING_FOR_DELEGATE if there's a load state param.
+  if (blocked_on_delegate_ && !load_state_param_.empty()) {
     return LoadStateWithParam(LOAD_STATE_WAITING_FOR_DELEGATE,
                               load_state_param_);
   }
@@ -373,6 +373,10 @@ HostPortPair URLRequest::GetSocketAddress() const {
 
 HttpResponseHeaders* URLRequest::response_headers() const {
   return response_info_.headers.get();
+}
+
+void URLRequest::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
+  *load_timing_info = load_timing_info_;
 }
 
 bool URLRequest::GetResponseCookies(ResponseCookies* cookies) {
@@ -458,7 +462,11 @@ void URLRequest::Start() {
   DCHECK_EQ(network_delegate_, context_->network_delegate());
 
   g_url_requests_started = true;
-  response_info_.request_time = Time::Now();
+  response_info_.request_time = base::Time::Now();
+
+  load_timing_info_ = LoadTimingInfo();
+  load_timing_info_.request_start_time = response_info_.request_time;
+  load_timing_info_.request_start = base::TimeTicks::Now();
 
   // Only notify the delegate for the initial request.
   if (network_delegate_) {
@@ -500,9 +508,8 @@ void URLRequest::BeforeRequestComplete(int error) {
     new_url.Swap(&delegate_redirect_url_);
 
     URLRequestRedirectJob* job = new URLRequestRedirectJob(
-        this, network_delegate_, new_url);
-    // Use status code 307 to preserve the method, so POST requests work.
-    job->set_redirect_code(
+        this, network_delegate_, new_url,
+        // Use status code 307 to preserve the method, so POST requests work.
         URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT);
     StartJob(job);
   } else {
@@ -518,15 +525,17 @@ void URLRequest::StartJob(URLRequestJob* job) {
   net_log_.BeginEvent(
       NetLog::TYPE_URL_REQUEST_START_JOB,
       base::Bind(&NetLogURLRequestStartCallback,
-                 &url(), &method_, load_flags_, priority_));
+                 &url(), &method_, load_flags_, priority_,
+                 upload_data_stream_ ? upload_data_stream_->identifier() : -1));
 
   job_ = job;
   job_->SetExtraRequestHeaders(extra_request_headers_);
 
-  if (upload_.get())
-    job_->SetUpload(upload_.get());
+  if (upload_data_stream_.get())
+    job_->SetUpload(upload_data_stream_.get());
 
   is_pending_ = true;
+  is_redirecting_ = false;
 
   response_info_.was_cached = false;
 
@@ -635,6 +644,8 @@ void URLRequest::StopCaching() {
 
 void URLRequest::NotifyReceivedRedirect(const GURL& location,
                                         bool* defer_redirect) {
+  is_redirecting_ = true;
+
   URLRequestJob* job =
       URLRequestJobManager::GetInstance()->MaybeInterceptRedirect(
           this, network_delegate_, location);
@@ -642,6 +653,7 @@ void URLRequest::NotifyReceivedRedirect(const GURL& location,
     RestartWithJob(job);
   } else if (delegate_) {
     delegate_->OnReceivedRedirect(this, location, defer_redirect);
+    // |this| may be have been destroyed here.
   }
 }
 
@@ -720,7 +732,12 @@ void URLRequest::PrepareToRestart() {
   OrphanJob();
 
   response_info_ = HttpResponseInfo();
-  response_info_.request_time = Time::Now();
+  response_info_.request_time = base::Time::Now();
+
+  load_timing_info_ = LoadTimingInfo();
+  load_timing_info_.request_start_time = response_info_.request_time;
+  load_timing_info_.request_start = base::TimeTicks::Now();
+
   status_ = URLRequestStatus();
   is_pending_ = false;
 }
@@ -762,6 +779,10 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     return ERR_UNSAFE_REDIRECT;
   }
 
+  if (!final_upload_progress_.position())
+    final_upload_progress_ = job_->GetUploadProgress();
+  PrepareToRestart();
+
   // For 303 redirects, all request methods except HEAD are converted to GET,
   // as per the latest httpbis draft.  The draft also allows POST requests to
   // be converted to GETs when following 301/302 redirects, for historical
@@ -774,7 +795,7 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
   if ((http_status_code == 303 && method_ != "HEAD") ||
       ((http_status_code == 301 || http_status_code == 302) && was_post)) {
     method_ = "GET";
-    upload_ = NULL;
+    upload_data_stream_.reset();
     if (was_post) {
       // If being switched from POST to GET, must remove headers that were
       // specific to the POST and don't have meaning in GET. For example
@@ -795,10 +816,6 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
   url_chain_.push_back(location);
   --redirect_limit_;
 
-  if (!final_upload_progress_.position())
-    final_upload_progress_ = job_->GetUploadProgress();
-
-  PrepareToRestart();
   Start();
   return OK;
 }
@@ -825,7 +842,7 @@ bool URLRequest::GetHSTSRedirect(GURL* redirect_url) const {
           url.host(),
           SSLConfigService::IsSNIAvailable(context()->ssl_config_service()),
           &domain_state) &&
-      domain_state.ShouldRedirectHTTPToHTTPS()) {
+      domain_state.ShouldUpgradeToSSL()) {
     url_canon::Replacements<char> replacements;
     const char kNewScheme[] = "https";
     replacements.SetScheme(kNewScheme,
@@ -930,14 +947,23 @@ void URLRequest::NotifyReadCompleted(int bytes_read) {
 
   // Notify NetworkChangeNotifier that we just received network data.
   // This is to identify cases where the NetworkChangeNotifier thinks we
-  // are off-line but we are still receiving network data (crbug.com/124069).
+  // are off-line but we are still receiving network data (crbug.com/124069),
+  // and to get rough network connection measurements.
   if (bytes_read > 0 && !was_cached())
-    NetworkChangeNotifier::NotifyDataReceived(url());
+    NetworkChangeNotifier::NotifyDataReceived(*this, bytes_read);
 
   if (delegate_)
     delegate_->OnReadCompleted(this, bytes_read);
 
   // Nothing below this line as OnReadCompleted may delete |this|.
+}
+
+void URLRequest::OnHeadersComplete() {
+  // Cache load timing information now, as information will be lost once the
+  // socket is closed and the ClientSocketHandle is Reset, which will happen
+  // once the body is complete.  The start times should already be populated.
+  if (job_)
+    job_->GetLoadTimingInfo(&load_timing_info_);
 }
 
 void URLRequest::NotifyRequestCompleted() {
@@ -947,6 +973,7 @@ void URLRequest::NotifyRequestCompleted() {
     return;
 
   is_pending_ = false;
+  is_redirecting_ = false;
   has_notified_completion_ = true;
   if (network_delegate_)
     network_delegate_->NotifyCompleted(this, job_ != NULL);
@@ -954,7 +981,12 @@ void URLRequest::NotifyRequestCompleted() {
 
 void URLRequest::SetBlockedOnDelegate() {
   blocked_on_delegate_ = true;
-  net_log_.BeginEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE);
+  if (!load_state_param_.empty()) {
+    net_log_.BeginEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE,
+                        NetLog::StringCallback("delegate", &load_state_param_));
+  } else {
+    net_log_.BeginEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE);
+  }
 }
 
 void URLRequest::SetUnblockedOnDelegate() {

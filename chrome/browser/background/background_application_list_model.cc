@@ -16,9 +16,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -60,7 +63,7 @@ bool ExtensionNameComparator::operator()(const Extension* x,
 // Background application representation, private to the
 // BackgroundApplicationListModel class.
 class BackgroundApplicationListModel::Application
-  : public ImageLoadingTracker::Observer {
+    : public base::SupportsWeakPtr<Application> {
  public:
   Application(BackgroundApplicationListModel* model,
               const Extension* an_extension);
@@ -68,9 +71,7 @@ class BackgroundApplicationListModel::Application
   virtual ~Application();
 
   // Invoked when a request icon is available.
-  virtual void OnImageLoaded(const gfx::Image& image,
-                             const std::string& extension_id,
-                             int index) OVERRIDE;
+  void OnImageLoaded(const gfx::Image& image);
 
   // Uses the FILE thread to request this extension's icon, sized
   // appropriately.
@@ -79,7 +80,6 @@ class BackgroundApplicationListModel::Application
   const Extension* extension_;
   scoped_ptr<gfx::ImageSkia> icon_;
   BackgroundApplicationListModel* model_;
-  ImageLoadingTracker tracker_;
 };
 
 namespace {
@@ -141,14 +141,11 @@ BackgroundApplicationListModel::Application::Application(
     const Extension* extension)
     : extension_(extension),
       icon_(NULL),
-      model_(model),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
+      model_(model) {
 }
 
 void BackgroundApplicationListModel::Application::OnImageLoaded(
-    const gfx::Image& image,
-    const std::string& extension_id,
-    int index) {
+    const gfx::Image& image) {
   if (image.IsEmpty())
     return;
   icon_.reset(image.CopyImageSkia());
@@ -157,10 +154,11 @@ void BackgroundApplicationListModel::Application::OnImageLoaded(
 
 void BackgroundApplicationListModel::Application::RequestIcon(
     extension_misc::ExtensionIcons size) {
-  ExtensionResource resource = extension_->GetIconResource(
-      size, ExtensionIconSet::MATCH_BIGGER);
-  tracker_.LoadImage(extension_, resource, gfx::Size(size, size),
-                     ImageLoadingTracker::CACHE);
+  ExtensionResource resource = extensions::IconsInfo::GetIconResource(
+      extension_, size, ExtensionIconSet::MATCH_BIGGER);
+  extensions::ImageLoader::Get(model_->profile_)->LoadImageAsync(
+      extension_, resource, gfx::Size(size, size),
+      base::Bind(&Application::OnImageLoaded, AsWeakPtr()));
 }
 
 BackgroundApplicationListModel::~BackgroundApplicationListModel() {
@@ -186,7 +184,8 @@ BackgroundApplicationListModel::BackgroundApplicationListModel(Profile* profile)
   registrar_.Add(this,
                  chrome::NOTIFICATION_BACKGROUND_CONTENTS_SERVICE_CHANGED,
                  content::Source<Profile>(profile));
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile)->
+      extension_service();
   if (service && service->is_ready())
     Update();
 }
@@ -289,7 +288,7 @@ bool BackgroundApplicationListModel::IsBackgroundApp(
     return true;
 
   // Hosted apps with manifest-provided background pages are background apps.
-  if (extension.has_background_page())
+  if (extensions::BackgroundInfo::HasBackgroundPage(&extension))
     return true;
 
   BackgroundContentsService* service =
@@ -317,7 +316,8 @@ void BackgroundApplicationListModel::Observe(
     Update();
     return;
   }
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile_)->
+      extension_service();
   if (!service || !service->is_ready())
     return;
 
@@ -396,7 +396,8 @@ void BackgroundApplicationListModel::RemoveObserver(Observer* observer) {
 // differs from the old list, it generates OnApplicationListChanged events for
 // each observer.
 void BackgroundApplicationListModel::Update() {
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile_)->
+      extension_service();
 
   // Discover current background applications, compare with previous list, which
   // is consistently sorted, and notify observers if they differ.

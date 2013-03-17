@@ -4,18 +4,21 @@
 
 #include "net/base/upload_data_stream.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/upload_data.h"
+#include "net/base/test_completion_callback.h"
+#include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_file_element_reader.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,7 +42,10 @@ std::string ReadFromUploadDataStream(UploadDataStream* stream) {
   std::string data_read;
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
   while (!stream->IsEOF()) {
-    const int bytes_read = stream->Read(buf, kTestBufferSize);
+    TestCompletionCallback callback;
+    const int result = stream->Read(buf, kTestBufferSize, callback.callback());
+    const int bytes_read =
+        result != ERR_IO_PENDING ? result : callback.WaitForResult();
     data_read.append(buf->data(), bytes_read);
   }
   return data_read;
@@ -48,14 +54,23 @@ std::string ReadFromUploadDataStream(UploadDataStream* stream) {
 // A mock class of UploadElementReader.
 class MockUploadElementReader : public UploadElementReader {
  public:
-  MockUploadElementReader() : init_result_(OK) {}
+  MockUploadElementReader(int content_length, bool is_in_memory)
+      : content_length_(content_length),
+        bytes_remaining_(content_length),
+        is_in_memory_(is_in_memory),
+        init_result_(OK),
+        read_result_(OK) {}
+
   virtual ~MockUploadElementReader() {}
 
+  // UploadElementReader overrides.
   MOCK_METHOD1(Init, int(const CompletionCallback& callback));
-  MOCK_CONST_METHOD0(GetContentLength, uint64());
-  MOCK_CONST_METHOD0(BytesRemaining, uint64());
-  MOCK_CONST_METHOD0(IsInMemory, bool());
-  MOCK_METHOD2(ReadSync, int(char* buf, int buf_length));
+  virtual uint64 GetContentLength() const OVERRIDE { return content_length_; }
+  virtual uint64 BytesRemaining() const OVERRIDE { return bytes_remaining_; }
+  virtual bool IsInMemory() const OVERRIDE { return is_in_memory_; }
+  MOCK_METHOD3(Read, int(IOBuffer* buf,
+                         int buf_length,
+                         const CompletionCallback& callback));
 
   // Sets expectation to return the specified result from Init() asynchronously.
   void SetAsyncInitExpectation(int result) {
@@ -65,100 +80,121 @@ class MockUploadElementReader : public UploadElementReader {
                         Return(ERR_IO_PENDING)));
   }
 
+  // Sets expectation to return the specified result from Read().
+  void SetReadExpectation(int result) {
+    read_result_ = result;
+    EXPECT_CALL(*this, Read(_, _, _))
+        .WillOnce(Invoke(this, &MockUploadElementReader::OnRead));
+  }
+
  private:
   void OnInit(const CompletionCallback& callback) {
     MessageLoop::current()->PostTask(FROM_HERE,
                                      base::Bind(callback, init_result_));
   }
 
+  int OnRead(IOBuffer* buf,
+             int buf_length,
+             const CompletionCallback& callback) {
+    if (read_result_ > 0)
+      bytes_remaining_ = std::max(0, bytes_remaining_ - read_result_);
+    if (IsInMemory()) {
+      return read_result_;
+    } else {
+      MessageLoop::current()->PostTask(FROM_HERE,
+                                       base::Bind(callback, read_result_));
+      return ERR_IO_PENDING;
+    }
+  }
+
+  int content_length_;
+  int bytes_remaining_;
+  bool is_in_memory_;
+
   // Result value returned from Init().
   int init_result_;
-};
 
-// A mock CompletionCallback.
-class MockCompletionCallback {
- public:
-  MOCK_METHOD1(Run, void(int result));
-
-  CompletionCallback CreateCallback() {
-    return base::Bind(&MockCompletionCallback::Run, base::Unretained(this));
-  }
+  // Result value returned from Read().
+  int read_result_;
 };
 
 }  // namespace
 
 class UploadDataStreamTest : public PlatformTest {
  public:
-  UploadDataStreamTest() : upload_data_(new UploadData) { }
+  virtual void SetUp() OVERRIDE {
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+  }
 
-  void FileChangedHelper(const FilePath& file_path,
+  void FileChangedHelper(const base::FilePath& file_path,
                          const base::Time& time,
                          bool error_expected);
 
-  scoped_refptr<UploadData> upload_data_;
+  base::ScopedTempDir temp_dir_;
+  ScopedVector<UploadElementReader> element_readers_;
 };
 
 TEST_F(UploadDataStreamTest, EmptyUploadData) {
-  upload_data_->AppendBytes("", 0);
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_TRUE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(0U, stream->size());
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_TRUE(stream->IsEOF());
+  UploadDataStream stream(&element_readers_, 0);
+  ASSERT_EQ(OK, stream.Init(CompletionCallback()));
+  EXPECT_TRUE(stream.IsInMemory());
+  EXPECT_EQ(0U, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_TRUE(stream.IsEOF());
 }
 
 TEST_F(UploadDataStreamTest, ConsumeAllBytes) {
-  upload_data_->AppendBytes(kTestData, kTestDataSize);
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_TRUE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(kTestDataSize, stream->size());
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_FALSE(stream->IsEOF());
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  UploadDataStream stream(&element_readers_, 0);
+  ASSERT_EQ(OK, stream.Init(CompletionCallback()));
+  EXPECT_TRUE(stream.IsInMemory());
+  EXPECT_EQ(kTestDataSize, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
-  while (!stream->IsEOF()) {
-    int bytes_read = stream->Read(buf, kTestBufferSize);
+  while (!stream.IsEOF()) {
+    int bytes_read = stream.Read(buf, kTestBufferSize, CompletionCallback());
     ASSERT_LE(0, bytes_read);  // Not an error.
   }
-  EXPECT_EQ(kTestDataSize, stream->position());
-  ASSERT_TRUE(stream->IsEOF());
+  EXPECT_EQ(kTestDataSize, stream.position());
+  ASSERT_TRUE(stream.IsEOF());
 }
 
 TEST_F(UploadDataStreamTest, File) {
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
 
-  std::vector<UploadElement> elements;
-  UploadElement element;
-  element.SetToFilePath(temp_file_path);
-  elements.push_back(element);
-  upload_data_->SetElements(elements);
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
 
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_FALSE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(kTestDataSize, stream->size());
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_FALSE(stream->IsEOF());
+  TestCompletionCallback init_callback;
+  UploadDataStream stream(&element_readers_, 0);
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  ASSERT_EQ(OK, init_callback.WaitForResult());
+  EXPECT_FALSE(stream.IsInMemory());
+  EXPECT_EQ(kTestDataSize, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
-  while (!stream->IsEOF()) {
-    int bytes_read = stream->Read(buf, kTestBufferSize);
-    ASSERT_LE(0, bytes_read);  // Not an error.
+  while (!stream.IsEOF()) {
+    TestCompletionCallback read_callback;
+    ASSERT_EQ(ERR_IO_PENDING,
+              stream.Read(buf, kTestBufferSize, read_callback.callback()));
+    ASSERT_LE(0, read_callback.WaitForResult());  // Not an error.
   }
-  EXPECT_EQ(kTestDataSize, stream->position());
-  ASSERT_TRUE(stream->IsEOF());
-  file_util::Delete(temp_file_path, false);
+  EXPECT_EQ(kTestDataSize, stream.position());
+  ASSERT_TRUE(stream.IsEOF());
 }
 
 TEST_F(UploadDataStreamTest, FileSmallerThanLength) {
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
   const uint64 kFakeSize = kTestDataSize*2;
@@ -166,193 +202,323 @@ TEST_F(UploadDataStreamTest, FileSmallerThanLength) {
   UploadFileElementReader::ScopedOverridingContentLengthForTests
       overriding_content_length(kFakeSize);
 
-  std::vector<UploadElement> elements;
-  UploadElement element;
-  element.SetToFilePath(temp_file_path);
-  elements.push_back(element);
-  upload_data_->SetElements(elements);
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
 
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_FALSE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(kFakeSize, stream->size());
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_FALSE(stream->IsEOF());
+  TestCompletionCallback init_callback;
+  UploadDataStream stream(&element_readers_, 0);
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  ASSERT_EQ(OK, init_callback.WaitForResult());
+  EXPECT_FALSE(stream.IsInMemory());
+  EXPECT_EQ(kFakeSize, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
   uint64 read_counter = 0;
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
-  while (!stream->IsEOF()) {
-    int bytes_read = stream->Read(buf, kTestBufferSize);
+  while (!stream.IsEOF()) {
+    TestCompletionCallback read_callback;
+    ASSERT_EQ(ERR_IO_PENDING,
+              stream.Read(buf, kTestBufferSize, read_callback.callback()));
+    int bytes_read = read_callback.WaitForResult();
     ASSERT_LE(0, bytes_read);  // Not an error.
     read_counter += bytes_read;
-    EXPECT_EQ(read_counter, stream->position());
+    EXPECT_EQ(read_counter, stream.position());
   }
   // UpdateDataStream will pad out the file with 0 bytes so that the HTTP
   // transaction doesn't hang.  Therefore we expected the full size.
   EXPECT_EQ(kFakeSize, read_counter);
-  EXPECT_EQ(read_counter, stream->position());
+  EXPECT_EQ(read_counter, stream.position());
+}
 
-  file_util::Delete(temp_file_path, false);
+TEST_F(UploadDataStreamTest, ReadErrorSync) {
+  // This element cannot be read.
+  MockUploadElementReader* reader =
+      new MockUploadElementReader(kTestDataSize, true);
+  EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
+  reader->SetReadExpectation(ERR_FAILED);
+  element_readers_.push_back(reader);
+
+  // This element is ignored because of the error from the previous reader.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+
+  UploadDataStream stream(&element_readers_, 0);
+
+  // Run Init().
+  ASSERT_EQ(OK, stream.Init(CompletionCallback()));
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
+
+  // Prepare a buffer filled with non-zero data.
+  scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
+  std::fill_n(buf->data(), kTestBufferSize, -1);
+
+  // Read() results in success even when the reader returns error.
+  EXPECT_EQ(static_cast<int>(kTestDataSize*2),
+            stream.Read(buf, kTestBufferSize, CompletionCallback()));
+  EXPECT_EQ(kTestDataSize*2, stream.position());
+  EXPECT_TRUE(stream.IsEOF());
+
+  // The buffer is filled with zero.
+  EXPECT_EQ(static_cast<int>(kTestDataSize*2),
+            std::count(buf->data(), buf->data() + kTestBufferSize, 0));
+}
+
+TEST_F(UploadDataStreamTest, ReadErrorAsync) {
+  // This element cannot be read.
+  MockUploadElementReader* reader =
+      new MockUploadElementReader(kTestDataSize, false);
+  reader->SetAsyncInitExpectation(OK);
+  reader->SetReadExpectation(ERR_FAILED);
+  element_readers_.push_back(reader);
+
+  // This element is ignored because of the error from the previous reader.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+
+  UploadDataStream stream(&element_readers_, 0);
+
+  // Run Init().
+  TestCompletionCallback init_callback;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  EXPECT_EQ(OK, init_callback.WaitForResult());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
+
+  // Prepare a buffer filled with non-zero data.
+  scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
+  std::fill_n(buf->data(), kTestBufferSize, -1);
+
+  // Read() results in success even when the reader returns error.
+  TestCompletionCallback read_callback;
+  ASSERT_EQ(ERR_IO_PENDING,
+            stream.Read(buf, kTestBufferSize, read_callback.callback()));
+  EXPECT_EQ(static_cast<int>(kTestDataSize*2), read_callback.WaitForResult());
+  EXPECT_EQ(kTestDataSize*2, stream.position());
+  EXPECT_TRUE(stream.IsEOF());
+
+  // The buffer is filled with zero.
+  EXPECT_EQ(static_cast<int>(kTestDataSize*2),
+            std::count(buf->data(), buf->data() + kTestBufferSize, 0));
 }
 
 TEST_F(UploadDataStreamTest, FileAndBytes) {
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
 
   const uint64 kFileRangeOffset = 1;
   const uint64 kFileRangeLength = 4;
-  upload_data_->AppendFileRange(
-      temp_file_path, kFileRangeOffset, kFileRangeLength, base::Time());
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, kFileRangeOffset, kFileRangeLength, base::Time()));
 
-  upload_data_->AppendBytes(kTestData, kTestDataSize);
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
 
   const uint64 kStreamSize = kTestDataSize + kFileRangeLength;
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_FALSE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(kStreamSize, stream->size());
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_FALSE(stream->IsEOF());
+  TestCompletionCallback init_callback;
+  UploadDataStream stream(&element_readers_, 0);
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  ASSERT_EQ(OK, init_callback.WaitForResult());
+  EXPECT_FALSE(stream.IsInMemory());
+  EXPECT_EQ(kStreamSize, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
-  while (!stream->IsEOF()) {
-    int bytes_read = stream->Read(buf, kTestBufferSize);
+  while (!stream.IsEOF()) {
+    TestCompletionCallback read_callback;
+    const int result =
+        stream.Read(buf, kTestBufferSize, read_callback.callback());
+    const int bytes_read =
+        result != ERR_IO_PENDING ? result : read_callback.WaitForResult();
     ASSERT_LE(0, bytes_read);  // Not an error.
   }
-  EXPECT_EQ(kStreamSize, stream->position());
-  ASSERT_TRUE(stream->IsEOF());
-
-  file_util::Delete(temp_file_path, false);
+  EXPECT_EQ(kStreamSize, stream.position());
+  ASSERT_TRUE(stream.IsEOF());
 }
 
 TEST_F(UploadDataStreamTest, Chunk) {
-  upload_data_->set_is_chunked(true);
-  upload_data_->AppendChunk(kTestData, kTestDataSize, false);
-  upload_data_->AppendChunk(kTestData, kTestDataSize, true);
-
   const uint64 kStreamSize = kTestDataSize*2;
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data_));
-  ASSERT_EQ(OK, stream->InitSync());
-  EXPECT_FALSE(stream->IsInMemory());
-  ASSERT_TRUE(stream.get());
-  EXPECT_EQ(0U, stream->size());  // Content-Length is 0 for chunked data.
-  EXPECT_EQ(0U, stream->position());
-  EXPECT_FALSE(stream->IsEOF());
+  UploadDataStream stream(UploadDataStream::CHUNKED, 0);
+  stream.AppendChunk(kTestData, kTestDataSize, false);
+  stream.AppendChunk(kTestData, kTestDataSize, true);
+
+  ASSERT_EQ(OK, stream.Init(CompletionCallback()));
+  EXPECT_FALSE(stream.IsInMemory());
+  EXPECT_EQ(0U, stream.size());  // Content-Length is 0 for chunked data.
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
   scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
-  while (!stream->IsEOF()) {
-    int bytes_read = stream->Read(buf, kTestBufferSize);
+  while (!stream.IsEOF()) {
+    int bytes_read = stream.Read(buf, kTestBufferSize, CompletionCallback());
     ASSERT_LE(0, bytes_read);  // Not an error.
   }
-  EXPECT_EQ(kStreamSize, stream->position());
-  ASSERT_TRUE(stream->IsEOF());
+  EXPECT_EQ(kStreamSize, stream.position());
+  ASSERT_TRUE(stream.IsEOF());
 }
 
 // Init() with on-memory and not-on-memory readers.
 TEST_F(UploadDataStreamTest, InitAsync) {
-  // Create stream without element readers.
-  UploadDataStream stream(upload_data_);
-
-  // Set mock readers to the stream.
+  // Create UploadDataStream with mock readers.
   MockUploadElementReader* reader = NULL;
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, true);
   EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
-  EXPECT_CALL(*reader, GetContentLength()).WillRepeatedly(Return(0));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(true));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, true);
   EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
-  EXPECT_CALL(*reader, GetContentLength()).WillRepeatedly(Return(0));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(true));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, false);
   reader->SetAsyncInitExpectation(OK);
-  EXPECT_CALL(*reader, GetContentLength()).WillRepeatedly(Return(0));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(false));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, false);
   reader->SetAsyncInitExpectation(OK);
-  EXPECT_CALL(*reader, GetContentLength()).WillRepeatedly(Return(0));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(false));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, true);
   EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
-  EXPECT_CALL(*reader, GetContentLength()).WillRepeatedly(Return(0));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(true));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
+
+  UploadDataStream stream(&element_readers_, 0);
 
   // Run Init().
-  MockCompletionCallback mock_callback;
-  EXPECT_CALL(mock_callback, Run(OK)).Times(1);
-  EXPECT_EQ(stream.Init(mock_callback.CreateCallback()), ERR_IO_PENDING);
-  MessageLoop::current()->RunAllPending();
+  TestCompletionCallback callback;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(callback.callback()));
+  EXPECT_EQ(OK, callback.WaitForResult());
 }
 
 // Init() of a reader fails asynchronously.
 TEST_F(UploadDataStreamTest, InitAsyncFailureAsync) {
-  // Create stream without element readers.
-  UploadDataStream stream(upload_data_);
-
-  // Set a mock reader to the stream.
+  // Create UploadDataStream with a mock reader.
   MockUploadElementReader* reader = NULL;
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, false);
   reader->SetAsyncInitExpectation(ERR_FAILED);
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(false));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
+
+  UploadDataStream stream(&element_readers_, 0);
 
   // Run Init().
-  MockCompletionCallback mock_callback;
-  EXPECT_CALL(mock_callback, Run(ERR_FAILED)).Times(1);
-  EXPECT_EQ(stream.Init(mock_callback.CreateCallback()), ERR_IO_PENDING);
-  MessageLoop::current()->RunAllPending();
+  TestCompletionCallback callback;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(callback.callback()));
+  EXPECT_EQ(ERR_FAILED, callback.WaitForResult());
 }
 
 // Init() of a reader fails synchronously.
 TEST_F(UploadDataStreamTest, InitAsyncFailureSync) {
-  // Create stream without element readers.
-  UploadDataStream stream(upload_data_);
-
-  // Set mock readers to the stream.
+  // Create UploadDataStream with mock readers.
   MockUploadElementReader* reader = NULL;
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, false);
   reader->SetAsyncInitExpectation(OK);
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(false));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
 
-  reader = new MockUploadElementReader;
+  reader = new MockUploadElementReader(kTestDataSize, true);
   EXPECT_CALL(*reader, Init(_)).WillOnce(Return(ERR_FAILED));
-  EXPECT_CALL(*reader, IsInMemory()).WillRepeatedly(Return(true));
-  stream.element_readers_.push_back(reader);
+  element_readers_.push_back(reader);
+
+  UploadDataStream stream(&element_readers_, 0);
 
   // Run Init().
-  MockCompletionCallback mock_callback;
-  EXPECT_CALL(mock_callback, Run(ERR_FAILED)).Times(1);
-  EXPECT_EQ(stream.Init(mock_callback.CreateCallback()), ERR_IO_PENDING);
-  MessageLoop::current()->RunAllPending();
+  TestCompletionCallback callback;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(callback.callback()));
+  EXPECT_EQ(ERR_FAILED, callback.WaitForResult());
 }
 
-void UploadDataStreamTest::FileChangedHelper(const FilePath& file_path,
+// Read with a buffer whose size is same as the data.
+TEST_F(UploadDataStreamTest, ReadAsyncWithExactSizeBuffer) {
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  UploadDataStream stream(&element_readers_, 0);
+
+  ASSERT_EQ(OK, stream.Init(CompletionCallback()));
+  EXPECT_TRUE(stream.IsInMemory());
+  EXPECT_EQ(kTestDataSize, stream.size());
+  EXPECT_EQ(0U, stream.position());
+  EXPECT_FALSE(stream.IsEOF());
+  scoped_refptr<IOBuffer> buf = new IOBuffer(kTestDataSize);
+  int bytes_read = stream.Read(buf, kTestDataSize, CompletionCallback());
+  ASSERT_EQ(static_cast<int>(kTestDataSize), bytes_read);  // Not an error.
+  EXPECT_EQ(kTestDataSize, stream.position());
+  ASSERT_TRUE(stream.IsEOF());
+}
+
+// Async Read() with on-memory and not-on-memory readers.
+TEST_F(UploadDataStreamTest, ReadAsync) {
+  // Create UploadDataStream with mock readers.
+  MockUploadElementReader* reader = NULL;
+
+  reader = new MockUploadElementReader(kTestDataSize, true);
+  EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
+  reader->SetReadExpectation(kTestDataSize);
+  element_readers_.push_back(reader);
+
+  reader = new MockUploadElementReader(kTestDataSize, false);
+  reader->SetAsyncInitExpectation(OK);
+  reader->SetReadExpectation(kTestDataSize);
+  element_readers_.push_back(reader);
+
+  reader = new MockUploadElementReader(kTestDataSize, true);
+  EXPECT_CALL(*reader, Init(_)).WillOnce(Return(OK));
+  reader->SetReadExpectation(kTestDataSize);
+  element_readers_.push_back(reader);
+
+  reader = new MockUploadElementReader(kTestDataSize, false);
+  reader->SetAsyncInitExpectation(OK);
+  reader->SetReadExpectation(kTestDataSize);
+  element_readers_.push_back(reader);
+
+  UploadDataStream stream(&element_readers_, 0);
+
+  // Run Init().
+  TestCompletionCallback init_callback;
+  EXPECT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  EXPECT_EQ(OK, init_callback.WaitForResult());
+
+  scoped_refptr<IOBuffer> buf = new IOBuffer(kTestBufferSize);
+
+  // Consume the first element.
+  TestCompletionCallback read_callback1;
+  EXPECT_EQ(static_cast<int>(kTestDataSize),
+            stream.Read(buf, kTestDataSize, read_callback1.callback()));
+  MessageLoop::current()->RunUntilIdle();
+  EXPECT_FALSE(read_callback1.have_result());
+
+  // Consume the second element.
+  TestCompletionCallback read_callback2;
+  ASSERT_EQ(ERR_IO_PENDING,
+            stream.Read(buf, kTestDataSize, read_callback2.callback()));
+  EXPECT_EQ(static_cast<int>(kTestDataSize), read_callback2.WaitForResult());
+
+  // Consume the third and the fourth elements.
+  TestCompletionCallback read_callback3;
+  ASSERT_EQ(ERR_IO_PENDING,
+            stream.Read(buf, kTestDataSize*2, read_callback3.callback()));
+  EXPECT_EQ(static_cast<int>(kTestDataSize*2), read_callback3.WaitForResult());
+}
+
+void UploadDataStreamTest::FileChangedHelper(const base::FilePath& file_path,
                                              const base::Time& time,
                                              bool error_expected) {
-  std::vector<UploadElement> elements;
-  UploadElement element;
-  element.SetToFilePathRange(file_path, 1, 2, time);
-  elements.push_back(element);
-  // Don't use upload_data_ here, as this function is called twice, and
-  // reusing upload_data_ is wrong.
-  scoped_refptr<UploadData> upload_data(new UploadData);
-  upload_data->SetElements(elements);
+  // Don't use element_readers_ here, as this function is called twice, and
+  // reusing element_readers_ is wrong.
+  ScopedVector<UploadElementReader> element_readers;
+  element_readers.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(), file_path, 1, 2, time));
 
-  scoped_ptr<UploadDataStream> stream(new UploadDataStream(upload_data));
-  int error_code = stream->InitSync();
+  TestCompletionCallback init_callback;
+  UploadDataStream stream(&element_readers, 0);
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback.callback()));
+  int error_code = init_callback.WaitForResult();
   if (error_expected)
     ASSERT_EQ(ERR_UPLOAD_FILE_CHANGED, error_code);
   else
@@ -360,8 +526,9 @@ void UploadDataStreamTest::FileChangedHelper(const FilePath& file_path,
 }
 
 TEST_F(UploadDataStreamTest, FileChanged) {
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
 
@@ -375,41 +542,237 @@ TEST_F(UploadDataStreamTest, FileChanged) {
   FileChangedHelper(temp_file_path,
                     file_info.last_modified - base::TimeDelta::FromSeconds(1),
                     true);
-
-  file_util::Delete(temp_file_path, false);
 }
 
-TEST_F(UploadDataStreamTest, UploadDataReused) {
-  FilePath temp_file_path;
-  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+TEST_F(UploadDataStreamTest, MultipleInit) {
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
   ASSERT_EQ(static_cast<int>(kTestDataSize),
             file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
 
-  // Prepare |upload_data_| that contains a file.
-  std::vector<UploadElement> elements;
-  UploadElement element;
-  element.SetToFilePath(temp_file_path);
-  elements.push_back(element);
-  upload_data_->SetElements(elements);
+  // Prepare data.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
+  UploadDataStream stream(&element_readers_, 0);
 
-  // Confirm that the file is read properly.
-  {
-    UploadDataStream stream(upload_data_);
-    ASSERT_EQ(OK, stream.InitSync());
-    EXPECT_EQ(kTestDataSize, stream.size());
-    EXPECT_EQ(kTestData, ReadFromUploadDataStream(&stream));
-  }
+  std::string expected_data(kTestData, kTestData + kTestDataSize);
+  expected_data += expected_data;
 
-  // Reuse |upload_data_| for another UploadDataStream, and confirm that the
-  // file is read properly.
-  {
-    UploadDataStream stream(upload_data_);
-    ASSERT_EQ(OK, stream.InitSync());
-    EXPECT_EQ(kTestDataSize, stream.size());
-    EXPECT_EQ(kTestData, ReadFromUploadDataStream(&stream));
-  }
+  // Call Init().
+  TestCompletionCallback init_callback1;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback1.callback()));
+  ASSERT_EQ(OK, init_callback1.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
 
-  file_util::Delete(temp_file_path, false);
+  // Read.
+  EXPECT_EQ(expected_data, ReadFromUploadDataStream(&stream));
+  EXPECT_TRUE(stream.IsEOF());
+
+  // Call Init() again to reset.
+  TestCompletionCallback init_callback2;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback2.callback()));
+  ASSERT_EQ(OK, init_callback2.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read again.
+  EXPECT_EQ(expected_data, ReadFromUploadDataStream(&stream));
+  EXPECT_TRUE(stream.IsEOF());
+}
+
+TEST_F(UploadDataStreamTest, MultipleInitAsync) {
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
+  ASSERT_EQ(static_cast<int>(kTestDataSize),
+            file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
+  TestCompletionCallback test_callback;
+
+  // Prepare data.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
+  UploadDataStream stream(&element_readers_, 0);
+
+  std::string expected_data(kTestData, kTestData + kTestDataSize);
+  expected_data += expected_data;
+
+  // Call Init().
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(test_callback.callback()));
+  EXPECT_EQ(OK, test_callback.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read.
+  EXPECT_EQ(expected_data, ReadFromUploadDataStream(&stream));
+  EXPECT_TRUE(stream.IsEOF());
+
+  // Call Init() again to reset.
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(test_callback.callback()));
+  EXPECT_EQ(OK, test_callback.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read again.
+  EXPECT_EQ(expected_data, ReadFromUploadDataStream(&stream));
+  EXPECT_TRUE(stream.IsEOF());
+}
+
+TEST_F(UploadDataStreamTest, InitToReset) {
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
+  ASSERT_EQ(static_cast<int>(kTestDataSize),
+            file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
+
+  // Prepare data.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
+  UploadDataStream stream(&element_readers_, 0);
+
+  std::vector<char> expected_data(kTestData, kTestData + kTestDataSize);
+  expected_data.insert(expected_data.end(), expected_data.begin(),
+                       expected_data.begin() + kTestDataSize);
+
+  // Call Init().
+  TestCompletionCallback init_callback1;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback1.callback()));
+  EXPECT_EQ(OK, init_callback1.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read some.
+  TestCompletionCallback read_callback1;
+  std::vector<char> buf(kTestDataSize + kTestDataSize/2);
+  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  EXPECT_EQ(ERR_IO_PENDING, stream.Read(wrapped_buffer, buf.size(),
+                                        read_callback1.callback()));
+  EXPECT_EQ(static_cast<int>(buf.size()), read_callback1.WaitForResult());
+  EXPECT_EQ(buf.size(), stream.position());
+
+  // Call Init to reset the state.
+  TestCompletionCallback init_callback2;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback2.callback()));
+  EXPECT_EQ(OK, init_callback2.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read.
+  TestCompletionCallback read_callback2;
+  std::vector<char> buf2(kTestDataSize*2);
+  scoped_refptr<IOBuffer> wrapped_buffer2 = new WrappedIOBuffer(&buf2[0]);
+  EXPECT_EQ(ERR_IO_PENDING, stream.Read(wrapped_buffer2, buf2.size(),
+                                        read_callback2.callback()));
+  EXPECT_EQ(static_cast<int>(buf2.size()), read_callback2.WaitForResult());
+  EXPECT_EQ(expected_data, buf2);
+}
+
+TEST_F(UploadDataStreamTest, InitDuringAsyncInit) {
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
+  ASSERT_EQ(static_cast<int>(kTestDataSize),
+            file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
+
+  // Prepare data.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
+  UploadDataStream stream(&element_readers_, 0);
+
+  std::vector<char> expected_data(kTestData, kTestData + kTestDataSize);
+  expected_data.insert(expected_data.end(), expected_data.begin(),
+                       expected_data.begin() + kTestDataSize);
+
+  // Start Init.
+  TestCompletionCallback init_callback1;
+  EXPECT_EQ(ERR_IO_PENDING, stream.Init(init_callback1.callback()));
+
+  // Call Init again to cancel the previous init.
+  TestCompletionCallback init_callback2;
+  EXPECT_EQ(ERR_IO_PENDING, stream.Init(init_callback2.callback()));
+  EXPECT_EQ(OK, init_callback2.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read.
+  TestCompletionCallback read_callback2;
+  std::vector<char> buf2(kTestDataSize*2);
+  scoped_refptr<IOBuffer> wrapped_buffer2 = new WrappedIOBuffer(&buf2[0]);
+  EXPECT_EQ(ERR_IO_PENDING, stream.Read(wrapped_buffer2, buf2.size(),
+                                        read_callback2.callback()));
+  EXPECT_EQ(static_cast<int>(buf2.size()), read_callback2.WaitForResult());
+  EXPECT_EQ(expected_data, buf2);
+  EXPECT_TRUE(stream.IsEOF());
+
+  // Make sure callbacks are not called for cancelled operations.
+  EXPECT_FALSE(init_callback1.have_result());
+}
+
+TEST_F(UploadDataStreamTest, InitDuringAsyncRead) {
+  base::FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
+                                                  &temp_file_path));
+  ASSERT_EQ(static_cast<int>(kTestDataSize),
+            file_util::WriteFile(temp_file_path, kTestData, kTestDataSize));
+
+  // Prepare data.
+  element_readers_.push_back(new UploadBytesElementReader(
+      kTestData, kTestDataSize));
+  element_readers_.push_back(new UploadFileElementReader(
+      base::MessageLoopProxy::current(),
+      temp_file_path, 0, kuint64max, base::Time()));
+  UploadDataStream stream(&element_readers_, 0);
+
+  std::vector<char> expected_data(kTestData, kTestData + kTestDataSize);
+  expected_data.insert(expected_data.end(), expected_data.begin(),
+                       expected_data.begin() + kTestDataSize);
+
+  // Call Init().
+  TestCompletionCallback init_callback1;
+  ASSERT_EQ(ERR_IO_PENDING, stream.Init(init_callback1.callback()));
+  EXPECT_EQ(OK, init_callback1.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Start reading.
+  TestCompletionCallback read_callback1;
+  std::vector<char> buf(kTestDataSize*2);
+  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  EXPECT_EQ(ERR_IO_PENDING, stream.Read(wrapped_buffer, buf.size(),
+                                        read_callback1.callback()));
+
+  // Call Init to cancel the previous read.
+  TestCompletionCallback init_callback2;
+  EXPECT_EQ(ERR_IO_PENDING, stream.Init(init_callback2.callback()));
+  EXPECT_EQ(OK, init_callback2.WaitForResult());
+  EXPECT_FALSE(stream.IsEOF());
+  EXPECT_EQ(kTestDataSize*2, stream.size());
+
+  // Read.
+  TestCompletionCallback read_callback2;
+  std::vector<char> buf2(kTestDataSize*2);
+  scoped_refptr<IOBuffer> wrapped_buffer2 = new WrappedIOBuffer(&buf2[0]);
+  EXPECT_EQ(ERR_IO_PENDING, stream.Read(wrapped_buffer2, buf2.size(),
+                                        read_callback2.callback()));
+  EXPECT_EQ(static_cast<int>(buf2.size()), read_callback2.WaitForResult());
+  EXPECT_EQ(expected_data, buf2);
+  EXPECT_TRUE(stream.IsEOF());
+
+  // Make sure callbacks are not called for cancelled operations.
+  EXPECT_FALSE(read_callback1.have_result());
 }
 
 }  // namespace net

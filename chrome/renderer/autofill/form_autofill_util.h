@@ -9,14 +9,11 @@
 
 #include "base/string16.h"
 
-namespace webkit {
-namespace forms {
 struct FormData;
-struct FormField;
-}
-}
+struct FormFieldData;
 
 namespace WebKit {
+class WebDocument;
 class WebFormElement;
 class WebFormControlElement;
 class WebInputElement;
@@ -24,7 +21,9 @@ class WebInputElement;
 
 namespace autofill {
 
-// A bit field mask for form requirements.
+struct WebElementDescriptor;
+
+// A bit field mask for form or form element requirements.
 enum RequirementsMask {
   REQUIRE_NONE         = 0,  // No requirements.
   REQUIRE_AUTOCOMPLETE = 1,  // Require that autocomplete != off.
@@ -56,9 +55,21 @@ bool IsTextInput(const WebKit::WebInputElement* element);
 // Returns true if |element| is a select element.
 bool IsSelectElement(const WebKit::WebFormControlElement& element);
 
+// Returns true if |element| is a checkbox or a radio button element.
+bool IsCheckableElement(const WebKit::WebInputElement* element);
+
+// Returns true if |element| is one of the input element types that can be
+// autofilled. {Text, Radiobutton, Checkbox}.
+bool IsAutofillableInputElement(const WebKit::WebInputElement* element);
+
 // Returns the form's |name| attribute if non-empty; otherwise the form's |id|
 // attribute.
 const string16 GetFormIdentifier(const WebKit::WebFormElement& form);
+
+// Returns true if the element specified by |click_element| was successfully
+// clicked.
+bool ClickElement(const WebKit::WebDocument& document,
+                  const WebElementDescriptor& element_descriptor);
 
 // Fills |autofillable_elements| with all the auto-fillable form control
 // elements in |form_element|.
@@ -72,7 +83,7 @@ void ExtractAutofillableElements(
 void WebFormControlElementToFormField(
     const WebKit::WebFormControlElement& element,
     ExtractMask extract_mask,
-    webkit::forms::FormField* field);
+    FormFieldData* field);
 
 // Fills |form| with the FormData object corresponding to the |form_element|.
 // If |field| is non-NULL, also fills |field| with the FormField object
@@ -86,25 +97,31 @@ bool WebFormElementToFormData(
     const WebKit::WebFormControlElement& form_control_element,
     RequirementsMask requirements,
     ExtractMask extract_mask,
-    webkit::forms::FormData* form,
-    webkit::forms::FormField* field);
+    FormData* form,
+    FormFieldData* field);
 
 // Finds the form that contains |element| and returns it in |form|.  Fills
 // |field| with the |FormField| representation for element.
 // Returns false if the form is not found or cannot be serialized.
 bool FindFormAndFieldForInputElement(const WebKit::WebInputElement& element,
-                                     webkit::forms::FormData* form,
-                                     webkit::forms::FormField* field,
+                                     FormData* form,
+                                     FormFieldData* field,
                                      RequirementsMask requirements);
 
 // Fills the form represented by |form|.  |element| is the input element that
 // initiated the auto-fill process.
-void FillForm(const webkit::forms::FormData& form,
+void FillForm(const FormData& form,
               const WebKit::WebInputElement& element);
+
+// Fills focusable and non-focusable form control elements within |form_element|
+// with field data from |form_data|.
+void FillFormIncludingNonFocusableElements(
+    const FormData& form_data,
+    const WebKit::WebFormElement& form_element);
 
 // Previews the form represented by |form|.  |element| is the input element that
 // initiated the preview process.
-void PreviewForm(const webkit::forms::FormData& form,
+void PreviewForm(const FormData& form,
                  const WebKit::WebInputElement& element);
 
 // Clears the placeholder values and the auto-filled background for any fields

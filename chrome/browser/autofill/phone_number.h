@@ -29,12 +29,16 @@ class PhoneNumber : public FormGroup {
 
   // FormGroup implementation:
   virtual void GetMatchingTypes(const string16& text,
+                                const std::string& app_locale,
                                 FieldTypeSet* matching_types) const OVERRIDE;
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
-  virtual void SetInfo(AutofillFieldType type, const string16& value) OVERRIDE;
-  virtual string16 GetCanonicalizedInfo(AutofillFieldType type) const OVERRIDE;
-  virtual bool SetCanonicalizedInfo(AutofillFieldType type,
-                                    const string16& value) OVERRIDE;
+  virtual string16 GetRawInfo(AutofillFieldType type) const OVERRIDE;
+  virtual void SetRawInfo(AutofillFieldType type,
+                          const string16& value) OVERRIDE;
+  virtual string16 GetInfo(AutofillFieldType type,
+                           const std::string& app_locale) const OVERRIDE;
+  virtual bool SetInfo(AutofillFieldType type,
+                       const string16& value,
+                       const std::string& app_locale) OVERRIDE;
 
   // Size and offset of the prefix and suffix portions of phone numbers.
   static const size_t kPrefixOffset = 0;
@@ -52,8 +56,13 @@ class PhoneNumber : public FormGroup {
     // returns true.  For all other field types returs false.
     bool SetInfo(AutofillFieldType type, const string16& value);
 
-    // Returns true if parsing was successful, false otherwise.
-    bool ParseNumber(const std::string& locale, string16* value);
+    // Parses the number built up from pieces stored via SetInfo() according to
+    // the specified |profile|'s country code, falling back to the given
+    // |app_locale| if the |profile| has no associated country code.  Returns
+    // true if parsing was successful, false otherwise.
+    bool ParseNumber(const AutofillProfile& profile,
+                     const std::string& app_locale,
+                     string16* value);
 
     // Returns true if both |phone_| and |whole_number_| are empty.
     bool IsEmpty() const;
@@ -69,20 +78,14 @@ class PhoneNumber : public FormGroup {
   // FormGroup:
   virtual void GetSupportedTypes(FieldTypeSet* supported_types) const OVERRIDE;
 
-  // Validates |number_| and translates it into digits-only format.
-  bool NormalizePhone();
-
-  // Returns the locale for this phone number, based on the |profile_|.
-  std::string GetLocale() const;
-
-  // Updates the cached parsed number if the profile's locale has changed
+  // Updates the cached parsed number if the profile's region has changed
   // since the last time the cache was updated.
-  void UpdateCacheIfNeeded() const;
+  void UpdateCacheIfNeeded(const std::string& app_locale) const;
 
   // The phone number.
   string16 number_;
-  // Profile which stores the locale used as hint when normalizing the number.
-  AutofillProfile* profile_;  // WEAK
+  // Profile which stores the region used as hint when normalizing the number.
+  const AutofillProfile* profile_;  // WEAK
 
   // Cached number.
   mutable autofill_i18n::PhoneObject cached_parsed_phone_;

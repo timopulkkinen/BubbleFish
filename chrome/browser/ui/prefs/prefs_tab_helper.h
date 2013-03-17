@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_UI_PREFS_PREFS_TAB_HELPER_H_
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class OverlayUserPrefStore;
+class PrefRegistrySyncable;
 class PrefService;
 class Profile;
 
@@ -19,19 +21,23 @@ class WebContents;
 }
 
 // Per-tab class to handle user preferences.
-class PrefsTabHelper : public content::NotificationObserver {
+class PrefsTabHelper : public content::NotificationObserver,
+                       public content::WebContentsUserData<PrefsTabHelper> {
  public:
-  explicit PrefsTabHelper(content::WebContents* contents);
   virtual ~PrefsTabHelper();
 
   static void InitIncognitoUserPrefStore(OverlayUserPrefStore* pref_store);
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+  static void MigrateUserPrefs(PrefService* prefs);
 
  protected:
   // Update the RenderView's WebPreferences. Exposed as protected for testing.
   virtual void UpdateWebPreferences();
 
  private:
+  explicit PrefsTabHelper(content::WebContents* contents);
+  friend class content::WebContentsUserData<PrefsTabHelper>;
+
   // content::NotificationObserver overrides:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -41,6 +47,7 @@ class PrefsTabHelper : public content::NotificationObserver {
   void UpdateRendererPreferences();
 
   Profile* GetProfile();
+  void OnWebPrefChanged(const std::string& pref_name);
 
   content::WebContents* web_contents_;
   content::NotificationRegistrar registrar_;

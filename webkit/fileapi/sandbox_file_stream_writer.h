@@ -5,16 +5,16 @@
 #ifndef WEBKIT_FILEAPI_SANDBOX_FILE_STREAM_WRITER_H_
 #define WEBKIT_FILEAPI_SANDBOX_FILE_STREAM_WRITER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_stream_writer.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/fileapi_export.h"
 #include "webkit/fileapi/task_runner_bound_observer_list.h"
 #include "webkit/quota/quota_types.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
 
@@ -22,7 +22,8 @@ class FileSystemContext;
 class FileSystemQuotaUtil;
 class LocalFileStreamWriter;
 
-class FILEAPI_EXPORT_PRIVATE SandboxFileStreamWriter : public FileStreamWriter {
+class WEBKIT_STORAGE_EXPORT_PRIVATE SandboxFileStreamWriter
+    : public FileStreamWriter {
  public:
   SandboxFileStreamWriter(FileSystemContext* file_system_context,
                           const FileSystemURL& url,
@@ -51,7 +52,7 @@ class FILEAPI_EXPORT_PRIVATE SandboxFileStreamWriter : public FileStreamWriter {
   void DidGetFileInfo(const net::CompletionCallback& callback,
                       base::PlatformFileError file_error,
                       const base::PlatformFileInfo& file_info,
-                      const FilePath& platform_path);
+                      const base::FilePath& platform_path);
   void DidGetUsageAndQuota(const net::CompletionCallback& callback,
                            quota::QuotaStatusCode status,
                            int64 usage, int64 quota);
@@ -73,7 +74,7 @@ class FILEAPI_EXPORT_PRIVATE SandboxFileStreamWriter : public FileStreamWriter {
 
   UpdateObserverList observers_;
 
-  FilePath file_path_;
+  base::FilePath file_path_;
   int64 file_size_;
   int64 total_bytes_written_;
   int64 allowed_bytes_to_write_;

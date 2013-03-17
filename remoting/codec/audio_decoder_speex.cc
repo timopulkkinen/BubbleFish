@@ -11,11 +11,17 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "remoting/proto/audio.pb.h"
-#include "third_party/speex/speex.h"
 #include "third_party/speex/include/speex/speex_callbacks.h"
 #include "third_party/speex/include/speex/speex_stereo.h"
 
 namespace remoting {
+
+namespace {
+
+// Hosts will never generate more than 100 frames in a single packet.
+const int kMaxFramesPerPacket = 100;
+
+}  // namespace
 
 AudioDecoderSpeex::AudioDecoderSpeex() {
   // Create and initialize the Speex structures.
@@ -69,6 +75,10 @@ scoped_ptr<AudioPacket> AudioDecoderSpeex::Decode(
       (packet->channels() != AudioPacket::CHANNELS_STEREO)) {
     LOG(WARNING) << "Received an unsupported packet.";
     return scoped_ptr<AudioPacket>(NULL);
+  }
+  if (packet->data_size() > kMaxFramesPerPacket) {
+    LOG(WARNING) << "Received an packet with too many frames.";
+    return scoped_ptr<AudioPacket>();
   }
 
   // Create a new packet of decoded data.

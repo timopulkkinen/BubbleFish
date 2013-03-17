@@ -44,6 +44,7 @@
 
 #include "base/event_types.h"
 #include "base/logging.h"
+#include "content/browser/renderer_host/ui_events_helper.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
@@ -55,29 +56,6 @@ namespace content {
 // to do the work here ourselves.
 
 namespace {
-
-// This matches Firefox behavior.
-const int kPixelsPerTick = 53;
-
-int EventFlagsToWebEventModifiers(int flags) {
-  int modifiers = 0;
-  if (flags & ui::EF_SHIFT_DOWN)
-    modifiers |= WebKit::WebInputEvent::ShiftKey;
-  if (flags & ui::EF_CONTROL_DOWN)
-    modifiers |= WebKit::WebInputEvent::ControlKey;
-  if (flags & ui::EF_ALT_DOWN)
-    modifiers |= WebKit::WebInputEvent::AltKey;
-  // TODO(beng): MetaKey/META_MASK
-  if (flags & ui::EF_LEFT_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-  if (flags & ui::EF_MIDDLE_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-  if (flags & ui::EF_RIGHT_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::RightButtonDown;
-  if (flags & ui::EF_CAPS_LOCK_DOWN)
-    modifiers |= WebKit::WebInputEvent::CapsLockOn;
-  return modifiers;
-}
 
 int XKeyEventToWindowsKeyCode(XKeyEvent* event) {
   int windows_key_code =
@@ -155,89 +133,7 @@ WebKit::WebUChar GetControlCharacter(int windows_key_code, bool shift) {
   return 0;
 }
 
-WebKit::WebTouchPoint::State TouchPointStateFromEvent(
-    const ui::TouchEvent* event) {
-  switch (event->type()) {
-    case ui::ET_TOUCH_PRESSED:
-      return WebKit::WebTouchPoint::StatePressed;
-    case ui::ET_TOUCH_RELEASED:
-      return WebKit::WebTouchPoint::StateReleased;
-    case ui::ET_TOUCH_MOVED:
-      return WebKit::WebTouchPoint::StateMoved;
-    case ui::ET_TOUCH_CANCELLED:
-      return WebKit::WebTouchPoint::StateCancelled;
-    default:
-      return WebKit::WebTouchPoint::StateUndefined;
-  }
-}
-
-WebKit::WebInputEvent::Type TouchEventTypeFromEvent(
-    const ui::TouchEvent* event) {
-  switch (event->type()) {
-    case ui::ET_TOUCH_PRESSED:
-      return WebKit::WebInputEvent::TouchStart;
-    case ui::ET_TOUCH_RELEASED:
-      return WebKit::WebInputEvent::TouchEnd;
-    case ui::ET_TOUCH_MOVED:
-      return WebKit::WebInputEvent::TouchMove;
-    case ui::ET_TOUCH_CANCELLED:
-      return WebKit::WebInputEvent::TouchCancel;
-    default:
-      return WebKit::WebInputEvent::Undefined;
-  }
-}
-
 }  // namespace
-
-WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event) {
-  WebKit::WebMouseEvent webkit_event;
-
-  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
-  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
-
-  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
-  if (event->flags() & ui::EF_LEFT_MOUSE_BUTTON)
-    webkit_event.button = WebKit::WebMouseEvent::ButtonLeft;
-  if (event->flags() & ui::EF_MIDDLE_MOUSE_BUTTON)
-    webkit_event.button = WebKit::WebMouseEvent::ButtonMiddle;
-  if (event->flags() & ui::EF_RIGHT_MOUSE_BUTTON)
-    webkit_event.button = WebKit::WebMouseEvent::ButtonRight;
-
-  switch (event->type()) {
-    case ui::ET_MOUSE_PRESSED:
-      webkit_event.type = WebKit::WebInputEvent::MouseDown;
-      webkit_event.clickCount = event->GetClickCount();
-      break;
-    case ui::ET_MOUSE_RELEASED:
-      webkit_event.type = WebKit::WebInputEvent::MouseUp;
-      break;
-    case ui::ET_MOUSE_ENTERED:
-    case ui::ET_MOUSE_EXITED:
-    case ui::ET_MOUSE_MOVED:
-    case ui::ET_MOUSE_DRAGGED:
-      webkit_event.type = WebKit::WebInputEvent::MouseMove;
-      break;
-    default:
-      NOTIMPLEMENTED() << "Received unexpected event: " << event->type();
-      break;
-  }
-
-  return webkit_event;
-}
-
-WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
-    ui::MouseWheelEvent* event) {
-  WebKit::WebMouseWheelEvent webkit_event;
-
-  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
-  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
-  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
-  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
-  webkit_event.deltaY = event->offset();
-  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
-
-  return webkit_event;
-}
 
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
     ui::ScrollEvent* event) {
@@ -249,9 +145,17 @@ WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
   webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
   webkit_event.hasPreciseScrollingDeltas = true;
   webkit_event.deltaX = event->x_offset();
+  if (event->x_offset_ordinal() != 0.f && event->x_offset() != 0.f) {
+    webkit_event.accelerationRatioX =
+        event->x_offset_ordinal() / event->x_offset();
+  }
   webkit_event.wheelTicksX = webkit_event.deltaX / kPixelsPerTick;
   webkit_event.deltaY = event->y_offset();
   webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
+  if (event->y_offset_ordinal() != 0.f && event->y_offset() != 0.f) {
+    webkit_event.accelerationRatioY =
+        event->y_offset_ordinal() / event->y_offset();
+  }
 
   return webkit_event;
 }
@@ -262,30 +166,22 @@ WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
   WebKit::WebGestureEvent webkit_event;
 
   switch (event->type()) {
-    case ui::ET_SCROLL:
-      // TODO(sadrul || rjkroege): This will do touchscreen style scrolling in
-      // response to touchpad events. Currently, touchscreen and touchpad
-      // scrolls are the same. However, if the planned changes to touchscreen
-      // scrolling take place, this will no longer be so. If so, this needs to
-      // be adjusted.
-      webkit_event.type = WebKit::WebInputEvent::GestureScrollUpdate;
-      webkit_event.data.scrollUpdate.deltaX = event->x_offset();
-      webkit_event.data.scrollUpdate.deltaY = event->y_offset();
-      break;
     case ui::ET_SCROLL_FLING_START:
       webkit_event.type = WebKit::WebInputEvent::GestureFlingStart;
       webkit_event.data.flingStart.velocityX = event->x_offset();
       webkit_event.data.flingStart.velocityY = event->y_offset();
-      webkit_event.data.flingStart.sourceDevice =
-          WebKit::WebGestureEvent::Touchpad;
       break;
     case ui::ET_SCROLL_FLING_CANCEL:
       webkit_event.type = WebKit::WebInputEvent::GestureFlingCancel;
+      break;
+    case ui::ET_SCROLL:
+      NOTREACHED() << "Invalid gesture type: " << event->type();
       break;
     default:
       NOTREACHED() << "Unknown gesture type: " << event->type();
   }
 
+  webkit_event.sourceDevice = WebKit::WebGestureEvent::Touchpad;
   webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
   webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
 
@@ -338,158 +234,6 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   // TODO: IsAutoRepeat/IsKeyPad?
 
   return webkit_event;
-}
-
-// NOTE: ui::GestureEvent instances come from the touchscreen.
-WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
-    ui::GestureEvent* event) {
-  WebKit::WebGestureEvent gesture_event;
-
-  switch (event->type()) {
-    case ui::ET_GESTURE_TAP:
-      gesture_event.type = WebKit::WebInputEvent::GestureTap;
-      gesture_event.data.tap.tapCount = event->details().tap_count();
-      gesture_event.data.tap.width = event->details().bounding_box().width();
-      gesture_event.data.tap.height = event->details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_TAP_DOWN:
-      gesture_event.type = WebKit::WebInputEvent::GestureTapDown;
-      gesture_event.data.tapDown.width =
-          event->details().bounding_box().width();
-      gesture_event.data.tapDown.height =
-          event->details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_TAP_CANCEL:
-      gesture_event.type = WebKit::WebInputEvent::GestureTapCancel;
-      break;
-    case ui::ET_GESTURE_DOUBLE_TAP:
-      gesture_event.type = WebKit::WebInputEvent::GestureDoubleTap;
-      break;
-    case ui::ET_GESTURE_SCROLL_BEGIN:
-      gesture_event.type = WebKit::WebInputEvent::GestureScrollBegin;
-      break;
-    case ui::ET_GESTURE_SCROLL_UPDATE:
-      gesture_event.type = WebKit::WebInputEvent::GestureScrollUpdate;
-      gesture_event.data.scrollUpdate.deltaX = event->details().scroll_x();
-      gesture_event.data.scrollUpdate.deltaY = event->details().scroll_y();
-      break;
-    case ui::ET_GESTURE_SCROLL_END:
-      gesture_event.type = WebKit::WebInputEvent::GestureScrollEnd;
-      break;
-    case ui::ET_GESTURE_PINCH_BEGIN:
-      gesture_event.type = WebKit::WebInputEvent::GesturePinchBegin;
-      break;
-    case ui::ET_GESTURE_PINCH_UPDATE:
-      gesture_event.type = WebKit::WebInputEvent::GesturePinchUpdate;
-      gesture_event.data.pinchUpdate.scale = event->details().scale();
-      break;
-    case ui::ET_GESTURE_PINCH_END:
-      gesture_event.type = WebKit::WebInputEvent::GesturePinchEnd;
-      break;
-    case ui::ET_SCROLL_FLING_START:
-      gesture_event.type = WebKit::WebInputEvent::GestureFlingStart;
-      gesture_event.data.flingStart.velocityX = event->details().velocity_x();
-      gesture_event.data.flingStart.velocityY = event->details().velocity_y();
-      gesture_event.data.flingStart.sourceDevice =
-          WebKit::WebGestureEvent::Touchscreen;
-      break;
-    case ui::ET_SCROLL_FLING_CANCEL:
-      gesture_event.type = WebKit::WebInputEvent::GestureFlingCancel;
-      break;
-    case ui::ET_GESTURE_LONG_PRESS:
-      gesture_event.type = WebKit::WebInputEvent::GestureLongPress;
-      gesture_event.data.longPress.width =
-          event->details().bounding_box().width();
-      gesture_event.data.longPress.height =
-          event->details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_TWO_FINGER_TAP:
-      gesture_event.type = WebKit::WebInputEvent::GestureTwoFingerTap;
-      break;
-    case ui::ET_GESTURE_BEGIN:
-    case ui::ET_GESTURE_END:
-    case ui::ET_GESTURE_MULTIFINGER_SWIPE:
-      gesture_event.type = WebKit::WebInputEvent::Undefined;
-      break;
-    default:
-      NOTREACHED() << "Unknown gesture type: " << event->type();
-  }
-
-  gesture_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
-  gesture_event.timeStampSeconds = event->time_stamp().InSecondsF();
-
-  return gesture_event;
-}
-
-WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
-    ui::TouchEvent* event, WebKit::WebTouchEvent* web_event) {
-  WebKit::WebTouchPoint* point = NULL;
-  switch (event->type()) {
-    case ui::ET_TOUCH_PRESSED:
-      // Add a new touch point.
-      if (web_event->touchesLength < WebKit::WebTouchEvent::touchesLengthCap) {
-        point = &web_event->touches[web_event->touchesLength++];
-        point->id = event->touch_id();
-      }
-      break;
-    case ui::ET_TOUCH_RELEASED:
-    case ui::ET_TOUCH_CANCELLED:
-    case ui::ET_TOUCH_MOVED: {
-      // The touch point should have been added to the event from an earlier
-      // _PRESSED event. So find that.
-      // At the moment, only a maximum of 4 touch-points are allowed. So a
-      // simple loop should be sufficient.
-      for (unsigned i = 0; i < web_event->touchesLength; ++i) {
-        point = web_event->touches + i;
-        if (point->id == event->touch_id())
-          break;
-        point = NULL;
-      }
-      break;
-    }
-    default:
-      DLOG(WARNING) << "Unknown touch event " << event->type();
-      break;
-  }
-
-  if (!point)
-    return NULL;
-
-  // The spec requires the radii values to be positive (and 1 when unknown).
-  point->radiusX = std::max(1.f, event->radius_x());
-  point->radiusY = std::max(1.f, event->radius_y());
-  point->rotationAngle = event->rotation_angle();
-  point->force = event->force();
-
-  // Update the location and state of the point.
-  point->state = TouchPointStateFromEvent(event);
-  if (point->state == WebKit::WebTouchPoint::StateMoved) {
-    // It is possible for badly written touch drivers to emit Move events even
-    // when the touch location hasn't changed. In such cases, consume the event
-    // and pretend nothing happened.
-    if (point->position.x == event->x() && point->position.y == event->y())
-      return NULL;
-  }
-  point->position.x = event->x();
-  point->position.y = event->y();
-
-  const gfx::Point root_point = event->root_location();
-  point->screenPosition.x = root_point.x();
-  point->screenPosition.y = root_point.y();
-
-  // Mark the rest of the points as stationary.
-  for (unsigned i = 0; i < web_event->touchesLength; ++i) {
-    WebKit::WebTouchPoint* iter = web_event->touches + i;
-    if (iter != point)
-      iter->state = WebKit::WebTouchPoint::StateStationary;
-  }
-
-  // Update the type of the touch event.
-  web_event->type = TouchEventTypeFromEvent(event);
-  web_event->timeStampSeconds = event->time_stamp().InSecondsF();
-  web_event->modifiers = EventFlagsToWebEventModifiers(event->flags());
-
-  return point;
 }
 
 }  // namespace content

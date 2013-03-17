@@ -17,8 +17,14 @@ string16 MenuDelegate::GetLabel(int id) const {
   return string16();
 }
 
-const gfx::Font& MenuDelegate::GetLabelFont(int id) const {
-  return MenuConfig::instance().font;
+const gfx::Font* MenuDelegate::GetLabelFont(int id) const {
+  return NULL;
+}
+
+bool MenuDelegate::GetBackgroundColor(int command_id,
+                                      bool is_hovered,
+                                      SkColor* override_color) const {
+  return false;
 }
 
 string16 MenuDelegate::GetTooltipText(int id,
@@ -55,6 +61,11 @@ bool MenuDelegate::ShouldCloseAllMenusOnExecute(int id) {
 
 void MenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   ExecuteCommand(id);
+}
+
+bool MenuDelegate::ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                          const ui::Event& e) {
+  return false;
 }
 
 bool MenuDelegate::IsTriggerableEvent(MenuItemView* source,
@@ -127,16 +138,16 @@ void MenuDelegate::WillShowMenu(MenuItemView* menu) {
 void MenuDelegate::WillHideMenu(MenuItemView* menu) {
 }
 
-Border* MenuDelegate::CreateMenuBorder() {
-  return Border::CreateEmptyBorder(
-      MenuConfig::instance().submenu_vertical_margin_size,
-      MenuConfig::instance().submenu_horizontal_margin_size,
-      MenuConfig::instance().submenu_vertical_margin_size,
-      MenuConfig::instance().submenu_horizontal_margin_size);
+void MenuDelegate::GetHorizontalIconMargins(int command_id,
+                                            int icon_size,
+                                            int* left_margin,
+                                            int* right_margin) const {
+  *left_margin = 0;
+  *right_margin = 0;
 }
 
-Background* MenuDelegate::CreateMenuBackground() {
-  return NULL;
+bool MenuDelegate::ShouldReserveSpaceForSubmenuIndicator() const {
+  return true;
 }
 
 }  // namespace views

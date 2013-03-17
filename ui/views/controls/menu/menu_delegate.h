@@ -17,20 +17,15 @@
 using ui::OSExchangeData;
 
 namespace gfx {
-
 class Font;
-
-}  // namespace gfx
+}
 
 namespace ui {
-
 class Accelerator;
-
-}  // namespace ui
+}
 
 namespace views {
 
-class DropTargetEvent;
 class MenuButton;
 
 // MenuDelegate --------------------------------------------------------------
@@ -69,7 +64,14 @@ class VIEWS_EXPORT MenuDelegate {
   virtual string16 GetLabel(int id) const;
 
   // The font for the menu item label.
-  virtual const gfx::Font& GetLabelFont(int id) const;
+  virtual const gfx::Font* GetLabelFont(int id) const;
+
+  // Override the background color of a given menu item dependent on the
+  // |command_id| and its |is_hovered| state. Returns true if it chooses to
+  // override the color.
+  virtual bool GetBackgroundColor(int command_id,
+                                  bool is_hovered,
+                                  SkColor* override_color) const;
 
   // The tooltip shown for the menu item. This is invoked when the user
   // hovers over the item, and no tooltip text has been set for that item.
@@ -111,6 +113,11 @@ class VIEWS_EXPORT MenuDelegate {
   // flags). mouse_event_flags is 0 if this is triggered by a user gesture
   // other than a mouse event.
   virtual void ExecuteCommand(int id, int mouse_event_flags);
+
+  // Returns true if ExecuteCommand() should be invoked while leaving the
+  // menu open. Default implementation returns true.
+  virtual bool ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                      const ui::Event& e);
 
   // Returns true if the specified event is one the user can use to trigger, or
   // accept, the item. Defaults to left or right mouse buttons or tap.
@@ -201,13 +208,17 @@ class VIEWS_EXPORT MenuDelegate {
   // Invoked prior to a menu being hidden.
   virtual void WillHideMenu(MenuItemView* menu);
 
-  // Creates and returns a new border for the menu, or NULL if no border is
-  // needed. Caller owns the returned object.
-  virtual Border* CreateMenuBorder();
-
-  // Creates and returns a new background for the menu, or NULL if no
-  // background is needed. Caller owns the returned object.
-  virtual Background* CreateMenuBackground();
+  // Returns additional horizontal spacing for the icon of the given item.
+  // The |command_id| specifies the item of interest, the |icon_size| tells the
+  // function the size of the icon and it will then return |left_margin|
+  // and |right_margin| accordingly. Note: Negative values can be returned.
+  virtual void GetHorizontalIconMargins(int command_id,
+                                        int icon_size,
+                                        int* left_margin,
+                                        int* right_margin) const;
+  // Returns true if the labels should reserve additional spacing for e.g.
+  // submenu indicators at the end of the line.
+  virtual bool ShouldReserveSpaceForSubmenuIndicator() const;
 };
 
 }  // namespace views

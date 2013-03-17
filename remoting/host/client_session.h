@@ -8,6 +8,7 @@
 #include <list>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/time.h"
 #include "base/timer.h"
@@ -35,9 +36,10 @@ class AudioEncoder;
 class AudioScheduler;
 struct ClientSessionTraits;
 class DesktopEnvironment;
-class ScreenRecorder;
+class DesktopEnvironmentFactory;
+class EventExecutor;
 class VideoEncoder;
-class VideoFrameCapturer;
+class VideoScheduler;
 
 // A ClientSession keeps a reference to a connection to a client, and maintains
 // per-client state.
@@ -76,28 +78,37 @@ class ClientSession
         const std::string& channel_name,
         const protocol::TransportRoute& route) = 0;
 
-    // Called when the initial client dimensions are received, and when they
-    // change.
-    virtual void OnClientDimensionsChanged(ClientSession* client,
-                                           const SkISize& size) = 0;
+    // Called when the initial client resolution is received, and when it
+    // changes.
+    virtual void OnClientResolutionChanged(ClientSession* client,
+                                           const SkISize& size,
+                                           const SkIPoint& dpi) = 0;
 
    protected:
     virtual ~EventHandler() {}
   };
 
-  ClientSession(EventHandler* event_handler,
-                scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-                scoped_ptr<protocol::ConnectionToClient> connection,
-                scoped_ptr<DesktopEnvironment> desktop_environment,
-                const base::TimeDelta& max_duration);
+  // |event_handler| must outlive |this|. |desktop_environment_factory| is only
+  // used by the constructor to create an instance of DesktopEnvironment.
+  ClientSession(
+      EventHandler* event_handler,
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+      scoped_ptr<protocol::ConnectionToClient> connection,
+      DesktopEnvironmentFactory* desktop_environment_factory,
+      const base::TimeDelta& max_duration);
 
   // protocol::HostStub interface.
-  virtual void NotifyClientDimensions(
-      const protocol::ClientDimensions& dimensions) OVERRIDE;
+  virtual void NotifyClientResolution(
+      const protocol::ClientResolution& resolution) OVERRIDE;
   virtual void ControlVideo(
       const protocol::VideoControl& video_control) OVERRIDE;
+  virtual void ControlAudio(
+      const protocol::AudioControl& audio_control) OVERRIDE;
 
   // protocol::ConnectionToClient::EventHandler interface.
   virtual void OnConnectionAuthenticated(
@@ -113,21 +124,17 @@ class ClientSession
       const std::string& channel_name,
       const protocol::TransportRoute& route) OVERRIDE;
 
-  // Disconnects the session and destroys the transport. Event handler
-  // is guaranteed not to be called after this method is called. The object
-  // should not be used after this method returns.
+  // Disconnects the session, tears down transport resources and stops scheduler
+  // components. |event_handler_| is guaranteed not to be called after this
+  // method returns.
   void Disconnect();
 
-  // Stop all recorders asynchronously. |done_task| is executed when the session
-  // is completely stopped.
-  void Stop(const base::Closure& done_task);
+  // Stops the ClientSession. The caller can safely release its reference to
+  // the client session once Stop() returns.
+  void Stop();
 
   protocol::ConnectionToClient* connection() const {
     return connection_.get();
-  }
-
-  DesktopEnvironment* desktop_environment() const {
-    return desktop_environment_.get();
   }
 
   const std::string& client_jid() { return client_jid_; }
@@ -151,14 +158,12 @@ class ClientSession
   // Creates a proxy for sending clipboard events to the client.
   scoped_ptr<protocol::ClipboardStub> CreateClipboardProxy();
 
-  void OnRecorderStopped();
-
   // Creates an audio encoder for the specified configuration.
   static scoped_ptr<AudioEncoder> CreateAudioEncoder(
       const protocol::SessionConfig& config);
 
   // Creates a video encoder for the specified configuration.
-  static VideoEncoder* CreateVideoEncoder(
+  static scoped_ptr<VideoEncoder> CreateVideoEncoder(
       const protocol::SessionConfig& config);
 
   EventHandler* event_handler_;
@@ -166,16 +171,16 @@ class ClientSession
   // The connection to the client.
   scoped_ptr<protocol::ConnectionToClient> connection_;
 
-  // The desktop environment used by this session.
-  scoped_ptr<DesktopEnvironment> desktop_environment_;
+  // Used to disable callbacks to |connection_| once it is disconnected.
+  base::WeakPtrFactory<protocol::ConnectionToClient> connection_factory_;
 
   std::string client_jid_;
 
-  // The host clipboard and input stubs to which this object delegates.
-  // These are the final elements in the clipboard & input pipelines, which
-  // appear in order below.
-  protocol::ClipboardStub* host_clipboard_stub_;
-  protocol::InputStub* host_input_stub_;
+  // The desktop environment used by this session.
+  scoped_ptr<DesktopEnvironment> desktop_environment_;
+
+  // Filter used as the final element in the input pipeline.
+  protocol::InputFilter host_input_filter_;
 
   // Tracker used to release pressed keys and buttons when disconnecting.
   protocol::InputEventTracker input_tracker_;
@@ -187,7 +192,8 @@ class ClientSession
   MouseClampingFilter mouse_clamping_filter_;
 
   // Filter to used to stop clipboard items sent from the client being echoed
-  // back to it.
+  // back to it.  It is the final element in the clipboard (client -> host)
+  // pipeline.
   protocol::ClipboardEchoFilter clipboard_echo_filter_;
 
   // Filters used to manage enabling & disabling of input & clipboard.
@@ -211,21 +217,18 @@ class ClientSession
   // is reached.
   base::OneShotTimer<ClientSession> max_duration_timer_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // Schedulers for audio and video capture.
   scoped_refptr<AudioScheduler> audio_scheduler_;
-  scoped_refptr<ScreenRecorder> video_recorder_;
+  scoped_refptr<VideoScheduler> video_scheduler_;
 
-  // Number of screen recorders and audio schedulers that are currently being
-  // used or shutdown. Used to delay shutdown if one or more
-  // recorders/schedulers are asynchronously shutting down.
-  int active_recorders_;
-
-  // The task to be executed when the session is completely stopped.
-  base::Closure done_task_;
+  scoped_ptr<EventExecutor> event_executor_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSession);
 };

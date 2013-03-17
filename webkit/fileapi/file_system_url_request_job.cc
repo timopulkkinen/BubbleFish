@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util_proxy.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
@@ -117,7 +117,7 @@ bool FileSystemURLRequestJob::ReadRawData(net::IOBuffer* dest, int dest_size,
 bool FileSystemURLRequestJob::GetMimeType(std::string* mime_type) const {
   DCHECK(request_);
   DCHECK(url_.is_valid());
-  FilePath::StringType extension = url_.path().Extension();
+  base::FilePath::StringType extension = url_.path().Extension();
   if (!extension.empty())
     extension = extension.substr(1);
   VLOG(1) << __FUNCTION__ << "() " << " extension: " << extension;
@@ -183,7 +183,7 @@ void FileSystemURLRequestJob::StartAsync() {
 void FileSystemURLRequestJob::DidGetMetadata(
     base::PlatformFileError error_code,
     const base::PlatformFileInfo& file_info,
-    const FilePath& platform_path) {
+    const base::FilePath& platform_path) {
   if (error_code != base::PLATFORM_FILE_OK) {
     NotifyFailed(error_code == base::PLATFORM_FILE_ERROR_INVALID_URL ?
                  net::ERR_INVALID_URL : net::ERR_FILE_NOT_FOUND);
@@ -214,7 +214,8 @@ void FileSystemURLRequestJob::DidGetMetadata(
   reader_.reset(
       file_system_context_->CreateFileStreamReader(
           url_,
-          byte_range_.first_byte_position()));
+          byte_range_.first_byte_position(),
+          base::Time()));
 
   set_expected_content_size(remaining_bytes_);
   response_info_.reset(new net::HttpResponseInfo());

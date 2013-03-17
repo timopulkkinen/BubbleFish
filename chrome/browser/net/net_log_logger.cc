@@ -14,10 +14,16 @@
 #include "base/values.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 
-NetLogLogger::NetLogLogger(const FilePath &log_path) {
+NetLogLogger::NetLogLogger(const base::FilePath &log_path) {
   if (!log_path.empty()) {
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    file_.Set(file_util::OpenFile(log_path, "w"));
+    FILE* fp = file_util::OpenFile(log_path, "w");
+    if (!fp) {
+      LOG(ERROR) << "Could not open file " << log_path.value()
+                 << " for net logging";
+      return;
+    }
+    file_.Set(fp);
 
     // Write constants to the output file.  This allows loading files that have
     // different source and event types, as they may be added and removed
@@ -35,6 +41,10 @@ NetLogLogger::~NetLogLogger() {
 
 void NetLogLogger::StartObserving(net::NetLog* net_log) {
   net_log->AddThreadSafeObserver(this, net::NetLog::LOG_ALL_BUT_BYTES);
+}
+
+void NetLogLogger::StopObserving() {
+  net_log()->RemoveThreadSafeObserver(this);
 }
 
 void NetLogLogger::OnAddEntry(const net::NetLog::Entry& entry) {

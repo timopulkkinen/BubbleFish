@@ -52,48 +52,28 @@
 #include "media/audio/audio_output_controller.h"
 #include "media/audio/simple_sources.h"
 
-namespace content {
-class MediaObserver;
-class ResourceContext;
-}  // namespace content
-
 namespace media {
 class AudioManager;
 class AudioParameters;
 }
 
+namespace content {
+
+class AudioMirroringManager;
+class MediaInternals;
+class ResourceContext;
+
 class CONTENT_EXPORT AudioRendererHost
-    : public content::BrowserMessageFilter,
+    : public BrowserMessageFilter,
       public media::AudioOutputController::EventHandler {
  public:
-  struct AudioEntry {
-    AudioEntry();
-    ~AudioEntry();
-
-    // The AudioOutputController that manages the audio stream.
-    scoped_refptr<media::AudioOutputController> controller;
-
-    // The audio stream ID.
-    int stream_id;
-
-    // Shared memory for transmission of the audio data.
-    base::SharedMemory shared_memory;
-
-    // The synchronous reader to be used by the controller. We have the
-    // ownership of the reader.
-    scoped_ptr<media::AudioOutputController::SyncReader> reader;
-
-    // Set to true after we called Close() for the controller.
-    bool pending_close;
-  };
-
-  typedef std::map<int, AudioEntry*> AudioEntryMap;
-
   // Called from UI thread from the owner of this object.
-  AudioRendererHost(media::AudioManager* audio_manager,
-                    content::MediaObserver* media_observer);
+  AudioRendererHost(int render_process_id,
+                    media::AudioManager* audio_manager,
+                    AudioMirroringManager* mirroring_manager,
+                    MediaInternals* media_internals);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -105,14 +85,20 @@ class CONTENT_EXPORT AudioRendererHost
   virtual void OnPaused(media::AudioOutputController* controller) OVERRIDE;
   virtual void OnError(media::AudioOutputController* controller,
                        int error_code) OVERRIDE;
+  virtual void OnDeviceChange(media::AudioOutputController* controller,
+                              int new_buffer_size,
+                              int new_sample_rate) OVERRIDE;
 
  private:
   friend class AudioRendererHostTest;
-  friend class content::BrowserThread;
+  friend class BrowserThread;
   friend class base::DeleteHelper<AudioRendererHost>;
   friend class MockAudioRendererHost;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, MockStreamDataConversation);
+
+  struct AudioEntry;
+  typedef std::map<int, AudioEntry*> AudioEntryMap;
 
   virtual ~AudioRendererHost();
 
@@ -123,8 +109,11 @@ class CONTENT_EXPORT AudioRendererHost
   // successful this object would keep an internal entry of the stream for the
   // required properties.
   void OnCreateStream(int stream_id,
-                      const media::AudioParameters& params,
-                      int input_channels);
+                      const media::AudioParameters& params);
+
+  // Track that the data for the audio stream referenced by |stream_id| is
+  // produced by an entity in the render view referenced by |render_view_id|.
+  void OnAssociateStreamWithProducer(int stream_id, int render_view_id);
 
   // Play the audio stream referenced by |stream_id|.
   void OnPlayStream(int stream_id);
@@ -148,6 +137,8 @@ class CONTENT_EXPORT AudioRendererHost
   // Send a state change message to the renderer.
   void DoSendPlayingMessage(media::AudioOutputController* controller);
   void DoSendPausedMessage(media::AudioOutputController* controller);
+  void DoSendDeviceChangeMessage(media::AudioOutputController* controller,
+                                 int new_buffer_size, int new_sample_rate);
 
   // Handle error coming from audio stream.
   void DoHandleError(media::AudioOutputController* controller, int error_code);
@@ -178,13 +169,21 @@ class CONTENT_EXPORT AudioRendererHost
   // event is received.
   AudioEntry* LookupByController(media::AudioOutputController* controller);
 
+  media::AudioOutputController* LookupControllerByIdForTesting(int stream_id);
+
+  // ID of the RenderProcessHost that owns this instance.
+  const int render_process_id_;
+
+  media::AudioManager* const audio_manager_;
+  AudioMirroringManager* const mirroring_manager_;
+  MediaInternals* const media_internals_;
+
   // A map of stream IDs to audio sources.
   AudioEntryMap audio_entries_;
 
-  media::AudioManager* audio_manager_;
-  content::MediaObserver* media_observer_;
-
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_RENDERER_HOST_H_

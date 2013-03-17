@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -18,12 +18,18 @@
 #include "base/threading/non_thread_safe.h"
 #include "google/cacheinvalidation/include/invalidation-listener.h"
 #include "jingle/notifier/listener/push_client_observer.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/util/weak_handle.h"
+#include "sync/notifier/ack_tracker.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/invalidator_state.h"
-#include "sync/notifier/object_id_state_map.h"
+#include "sync/notifier/object_id_invalidation_map.h"
 #include "sync/notifier/state_writer.h"
 #include "sync/notifier/sync_system_resources.h"
+
+namespace base {
+class TickClock;
+}  // namespace base
 
 namespace buzz {
 class XmppTaskParentInterface;
@@ -39,11 +45,12 @@ class RegistrationManager;
 
 // SyncInvalidationListener is not thread-safe and lives on the sync
 // thread.
-class SyncInvalidationListener
-    : public invalidation::InvalidationListener,
+class SYNC_EXPORT_PRIVATE SyncInvalidationListener
+    : public NON_EXPORTED_BASE(invalidation::InvalidationListener),
       public StateWriter,
-      public notifier::PushClientObserver,
-      public base::NonThreadSafe {
+      public NON_EXPORTED_BASE(notifier::PushClientObserver),
+      public base::NonThreadSafe,
+      public AckTracker::Delegate {
  public:
   typedef base::Callback<invalidation::InvalidationClient*(
       invalidation::SystemResources*,
@@ -52,16 +59,18 @@ class SyncInvalidationListener
       const invalidation::string&,
       invalidation::InvalidationListener*)> CreateInvalidationClientCallback;
 
-  class Delegate {
+  class SYNC_EXPORT_PRIVATE Delegate {
    public:
     virtual ~Delegate();
 
-    virtual void OnInvalidate(const ObjectIdStateMap& id_state_map) = 0;
+    virtual void OnInvalidate(
+        const ObjectIdInvalidationMap& invalidation_map) = 0;
 
     virtual void OnInvalidatorStateChange(InvalidatorState state) = 0;
   };
 
   explicit SyncInvalidationListener(
+      base::TickClock* tick_clock,
       scoped_ptr<notifier::PushClient> push_client);
 
   // Calls Stop().
@@ -73,8 +82,8 @@ class SyncInvalidationListener
       const CreateInvalidationClientCallback&
           create_invalidation_client_callback,
       const std::string& client_id, const std::string& client_info,
-      const std::string& state,
-      const InvalidationVersionMap& initial_max_invalidation_versions,
+      const std::string& invalidation_bootstrap_data,
+      const InvalidationStateMap& initial_invalidation_state_map,
       const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
       Delegate* delegate);
 
@@ -83,6 +92,9 @@ class SyncInvalidationListener
   // Update the set of object IDs that we're interested in getting
   // notifications for.  May be called at any time.
   void UpdateRegisteredIds(const ObjectIdSet& ids);
+  // Acknowledge that an invalidation for |id| was handled.
+  void Acknowledge(const invalidation::ObjectId& id,
+                   const AckHandle& ack_handle);
 
   // invalidation::InvalidationListener implementation.
   virtual void Ready(
@@ -125,9 +137,11 @@ class SyncInvalidationListener
   virtual void OnIncomingNotification(
       const notifier::Notification& notification) OVERRIDE;
 
-  void StopForTest();
-
   void DoRegistrationUpdate();
+
+  void StopForTest();
+  InvalidationStateMap GetStateMapForTest() const;
+  AckTracker* GetAckTrackerForTest();
 
  private:
   void Stop();
@@ -136,12 +150,26 @@ class SyncInvalidationListener
 
   void EmitStateChange();
 
-  void EmitInvalidation(const ObjectIdStateMap& id_state_map);
+  void PrepareInvalidation(const ObjectIdSet& ids,
+                           const std::string& payload,
+                           invalidation::InvalidationClient* client,
+                           const invalidation::AckHandle& ack_handle);
+  void EmitInvalidation(const ObjectIdSet& ids,
+                        const std::string& payload,
+                        invalidation::InvalidationClient* client,
+                        const invalidation::AckHandle& ack_handle,
+                        const AckHandleMap& local_ack_handles);
+
+  // AckTracker::Delegate implementation.
+  virtual void OnTimeout(const ObjectIdSet& ids) OVERRIDE;
+
+  base::WeakPtrFactory<SyncInvalidationListener> weak_ptr_factory_;
+  AckTracker ack_tracker_;
 
   // Owned by |sync_system_resources_|.
   notifier::PushClient* const push_client_;
   SyncSystemResources sync_system_resources_;
-  InvalidationVersionMap max_invalidation_versions_;
+  InvalidationStateMap invalidation_state_map_;
   WeakHandle<InvalidationStateTracker> invalidation_state_tracker_;
   Delegate* delegate_;
   scoped_ptr<invalidation::InvalidationClient> invalidation_client_;

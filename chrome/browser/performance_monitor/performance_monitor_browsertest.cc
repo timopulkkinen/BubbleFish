@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -24,8 +24,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -74,7 +75,7 @@ struct ExtensionBasicInfo {
   std::string name;
   std::string url;
   std::string version;
-  Extension::Location location;
+  extensions::Manifest::Location location;
 };
 
 // Compare the fields of |extension| to those in |value|; this is a check to
@@ -211,7 +212,7 @@ class PerformanceMonitorBrowserTest : public ExtensionBrowserTest {
 
   void GetStatsOnBackgroundThread(Database::MetricVector* metrics,
                                   MetricType type) {
-    *metrics = performance_monitor_->database()->GetStatsForActivityAndMetric(
+    *metrics = *performance_monitor_->database()->GetStatsForActivityAndMetric(
         type, base::Time(), base::Time::FromInternalValue(kint64max));
   }
 
@@ -267,7 +268,7 @@ class PerformanceMonitorBrowserTest : public ExtensionBrowserTest {
   }
 
  protected:
-  ScopedTempDir db_dir_;
+  base::ScopedTempDir db_dir_;
   PerformanceMonitor* performance_monitor_;
 };
 
@@ -275,7 +276,7 @@ class PerformanceMonitorUncleanExitBrowserTest
     : public PerformanceMonitorBrowserTest {
  public:
   virtual bool SetUpUserDataDirectory() OVERRIDE {
-    FilePath user_data_directory;
+    base::FilePath user_data_directory;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_directory);
 
     // On CrOS, if we are "logged in" with the --login-profile switch,
@@ -294,17 +295,17 @@ class PerformanceMonitorUncleanExitBrowserTest
     first_profile_name_ = chrome::kInitialProfile;
 #endif
 
-    FilePath first_profile =
+    base::FilePath first_profile =
         user_data_directory.AppendASCII(first_profile_name_);
     CHECK(file_util::CreateDirectory(first_profile));
 
-    FilePath stock_prefs_file;
+    base::FilePath stock_prefs_file;
     PathService::Get(chrome::DIR_TEST_DATA, &stock_prefs_file);
     stock_prefs_file = stock_prefs_file.AppendASCII("performance_monitor")
                                        .AppendASCII("unclean_exit_prefs");
     CHECK(file_util::PathExists(stock_prefs_file));
 
-    FilePath first_profile_prefs_file =
+    base::FilePath first_profile_prefs_file =
         first_profile.Append(chrome::kPreferencesFilename);
     CHECK(file_util::CopyFile(stock_prefs_file, first_profile_prefs_file));
     CHECK(file_util::PathExists(first_profile_prefs_file));
@@ -313,11 +314,11 @@ class PerformanceMonitorUncleanExitBrowserTest
         std::string(chrome::kMultiProfileDirPrefix)
         .append(base::IntToString(1));
 
-    FilePath second_profile =
+    base::FilePath second_profile =
         user_data_directory.AppendASCII(second_profile_name_);
     CHECK(file_util::CreateDirectory(second_profile));
 
-    FilePath second_profile_prefs_file =
+    base::FilePath second_profile_prefs_file =
         second_profile.Append(chrome::kPreferencesFilename);
     CHECK(file_util::CopyFile(stock_prefs_file, second_profile_prefs_file));
     CHECK(file_util::PathExists(second_profile_prefs_file));
@@ -369,7 +370,7 @@ class PerformanceMonitorSessionRestoreBrowserTest
     ui_test_utils::BrowserAddedObserver window_observer;
     content::TestNavigationObserver navigation_observer(
         content::NotificationService::AllSources(), NULL, expected_tab_count);
-    chrome::NewEmptyWindow(profile);
+    chrome::NewEmptyWindow(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
     Browser* new_browser = window_observer.WaitForSingleNewBrowser();
     navigation_observer.Wait();
     g_browser_process->ReleaseModule();
@@ -381,7 +382,7 @@ class PerformanceMonitorSessionRestoreBrowserTest
 // Test that PerformanceMonitor will correctly record an extension installation
 // event.
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, InstallExtensionEvent) {
-  FilePath extension_path;
+  base::FilePath extension_path;
   PathService::Get(chrome::DIR_TEST_DATA, &extension_path);
   extension_path = extension_path.AppendASCII("performance_monitor")
                                  .AppendASCII("extensions")
@@ -400,11 +401,12 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, InstallExtensionEvent) {
 
 // Test that PerformanceMonitor will correctly record events as an extension is
 // disabled and enabled.
+// Test is falky, see http://crbug.com/157980
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest,
-                       DisableAndEnableExtensionEvent) {
+                       DISABLED_DisableAndEnableExtensionEvent) {
   const int kNumEvents = 3;
 
-  FilePath extension_path;
+  base::FilePath extension_path;
   PathService::Get(chrome::DIR_TEST_DATA, &extension_path);
   extension_path = extension_path.AppendASCII("performance_monitor")
                                  .AppendASCII("extensions")
@@ -433,26 +435,26 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest,
 
 // Test that PerformanceMonitor correctly records an extension update event.
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, UpdateExtensionEvent) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  FilePath test_data_dir;
+  base::FilePath test_data_dir;
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
   test_data_dir = test_data_dir.AppendASCII("performance_monitor")
                                .AppendASCII("extensions");
 
   // We need two versions of the same extension.
-  FilePath pem_path = test_data_dir.AppendASCII("simple_extension.pem");
-  FilePath path_v1_ = PackExtensionWithOptions(
+  base::FilePath pem_path = test_data_dir.AppendASCII("simple_extension.pem");
+  base::FilePath path_v1_ = PackExtensionWithOptions(
       test_data_dir.AppendASCII("simple_extension_v1"),
       temp_dir.path().AppendASCII("simple_extension1.crx"),
       pem_path,
-      FilePath());
-  FilePath path_v2_ = PackExtensionWithOptions(
+      base::FilePath());
+  base::FilePath path_v2_ = PackExtensionWithOptions(
       test_data_dir.AppendASCII("simple_extension_v2"),
       temp_dir.path().AppendASCII("simple_extension2.crx"),
       pem_path,
-      FilePath());
+      base::FilePath());
 
   const extensions::Extension* extension = InstallExtension(path_v1_, 1);
 
@@ -495,7 +497,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, UpdateExtensionEvent) {
 
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, UninstallExtensionEvent) {
   const int kNumEvents = 2;
-  FilePath extension_path;
+  base::FilePath extension_path;
   PathService::Get(chrome::DIR_TEST_DATA, &extension_path);
   extension_path = extension_path.AppendASCII("performance_monitor")
                                  .AppendASCII("extensions")
@@ -550,7 +552,9 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, NewVersionEvent) {
   ASSERT_EQ(version_string, current_version);
 }
 
-IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, GatherStatistics) {
+// crbug.com/160502
+IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest,
+                       DISABLED_GatherStatistics) {
   GatherStatistics();
 
   // No stats should be recorded for this CPUUsage because this was the first
@@ -569,10 +573,10 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, GatherStatistics) {
   // Open new tabs to incur CPU usage.
   for (int i = 0; i < 10; ++i) {
     chrome::NavigateParams params(
-        browser(),
-        ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                  FilePath(FILE_PATH_LITERAL("title1.html"))),
-                                  content::PAGE_TRANSITION_LINK);
+        browser(), ui_test_utils::GetTestUrl(
+                       base::FilePath(base::FilePath::kCurrentDirectory),
+                       base::FilePath(FILE_PATH_LITERAL("title1.html"))),
+        content::PAGE_TRANSITION_LINK);
     params.disposition = NEW_BACKGROUND_TAB;
     ui_test_utils::NavigateToURL(&params);
   }
@@ -592,18 +596,25 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, GatherStatistics) {
   EXPECT_GT(stats[1].value, 0);
 }
 
+// Disabled on other platforms because of flakiness: http://crbug.com/159172.
 #if !defined(OS_WIN)
 // Disabled on Windows due to a bug where Windows will return a normal exit
 // code in the testing environment, even if the process died (this is not the
 // case when hand-testing). This code can be traced to MSDN functions in
 // base::GetTerminationStatus(), so there's not much we can do.
-IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, KilledByOSEvent) {
-  content::CrashTab(chrome::GetActiveWebContents(browser()));
+IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest,
+                       DISABLED_RendererKilledEvent) {
+  content::CrashTab(browser()->tab_strip_model()->GetActiveWebContents());
 
   Database::EventVector events = GetEvents();
 
   ASSERT_EQ(1u, events.size());
-  CheckEventType(EVENT_KILLED_BY_OS_CRASH, events[0]);
+  CheckEventType(EVENT_RENDERER_KILLED, events[0]);
+
+  // Check the url - since we never went anywhere, this should be about:blank.
+  std::string url;
+  ASSERT_TRUE(events[0]->data()->GetString("url", &url));
+  ASSERT_EQ("about:blank", url);
 }
 #endif  // !defined(OS_WIN)
 
@@ -612,7 +623,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, RendererCrashEvent) {
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       content::NotificationService::AllSources());
 
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUICrashURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(content::kChromeUICrashURL));
 
   windowed_observer.Wait();
 
@@ -620,6 +631,10 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, RendererCrashEvent) {
   ASSERT_EQ(1u, events.size());
 
   CheckEventType(EVENT_RENDERER_CRASH, events[0]);
+
+  std::string url;
+  ASSERT_TRUE(events[0]->data()->GetString("url", &url));
+  ASSERT_EQ("chrome://crash/", url);
 }
 
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorUncleanExitBrowserTest,
@@ -647,7 +662,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorUncleanExitBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorUncleanExitBrowserTest,
                        TwoProfileUncleanExit) {
-  FilePath second_profile_path;
+  base::FilePath second_profile_path;
   PathService::Get(chrome::DIR_USER_DATA, &second_profile_path);
   second_profile_path = second_profile_path.AppendASCII(second_profile_name_);
 
@@ -661,16 +676,26 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorUncleanExitBrowserTest,
   performance_monitor()->CheckForUncleanExits();
   content::RunAllPendingInMessageLoop();
 
-  // Load the second profile, which has also exited uncleanly.
+  // Load the second profile, which has also exited uncleanly. Note that since
+  // the second profile is new, component extensions will be installed as part
+  // of the browser startup for that profile, generating extra events.
   g_browser_process->profile_manager()->GetProfile(second_profile_path);
   content::RunAllPendingInMessageLoop();
 
   Database::EventVector events = GetEvents();
 
-  const size_t kNumEvents = 2;
-  ASSERT_EQ(kNumEvents, events.size());
-  CheckEventType(EVENT_UNCLEAN_EXIT, events[0]);
-  CheckEventType(EVENT_UNCLEAN_EXIT, events[1]);
+  const size_t kNumUncleanExitEvents = 2;
+  size_t num_unclean_exit_events = 0;
+  for (size_t i = 0; i < events.size(); ++i) {
+    int event_type = -1;
+    if (events[i]->data()->GetInteger("eventType", &event_type) &&
+        event_type == EVENT_EXTENSION_INSTALL) {
+      continue;
+    }
+    CheckEventType(EVENT_UNCLEAN_EXIT, events[i]);
+    ++num_unclean_exit_events;
+  }
+  ASSERT_EQ(kNumUncleanExitEvents, num_unclean_exit_events);
 
   std::string event_profile;
   ASSERT_TRUE(events[0]->data()->GetString("profileName", &event_profile));
@@ -690,9 +715,9 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, StartupTime) {
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorSessionRestoreBrowserTest,
                        StartupWithSessionRestore) {
   ui_test_utils::NavigateToURL(
-      browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(FILE_PATH_LITERAL("title1.html"))));
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(FILE_PATH_LITERAL("title1.html"))));
 
   QuitBrowserAndRestore(browser(), 1);
 
@@ -709,14 +734,14 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, PageLoadTime) {
   const base::TimeDelta kMaxLoadTime = base::TimeDelta::FromSeconds(30);
 
   ui_test_utils::NavigateToURL(
-      browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(FILE_PATH_LITERAL("title1.html"))));
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(FILE_PATH_LITERAL("title1.html"))));
 
   ui_test_utils::NavigateToURL(
-      browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(FILE_PATH_LITERAL("title1.html"))));
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(FILE_PATH_LITERAL("title1.html"))));
 
   Database::MetricVector metrics = GetStats(METRIC_PAGE_LOAD_TIME);
 
@@ -726,7 +751,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, PageLoadTime) {
 }
 
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, NetworkBytesRead) {
-  FilePath test_dir;
+  base::FilePath test_dir;
   PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
 
   int64 page1_size = 0;

@@ -4,8 +4,9 @@
 
 #include "content/browser/appcache/chrome_appcache_service.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
 #include "net/base/net_errors.h"
@@ -13,7 +14,7 @@
 #include "webkit/appcache/appcache_storage_impl.h"
 #include "webkit/quota/quota_manager.h"
 
-using content::BrowserThread;
+namespace content {
 
 ChromeAppCacheService::ChromeAppCacheService(
     quota::QuotaManagerProxy* quota_manager_proxy)
@@ -22,8 +23,8 @@ ChromeAppCacheService::ChromeAppCacheService(
 }
 
 void ChromeAppCacheService::InitializeOnIOThread(
-    const FilePath& cache_path,
-    content::ResourceContext* resource_context,
+    const base::FilePath& cache_path,
+    ResourceContext* resource_context,
     net::URLRequestContextGetter* request_context_getter,
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -53,14 +54,14 @@ bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url,
                                             const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // We don't prompt for read access.
-  return content::GetContentClient()->browser()->AllowAppCache(
+  return GetContentClient()->browser()->AllowAppCache(
       manifest_url, first_party, resource_context_);
 }
 
 bool ChromeAppCacheService::CanCreateAppCache(
     const GURL& manifest_url, const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  return content::GetContentClient()->browser()->AllowAppCache(
+  return GetContentClient()->browser()->AllowAppCache(
       manifest_url, first_party, resource_context_);
 }
 
@@ -74,3 +75,5 @@ void ChromeAppCacheService::DeleteOnCorrectThread() const {
   }
   delete this;
 }
+
+}  // namespace content

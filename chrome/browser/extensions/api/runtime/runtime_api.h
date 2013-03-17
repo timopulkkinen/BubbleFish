@@ -25,11 +25,21 @@ class RuntimeEventRouter {
                                        const std::string& extension_id,
                                        const Version& old_version,
                                        bool chrome_updated);
+
+  // Dispatches the onUpdateAvailable event to the given extension.
+  static void DispatchOnUpdateAvailableEvent(
+      Profile* profile,
+      const std::string& extension_id,
+      const base::DictionaryValue* manifest);
+
+  // Dispatches the onBrowserUpdateAvailable event to all extensions.
+  static void DispatchOnBrowserUpdateAvailableEvent(Profile* profile);
 };
 
 class RuntimeGetBackgroundPageFunction : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("runtime.getBackgroundPage");
+  DECLARE_EXTENSION_FUNCTION("runtime.getBackgroundPage",
+                             RUNTIME_GETBACKGROUNDPAGE)
 
  protected:
   virtual ~RuntimeGetBackgroundPageFunction() {}
@@ -37,6 +47,38 @@ class RuntimeGetBackgroundPageFunction : public AsyncExtensionFunction {
 
  private:
   void OnPageLoaded(ExtensionHost*);
+};
+
+class RuntimeReloadFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("runtime.reload", RUNTIME_RELOAD)
+
+ protected:
+  virtual ~RuntimeReloadFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class RuntimeRequestUpdateCheckFunction : public AsyncExtensionFunction,
+                                          public content::NotificationObserver {
+ public:
+  DECLARE_EXTENSION_FUNCTION("runtime.requestUpdateCheck",
+                             RUNTIME_REQUESTUPDATECHECK)
+
+  RuntimeRequestUpdateCheckFunction();
+ protected:
+  virtual ~RuntimeRequestUpdateCheckFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+
+  // Implements content::NotificationObserver interface.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+ private:
+  void CheckComplete();
+  void ReplyUpdateFound(const std::string& version);
+
+  content::NotificationRegistrar registrar_;
+  bool did_reply_;
 };
 
 }  // namespace extensions

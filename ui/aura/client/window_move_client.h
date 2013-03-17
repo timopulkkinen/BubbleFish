@@ -6,6 +6,7 @@
 #define UI_AURA_CLIENT_WINDOW_MOVE_CLIENT_H_
 
 #include "ui/aura/aura_export.h"
+#include "ui/gfx/vector2d.h"
 
 namespace gfx {
 class Point;
@@ -20,6 +21,11 @@ enum WindowMoveResult {
   MOVE_CANCELED    // Moving window was canceled.
 };
 
+enum WindowMoveSource {
+  WINDOW_MOVE_SOURCE_MOUSE,
+  WINDOW_MOVE_SOURCE_TOUCH,
+};
+
 // An interface implemented by an object that manages programatically keyed
 // window moving.
 class AURA_EXPORT WindowMoveClient {
@@ -29,7 +35,8 @@ class AURA_EXPORT WindowMoveClient {
   // Returns MOVE_SUCCESSFUL if the move has completed successfully, or
   // MOVE_CANCELED otherwise.
   virtual WindowMoveResult RunMoveLoop(Window* window,
-                                       const gfx::Point& drag_offset) = 0;
+                                       const gfx::Vector2d& drag_offset,
+                                       WindowMoveSource source) = 0;
 
   // Ends a previously started move loop.
   virtual void EndMoveLoop() = 0;

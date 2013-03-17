@@ -19,6 +19,7 @@
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/shared_memory.h"
+#include "base/string16.h"
 #include "base/string_number_conversions.h"  // Temporary
 #include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
@@ -39,7 +40,6 @@
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/common/web_database_observer_impl.h"
-#include "content/public/common/compositor_util.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -48,23 +48,22 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
-#include "content/renderer/browser_plugin/old/browser_plugin_channel_manager.h"
-#include "content/renderer/browser_plugin/old/browser_plugin_registry.h"
-#include "content/renderer/devtools_agent_filter.h"
+#include "content/renderer/devtools/devtools_agent_filter.h"
 #include "content/renderer/dom_storage/dom_storage_dispatcher.h"
 #include "content/renderer/dom_storage/webstoragearea_impl.h"
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/gpu/compositor_thread.h"
 #include "content/renderer/gpu/compositor_output_surface.h"
 #include "content/renderer/gpu/gpu_benchmarking_extension.h"
-#include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/media/audio_renderer_mixer_manager.h"
 #include "content/renderer/media/media_stream_center.h"
 #include "content/renderer/media/media_stream_dependency_factory.h"
+#include "content/renderer/media/peer_connection_tracker.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "content/renderer/media/video_capture_message_filter.h"
+#include "content/renderer/memory_benchmarking_extension.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_process_impl.h"
@@ -74,7 +73,9 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_forwarding_message_filter.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/base/audio_hardware_config.h"
 #include "media/base/media.h"
+#include "media/base/media_switches.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
@@ -84,12 +85,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerRepository.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/layout.h"
 #include "ui/base/ui_base_switches.h"
@@ -110,6 +113,10 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
+#if defined(ENABLE_WEBRTC)
+#include "third_party/webrtc/system_wrappers/interface/event_tracer.h"
+#endif
+
 using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebNetworkStateNotifier;
@@ -118,8 +125,8 @@ using WebKit::WebScriptController;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebView;
-using content::AudioRendererMixerManager;
-using content::RenderProcessObserver;
+
+namespace content {
 
 namespace {
 
@@ -133,13 +140,13 @@ const int kIdleCPUUsageThresholdInPercents = 3;
 base::LazyInstance<base::ThreadLocalPointer<RenderThreadImpl> >
     lazy_tls = LAZY_INSTANCE_INITIALIZER;
 
-class RenderViewZoomer : public content::RenderViewVisitor {
+class RenderViewZoomer : public RenderViewVisitor {
  public:
   RenderViewZoomer(const std::string& host, double zoom_level)
       : host_(host), zoom_level_(zoom_level) {
   }
 
-  virtual bool Visit(content::RenderView* render_view) {
+  virtual bool Visit(RenderView* render_view) OVERRIDE {
     WebView* webview = render_view->GetWebView();
     WebDocument document = webview->mainFrame()->document();
 
@@ -182,7 +189,7 @@ void* CreateHistogram(
   } else {
     histogram_name = std::string(name);
   }
-  base::Histogram* histogram = base::Histogram::FactoryGet(
+  base::HistogramBase* histogram = base::Histogram::FactoryGet(
       histogram_name, min, max, buckets,
       base::Histogram::kUmaTargetedHistogramFlag);
   return histogram;
@@ -192,6 +199,25 @@ void AddHistogramSample(void* hist, int sample) {
   base::Histogram* histogram = static_cast<base::Histogram*>(hist);
   histogram->Add(sample);
 }
+
+#if defined(ENABLE_WEBRTC)
+const unsigned char* GetCategoryEnabled(const char* name) {
+  return TRACE_EVENT_API_GET_CATEGORY_ENABLED(name);
+}
+
+void AddTraceEvent(char phase,
+                   const unsigned char* category_enabled,
+                   const char* name,
+                   unsigned long long id,
+                   int num_args,
+                   const char** arg_names,
+                   const unsigned char* arg_types,
+                   const unsigned long long* arg_values,
+                   unsigned char flags) {
+  TRACE_EVENT_API_ADD_TRACE_EVENT(phase, category_enabled, name, id, num_args,
+                                  arg_names, arg_types, arg_values, flags);
+}
+#endif
 
 }  // namespace
 
@@ -216,6 +242,10 @@ RenderThreadImpl::HistogramCustomizer::~HistogramCustomizer() {}
 
 void RenderThreadImpl::HistogramCustomizer::RenderViewNavigatedToHost(
     const std::string& host, size_t view_count) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHistogramCustomizer)) {
+    return;
+  }
   // Check if all RenderViews are displaying a page from the same host. If there
   // is only one RenderView, the common host is this view's host. If there are
   // many, check if this one shares the common host of the other
@@ -291,16 +321,12 @@ void RenderThreadImpl::Init() {
   hidden_widget_count_ = 0;
   idle_notification_delay_in_ms_ = kInitialIdleHandlerDelayMs;
   idle_notifications_to_skip_ = 0;
+  require_user_gesture_for_focus_ = true;
   compositor_initialized_ = false;
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
   dom_storage_dispatcher_.reset(new DomStorageDispatcher());
   main_thread_indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
-
-  browser_plugin_registry_.reset(new content::old::BrowserPluginRegistry());
-  browser_plugin_channel_manager_.reset(
-      new content::old::BrowserPluginChannelManager());
-  AddObserver(browser_plugin_channel_manager_.get());
 
   media_stream_center_ = NULL;
 
@@ -308,33 +334,41 @@ void RenderThreadImpl::Init() {
   AddFilter(db_message_filter_.get());
 
 #if defined(ENABLE_WEBRTC)
-  p2p_socket_dispatcher_ = new content::P2PSocketDispatcher(
-      GetIOMessageLoopProxy());
+  webrtc::SetupEventTracer(&GetCategoryEnabled, &AddTraceEvent);
+
+  peer_connection_tracker_.reset(new PeerConnectionTracker());
+  AddObserver(peer_connection_tracker_.get());
+
+  p2p_socket_dispatcher_ = new P2PSocketDispatcher(GetIOMessageLoopProxy());
   AddFilter(p2p_socket_dispatcher_);
 #endif  // defined(ENABLE_WEBRTC)
   vc_manager_ = new VideoCaptureImplManager();
   AddFilter(vc_manager_->video_capture_message_filter());
 
-  audio_input_message_filter_ = new AudioInputMessageFilter();
+  audio_input_message_filter_ =
+      new AudioInputMessageFilter(GetIOMessageLoopProxy());
   AddFilter(audio_input_message_filter_.get());
 
-  audio_message_filter_ = new AudioMessageFilter();
+  audio_message_filter_ = new AudioMessageFilter(GetIOMessageLoopProxy());
   AddFilter(audio_message_filter_.get());
 
   AddFilter(new IndexedDBMessageFilter);
 
-  content::GetContentClient()->renderer()->RenderThreadStarted();
+  GetContentClient()->renderer()->RenderThreadStarted();
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kEnableGpuBenchmarking))
-      RegisterExtension(content::GpuBenchmarkingExtension::Get());
+      RegisterExtension(GpuBenchmarkingExtension::Get());
+
+  if (command_line.HasSwitch(switches::kEnableMemoryBenchmarking))
+    RegisterExtension(MemoryBenchmarkingExtension::Get());
 
   context_lost_cb_.reset(new GpuVDAContextLostCallback());
 
   // Note that under Linux, the media library will normally already have
   // been initialized by the Zygote before this instance became a Renderer.
-  FilePath media_path;
-  PathService::Get(content::DIR_MEDIA_LIBS, &media_path);
+  base::FilePath media_path;
+  PathService::Get(DIR_MEDIA_LIBS, &media_path);
   if (!media_path.empty())
     media::InitializeMediaLibrary(media_path);
 
@@ -415,7 +449,7 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
       if ((msg->type() == ViewHostMsg_GetCookies::ID ||
            msg->type() == ViewHostMsg_GetRawCookies::ID ||
            msg->type() == ViewHostMsg_CookiesEnabled::ID) &&
-          content::GetContentClient()->renderer()->
+          GetContentClient()->renderer()->
               ShouldPumpEventsDuringCookieMessage()) {
         pumping_events = true;
       }
@@ -428,7 +462,7 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
   bool notify_webkit_of_modal_loop = true;  // default value
   std::swap(notify_webkit_of_modal_loop, notify_webkit_of_modal_loop_);
 
-  gfx::NativeViewId host_window = 0;
+  int render_view_id = MSG_ROUTING_NONE;
 
   if (pumping_events) {
     if (suspend_webkit_shared_timer)
@@ -440,18 +474,18 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
     RenderWidget* widget =
         static_cast<RenderWidget*>(ResolveRoute(msg->routing_id()));
     if (widget) {
-      host_window = widget->host_window();
+      render_view_id = widget->routing_id();
       PluginChannelHost::Broadcast(
-          new PluginMsg_SignalModalDialogEvent(host_window));
+          new PluginMsg_SignalModalDialogEvent(render_view_id));
     }
   }
 
   bool rv = ChildThread::Send(msg);
 
   if (pumping_events) {
-    if (host_window) {
+    if (render_view_id != MSG_ROUTING_NONE) {
       PluginChannelHost::Broadcast(
-          new PluginMsg_ResetModalDialogEvent(host_window));
+          new PluginMsg_ResetModalDialogEvent(render_view_id));
     }
 
     if (notify_webkit_of_modal_loop)
@@ -474,14 +508,11 @@ IPC::SyncChannel* RenderThreadImpl::GetChannel() {
 
 std::string RenderThreadImpl::GetLocale() {
   // The browser process should have passed the locale to the renderer via the
-  // --lang command line flag.  In single process mode, this will return the
-  // wrong value.  TODO(tc): Fix this for single process mode.
+  // --lang command line flag.
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::string& lang =
       parsed_command_line.GetSwitchValueASCII(switches::kLang);
-  DCHECK(!lang.empty() ||
-      (!parsed_command_line.HasSwitch(switches::kRendererProcess) &&
-       !parsed_command_line.HasSwitch(switches::kPluginProcess)));
+  DCHECK(!lang.empty());
   return lang;
 }
 
@@ -522,17 +553,16 @@ void RenderThreadImpl::SetOutgoingMessageFilter(
     IPC::ChannelProxy::OutgoingMessageFilter* filter) {
 }
 
-void RenderThreadImpl::AddObserver(content::RenderProcessObserver* observer) {
+void RenderThreadImpl::AddObserver(RenderProcessObserver* observer) {
   observers_.AddObserver(observer);
 }
 
-void RenderThreadImpl::RemoveObserver(
-    content::RenderProcessObserver* observer) {
+void RenderThreadImpl::RemoveObserver(RenderProcessObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
 void RenderThreadImpl::SetResourceDispatcherDelegate(
-    content::ResourceDispatcherDelegate* delegate) {
+    ResourceDispatcherDelegate* delegate) {
   resource_dispatcher()->set_delegate(delegate);
 }
 
@@ -540,8 +570,7 @@ void RenderThreadImpl::WidgetHidden() {
   DCHECK(hidden_widget_count_ < widget_count_);
   hidden_widget_count_++;
 
-  if (!content::GetContentClient()->renderer()->
-          RunIdleHandlerWhenWidgetsHidden()) {
+  if (!GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden()) {
     return;
   }
 
@@ -552,8 +581,7 @@ void RenderThreadImpl::WidgetHidden() {
 void RenderThreadImpl::WidgetRestored() {
   DCHECK_GT(hidden_widget_count_, 0);
   hidden_widget_count_--;
-  if (!content::GetContentClient()->renderer()->
-          RunIdleHandlerWhenWidgetsHidden()) {
+  if (!GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden()) {
     return;
   }
 
@@ -566,24 +594,17 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   webkit_platform_support_.reset(new RendererWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
+  WebKit::setSharedWorkerRepository(
+      webkit_platform_support_.get()->sharedWorkerRepository());
+  WebKit::setIDBFactory(
+      webkit_platform_support_.get()->idbFactory());
 
 
   WebKit::WebCompositorSupport* compositor_support =
       WebKit::Platform::current()->compositorSupport();
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  compositor_support->setAcceleratedAnimationEnabled(
-      !command_line.HasSwitch(switches::kDisableThreadedAnimation));
-  compositor_support->setPerTilePaintingEnabled(
-      command_line.HasSwitch(switches::kEnablePerTilePainting));
-  compositor_support->setPartialSwapEnabled(
-      command_line.HasSwitch(switches::kEnablePartialSwap));
 
-  // TODO(fsamuel): Guests don't currently support threaded compositing.
-  // This should go away with the new design of the browser plugin.
-  // The new design can be tracked at: http://crbug.com/134492.
-  bool is_guest = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kGuestRenderer);
-  bool enable = content::IsThreadedCompositingEnabled() && !is_guest;
+  bool enable = command_line.HasSwitch(switches::kEnableThreadedCompositing);
   if (enable) {
     compositor_thread_.reset(new CompositorThread(this));
     AddFilter(compositor_thread_->GetMessageFilter());
@@ -607,14 +628,6 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   webkit_glue::EnableWebCoreLogChannels(
       command_line.GetSwitchValueASCII(switches::kWebCoreLogChannels));
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDomAutomationController)) {
-    base::StringPiece extension = content::GetContentClient()->GetDataResource(
-        IDR_DOM_AUTOMATION_JS, ui::SCALE_FACTOR_NONE);
-    RegisterExtension(new v8::Extension(
-        "dom_automation.js", extension.data(), 0, NULL, extension.size()));
-  }
 
   web_database_observer_impl_.reset(
       new WebDatabaseObserverImpl(sync_message_filter()));
@@ -651,16 +664,21 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableMediaPlayer(
       media::IsMediaLibraryInitialized());
 
+#if defined(OS_ANDROID)
+  WebKit::WebRuntimeFeatures::enableMediaStream(
+      command_line.HasSwitch(switches::kEnableWebRTC));
+  WebKit::WebRuntimeFeatures::enablePeerConnection(
+      command_line.HasSwitch(switches::kEnableWebRTC));
+#else
   WebKit::WebRuntimeFeatures::enableMediaStream(true);
   WebKit::WebRuntimeFeatures::enablePeerConnection(true);
+#endif
 
   WebKit::WebRuntimeFeatures::enableFullScreenAPI(
       !command_line.HasSwitch(switches::kDisableFullScreen));
 
-  WebKit::WebRuntimeFeatures::enablePointerLock(true);
-
   WebKit::WebRuntimeFeatures::enableEncryptedMedia(
-      command_line.HasSwitch(switches::kEnableEncryptedMedia));
+      !command_line.HasSwitch(switches::kDisableEncryptedMedia));
 
 #if defined(OS_ANDROID)
   WebRuntimeFeatures::enableWebAudio(
@@ -672,9 +690,6 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
       media::IsMediaLibraryInitialized());
 #endif
 
-  WebRuntimeFeatures::enableTouch(
-      command_line.HasSwitch(switches::kEnableTouchEvents));
-
   WebRuntimeFeatures::enableDeviceMotion(
       command_line.HasSwitch(switches::kEnableDeviceMotion));
 
@@ -684,8 +699,12 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableSpeechInput(
       !command_line.HasSwitch(switches::kDisableSpeechInput));
 
-  WebRuntimeFeatures::enableScriptedSpeech(
-      command_line.HasSwitch(switches::kEnableScriptedSpeech));
+#if defined(OS_ANDROID)
+  // Web Speech API Speech recognition is not implemented on Android yet.
+  WebRuntimeFeatures::enableScriptedSpeech(false);
+#else
+  WebRuntimeFeatures::enableScriptedSpeech(true);
+#endif
 
   WebRuntimeFeatures::enableFileSystem(
       !command_line.HasSwitch(switches::kDisableFileSystem));
@@ -697,13 +716,18 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enableQuota(true);
 
-  WebRuntimeFeatures::enableShadowDOM(
-      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+  WebRuntimeFeatures::enableShadowDOM(true);
 
-  WebRuntimeFeatures::enableStyleScoped(
-      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+  if (command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures)) {
+    WebRuntimeFeatures::enableStyleScoped(true);
+    WebRuntimeFeatures::enableCustomDOMElements(true);
+    WebRuntimeFeatures::enableCSSExclusions(true);
+    WebRuntimeFeatures::enableExperimentalContentSecurityPolicyFeatures(true);
+    WebRuntimeFeatures::enableCSSRegions(true);
+    WebRuntimeFeatures::enableDialogElement(true);
+  }
 
-  WebRuntimeFeatures::enableCSSExclusions(
+  WebRuntimeFeatures::enableSeamlessIFrames(
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
@@ -711,10 +735,8 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   devtools_agent_message_filter_ = new DevToolsAgentFilter();
   AddFilter(devtools_agent_message_filter_.get());
 
-  if (content::GetContentClient()->renderer()->
-         RunIdleHandlerWhenWidgetsHidden()) {
+  if (GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden())
     ScheduleIdleHandler(kLongIdleHandlerDelayMs);
-  }
 }
 
 void RenderThreadImpl::RegisterSchemes() {
@@ -729,12 +751,29 @@ void RenderThreadImpl::RecordUserMetrics(const std::string& action) {
   Send(new ViewHostMsg_UserMetricsRecordAction(action));
 }
 
-base::SharedMemoryHandle RenderThreadImpl::HostAllocateSharedMemoryBuffer(
-    uint32 buffer_size) {
-  base::SharedMemoryHandle mem_handle;
-  Send(new ChildProcessHostMsg_SyncAllocateSharedMemory(
-                buffer_size, &mem_handle));
-  return mem_handle;
+scoped_ptr<base::SharedMemory>
+    RenderThreadImpl::HostAllocateSharedMemoryBuffer(size_t size) {
+  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+    return scoped_ptr<base::SharedMemory>();
+
+  base::SharedMemoryHandle handle;
+  bool success;
+  IPC::Message* message =
+      new ChildProcessHostMsg_SyncAllocateSharedMemory(size, &handle);
+
+  // Allow calling this from the compositor thread.
+  if (MessageLoop::current() == message_loop())
+    success = ChildThread::Send(message);
+  else
+    success = sync_message_filter()->Send(message);
+
+  if (!success)
+    return scoped_ptr<base::SharedMemory>();
+
+  if (!base::SharedMemory::IsHandleValid(handle))
+    return scoped_ptr<base::SharedMemory>();
+
+  return scoped_ptr<base::SharedMemory>(new base::SharedMemory(handle, false));
 }
 
 void RenderThreadImpl::RegisterExtension(v8::Extension* extension) {
@@ -751,7 +790,7 @@ void RenderThreadImpl::ScheduleIdleHandler(int64 initial_delay_ms) {
 
 void RenderThreadImpl::IdleHandler() {
   bool run_in_foreground_tab = (widget_count_ > hidden_widget_count_) &&
-                               content::GetContentClient()->renderer()->
+                               GetContentClient()->renderer()->
                                    RunIdleHandlerWhenWidgetsHidden();
   if (run_in_foreground_tab) {
     IdleHandlerInForegroundTab();
@@ -830,6 +869,12 @@ void RenderThreadImpl::UpdateHistograms(int sequence_number) {
   child_histogram_message_filter()->SendHistograms(sequence_number);
 }
 
+bool RenderThreadImpl::ResolveProxy(const GURL& url, std::string* proxy_list) {
+  bool result = false;
+  Send(new ViewHostMsg_ResolveProxy(url, &result, proxy_list));
+  return result;
+}
+
 void RenderThreadImpl::PostponeIdleNotification() {
   idle_notifications_to_skip_ = 2;
 }
@@ -861,18 +906,41 @@ RenderThreadImpl::GetGpuVDAContext3D() {
   return gpu_vda_context3d_.get();
 }
 
-content::AudioRendererMixerManager*
-RenderThreadImpl::GetAudioRendererMixerManager() {
+AudioRendererMixerManager* RenderThreadImpl::GetAudioRendererMixerManager() {
   if (!audio_renderer_mixer_manager_.get()) {
     audio_renderer_mixer_manager_.reset(new AudioRendererMixerManager(
-        audio_hardware::GetOutputSampleRate(),
-        audio_hardware::GetOutputBufferSize()));
+        GetAudioHardwareConfig()));
   }
 
   return audio_renderer_mixer_manager_.get();
 }
 
+media::AudioHardwareConfig* RenderThreadImpl::GetAudioHardwareConfig() {
+  if (!audio_hardware_config_) {
+    int output_buffer_size;
+    int output_sample_rate;
+    int input_sample_rate;
+    media::ChannelLayout input_channel_layout;
+
+    Send(new ViewHostMsg_GetAudioHardwareConfig(
+        &output_buffer_size, &output_sample_rate,
+        &input_sample_rate, &input_channel_layout));
+
+    audio_hardware_config_.reset(new media::AudioHardwareConfig(
+        output_buffer_size, output_sample_rate, input_sample_rate,
+        input_channel_layout));
+    audio_message_filter_->SetAudioHardwareConfig(audio_hardware_config_.get());
+  }
+
+  return audio_hardware_config_.get();
+}
+
 #if defined(OS_WIN)
+void RenderThreadImpl::PreCacheFontCharacters(const LOGFONT& log_font,
+                                              const string16& str) {
+  Send(new ViewHostMsg_PreCacheFontCharacters(log_font, str));
+}
+
 void RenderThreadImpl::PreCacheFont(const LOGFONT& log_font) {
   Send(new ChildProcessHostMsg_PreCacheFont(log_font));
 }
@@ -915,24 +983,9 @@ base::WaitableEvent* RenderThreadImpl::GetShutDownEvent() {
 }
 
 scoped_ptr<base::SharedMemory> RenderThreadImpl::AllocateSharedMemory(
-    uint32 size) {
-  base::SharedMemoryHandle handle;
-  bool success;
-  IPC::Message* message =
-      new ChildProcessHostMsg_SyncAllocateSharedMemory(size, &handle);
-
-  // Allow calling this from the compositor thread.
-  if (MessageLoop::current() == message_loop())
-    success = ChildThread::Send(message);
-  else
-    success = sync_message_filter()->Send(message);
-
-  if (!success)
-    return scoped_ptr<base::SharedMemory>();
-
-  if (!base::SharedMemory::IsHandleValid(handle))
-    return scoped_ptr<base::SharedMemory>();
-  return scoped_ptr<base::SharedMemory>(new base::SharedMemory(handle, false));
+    size_t size) {
+  return scoped_ptr<base::SharedMemory>(
+      HostAllocateSharedMemoryBuffer(size));
 }
 
 int32 RenderThreadImpl::CreateViewCommandBuffer(
@@ -957,6 +1010,17 @@ int32 RenderThreadImpl::CreateViewCommandBuffer(
   return route_id;
 }
 
+void RenderThreadImpl::CreateImage(
+    gfx::PluginWindowHandle window,
+    int32 image_id,
+    const CreateImageCallback& callback) {
+  NOTREACHED();
+}
+
+void RenderThreadImpl::DeleteImage(int32 image_id, int32 sync_point) {
+  NOTREACHED();
+}
+
 void RenderThreadImpl::DoNotSuspendWebKitSharedTimer() {
   suspend_webkit_shared_timer_ = false;
 }
@@ -968,7 +1032,7 @@ void RenderThreadImpl::DoNotNotifyWebKitOfModalLoop() {
 void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const std::string& host,
                                                    double zoom_level) {
   RenderViewZoomer zoomer(host, zoom_level);
-  content::RenderView::ForEach(&zoomer);
+  RenderView::ForEach(&zoomer);
 }
 
 bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
@@ -989,7 +1053,6 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(RenderThreadImpl, msg)
     IPC_MESSAGE_HANDLER(ViewMsg_SetZoomLevelForCurrentURL,
                         OnSetZoomLevelForCurrentURL)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetCSSColors, OnSetCSSColors)
     // TODO(port): removed from render_messages_internal.h;
     // is there a new non-windows message I should add here?
     IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
@@ -1001,54 +1064,27 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-// Called when to register CSS Color name->system color mappings.
-// We update the colors one by one and then tell WebKit to refresh all render
-// views.
-void RenderThreadImpl::OnSetCSSColors(
-    const std::vector<CSSColors::CSSColorMapping>& colors) {
-  EnsureWebKitInitialized();
-  size_t num_colors = colors.size();
-  scoped_array<WebKit::WebColorName> color_names(
-      new WebKit::WebColorName[num_colors]);
-  scoped_array<WebKit::WebColor> web_colors(new WebKit::WebColor[num_colors]);
-  size_t i = 0;
-  for (std::vector<CSSColors::CSSColorMapping>::const_iterator it =
-          colors.begin();
-       it != colors.end();
-       ++it, ++i) {
-    color_names[i] = it->first;
-    web_colors[i] = it->second;
-  }
-  WebKit::setNamedColors(color_names.get(), web_colors.get(), num_colors);
-}
-
 void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
   EnsureWebKitInitialized();
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
-  if (!params.embedder_channel_name.empty()) {
-    browser_plugin_channel_manager()->CreateRenderView(params);
-  } else {
-    RenderViewImpl::Create(
-        params.parent_window,
-        params.opener_route_id,
-        params.renderer_preferences,
-        params.web_preferences,
-        new SharedRenderViewCounter(0),
-        params.view_id,
-        params.surface_id,
-        params.session_storage_namespace_id,
-        params.frame_name,
-        false,
-        params.swapped_out,
-        params.next_page_id,
-        params.screen_info,
-        NULL,
-        params.accessibility_mode);
-  }
+  RenderViewImpl::Create(
+      params.opener_route_id,
+      params.renderer_preferences,
+      params.web_preferences,
+      new SharedRenderViewCounter(0),
+      params.view_id,
+      params.surface_id,
+      params.session_storage_namespace_id,
+      params.frame_name,
+      false,
+      params.swapped_out,
+      params.next_page_id,
+      params.screen_info,
+      params.accessibility_mode);
 }
 
 GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
-    content::CauseForGpuLaunch cause_for_gpu_launch) {
+    CauseForGpuLaunch cause_for_gpu_launch) {
   TRACE_EVENT0("gpu", "RenderThreadImpl::EstablishGpuChannelSync");
 
   if (gpu_channel_.get()) {
@@ -1065,7 +1101,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
   // Ask the browser for the channel name.
   int client_id = 0;
   IPC::ChannelHandle channel_handle;
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   if (!Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch,
                                                &client_id,
                                                &channel_handle,
@@ -1081,7 +1117,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
 
   gpu_channel_ = new GpuChannelHost(this, 0, client_id);
   gpu_channel_->set_gpu_info(gpu_info);
-  content::GetContentClient()->SetGpuInfo(gpu_info);
+  GetContentClient()->SetGpuInfo(gpu_info);
 
   // Connect to the GPU process if a channel name was received.
   gpu_channel_->Connect(channel_handle);
@@ -1091,10 +1127,21 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
 
 WebKit::WebMediaStreamCenter* RenderThreadImpl::CreateMediaStreamCenter(
     WebKit::WebMediaStreamCenterClient* client) {
+#if defined(OS_ANDROID)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableWebRTC))
+    return NULL;
+#endif
+
 #if defined(ENABLE_WEBRTC)
-  if (!media_stream_center_)
-    media_stream_center_ = new content::MediaStreamCenter(
-        client, GetMediaStreamDependencyFactory());
+  if (!media_stream_center_) {
+    media_stream_center_ = GetContentClient()->renderer()
+        ->OverrideCreateWebMediaStreamCenter(client);
+    if (!media_stream_center_) {
+      media_stream_center_ = new MediaStreamCenter(
+          client, GetMediaStreamDependencyFactory());
+    }
+  }
 #endif
   return media_stream_center_;
 }
@@ -1139,7 +1186,7 @@ void RenderThreadImpl::OnNetworkStateChanged(bool online) {
 }
 
 void RenderThreadImpl::OnTempCrashWithData(const GURL& data) {
-  content::GetContentClient()->SetActiveURL(data);
+  GetContentClient()->SetActiveURL(data);
   CHECK(false);
 }
 
@@ -1152,3 +1199,13 @@ RenderThreadImpl::GetFileThreadMessageLoopProxy() {
   }
   return file_thread_->message_loop_proxy();
 }
+
+void RenderThreadImpl::SetFlingCurveParameters(
+    const std::vector<float>& new_touchpad,
+    const std::vector<float>& new_touchscreen) {
+  webkit_platform_support_->SetFlingCurveParameters(new_touchpad,
+                                                    new_touchscreen);
+
+}
+
+}  // namespace content

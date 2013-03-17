@@ -70,10 +70,6 @@ typedef scoped_ptr_malloc<const CERT_CONTEXT,
 
 //-----------------------------------------------------------------------------
 
-// TODO(wtc): This is a copy of the MapSecurityError function in
-// ssl_client_socket_win.cc.  Another function that maps Windows error codes
-// to our network error codes is WinInetUtil::OSErrorToNetError.  We should
-// eliminate the code duplication.
 int MapSecurityError(SECURITY_STATUS err) {
   // There are numerous security error codes, but these are the ones we thus
   // far find interesting.
@@ -737,11 +733,11 @@ int CertVerifyProcWin::VerifyInternal(X509Certificate* cert,
     verify_result->cert_status &= ~CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
   }
 
-  if (IsCertStatusError(verify_result->cert_status))
-    return MapCertStatusToNetError(verify_result->cert_status);
-
   AppendPublicKeyHashes(chain_context, &verify_result->public_key_hashes);
   verify_result->is_issued_by_known_root = IsIssuedByKnownRoot(chain_context);
+
+  if (IsCertStatusError(verify_result->cert_status))
+    return MapCertStatusToNetError(verify_result->cert_status);
 
   if (ev_policy_oid &&
       CheckEV(chain_context, rev_checking_enabled, ev_policy_oid)) {

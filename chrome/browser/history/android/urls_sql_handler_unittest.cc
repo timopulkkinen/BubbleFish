@@ -6,9 +6,9 @@
 
 #include "chrome/browser/history/android/urls_sql_handler.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/android/visit_sql_handler.h"
@@ -34,16 +34,16 @@ class UrlsSQLHandlerTest : public testing::Test {
   virtual void SetUp() {
     // Get a temporary directory for the test DB files.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FilePath history_db_name = temp_dir_.path().AppendASCII(
+    base::FilePath history_db_name = temp_dir_.path().AppendASCII(
         chrome::kHistoryFilename);
-    ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name));
+    ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name, NULL));
   }
 
   virtual void TearDown() {
   }
 
   HistoryDatabase history_db_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   UrlsSQLHandler urls_sql_handler_;
   VisitSQLHandler visit_sql_handler_;
 

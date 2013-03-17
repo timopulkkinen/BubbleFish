@@ -8,7 +8,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_piece.h"
 #include "chrome/renderer/extensions/native_handler.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #include <map>
@@ -20,8 +19,9 @@ using extensions::NativeHandler;
 // Native JS functions for doing asserts.
 class AssertNatives : public NativeHandler {
  public:
-  AssertNatives()
-      : assertion_made_(false),
+  explicit AssertNatives(v8::Isolate* isolate)
+      : NativeHandler(isolate),
+        assertion_made_(false),
         failed_(false) {
     RouteFunction("AssertTrue", base::Bind(&AssertNatives::AssertTrue,
         base::Unretained(this)));
@@ -57,13 +57,13 @@ class StringSourceMap : public ModuleSystem::SourceMap {
   StringSourceMap() {}
   virtual ~StringSourceMap() {}
 
-  v8::Handle<v8::Value> GetSource(const std::string& name) OVERRIDE {
+  virtual v8::Handle<v8::Value> GetSource(const std::string& name) OVERRIDE {
     if (source_map_.count(name) == 0)
       return v8::Undefined();
     return v8::String::New(source_map_[name].c_str());
   }
 
-  bool Contains(const std::string& name) OVERRIDE {
+  virtual bool Contains(const std::string& name) OVERRIDE {
     return source_map_.count(name);
   }
 
@@ -76,22 +76,30 @@ class StringSourceMap : public ModuleSystem::SourceMap {
   std::map<std::string, std::string> source_map_;
 };
 
+class FailsOnException : public ModuleSystem::ExceptionHandler {
+ public:
+  virtual void HandleUncaughtException() OVERRIDE {
+    FAIL();
+  }
+};
+
 ModuleSystemTest::ModuleSystemTest()
     : context_(v8::Context::New()),
       source_map_(new StringSourceMap()),
       should_assertions_be_made_(true) {
   context_->Enter();
-  assert_natives_ = new AssertNatives();
+  assert_natives_ = new AssertNatives(context_->GetIsolate());
   module_system_.reset(new ModuleSystem(context_, source_map_.get()));
   module_system_->RegisterNativeHandler("assert", scoped_ptr<NativeHandler>(
       assert_natives_));
-  try_catch_.SetCaptureMessage(true);
+  module_system_->set_exception_handler(
+      scoped_ptr<ModuleSystem::ExceptionHandler>(new FailsOnException));
 }
 
 ModuleSystemTest::~ModuleSystemTest() {
   module_system_.reset();
   context_->Exit();
-  context_.Dispose();
+  context_.Dispose(context_->GetIsolate());
 }
 
 void ModuleSystemTest::RegisterModule(const std::string& name,
@@ -102,8 +110,7 @@ void ModuleSystemTest::RegisterModule(const std::string& name,
 void ModuleSystemTest::RegisterModule(const std::string& name,
                                       int resource_id) {
   const std::string& code = ResourceBundle::GetSharedInstance().
-      GetRawDataResource(resource_id,
-                         ui::SCALE_FACTOR_NONE).as_string();
+      GetRawDataResource(resource_id).as_string();
   source_map_->RegisterModule(name, code);
 }
 
@@ -114,9 +121,6 @@ void ModuleSystemTest::OverrideNativeHandler(const std::string& name,
 }
 
 void ModuleSystemTest::TearDown() {
-  if (try_catch_.HasCaught())
-    ModuleSystem::DumpException(try_catch_);
-  EXPECT_FALSE(try_catch_.HasCaught());
   // All tests must assert at least once unless otherwise specified.
   EXPECT_EQ(should_assertions_be_made_,
             assert_natives_->assertion_made());

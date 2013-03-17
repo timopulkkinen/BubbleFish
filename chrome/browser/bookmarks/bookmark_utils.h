@@ -13,17 +13,15 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/snippet.h"
 #include "ui/gfx/native_widget_types.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class BookmarkModel;
 class BookmarkNode;
 class Browser;
-class PrefServiceBase;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace content {
-class PageNavigator;
-class WebContents;
+class BrowserContext;
 }
 
 namespace ui {
@@ -40,7 +38,8 @@ namespace bookmark_utils {
 int PreferredDropOperation(int source_operations, int operations);
 
 // Returns the drag operations for the specified node.
-int BookmarkDragOperation(Profile* profile, const BookmarkNode* node);
+int BookmarkDragOperation(content::BrowserContext* browser_context,
+                          const BookmarkNode* node);
 
 // Returns the preferred drop operation on a bookmark menu/bar.
 // |parent| is the parent node the drop is to occur on and |index| the index the
@@ -80,21 +79,6 @@ void DragBookmarks(Profile* profile,
                    const std::vector<const BookmarkNode*>& nodes,
                    gfx::NativeView view);
 
-// Opens all the bookmarks in |nodes| that are of type url and all the child
-// bookmarks that are of type url for folders in |nodes|. |initial_disposition|
-// dictates how the first URL is opened, all subsequent URLs are opened as
-// background tabs.  |navigator| is used to open the URLs.
-void OpenAll(gfx::NativeWindow parent,
-             content::PageNavigator* navigator,
-             const std::vector<const BookmarkNode*>& nodes,
-             WindowOpenDisposition initial_disposition);
-
-// Convenience for |OpenAll| with a single BookmarkNode.
-void OpenAll(gfx::NativeWindow parent,
-             content::PageNavigator* navigator,
-             const BookmarkNode* node,
-             WindowOpenDisposition initial_disposition);
-
 // Copies nodes onto the clipboard. If |remove_nodes| is true the nodes are
 // removed after copied to the clipboard. The nodes are copied in such a way
 // that if pasted again copies are made.
@@ -111,10 +95,6 @@ void PasteFromClipboard(BookmarkModel* model,
 
 // Returns true if the user can copy from the pasteboard.
 bool CanPasteFromClipboard(const BookmarkNode* node);
-
-// Returns a name for the given URL. Used for drags into bookmark areas when
-// the source doesn't specify a title.
-string16 GetNameForURL(const GURL& url);
 
 // Returns a vector containing up to |max_count| of the most recently modified
 // folders. This never returns an empty vector.
@@ -179,22 +159,8 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
     const string16& new_title,
     const GURL& new_url);
 
-// Toggles whether the bookmark bar is shown only on the new tab page or on
-// all tabs.  This is a preference modifier, not a visual modifier.
-void ToggleWhenVisible(Profile* profile);
-
 // Register user preferences for BookmarksBar.
-void RegisterUserPrefs(PrefServiceBase* prefs);
-
-// Fills in the URL and title for a bookmark of |web_contents|.
-void GetURLAndTitleToBookmark(content::WebContents* web_contents,
-                              GURL* url,
-                              string16* title);
-
-// Returns, by reference in |urls|, the url and title pairs for each open
-// tab in browser.
-void GetURLsForOpenTabs(Browser* browser,
-                        std::vector<std::pair<GURL, string16> >* urls);
+void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
 // Returns the parent for newly created folders/bookmarks. If |selection| has
 // one element and it is a folder, |selection[0]| is returned, otherwise
@@ -204,14 +170,6 @@ const BookmarkNode* GetParentForNewNodes(
     const BookmarkNode* parent,
     const std::vector<const BookmarkNode*>& selection,
     int* index);
-
-// Returns true if the specified node is of type URL, or has a descendant
-// of type URL.
-bool NodeHasURLs(const BookmarkNode* node);
-
-// Ask the user before deleting a non-empty bookmark folder.
-bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
-                               gfx::NativeWindow window);
 
 // Deletes the bookmark folders for the given list of |ids|.
 void DeleteBookmarkFolders(BookmarkModel* model, const std::vector<int64>& ids);
@@ -224,15 +182,8 @@ void AddIfNotBookmarked(BookmarkModel* model,
 // Removes all bookmarks for the given |url|.
 void RemoveAllBookmarks(BookmarkModel* model, const GURL& url);
 
-// Number of bookmarks we'll open before prompting the user to see if they
-// really want to open all.
-//
-// NOTE: treat this as a const. It is not const as various tests change the
-// value.
-extern int num_urls_before_prompting;
-
 // This enum is used for the Bookmarks.EntryPoint histogram.
-enum BoomarkEntryPoint {
+enum BookmarkEntryPoint {
   ENTRY_POINT_ACCELERATOR,
   ENTRY_POINT_STAR_GESTURE,
   ENTRY_POINT_STAR_KEY,
@@ -265,6 +216,9 @@ enum BookmarkLaunchLocation {
 
 // Records the launch of a bookmark for UMA purposes.
 void RecordBookmarkLaunch(BookmarkLaunchLocation location);
+
+// Records the user opening a folder of bookmarks for UMA purposes.
+void RecordBookmarkFolderOpen(BookmarkLaunchLocation location);
 
 #if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)
 void DisableBookmarkBarViewAnimationsForTesting(bool disabled);

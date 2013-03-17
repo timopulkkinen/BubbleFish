@@ -13,7 +13,7 @@
 #include "content/renderer/dom_storage/webstoragearea_impl.h"
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/render_thread_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "webkit/dom_storage/dom_storage_cached_area.h"
@@ -23,6 +23,8 @@
 using dom_storage::DomStorageCachedArea;
 using dom_storage::DomStorageProxy;
 using dom_storage::ValuesMap;
+
+namespace content {
 
 namespace {
 // MessageThrottlingFilter -------------------------------------------
@@ -141,7 +143,7 @@ class DomStorageDispatcher::ProxyImpl : public DomStorageProxy {
   // to more reliably commit changes during shutdown.
   void PushPendingCallback(const CompletionCallback& callback) {
     if (pending_callbacks_.empty())
-      WebKit::webKitPlatformSupport()->suddenTerminationChanged(false);
+      WebKit::Platform::current()->suddenTerminationChanged(false);
     pending_callbacks_.push_back(callback);
   }
 
@@ -149,7 +151,7 @@ class DomStorageDispatcher::ProxyImpl : public DomStorageProxy {
     CompletionCallback callback = pending_callbacks_.front();
     pending_callbacks_.pop_front();
     if (pending_callbacks_.empty())
-      WebKit::webKitPlatformSupport()->suddenTerminationChanged(true);
+      WebKit::Platform::current()->suddenTerminationChanged(true);
     return callback;
   }
 
@@ -334,3 +336,5 @@ void DomStorageDispatcher::OnStorageEvent(
 void DomStorageDispatcher::OnAsyncOperationComplete(bool success) {
   proxy_->CompleteOnePendingCallback(success);
 }
+
+}  // namespace content

@@ -7,7 +7,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/message_loop_proxy.h"
 #include "media/audio/audio_manager_base.h"
+#include "media/audio/mac/audio_device_listener_mac.h"
 
 namespace media {
 
@@ -34,12 +36,19 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   virtual AudioInputStream* MakeLowLatencyInputStream(
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual AudioParameters GetPreferredLowLatencyOutputStreamParameters(
-      const AudioParameters& params) OVERRIDE;
+      const AudioParameters& input_params) OVERRIDE;
 
  protected:
   virtual ~AudioManagerMac();
 
  private:
+  // Helper methods for constructing AudioDeviceListenerMac on the audio thread.
+  void CreateDeviceListener();
+  void DestroyDeviceListener();
+  void DelayedDeviceChange();
+
+  scoped_ptr<AudioDeviceListenerMac> output_device_listener_;
+
   DISALLOW_COPY_AND_ASSIGN(AudioManagerMac);
 };
 

@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/sha1.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 
 namespace {
@@ -31,9 +31,9 @@ AutofillField::AutofillField()
       phone_part_(IGNORED) {
 }
 
-AutofillField::AutofillField(const webkit::forms::FormField& field,
+AutofillField::AutofillField(const FormFieldData& field,
                              const string16& unique_name)
-    : webkit::forms::FormField(field),
+    : FormFieldData(field),
       unique_name_(unique_name),
       server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
@@ -43,7 +43,8 @@ AutofillField::AutofillField(const webkit::forms::FormField& field,
 AutofillField::~AutofillField() {}
 
 void AutofillField::set_heuristic_type(AutofillFieldType type) {
-  if (type >= 0 && type < MAX_VALID_FIELD_TYPE) {
+  if (type >= 0 && type < MAX_VALID_FIELD_TYPE &&
+      type != FIELD_WITH_DEFAULT_VALUE) {
     heuristic_type_ = type;
   } else {
     NOTREACHED();
@@ -74,8 +75,7 @@ bool AutofillField::IsEmpty() const {
 
 std::string AutofillField::FieldSignature() const {
   std::string field_name = UTF16ToUTF8(name);
-  std::string type = UTF16ToUTF8(form_control_type);
-  std::string field_string = field_name + "&" + type;
+  std::string field_string = field_name + "&" + form_control_type;
   return Hash32Bit(field_string);
 }
 

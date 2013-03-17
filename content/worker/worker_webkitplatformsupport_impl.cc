@@ -17,26 +17,28 @@
 #include "content/worker/worker_thread.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "net/base/mime_util.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebBlobRegistry.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebBlobRegistry.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileInfo.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkit_glue.h"
 
+using WebKit::Platform;
 using WebKit::WebBlobRegistry;
 using WebKit::WebClipboard;
 using WebKit::WebFileInfo;
 using WebKit::WebFileSystem;
 using WebKit::WebFileUtilities;
-using WebKit::WebKitPlatformSupport;
 using WebKit::WebMessagePortChannel;
 using WebKit::WebMimeRegistry;
 using WebKit::WebSandboxSupport;
-using WebKit::WebSharedWorkerRepository;
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
 using WebKit::WebURL;
+
+namespace content {
 
 // TODO(kinuko): Probably this could be consolidated into
 // RendererWebKitPlatformSupportImpl::FileUtilities.
@@ -62,7 +64,7 @@ bool WorkerWebKitPlatformSupportImpl::FileUtilities::getFileInfo(
   base::PlatformFileInfo file_info;
   base::PlatformFileError status;
   if (!SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileInfo(
-           webkit_glue::WebStringToFilePath(path), &file_info, &status)) ||
+           webkit_base::WebStringToFilePath(path), &file_info, &status)) ||
       status != base::PLATFORM_FILE_OK) {
     return false;
   }
@@ -168,12 +170,7 @@ void WorkerWebKitPlatformSupportImpl::dispatchStorageEvent(
   NOTREACHED();
 }
 
-WebSharedWorkerRepository*
-WorkerWebKitPlatformSupportImpl::sharedWorkerRepository() {
-    return 0;
-}
-
-WebKitPlatformSupport::FileHandle
+Platform::FileHandle
 WorkerWebKitPlatformSupportImpl::databaseOpenFile(
     const WebString& vfs_file_name, int desired_flags) {
   return DatabaseUtil::DatabaseOpenFile(vfs_file_name, desired_flags);
@@ -249,7 +246,7 @@ WebString WorkerWebKitPlatformSupportImpl::mimeTypeForExtension(
     const WebString& file_extension) {
   std::string mime_type;
   SendSyncMessageFromAnyThread(new MimeRegistryMsg_GetMimeTypeFromExtension(
-      webkit_glue::WebStringToFilePathString(file_extension), &mime_type));
+      webkit_base::WebStringToFilePathString(file_extension), &mime_type));
   return ASCIIToUTF16(mime_type);
 }
 
@@ -257,7 +254,7 @@ WebString WorkerWebKitPlatformSupportImpl::wellKnownMimeTypeForExtension(
     const WebString& file_extension) {
   std::string mime_type;
   net::GetWellKnownMimeTypeFromExtension(
-      webkit_glue::WebStringToFilePathString(file_extension), &mime_type);
+      webkit_base::WebStringToFilePathString(file_extension), &mime_type);
   return ASCIIToUTF16(mime_type);
 }
 
@@ -265,18 +262,18 @@ WebString WorkerWebKitPlatformSupportImpl::mimeTypeFromFile(
     const WebString& file_path) {
   std::string mime_type;
   SendSyncMessageFromAnyThread(new MimeRegistryMsg_GetMimeTypeFromFile(
-      FilePath(webkit_glue::WebStringToFilePathString(file_path)),
+      base::FilePath(webkit_base::WebStringToFilePathString(file_path)),
       &mime_type));
   return ASCIIToUTF16(mime_type);
 }
 
 WebString WorkerWebKitPlatformSupportImpl::preferredExtensionForMIMEType(
     const WebString& mime_type) {
-  FilePath::StringType file_extension;
+  base::FilePath::StringType file_extension;
   SendSyncMessageFromAnyThread(
       new MimeRegistryMsg_GetPreferredExtensionForMimeType(
           UTF16ToASCII(mime_type), &file_extension));
-  return webkit_glue::FilePathStringToWebString(file_extension);
+  return webkit_base::FilePathStringToWebString(file_extension);
 }
 
 WebBlobRegistry* WorkerWebKitPlatformSupportImpl::blobRegistry() {
@@ -284,3 +281,5 @@ WebBlobRegistry* WorkerWebKitPlatformSupportImpl::blobRegistry() {
     blob_registry_.reset(new WebBlobRegistryImpl(WorkerThread::current()));
   return blob_registry_.get();
 }
+
+}  // namespace content

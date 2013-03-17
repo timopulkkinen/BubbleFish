@@ -12,30 +12,21 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 
-#include "base/eintr_wrapper.h"
 #include "base/logging.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/safe_strerror_posix.h"
 #include "tools/android/common/net.h"
-
-// This is used in Close and Shutdown.
-// Preserving errno for Close() is important because the function is very often
-// used in cleanup code, after an error occurred, and it is very easy to pass an
-// invalid file descriptor to close() in this context, or more rarely, a
-// spurious signal might make close() return -1 + setting errno to EINTR,
-// masking the real reason for the original error. This leads to very unpleasant
-// debugging sessions.
-#define PRESERVE_ERRNO_HANDLE_EINTR(Func)                     \
-  do {                                                        \
-    int local_errno = errno;                                  \
-    (void) HANDLE_EINTR(Func);                                \
-    errno = local_errno;                                      \
-  } while (false);
-
+#include "tools/android/forwarder2/common.h"
 
 namespace {
 const int kNoTimeout = -1;
 const int kConnectTimeOut = 10;  // Seconds.
+
+bool FamilyIsTCP(int family) {
+  return family == AF_INET || family == AF_INET6;
+}
 }  // namespace
 
 namespace forwarder2 {
@@ -84,12 +75,13 @@ Socket::Socket()
       abstract_(false),
       addr_ptr_(reinterpret_cast<sockaddr*>(&addr_.addr4)),
       addr_len_(sizeof(sockaddr)),
-      exit_notifier_fd_(-1) {
+      exit_notifier_fd_(-1),
+      exited_(false) {
   memset(&addr_, 0, sizeof(addr_));
 }
 
 Socket::~Socket() {
-  CHECK(IsClosed());
+  Close();
 }
 
 void Socket::Shutdown() {
@@ -100,7 +92,7 @@ void Socket::Shutdown() {
 
 void Socket::Close() {
   if (!IsClosed()) {
-    PRESERVE_ERRNO_HANDLE_EINTR(close(socket_));
+    CloseFD(socket_);
     socket_ = -1;
   }
 }
@@ -129,7 +121,6 @@ bool Socket::InitUnixSocket(const std::string& path, bool abstract) {
   abstract_ = abstract;
   family_ = PF_UNIX;
   addr_.addr_un.sun_family = family_;
-
   if (abstract) {
     // Copied from net/base/unix_domain_socket_posix.cc
     // Convert the path given into abstract socket name. It must start with
@@ -143,14 +134,12 @@ bool Socket::InitUnixSocket(const std::string& path, bool abstract) {
     memcpy(addr_.addr_un.sun_path, path.c_str(), path.size());
     addr_len_ = sizeof(sockaddr_un);
   }
-
   addr_ptr_ = reinterpret_cast<sockaddr*>(&addr_.addr_un);
   return InitSocketInternal();
 }
 
 bool Socket::InitTcpSocket(const std::string& host, int port) {
   port_ = port;
-
   if (host.empty()) {
     // Use localhost: INADDR_LOOPBACK
     family_ = AF_INET;
@@ -159,8 +148,7 @@ bool Socket::InitTcpSocket(const std::string& host, int port) {
   } else if (!Resolve(host)) {
     return false;
   }
-  CHECK(family_ == AF_INET || family_ == AF_INET6)
-      << "Invalid socket family.";
+  CHECK(FamilyIsTCP(family_)) << "Invalid socket family.";
   if (family_ == AF_INET) {
     addr_.addr4.sin_port = htons(port_);
     addr_ptr_ = reinterpret_cast<sockaddr*>(&addr_.addr4);
@@ -180,7 +168,7 @@ bool Socket::BindAndListen() {
     SetSocketError();
     return false;
   }
-  if (port_ == 0) {
+  if (port_ == 0 && FamilyIsTCP(family_)) {
     SockAddr addr;
     memset(&addr, 0, sizeof(addr));
     socklen_t addrlen = 0;
@@ -225,19 +213,38 @@ bool Socket::Accept(Socket* new_socket) {
 }
 
 bool Socket::Connect() {
-  // Set non-block because we use select.
-  fcntl(socket_, F_SETFL, fcntl(socket_, F_GETFL) | O_NONBLOCK);
+  // Set non-block because we use select for connect.
+  const int kFlags = fcntl(socket_, F_GETFL);
+  DCHECK(!(kFlags & O_NONBLOCK));
+  fcntl(socket_, F_SETFL, kFlags | O_NONBLOCK);
   errno = 0;
   if (HANDLE_EINTR(connect(socket_, addr_ptr_, addr_len_)) < 0 &&
       errno != EINPROGRESS) {
     SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
     return false;
   }
   // Wait for connection to complete, or receive a notification.
   if (!WaitForEvent(WRITE, kConnectTimeOut)) {
     SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
     return false;
   }
+  int socket_errno;
+  socklen_t opt_len = sizeof(socket_errno);
+  if (!getsockopt(socket_, SOL_SOCKET, SO_ERROR, &socket_errno, &opt_len) < 0) {
+    LOG(ERROR) << "getsockopt(): " << safe_strerror(errno);
+    SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
+    return false;
+  }
+  if (socket_errno != 0) {
+    LOG(ERROR) << "Could not connect to host: " << safe_strerror(socket_errno);
+    SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
+    return false;
+  }
+  fcntl(socket_, F_SETFL, kFlags);
   return true;
 }
 
@@ -271,7 +278,7 @@ bool Socket::Resolve(const std::string& host) {
 }
 
 int Socket::GetPort() {
-  if (family_ != AF_INET && family_ != AF_INET6) {
+  if (!FamilyIsTCP(family_)) {
     LOG(ERROR) << "Can't call GetPort() on an unix domain socket.";
     return 0;
   }
@@ -291,11 +298,11 @@ bool Socket::AddFdToSet(fd_set* fds) const {
   return true;
 }
 
-int Socket::ReadNumBytes(char* buffer, size_t num_bytes) {
+int Socket::ReadNumBytes(void* buffer, size_t num_bytes) {
   int bytes_read = 0;
   int ret = 1;
   while (bytes_read < num_bytes && ret > 0) {
-    ret = Read(buffer + bytes_read, num_bytes - bytes_read);
+    ret = Read(static_cast<char*>(buffer) + bytes_read, num_bytes - bytes_read);
     if (ret >= 0)
       bytes_read += ret;
   }
@@ -309,7 +316,7 @@ void Socket::SetSocketError() {
   Close();
 }
 
-int Socket::Read(char* buffer, size_t buffer_size) {
+int Socket::Read(void* buffer, size_t buffer_size) {
   if (!WaitForEvent(READ, kNoTimeout)) {
     SetSocketError();
     return 0;
@@ -320,7 +327,7 @@ int Socket::Read(char* buffer, size_t buffer_size) {
   return ret;
 }
 
-int Socket::Write(const char* buffer, size_t count) {
+int Socket::Write(const void* buffer, size_t count) {
   int ret = HANDLE_EINTR(send(socket_, buffer, count, MSG_NOSIGNAL));
   if (ret < 0)
     SetSocketError();
@@ -331,18 +338,19 @@ int Socket::WriteString(const std::string& buffer) {
   return WriteNumBytes(buffer.c_str(), buffer.size());
 }
 
-int Socket::WriteNumBytes(const char* buffer, size_t num_bytes) {
+int Socket::WriteNumBytes(const void* buffer, size_t num_bytes) {
   int bytes_written = 0;
   int ret = 1;
   while (bytes_written < num_bytes && ret > 0) {
-    ret = Write(buffer + bytes_written, num_bytes - bytes_written);
+    ret = Write(static_cast<const char*>(buffer) + bytes_written,
+                num_bytes - bytes_written);
     if (ret >= 0)
       bytes_written += ret;
   }
   return bytes_written;
 }
 
-bool Socket::WaitForEvent(EventType type, int timeout_secs) const {
+bool Socket::WaitForEvent(EventType type, int timeout_secs) {
   if (exit_notifier_fd_ == -1 || socket_ == -1)
     return true;
   const int nfds = std::max(socket_, exit_notifier_fd_) + 1;
@@ -365,7 +373,11 @@ bool Socket::WaitForEvent(EventType type, int timeout_secs) const {
   }
   if (HANDLE_EINTR(select(nfds, &read_fds, &write_fds, NULL, tv_ptr)) <= 0)
     return false;
-  return !FD_ISSET(exit_notifier_fd_, &read_fds);
+  if (FD_ISSET(exit_notifier_fd_, &read_fds)) {
+    exited_ = true;
+    return false;
+  }
+  return true;
 }
 
 // static

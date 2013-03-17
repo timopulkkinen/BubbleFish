@@ -6,10 +6,12 @@
 #define CHROME_BROWSER_HISTORY_IN_MEMORY_DATABASE_H_
 
 #include "base/basictypes.h"
-#include "chrome/browser/common/url_database/url_database.h"
+#include "chrome/browser/history/url_database.h"
 #include "sql/connection.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace history {
 
@@ -28,7 +30,7 @@ class InMemoryDatabase : public URLDatabase {
   // file. Conceptually, the InMemoryHistoryBackend should do the populating
   // after this object does some common initialization, but that would be
   // much slower.
-  bool InitFromDisk(const FilePath& history_name);
+  bool InitFromDisk(const base::FilePath& history_name);
 
  protected:
   // Implemented for URLDatabase.

@@ -15,7 +15,7 @@
 #include <OpenGL/OpenGL.h>
 #endif  // OS_MACOSX
 
-namespace gfx {
+namespace ui {
 
 class GL_EXPORT GpuSwitchingManager {
  public:
@@ -30,13 +30,15 @@ class GL_EXPORT GpuSwitchingManager {
 
   // If no GPU is forced, return the original GpuPreference; otherwise, return
   // the forced GPU.
-  GpuPreference AdjustGpuPreference(GpuPreference gpu_preference);
+  gfx::GpuPreference AdjustGpuPreference(gfx::GpuPreference gpu_preference);
 
   // In the browser process, the value for this flag is computed the first time
   // this function is called.
   // In the GPU process, the value is passed from the browser process using the
   // --supports-dual-gpus commandline switch.
   bool SupportsDualGpus();
+
+  void SetGpuCount(size_t gpu_count);
 
  private:
   friend struct DefaultSingletonTraits<GpuSwitchingManager>;
@@ -50,16 +52,17 @@ class GL_EXPORT GpuSwitchingManager {
   CGLPixelFormatObj discrete_pixel_format_;
 #endif  // OS_MACOSX
 
-  GpuPreference gpu_switching_option_;
+  gfx::GpuPreference gpu_switching_option_;
   bool gpu_switching_option_set_;
 
   bool supports_dual_gpus_;
   bool supports_dual_gpus_set_;
 
+  size_t gpu_count_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuSwitchingManager);
 };
 
-}  // namespace gfx
+}  // namespace ui
 
 #endif  // UI_GL_GPU_SWITCHING_MANAGER_H_
-

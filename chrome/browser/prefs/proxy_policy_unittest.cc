@@ -3,12 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_service_impl.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/common/chrome_switches.h"
@@ -79,12 +81,17 @@ class ProxyPolicyTest : public testing::Test {
       : command_line_(CommandLine::NO_PROGRAM) {}
 
   virtual void SetUp() OVERRIDE {
-    EXPECT_CALL(provider_, IsInitializationComplete())
+    EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
 
     PolicyServiceImpl::Providers providers;
     providers.push_back(&provider_);
     policy_service_.reset(new PolicyServiceImpl(providers));
+    provider_.Init();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    provider_.Shutdown();
   }
 
   PrefService* CreatePrefService(bool with_managed_policies) {
@@ -92,8 +99,9 @@ class ProxyPolicyTest : public testing::Test {
     builder.WithCommandLine(&command_line_);
     if (with_managed_policies)
       builder.WithManagedPolicies(policy_service_.get());
-    PrefService* prefs = builder.Create();
-    chrome::RegisterUserPrefs(prefs);
+    scoped_refptr<PrefRegistrySyncable> registry(new PrefRegistrySyncable);
+    PrefServiceSyncable* prefs = builder.CreateSyncable(registry);
+    chrome::RegisterUserPrefs(registry);
     return prefs;
   }
 

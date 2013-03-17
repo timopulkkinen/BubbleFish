@@ -7,22 +7,22 @@
 #include <windows.h>
 #include <string>
 
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "remoting/host/win/desktop.h"
-#include "remoting/host/win/scoped_thread_desktop.h"
+#include "media/video/capture/screen/win/desktop.h"
+#include "media/video/capture/screen/win/scoped_thread_desktop.h"
 
 namespace remoting {
 
 namespace {
 
 // Names of the API and library implementing software SAS generation.
-const FilePath::CharType kSasDllFileName[] = FILE_PATH_LITERAL("sas.dll");
+const base::FilePath::CharType kSasDllFileName[] = FILE_PATH_LITERAL("sas.dll");
 const char kSendSasName[] = "SendSAS";
 
 // The prototype of SendSAS().
@@ -34,10 +34,10 @@ const wchar_t kSystemPolicyKeyName[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
 const wchar_t kSoftwareSasValueName[] = L"SoftwareSASGeneration";
 
-const DWORD kEnableSoftwareSasByApps = 2;
+const DWORD kEnableSoftwareSasByServices = 1;
 
 // Toggles the default software SAS generation policy to enable SAS generation
-// by applications. Non-default policy is not changed.
+// by services. Non-default policy is not changed.
 class ScopedSoftwareSasPolicy {
  public:
   ScopedSoftwareSasPolicy();
@@ -89,7 +89,7 @@ bool ScopedSoftwareSasPolicy::Apply() {
   // Override the default policy (i.e. there is no value in the registry) only.
   if (!custom_policy) {
     result = system_policy_.WriteValue(kSoftwareSasValueName,
-                                       kEnableSoftwareSasByApps);
+                                       kEnableSoftwareSasByServices);
     if (result != ERROR_SUCCESS) {
       SetLastError(result);
       LOG_GETLASTERROR(ERROR)
@@ -105,9 +105,9 @@ bool ScopedSoftwareSasPolicy::Apply() {
 
 } // namespace
 
-// Sends the Secure Attention Sequence using the SendSAS() function from
-// sas.dll. This library is shipped starting from Win7/W2K8 R2 only. However
-// Win7 SDK includes a redistributable verion of the same library that works on
+// Sends Secure Attention Sequence using the SendSAS() function from sas.dll.
+// This library is shipped starting from Win7/W2K8 R2 only. However Win7 SDK
+// includes a redistributable verion of the same library that works on
 // Vista/W2K8. We install the latter along with our binaries.
 class SasInjectorWin : public SasInjector {
  public:
@@ -144,7 +144,7 @@ bool SasInjectorWin::InjectSas() {
   // Load sas.dll. The library is expected to be in the same folder as this
   // binary.
   if (!sas_dll_.is_valid()) {
-    FilePath dir_path;
+    base::FilePath dir_path;
     if (!PathService::Get(base::DIR_EXE, &dir_path)) {
       LOG(ERROR) << "Failed to get the executable file name.";
       return false;
@@ -170,7 +170,7 @@ bool SasInjectorWin::InjectSas() {
   }
 
   // Enable software SAS generation by services and send SAS. SAS can still fail
-  // if the policy does not allow applications to generate software SAS.
+  // if the policy does not allow services to generate software SAS.
   ScopedSoftwareSasPolicy enable_sas;
   if (!enable_sas.Apply())
     return false;
@@ -190,23 +190,37 @@ bool SasInjectorXp::InjectSas() {
   const wchar_t kSasWindowClassName[] = L"SAS window class";
   const wchar_t kSasWindowTitle[] = L"SAS window";
 
-  scoped_ptr<remoting::Desktop> winlogon_desktop(
-      remoting::Desktop::GetDesktop(kWinlogonDesktopName));
-  if (!winlogon_desktop.get())
+  scoped_ptr<media::Desktop> winlogon_desktop(
+      media::Desktop::GetDesktop(kWinlogonDesktopName));
+  if (!winlogon_desktop.get()) {
+    LOG_GETLASTERROR(ERROR)
+        << "Failed to open '" << kWinlogonDesktopName << "' desktop";
     return false;
+  }
 
-  remoting::ScopedThreadDesktop desktop;
-  if (!desktop.SetThreadDesktop(winlogon_desktop.Pass()))
+  media::ScopedThreadDesktop desktop;
+  if (!desktop.SetThreadDesktop(winlogon_desktop.Pass())) {
+    LOG_GETLASTERROR(ERROR)
+        << "Failed to switch to '" << kWinlogonDesktopName << "' desktop";
     return false;
+  }
 
   HWND window = FindWindow(kSasWindowClassName, kSasWindowTitle);
-  if (!window)
+  if (!window) {
+    LOG_GETLASTERROR(ERROR)
+        << "Failed to find '" << kSasWindowTitle << "' window";
     return false;
+  }
 
-  PostMessage(window,
-              WM_HOTKEY,
-              0,
-              MAKELONG(MOD_ALT | MOD_CONTROL, VK_DELETE));
+  if (PostMessage(window,
+                  WM_HOTKEY,
+                  0,
+                  MAKELONG(MOD_ALT | MOD_CONTROL, VK_DELETE)) == 0) {
+    LOG_GETLASTERROR(ERROR)
+        << "Failed to post WM_HOTKEY message";
+    return false;
+  }
+
   return true;
 }
 

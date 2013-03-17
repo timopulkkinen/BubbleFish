@@ -9,7 +9,7 @@
 #include <set>
 #include <utility>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -20,6 +20,7 @@
 #include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "webkit/database/database_connections.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -37,13 +38,15 @@ class SpecialStoragePolicy;
 
 namespace webkit_database {
 
-extern const FilePath::CharType kDatabaseDirectoryName[];
-extern const FilePath::CharType kTrackerDatabaseFileName[];
+WEBKIT_STORAGE_EXPORT extern const base::FilePath::CharType
+    kDatabaseDirectoryName[];
+WEBKIT_STORAGE_EXPORT extern const base::FilePath::CharType
+    kTrackerDatabaseFileName[];
 
 class DatabasesTable;
 
 // This class is used to store information about all databases in an origin.
-class OriginInfo {
+class WEBKIT_STORAGE_EXPORT OriginInfo {
  public:
   OriginInfo();
   OriginInfo(const OriginInfo& origin_info);
@@ -75,7 +78,7 @@ class OriginInfo {
 // the disk. Therefore, in a multi-threaded application, all methods of this
 // class should be called on the thread dedicated to file operations (file
 // thread in the browser process, for example), if such a thread exists.
-class DatabaseTracker
+class WEBKIT_STORAGE_EXPORT DatabaseTracker
     : public base::RefCountedThreadSafe<DatabaseTracker> {
  public:
   class Observer {
@@ -91,7 +94,7 @@ class DatabaseTracker
     virtual ~Observer() {}
   };
 
-  DatabaseTracker(const FilePath& profile_path,
+  DatabaseTracker(const base::FilePath& profile_path,
                   bool is_incognito,
                   quota::SpecialStoragePolicy* special_storage_policy,
                   quota::QuotaManagerProxy* quota_manager_proxy,
@@ -117,8 +120,8 @@ class DatabaseTracker
 
   void CloseTrackerDatabaseAndClearCaches();
 
-  const FilePath& DatabaseDirectory() const { return db_dir_; }
-  FilePath GetFullDBFilePath(const string16& origin_identifier,
+  const base::FilePath& DatabaseDirectory() const { return db_dir_; }
+  base::FilePath GetFullDBFilePath(const string16& origin_identifier,
                              const string16& database_name);
 
   // virtual for unit-testing only
@@ -262,8 +265,8 @@ class DatabaseTracker
   const bool is_incognito_;
   bool force_keep_session_state_;
   bool shutting_down_;
-  const FilePath profile_path_;
-  const FilePath db_dir_;
+  const base::FilePath profile_path_;
+  const base::FilePath db_dir_;
   scoped_ptr<sql::Connection> db_;
   scoped_ptr<DatabasesTable> databases_table_;
   scoped_ptr<sql::MetaTable> meta_table_;

@@ -28,11 +28,12 @@ class CookieOptions;
 class HttpRequestHeaders;
 class HttpResponseInfo;
 class IOBuffer;
+struct LoadTimingInfo;
 class NetworkDelegate;
 class SSLCertRequestInfo;
 class SSLInfo;
 class URLRequest;
-class UploadData;
+class UploadDataStream;
 class URLRequestStatus;
 class X509Certificate;
 
@@ -50,7 +51,7 @@ class NET_EXPORT URLRequestJob : public base::RefCounted<URLRequestJob>,
 
   // Sets the upload data, most requests have no upload data, so this is a NOP.
   // Job types supporting upload data will override this.
-  virtual void SetUpload(UploadData* upload);
+  virtual void SetUpload(UploadDataStream* upload_data_stream);
 
   // Sets extra request headers for Job types that support request headers.
   virtual void SetExtraRequestHeaders(const HttpRequestHeaders& headers);
@@ -109,6 +110,8 @@ class NET_EXPORT URLRequestJob : public base::RefCounted<URLRequestJob>,
 
   // Called to get response info.
   virtual void GetResponseInfo(HttpResponseInfo* info);
+
+  virtual void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const;
 
   // Returns the cookie values included in the response, if applicable.
   // Returns true if applicable.
@@ -241,8 +244,8 @@ class NET_EXPORT URLRequestJob : public base::RefCounted<URLRequestJob>,
   // Should only be called if the job has not started a resposne.
   void NotifyRestartRequired();
 
-  // Called when the delegate blocks or unblocks this request when intercepting
-  // certain requests.
+  // Called when the network delegate blocks or unblocks this request when
+  // intercepting certain requests.
   void SetBlockedOnDelegate();
   void SetUnblockedOnDelegate();
 

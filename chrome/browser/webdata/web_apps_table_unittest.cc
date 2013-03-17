@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/webdata/web_apps_table.h"
 #include "chrome/browser/webdata/web_database.h"
@@ -27,8 +27,8 @@ class WebAppsTableTest : public testing::Test {
     file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
   }
 
-  FilePath file_;
-  ScopedTempDir temp_dir_;
+  base::FilePath file_;
+  base::ScopedTempDir temp_dir_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebAppsTableTest);
@@ -38,7 +38,7 @@ class WebAppsTableTest : public testing::Test {
 TEST_F(WebAppsTableTest, WebAppHasAllImages) {
   WebDatabase db;
 
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   GURL url("http://google.com/");
 
   // Initial value for unknown web app should be false.
@@ -56,7 +56,7 @@ TEST_F(WebAppsTableTest, WebAppHasAllImages) {
 TEST_F(WebAppsTableTest, WebAppImages) {
   WebDatabase db;
 
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   GURL url("http://google.com/");
 
   // Web app should initially have no images.

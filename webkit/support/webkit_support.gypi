@@ -14,22 +14,23 @@
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/cc/cc.gyp:cc',
         '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gtest.gyp:gtest',
+        '<(DEPTH)/third_party/hyphen/hyphen.gyp:hyphen',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/ui.gyp:shell_dialogs',
         '<(DEPTH)/ui/ui.gyp:ui',
-        'appcache',
-        'blob',
-        'database',
-        'dom_storage',
-        'fileapi',
-        'forms',
+        '<(DEPTH)/webkit/compositor_bindings/compositor_bindings.gyp:webkit_compositor_bindings',
+        '<(DEPTH)/webkit/gpu/webkit_gpu.gyp:webkit_gpu',
         'glue',
         'user_agent',
         'webkit_base',
-        'webkit_gpu',
         'webkit_media',
+        'webkit_storage',
         'webkit_support_common',
       ],
       'include_dirs': [
@@ -56,6 +57,8 @@
         'test_stream_texture_factory_android.h',
         'test_webkit_platform_support.cc',
         'test_webkit_platform_support.h',
+        'test_webidbfactory.cc',
+        'test_webidbfactory.h',
         'test_webmessageportchannel.cc',
         'test_webmessageportchannel.h',
         'test_webplugin_page_delegate.cc',
@@ -69,6 +72,8 @@
         'weburl_loader_mock_factory.h',
         'web_audio_device_mock.cc',
         'web_audio_device_mock.h',
+        'web_gesture_curve_mock.cc',
+        'web_gesture_curve_mock.h',
       ],
       'conditions': [
         ['OS=="mac"', {
@@ -89,6 +94,8 @@
           }],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
 
     {
@@ -137,6 +144,8 @@
         '<(DEPTH)/webkit/tools/test_shell/test_shell_webmimeregistry_impl.h',
         '<(DEPTH)/webkit/fileapi/mock_file_system_options.cc',
         '<(DEPTH)/webkit/fileapi/mock_file_system_options.h',
+        '<(DEPTH)/webkit/mocks/mock_webhyphenator.cc',
+        '<(DEPTH)/webkit/mocks/mock_webhyphenator.h',
         'simple_database_system.cc',
         'simple_database_system.h',
       ],
@@ -147,6 +156,8 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
 
     {

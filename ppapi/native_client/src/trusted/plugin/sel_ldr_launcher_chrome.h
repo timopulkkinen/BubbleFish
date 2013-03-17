@@ -13,7 +13,11 @@ namespace plugin {
 class SelLdrLauncherChrome : public nacl::SelLdrLauncherBase {
  public:
   virtual bool Start(const char* url);
-  virtual bool Start(PP_Instance instance, const char* url);
+  virtual bool Start(PP_Instance instance,
+                     const char* url,
+                     bool uses_irt,
+                     bool uses_ppapi,
+                     bool enable_ppapi_dev);
 };
 
 }  // namespace plugin

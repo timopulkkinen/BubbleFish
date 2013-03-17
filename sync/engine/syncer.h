@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/synchronization/lock.h"
+#include "sync/base/sync_export.h"
 #include "sync/engine/conflict_resolver.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -27,13 +28,10 @@ class MutableEntry;
 enum SyncerStep {
   SYNCER_BEGIN,
   DOWNLOAD_UPDATES,
-  VERIFY_UPDATES,
   PROCESS_UPDATES,
   STORE_TIMESTAMPS,
   APPLY_UPDATES,
   COMMIT,
-  RESOLVE_CONFLICTS,
-  APPLY_UPDATES_TO_RESOLVE_CONFLICTS,
   SYNCER_END
 };
 
@@ -47,7 +45,7 @@ enum SyncerStep {
 // to SyncShare() may take an unbounded amount of time, as SyncerCommands
 // may block on network i/o, on lock contention, or on tasks posted to
 // other threads.
-class Syncer {
+class SYNC_EXPORT_PRIVATE Syncer {
  public:
   typedef std::vector<int64> UnsyncedMetaHandles;
 
@@ -60,15 +58,15 @@ class Syncer {
   void RequestEarlyExit();
 
   // Runs a sync cycle from |first_step| to |last_step|.
-  virtual void SyncShare(sessions::SyncSession* session,
+  // Returns true if the cycle completed with |last_step|, and false
+  // if it terminated early due to error / exit requested.
+  virtual bool SyncShare(sessions::SyncSession* session,
                          SyncerStep first_step,
                          SyncerStep last_step);
 
  private:
   bool early_exit_requested_;
   base::Lock early_exit_requested_lock_;
-
-  ConflictResolver resolver_;
 
   friend class SyncerTest;
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, NameClashWithResolver);

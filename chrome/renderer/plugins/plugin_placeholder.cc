@@ -11,18 +11,21 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/custom_menu_commands.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "grit/webkit_strings.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -34,12 +37,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCaseSensitivity.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/webui/jstemplate_builder.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/webview_plugin.h"
@@ -106,13 +106,17 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_BLOCKED_PLUGIN_HTML));
 
   DictionaryValue values;
+#if defined(ENABLE_PLUGIN_INSTALLATION)
   values.SetString("message", l10n_util::GetStringUTF8(IDS_PLUGIN_SEARCHING));
+#else
+  values.SetString("message",
+      l10n_util::GetStringUTF8(IDS_PLUGIN_NOT_SUPPORTED));
+#endif
 
-  std::string html_data =
-      jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
 
   // |missing_plugin| will destroy itself when its WebViewPlugin is going away.
   PluginPlaceholder* missing_plugin = new PluginPlaceholder(
@@ -122,24 +126,21 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
   RenderThread::Get()->Send(new ChromeViewHostMsg_FindMissingPlugin(
       missing_plugin->routing_id(), missing_plugin->CreateRoutingId(),
       params.mimeType.utf8()));
-#else
-  missing_plugin->OnDidNotFindMissingPlugin();
 #endif
   return missing_plugin;
 }
 
 PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
     RenderView* render_view,
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   DictionaryValue values;
   values.SetString("message",
                    l10n_util::GetStringUTF8(IDS_PLUGIN_INITIALIZATION_ERROR));
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_BLOCKED_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
-  std::string html_data =
-      jstemplate_builder::GetI18nTemplateHtml(template_html, &values);
+          IDR_BLOCKED_PLUGIN_HTML));
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
 
   WebPluginParams params;
   // |missing_plugin| will destroy itself when its WebViewPlugin is going away.
@@ -161,9 +162,7 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
     const std::string& identifier,
     const string16& name,
     int template_id,
-    int message_id) {
-  string16 message = l10n_util::GetStringFUTF16(message_id, name);
-
+    const string16& message) {
   DictionaryValue values;
   values.SetString("message", message);
   values.SetString("name", name);
@@ -171,12 +170,11 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          template_id, ui::SCALE_FACTOR_NONE));
+          template_id));
 
   DCHECK(!template_html.empty()) << "unable to load template. ID: "
                                  << template_id;
-  std::string html_data = jstemplate_builder::GetI18nTemplateHtml(
-      template_html, &values);
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
 
   // |blocked_plugin| will destroy itself when its WebViewPlugin is going away.
   PluginPlaceholder* blocked_plugin = new PluginPlaceholder(
@@ -194,12 +192,11 @@ PluginPlaceholder* PluginPlaceholder::CreateMobileYoutubePlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_MOBILE_YOUTUBE_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_MOBILE_YOUTUBE_PLUGIN_HTML));
 
   DictionaryValue values;
   values.SetString("video_id", GetYoutubeVideoId(params));
-  std::string html_data = jstemplate_builder::GetI18nTemplateHtml(
-      template_html, &values);
+  std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
 
   // |youtube_plugin| will destroy itself when its WebViewPlugin is going away.
   PluginPlaceholder* youtube_plugin = new PluginPlaceholder(
@@ -228,12 +225,16 @@ PluginPlaceholder::PluginPlaceholder(content::RenderView* render_view,
 #endif
       hidden_(false),
       has_host_(false),
-      finished_loading_(false) {
+      finished_loading_(false),
+      context_menu_request_id_(0) {
   RenderThread::Get()->AddObserver(this);
 }
 
 PluginPlaceholder::~PluginPlaceholder() {
   RenderThread::Get()->RemoveObserver(this);
+  if (context_menu_request_id_)
+    render_view()->CancelContextMenu(context_menu_request_id_);
+
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   if (placeholder_routing_id_ == MSG_ROUTING_NONE)
     return;
@@ -320,12 +321,22 @@ void PluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
     return;
   }
 
-  // Set the new plug-in on the container before initializing it.
   WebPluginContainer* container = plugin_->container();
+  // Set the new plug-in on the container before initializing it.
   container->setPlugin(new_plugin);
+  // Save the element in case the plug-in is removed from the page during
+  // initialization.
+  WebElement element = container->element();
   if (!new_plugin->initialize(container)) {
     // We couldn't initialize the new plug-in. Restore the old one and abort.
     container->setPlugin(plugin_);
+    return;
+  }
+
+  // The plug-in has been removed from the page. Destroy the old plug-in
+  // (which will destroy us).
+  if (element.parentNode().isNull()) {
+    plugin_->destroy();
     return;
   }
 
@@ -395,11 +406,11 @@ void PluginPlaceholder::WillDestroyPlugin() {
   delete this;
 }
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginPlaceholder::OnDidNotFindMissingPlugin() {
   SetMessage(l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_FOUND));
 }
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginPlaceholder::OnFoundMissingPlugin(const string16& plugin_name) {
   if (status_->value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound)
     SetMessage(l10n_util::GetStringFUTF16(IDS_PLUGIN_FOUND, plugin_name));
@@ -452,23 +463,11 @@ void PluginPlaceholder::PluginListChanged() {
   ReplacePlugin(new_plugin);
 }
 
-void PluginPlaceholder::SetMessage(const string16& message) {
-  message_ = message;
-  if (finished_loading_)
-    UpdateMessage();
-}
-
-void PluginPlaceholder::UpdateMessage() {
-  std::string script = "window.setMessage(" +
-                       base::GetDoubleQuotedJson(message_) + ")";
-  plugin_->web_view()->mainFrame()->executeScript(
-      WebScriptSource(ASCIIToUTF16(script)));
-}
-
-void PluginPlaceholder::ContextMenuAction(unsigned id) {
+void PluginPlaceholder::OnMenuAction(int request_id, unsigned action) {
+  DCHECK_EQ(context_menu_request_id_, request_id);
   if (g_last_active_menu != this)
     return;
-  switch (id) {
+  switch (action) {
     case chrome::MENU_COMMAND_PLUGIN_RUN: {
       RenderThread::Get()->RecordUserMetrics("Plugin_Load_Menu");
       LoadPlugin();
@@ -484,25 +483,39 @@ void PluginPlaceholder::ContextMenuAction(unsigned id) {
   }
 }
 
+void PluginPlaceholder::OnMenuClosed(int request_id) {
+  DCHECK_EQ(context_menu_request_id_, request_id);
+  context_menu_request_id_ = 0;
+}
+
+void PluginPlaceholder::SetMessage(const string16& message) {
+  message_ = message;
+  if (finished_loading_)
+    UpdateMessage();
+}
+
+void PluginPlaceholder::UpdateMessage() {
+  std::string script = "window.setMessage(" +
+                       base::GetDoubleQuotedJson(message_) + ")";
+  plugin_->web_view()->mainFrame()->executeScript(
+      WebScriptSource(ASCIIToUTF16(script)));
+}
+
 void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
-  WebContextMenuData menu_data;
+  if (context_menu_request_id_)
+    return;  // Don't allow nested context menu requests.
 
-  size_t num_items = 3u;
-  if (!plugin_info_.path.value().empty())
-    num_items++;
+  content::ContextMenuParams params;
 
-  WebVector<WebMenuItemInfo> custom_items(num_items);
-
-  size_t i = 0;
   WebMenuItemInfo name_item;
   name_item.label = title_;
   name_item.hasTextDirectionOverride = false;
   name_item.textDirection =  WebKit::WebTextDirectionDefault;
-  custom_items[i++] = name_item;
+  params.custom_items.push_back(WebMenuItem(name_item));
 
   WebMenuItemInfo separator_item;
   separator_item.type = WebMenuItemInfo::Separator;
-  custom_items[i++] = separator_item;
+  params.custom_items.push_back(WebMenuItem(separator_item));
 
   if (!plugin_info_.path.value().empty()) {
     WebMenuItemInfo run_item;
@@ -513,7 +526,7 @@ void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
         l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_RUN).c_str());
     run_item.hasTextDirectionOverride = false;
     run_item.textDirection =  WebKit::WebTextDirectionDefault;
-    custom_items[i++] = run_item;
+    params.custom_items.push_back(WebMenuItem(run_item));
   }
 
   WebMenuItemInfo hide_item;
@@ -523,11 +536,12 @@ void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
       l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_HIDE).c_str());
   hide_item.hasTextDirectionOverride = false;
   hide_item.textDirection =  WebKit::WebTextDirectionDefault;
-  custom_items[i++] = hide_item;
+  params.custom_items.push_back(WebMenuItem(hide_item));
 
-  menu_data.customItems.swap(custom_items);
-  menu_data.mousePosition = WebPoint(event.windowX, event.windowY);
-  render_view()->ShowContextMenu(NULL, menu_data);
+  params.x = event.windowX;
+  params.y = event.windowY;
+
+  context_menu_request_id_ = render_view()->ShowContextMenu(this, params);
   g_last_active_menu = this;
 }
 
@@ -599,7 +613,7 @@ void PluginPlaceholder::OpenYoutubeUrlCallback(const CppArgumentList& args,
   request.initialize();
   request.setURL(url);
   render_view()->LoadURLExternally(
-      frame_, request, WebKit::WebNavigationPolicyCurrentTab);
+      frame_, request, WebKit::WebNavigationPolicyNewForegroundTab);
 }
 
 bool PluginPlaceholder::IsValidYouTubeVideo(const std::string& path) {

@@ -12,16 +12,16 @@
 #include "chrome/browser/password_manager/password_manager_delegate.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_profile.h"
-#include "webkit/forms/password_form.h"
+#include "content/public/common/password_form.h"
 
-using webkit::forms::PasswordForm;
+using content::PasswordForm;
 
 class TestPasswordManagerDelegate : public PasswordManagerDelegate {
  public:
   explicit TestPasswordManagerDelegate(Profile* profile) : profile_(profile) {}
 
   virtual void FillPasswordForm(
-      const webkit::forms::PasswordFormFillData& form_data) OVERRIDE {}
+      const PasswordFormFillData& form_data) OVERRIDE {}
   virtual void AddSavePasswordInfoBarIfPermitted(
       PasswordFormManager* form_to_save) OVERRIDE {}
   virtual Profile* GetProfile() OVERRIDE { return profile_; }
@@ -37,9 +37,9 @@ class TestPasswordManager : public PasswordManager {
     : PasswordManager(NULL, delegate) {}
 
   virtual void Autofill(
-      const webkit::forms::PasswordForm& form_for_autofill,
-      const webkit::forms::PasswordFormMap& best_matches,
-      const webkit::forms::PasswordForm& preferred_match,
+      const content::PasswordForm& form_for_autofill,
+      const content::PasswordFormMap& best_matches,
+      const content::PasswordForm& preferred_match,
       bool wait_for_username) const OVERRIDE {}
 };
 
@@ -47,7 +47,7 @@ class TestPasswordFormManager : public PasswordFormManager {
  public:
   TestPasswordFormManager(Profile* profile,
                           PasswordManager* manager,
-                          const webkit::forms::PasswordForm& observed_form,
+                          const content::PasswordForm& observed_form,
                           bool ssl_valid)
     : PasswordFormManager(profile, manager, NULL, observed_form, ssl_valid),
       num_sent_messages_(0) {}
@@ -106,20 +106,17 @@ class PasswordFormManagerTest : public testing::Test {
   }
 
   void SimulateFetchMatchingLoginsFromPasswordStore(
-      PasswordFormManager* manager,
-      int handle) {
+      PasswordFormManager* manager) {
     // Just need to update the internal states.
     manager->state_ = PasswordFormManager::MATCHING_PHASE;
-    manager->pending_login_query_ = handle;
   }
 
   void SimulateResponseFromPasswordStore(
       PasswordFormManager* manager,
-      int handle,
       const std::vector<PasswordForm*>& result) {
     // Simply call the callback method when request done. This will transfer
     // the ownership of the objects in |result| to the |manager|.
-    manager->OnPasswordStoreRequestDone(handle, result);
+    manager->OnGetPasswordStoreResults(result);
   }
 
   bool IgnoredResult(PasswordFormManager* p, PasswordForm* form) {
@@ -384,9 +381,9 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
   // We should send the not blacklisted message.
   scoped_ptr<TestPasswordFormManager> manager(new TestPasswordFormManager(
       profile(), &password_manager, *observed_form(), false));
-  SimulateFetchMatchingLoginsFromPasswordStore(manager.get(), 1);
+  SimulateFetchMatchingLoginsFromPasswordStore(manager.get());
   std::vector<PasswordForm*> result;
-  SimulateResponseFromPasswordStore(manager.get(), 1, result);
+  SimulateResponseFromPasswordStore(manager.get(), result);
   EXPECT_EQ(1u, manager->num_sent_messages());
 
   // Sign up attempt to previously visited sites; Login result is found from
@@ -394,10 +391,10 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
   // message.
   manager.reset(new TestPasswordFormManager(
       profile(), &password_manager, *observed_form(), false));
-  SimulateFetchMatchingLoginsFromPasswordStore(manager.get(), 2);
+  SimulateFetchMatchingLoginsFromPasswordStore(manager.get());
   // We need add heap allocated objects to result.
   result.push_back(CreateSavedMatch(false));
-  SimulateResponseFromPasswordStore(manager.get(), 2, result);
+  SimulateResponseFromPasswordStore(manager.get(), result);
   EXPECT_EQ(1u, manager->num_sent_messages());
 
   // Sign up attempt to previously visited sites; Login result is found from
@@ -405,9 +402,9 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
   // message.
   manager.reset(new TestPasswordFormManager(
       profile(), &password_manager, *observed_form(), false));
-  SimulateFetchMatchingLoginsFromPasswordStore(manager.get(), 3);
+  SimulateFetchMatchingLoginsFromPasswordStore(manager.get());
   result.clear();
   result.push_back(CreateSavedMatch(true));
-  SimulateResponseFromPasswordStore(manager.get(), 3, result);
+  SimulateResponseFromPasswordStore(manager.get(), result);
   EXPECT_EQ(0u, manager->num_sent_messages());
 }

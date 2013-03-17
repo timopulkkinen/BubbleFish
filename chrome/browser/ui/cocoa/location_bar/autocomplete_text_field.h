@@ -104,6 +104,9 @@ class AutocompleteTextFieldObserver {
   // Called whenever the autocomplete text field is losing focus.
   virtual void OnKillFocus() = 0;
 
+  // Called before the text field handles a mouse down event.
+  virtual void OnMouseDown(NSInteger button_number) = 0;
+
  protected:
   virtual ~AutocompleteTextFieldObserver() {}
 };
@@ -140,7 +143,7 @@ class AutocompleteTextFieldObserver {
 // Updates cursor and tooltip rects depending on the contents of the text field
 // e.g. the security icon should have a default pointer shown on hover instead
 // of an I-beam.
-- (void)updateCursorAndToolTipRects;
+- (void)updateMouseTracking;
 
 // Return the appropriate menu for any decoration under |event|.
 - (NSMenu*)decorationMenuForEvent:(NSEvent*)event;

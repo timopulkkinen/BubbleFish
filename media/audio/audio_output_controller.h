@@ -5,19 +5,16 @@
 #ifndef MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_
 #define MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_
 
+#include "base/atomic_ref_count.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/synchronization/lock.h"
-#include "base/time.h"
 #include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
+#include "media/audio/audio_source_diverter.h"
 #include "media/audio/simple_sources.h"
-
-namespace base {
-class WaitableEvent;
-}  // namespace base
+#include "media/base/media_export.h"
 
 class MessageLoop;
 
@@ -29,44 +26,42 @@ class MessageLoop;
 // All the public methods of AudioOutputController are non-blocking.
 // The actual operations are performed on the audio manager thread.
 //
-// Here is a state diagram for the AudioOutputController:
+// Here is a state transition diagram for the AudioOutputController:
 //
-//             .----------------------->  [ Closed / Error ]  <------.
-//             |                                   ^                 |
-//             |                                   |                 |
-//        [ Created ]  -->  [ Starting ]  -->  [ Playing ]  -->  [ Paused ]
-//             ^                 |                 ^                |  ^
-//             |                 |                 |                |  |
-//             |                 |                 `----------------'  |
-//             |                 V                                     |
-//             |        [ PausedWhenStarting ] ------------------------'
-//             |
-//       *[  Empty  ]
+//   *[ Empty ]  -->  [ Created ]  -->  [ Starting ]  -->  [ Playing ]  --.
+//        |                |               |    ^               |         |
+//        |                |               |    |               |         |
+//        |                |               |    |               v         |
+//        |                |               |    `---------  [ Paused ]    |
+//        |                |               |                    |         |
+//        |                v               v                    |         |
+//        `----------->  [      Closed       ]  <-------------------------'
 //
 // * Initial state
+//
+// At any time after reaching the Created state but before Closed, the
+// AudioOutputController may be notified of a device change via
+// OnDeviceChange().  As the OnDeviceChange() is processed, state transitions
+// will occur, ultimately ending up in an equivalent pre-call state.  E.g., if
+// the state was Paused, the new state will be Created, since these states are
+// all functionally equivalent and require a Play() call to continue to the next
+// state.
 //
 // The AudioOutputStream can request data from the AudioOutputController via the
 // AudioSourceCallback interface. AudioOutputController uses the SyncReader
 // passed to it via construction to synchronously fulfill this read request.
 //
-// The audio manager thread is owned by the AudioManager that the
-// AudioOutputController holds a reference to.  When performing tasks on this
-// thread, the controller must not add or release references to the
-// AudioManager or itself (since it in turn holds a reference to the manager),
-// for delayed tasks as it can slow down or even prevent normal shut down.
-// So, for tasks on the audio thread, the controller uses WeakPtr which enables
-// us to safely cancel pending polling tasks.
+// Since AudioOutputController uses AudioManager's message loop the controller
+// uses WeakPtr to allow safe cancellation of pending tasks.
 //
-// AudioManager will take care of properly shutting down the audio manager
-// thread.
-//
-#include "media/base/media_export.h"
 
 namespace media {
 
 class MEDIA_EXPORT AudioOutputController
     : public base::RefCountedThreadSafe<AudioOutputController>,
-      public AudioOutputStream::AudioSourceCallback {
+      public AudioOutputStream::AudioSourceCallback,
+      public AudioSourceDiverter,
+      NON_EXPORTED_BASE(public AudioManager::AudioDeviceListener)  {
  public:
   // An event handler that receives events from the AudioOutputController. The
   // following methods are called on the audio manager thread.
@@ -76,6 +71,8 @@ class MEDIA_EXPORT AudioOutputController
     virtual void OnPlaying(AudioOutputController* controller) = 0;
     virtual void OnPaused(AudioOutputController* controller) = 0;
     virtual void OnError(AudioOutputController* controller, int error_code) = 0;
+    virtual void OnDeviceChange(AudioOutputController* controller,
+                                int new_buffer_size, int new_sample_rate) = 0;
 
    protected:
     virtual ~EventHandler() {}
@@ -102,24 +99,18 @@ class MEDIA_EXPORT AudioOutputController
     // Close this synchronous reader.
     virtual void Close() = 0;
 
-    // Poll if data is ready.
-    // Not reliable, as there is no guarantee that renderer is "new-style"
-    // renderer that writes metadata into buffer. After several unsuccessful
-    // attempts caller should assume the data is ready even if that function
-    // returns false.
+    // Check if data is ready.
     virtual bool DataReady() = 0;
   };
 
   // Factory method for creating an AudioOutputController.
   // This also creates and opens an AudioOutputStream on the audio manager
   // thread, and if this is successful, the |event_handler| will receive an
-  // OnCreated() call from the same audio manager thread.
+  // OnCreated() call from the same audio manager thread.  |audio_manager| must
+  // outlive AudioOutputController.
   static scoped_refptr<AudioOutputController> Create(
-      AudioManager* audio_manager,
-      EventHandler* event_handler,
-      const AudioParameters& params,
-      // External synchronous reader for audio controller.
-      SyncReader* sync_reader);
+      AudioManager* audio_manager, EventHandler* event_handler,
+      const AudioParameters& params, SyncReader* sync_reader);
 
   // Methods to control playback of the stream.
 
@@ -145,24 +136,35 @@ class MEDIA_EXPORT AudioOutputController
   // Sets the volume of the audio output stream.
   void SetVolume(double volume);
 
-  ///////////////////////////////////////////////////////////////////////////
-  // AudioSourceCallback methods.
+  // AudioSourceCallback implementation.
   virtual int OnMoreData(AudioBus* dest,
                          AudioBuffersState buffers_state) OVERRIDE;
   virtual int OnMoreIOData(AudioBus* source,
                            AudioBus* dest,
                            AudioBuffersState buffers_state) OVERRIDE;
   virtual void OnError(AudioOutputStream* stream, int code) OVERRIDE;
+  // Deprecated: Currently only used for starting audio playback and for audio
+  // mirroring.
   virtual void WaitTillDataReady() OVERRIDE;
 
+  // AudioDeviceListener implementation.  When called AudioOutputController will
+  // shutdown the existing |stream_|, transition to the kRecreating state,
+  // create a new stream, and then transition back to an equivalent state prior
+  // to being called.
+  virtual void OnDeviceChange() OVERRIDE;
+
+  // AudioSourceDiverter implementation.
+  virtual const AudioParameters& GetAudioParameters() OVERRIDE;
+  virtual void StartDiverting(AudioOutputStream* to_stream) OVERRIDE;
+  virtual void StopDiverting() OVERRIDE;
+
  protected:
-    // Internal state of the source.
+  // Internal state of the source.
   enum State {
     kEmpty,
     kCreated,
-    kPlaying,
     kStarting,
-    kPausedWhenStarting,
+    kPlaying,
     kPaused,
     kClosed,
     kError,
@@ -176,12 +178,11 @@ class MEDIA_EXPORT AudioOutputController
   static const int kPollNumAttempts;
   static const int kPollPauseInMilliseconds;
 
-  AudioOutputController(EventHandler* handler,
-                        SyncReader* sync_reader,
-                        const AudioParameters& params);
+  AudioOutputController(AudioManager* audio_manager, EventHandler* handler,
+                        const AudioParameters& params, SyncReader* sync_reader);
 
   // The following methods are executed on the audio manager thread.
-  void DoCreate(AudioManager* audio_manager);
+  void DoCreate(bool is_for_device_change);
   void DoPlay();
   void PollAndStartIfDataReady();
   void DoPause();
@@ -189,17 +190,31 @@ class MEDIA_EXPORT AudioOutputController
   void DoClose();
   void DoSetVolume(double volume);
   void DoReportError(int code);
+  void DoStartDiverting(AudioOutputStream* to_stream);
+  void DoStopDiverting();
 
-  // Helper method that starts physical stream.
+  // Helper methods that start/stop physical stream.
   void StartStream();
+  void StopStream();
 
   // Helper method that stops, closes, and NULLs |*stream_|.
-  // Signals event when done if it is not NULL.
-  void DoStopCloseAndClearStream(base::WaitableEvent *done);
+  void DoStopCloseAndClearStream();
 
-  // |handler_| may be called only if |state_| is not kClosed.
-  EventHandler* handler_;
+  // Sanity-check that entry/exit to OnMoreIOData() by the hardware audio thread
+  // happens only between AudioOutputStream::Start() and Stop().
+  void AllowEntryToOnMoreIOData();
+  void DisallowEntryToOnMoreIOData();
+
+  AudioManager* const audio_manager_;
+  const AudioParameters params_;
+  EventHandler* const handler_;
+
+  // Note: It's important to invalidate the weak pointers whenever stream_ is
+  // changed.  See comment for weak_this_.
   AudioOutputStream* stream_;
+
+  // When non-NULL, audio is being diverted to this stream.
+  AudioOutputStream* diverting_to_stream_;
 
   // The current volume of the audio stream.
   double volume_;
@@ -209,26 +224,25 @@ class MEDIA_EXPORT AudioOutputController
   // is not required for reading on the audio manager thread.
   State state_;
 
-  // The |lock_| must be acquired whenever we access |state_| from a thread
-  // other than the audio manager thread.
-  base::Lock lock_;
+  // Binary semaphore, used to ensure that only one thread enters the
+  // OnMoreIOData() method, and only when it is valid to do so.  This is for
+  // sanity-checking the behavior of platform implementations of
+  // AudioOutputStream.  In other words, multiple contention is not expected,
+  // nor in the design here.
+  base::AtomicRefCount num_allowed_io_;
 
   // SyncReader is used only in low latency mode for synchronous reading.
-  SyncReader* sync_reader_;
+  SyncReader* const sync_reader_;
 
   // The message loop of audio manager thread that this object runs on.
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
+  const scoped_refptr<base::MessageLoopProxy> message_loop_;
 
   // When starting stream we wait for data to become available.
   // Number of times left.
   int number_polling_attempts_left_;
 
-  AudioParameters params_;
-
-  // Used to post delayed tasks to ourselves that we can cancel.
-  // We don't want the tasks to hold onto a reference as it will slow down
-  // shutdown and force it to wait for the most delayed task.
-  // Also, if we're shutting down, we do not want to poll for more data.
+  // Used to auto-cancel the delayed tasks that are created to poll for data
+  // (when starting-up a stream).
   base::WeakPtrFactory<AudioOutputController> weak_this_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputController);

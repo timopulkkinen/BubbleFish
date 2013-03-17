@@ -6,12 +6,12 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
@@ -21,7 +21,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "unicode/regex.h"
+#include "third_party/icu/public/i18n/unicode/regex.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
@@ -54,6 +55,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     file_system_context_ =
         new FileSystemContext(
             FileSystemTaskRunners::CreateMockTaskRunners(),
+            ExternalMountPoints::CreateRefCounted().get(),
             special_storage_policy_, NULL,
             temp_dir_.path(),
             CreateAllowFileAccessOptions());
@@ -62,7 +64,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
         GURL("http://remote/"), kFileSystemTypeTemporary, true,  // create
         base::Bind(&FileSystemDirURLRequestJobTest::OnValidateFileSystem,
                    weak_factory_.GetWeakPtr()));
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     net::URLRequest::Deprecated::RegisterProtocolFactory(
         "filesystem", &FileSystemDirURLRequestJobFactory);
@@ -82,7 +84,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   void TestRequestHelper(const GURL& url, bool run_to_completion) {
-    delegate_.reset(new TestDelegate());
+    delegate_.reset(new net::TestDelegate());
     delegate_->set_quit_on_redirect(true);
     request_.reset(empty_context_.CreateRequest(url, delegate_.get()));
     job_ = new FileSystemDirURLRequestJob(
@@ -104,10 +106,11 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     TestRequestHelper(url, false);
   }
 
-  FileSystemURL CreateURL(const FilePath& file_path) {
-    return FileSystemURL(GURL("http://remote"),
-                         fileapi::kFileSystemTypeTemporary,
-                         file_path);
+  FileSystemURL CreateURL(const base::FilePath& file_path) {
+    return file_system_context_->CreateCrackedFileSystemURL(
+        GURL("http://remote"),
+        fileapi::kFileSystemTypeTemporary,
+        file_path);
   }
 
   FileSystemOperationContext* NewOperationContext() {
@@ -118,7 +121,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   void CreateDirectory(const base::StringPiece& dir_name) {
-    FilePath path = FilePath().AppendASCII(dir_name);
+    base::FilePath path = base::FilePath().AppendASCII(dir_name);
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->CreateDirectory(
         context.get(),
@@ -128,22 +131,22 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   void EnsureFileExists(const base::StringPiece file_name) {
-    FilePath path = FilePath().AppendASCII(file_name);
+    base::FilePath path = base::FilePath().AppendASCII(file_name);
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->EnsureFileExists(
         context.get(), CreateURL(path), NULL));
   }
 
   void TruncateFile(const base::StringPiece file_name, int64 length) {
-    FilePath path = FilePath().AppendASCII(file_name);
+    base::FilePath path = base::FilePath().AppendASCII(file_name);
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->Truncate(
         context.get(), CreateURL(path), length));
   }
 
-  PlatformFileError GetFileInfo(const FilePath& path,
-                   base::PlatformFileInfo* file_info,
-                   FilePath* platform_file_path) {
+  base::PlatformFileError GetFileInfo(const base::FilePath& path,
+                                      base::PlatformFileInfo* file_info,
+                                      base::FilePath* platform_file_path) {
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     return file_util()->GetFileInfo(context.get(),
                                     CreateURL(path),
@@ -212,9 +215,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   // leaks caused by tasks posted during shutdown.
   MessageLoop message_loop_;
 
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   net::URLRequestContext empty_context_;
-  scoped_ptr<TestDelegate> delegate_;
+  scoped_ptr<net::TestDelegate> delegate_;
   scoped_ptr<net::URLRequest> request_;
   scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
@@ -287,7 +290,7 @@ TEST_F(FileSystemDirURLRequestJobTest, Cancel) {
   TestRequestNoRun(CreateFileSystemURL("foo/"));
   // Run StartAsync() and only StartAsync().
   MessageLoop::current()->DeleteSoon(FROM_HERE, request_.release());
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   // If we get here, success! we didn't crash!
 }
 

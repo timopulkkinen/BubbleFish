@@ -6,39 +6,49 @@
 
 #include <algorithm>
 
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
-#include "base/threading/platform_thread.h"
 #include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_parameters.h"
 #include "media/audio/shared_memory_util.h"
 
-#if defined(OS_WIN)
-const int kMinIntervalBetweenReadCallsInMs = 10;
-#endif
-
 using media::AudioBus;
+
+namespace content {
 
 AudioSyncReader::AudioSyncReader(base::SharedMemory* shared_memory,
                                  const media::AudioParameters& params,
                                  int input_channels)
     : shared_memory_(shared_memory),
-      input_channels_(input_channels) {
+      input_channels_(input_channels),
+      renderer_callback_count_(0),
+      renderer_missed_callback_count_(0) {
   packet_size_ = media::PacketSizeInBytes(shared_memory_->created_size());
-  DCHECK_EQ(packet_size_, AudioBus::CalculateMemorySize(params));
-  output_bus_ = AudioBus::WrapMemory(params, shared_memory->memory());
-
+  int input_memory_size = 0;
+  int output_memory_size = AudioBus::CalculateMemorySize(params);
   if (input_channels_ > 0) {
     // The input storage is after the output storage.
-    int output_memory_size = AudioBus::CalculateMemorySize(params);
     int frames = params.frames_per_buffer();
+    input_memory_size = AudioBus::CalculateMemorySize(input_channels_, frames);
     char* input_data =
         static_cast<char*>(shared_memory_->memory()) + output_memory_size;
     input_bus_ = AudioBus::WrapMemory(input_channels_, frames, input_data);
   }
+  DCHECK_EQ(packet_size_, output_memory_size + input_memory_size);
+  output_bus_ = AudioBus::WrapMemory(params, shared_memory->memory());
 }
 
 AudioSyncReader::~AudioSyncReader() {
+  if (!renderer_callback_count_)
+    return;
+
+  // Recording the percentage of deadline misses gives us a rough overview of
+  // how many users might be running into audio glitches.
+  int percentage_missed =
+      100.0 * renderer_missed_callback_count_ / renderer_callback_count_;
+  UMA_HISTOGRAM_PERCENTAGE(
+      "Media.AudioRendererMissedDeadline", percentage_missed);
 }
 
 bool AudioSyncReader::DataReady() {
@@ -59,21 +69,9 @@ void AudioSyncReader::UpdatePendingBytes(uint32 bytes) {
 }
 
 int AudioSyncReader::Read(AudioBus* source, AudioBus* dest) {
-#if defined(OS_WIN)
-  // HACK: yield if reader is called too often.
-  // Problem is lack of synchronization between host and renderer. We cannot be
-  // sure if renderer already filled the buffer, and due to all the plugins we
-  // cannot change the API, so we yield if previous call was too recent.
-  // Optimization: if renderer is "new" one that writes length of data we can
-  // stop yielding the moment length is written -- not ideal solution,
-  // but better than nothing.
-  while (!DataReady() &&
-         ((base::Time::Now() - previous_call_time_).InMilliseconds() <
-          kMinIntervalBetweenReadCallsInMs)) {
-    base::PlatformThread::YieldCurrentThread();
-  }
-  previous_call_time_ = base::Time::Now();
-#endif
+  ++renderer_callback_count_;
+  if (!DataReady())
+    ++renderer_missed_callback_count_;
 
   // Copy optional synchronized live audio input for consumption by renderer
   // process.
@@ -155,3 +153,5 @@ bool AudioSyncReader::PrepareForeignSocketHandle(
   return false;
 }
 #endif
+
+}  // namespace content

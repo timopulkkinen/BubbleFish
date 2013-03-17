@@ -5,14 +5,21 @@
 #ifndef CHROME_BROWSER_UI_HOST_DESKTOP_H_
 #define CHROME_BROWSER_UI_HOST_DESKTOP_H_
 
+#include "ui/gfx/native_widget_types.h"
+
+class Browser;
+
 namespace chrome {
 
 // A value that specifies what desktop environment hosts a particular piece of
-// UI.
-// Note that HOST_DESKTOP_TYPE_ASH is always used on ChromeOS.
+// UI. Please take a look at the following document for details on choosing the
+// right HostDesktopType:
+// http://sites.google.com/a/chromium.org/dev/developers/design-documents/aura/multi-desktop
 enum HostDesktopType {
+  HOST_DESKTOP_TYPE_FIRST = 0,
+
   // The UI is hosted on the system native desktop.
-  HOST_DESKTOP_TYPE_NATIVE = 0,
+  HOST_DESKTOP_TYPE_NATIVE = HOST_DESKTOP_TYPE_FIRST,
 
   // The UI is hosted in the synthetic Ash desktop.
 #if defined(OS_CHROMEOS)
@@ -24,14 +31,13 @@ enum HostDesktopType {
   HOST_DESKTOP_TYPE_COUNT
 };
 
-/*
-TODO(beng): implement utilities as needed, e.g.:
-HostDesktopType GetActiveDesktop();
 HostDesktopType GetHostDesktopTypeForNativeView(gfx::NativeView native_view);
 HostDesktopType GetHostDesktopTypeForNativeWindow(
     gfx::NativeWindow native_window);
-HostDesktopType GetHostDesktopTypeForBrowser(Browser* browser);
-*/
+
+// Returns the type of host desktop most likely to be in use.  This is the one
+// most recently activated by the user.
+HostDesktopType GetActiveDesktop();
 
 }  // namespace chrome
 

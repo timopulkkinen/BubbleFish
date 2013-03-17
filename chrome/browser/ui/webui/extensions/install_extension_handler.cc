@@ -12,11 +12,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/common/extensions/extension_switch_utils.h"
+#include "chrome/common/extensions/feature_switch.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -29,14 +29,13 @@ InstallExtensionHandler::~InstallExtensionHandler() {
 }
 
 void InstallExtensionHandler::GetLocalizedValues(
-    DictionaryValue* localized_strings) {
-  DCHECK(localized_strings);
-  localized_strings->SetString(
+    content::WebUIDataSource* source) {
+  source->AddString(
       "extensionSettingsInstallDropTarget",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALL_DROP_TARGET));
-  localized_strings->SetBoolean(
+  source->AddBoolean(
       "offStoreInstallEnabled",
-      extensions::switch_utils::IsEasyOffStoreInstallEnabled());
+      extensions::FeatureSwitch::easy_off_store_install()->IsEnabled());
 }
 
 void InstallExtensionHandler::RegisterMessages() {
@@ -66,7 +65,7 @@ void InstallExtensionHandler::HandleStartDragMessage(const ListValue* args) {
     return;
   }
 
-  file_to_install_ = FilePath::FromWStringHack(
+  file_to_install_ = base::FilePath::FromWStringHack(
       UTF16ToWide(drop_data->filenames.front().path));
 }
 
@@ -80,16 +79,16 @@ void InstallExtensionHandler::HandleInstallMessage(const ListValue* args) {
     return;
   }
 
-  Browser* browser = browser::FindBrowserWithWebContents(
-      web_ui()->GetWebContents());
-  Profile* profile = browser->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      web_ui()->GetWebContents()->GetBrowserContext());
   scoped_refptr<extensions::CrxInstaller> crx_installer(
       extensions::CrxInstaller::Create(
           extensions::ExtensionSystem::Get(profile)->extension_service(),
-          chrome::CreateExtensionInstallPromptWithBrowser(browser)));
+          new ExtensionInstallPrompt(web_ui()->GetWebContents())));
   crx_installer->set_error_on_unsupported_requirements(true);
   crx_installer->set_off_store_install_allow_reason(
       extensions::CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
+  crx_installer->set_install_wait_for_idle(false);
 
   const bool kCaseSensitive = false;
 

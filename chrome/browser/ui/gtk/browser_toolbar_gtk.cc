@@ -15,10 +15,11 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -52,7 +53,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/accelerators/accelerator_gtk.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -100,8 +100,10 @@ BrowserToolbarGtk::BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window)
       model_(browser->toolbar_model()),
       is_wrench_menu_model_valid_(true),
       browser_(browser),
-      window_(window) {
-  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+      window_(window),
+      zoom_callback_(base::Bind(&BrowserToolbarGtk::OnZoomLevelChanged,
+                                base::Unretained(this))) {
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_, false, false));
 
   chrome::AddCommandObserver(browser_, IDC_BACK, this);
   chrome::AddCommandObserver(browser_, IDC_FORWARD, this);
@@ -125,6 +127,9 @@ BrowserToolbarGtk::~BrowserToolbarGtk() {
   offscreen_entry_.Destroy();
 
   wrench_menu_.reset();
+
+  HostZoomMap::GetForBrowserContext(
+      browser()->profile())->RemoveZoomLevelChangedCallback(zoom_callback_);
 }
 
 void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
@@ -136,10 +141,17 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
 
   offscreen_entry_.Own(gtk_entry_new());
 
-  show_home_button_.Init(prefs::kShowHomeButton, profile->GetPrefs(), this);
-  home_page_.Init(prefs::kHomePage, profile->GetPrefs(), this);
+  base::Closure callback =
+      base::Bind(&BrowserToolbarGtk::SetUpDragForHomeButton,
+                 base::Unretained(this));
+
+  show_home_button_.Init(prefs::kShowHomeButton, profile->GetPrefs(),
+                         base::Bind(&BrowserToolbarGtk::UpdateShowHomeButton,
+                                    base::Unretained(this)));
+  home_page_.Init(prefs::kHomePage, profile->GetPrefs(), callback);
   home_page_is_new_tab_page_.Init(prefs::kHomePageIsNewTabPage,
-                                  profile->GetPrefs(), this);
+                                  profile->GetPrefs(),
+                                  callback);
 
   event_box_ = gtk_event_box_new();
   // Make the event box transparent so themes can use transparent toolbar
@@ -235,9 +247,8 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
   // The bookmark menu model needs to be able to force the wrench menu to close.
   wrench_menu_model_->bookmark_sub_menu_model()->SetMenuGtk(wrench_menu_.get());
 
-  registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::Source<HostZoomMap>(
-          HostZoomMap::GetForBrowserContext(profile)));
+  HostZoomMap::GetForBrowserContext(
+      browser()->profile())->AddZoomLevelChangedCallback(zoom_callback_);
 
   if (ShouldOnlyShowLocation()) {
     gtk_widget_show(event_box_);
@@ -250,8 +261,10 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
     if (actions_toolbar_->button_count() == 0)
       gtk_widget_hide(actions_toolbar_->widget());
   }
+
   // Initialize pref-dependent UI state.
-  NotifyPrefChanged(NULL);
+  UpdateShowHomeButton();
+  SetUpDragForHomeButton();
 
   // Because the above does a recursive show all on all widgets we need to
   // update the icon visibility to hide them.
@@ -267,7 +280,7 @@ void BrowserToolbarGtk::SetViewIDs() {
   ViewIDUtil::SetID(forward_->widget(), VIEW_ID_FORWARD_BUTTON);
   ViewIDUtil::SetID(reload_->widget(), VIEW_ID_RELOAD_BUTTON);
   ViewIDUtil::SetID(home_->widget(), VIEW_ID_HOME_BUTTON);
-  ViewIDUtil::SetID(location_bar_->widget(), VIEW_ID_LOCATION_BAR);
+  ViewIDUtil::SetID(location_bar_->widget(), VIEW_ID_OMNIBOX);
   ViewIDUtil::SetID(wrench_menu_button_->widget(), VIEW_ID_APP_MENU);
 }
 
@@ -355,12 +368,13 @@ bool BrowserToolbarGtk::AlwaysShowIconForCmd(int command_id) const {
 
 bool BrowserToolbarGtk::GetAcceleratorForCommandId(
     int id,
-    ui::Accelerator* accelerator) {
-  const ui::AcceleratorGtk* accelerator_gtk =
+    ui::Accelerator* out_accelerator) {
+  const ui::Accelerator* accelerator =
       AcceleratorsGtk::GetInstance()->GetPrimaryAcceleratorForCommand(id);
-  if (accelerator_gtk)
-    *accelerator = *accelerator_gtk;
-  return !!accelerator_gtk;
+  if (!accelerator)
+    return false;
+  *out_accelerator = *accelerator;
+  return true;
 }
 
 // content::NotificationObserver -----------------------------------------------
@@ -368,9 +382,7 @@ bool BrowserToolbarGtk::GetAcceleratorForCommandId(
 void BrowserToolbarGtk::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    NotifyPrefChanged(content::Details<std::string>(details).ptr());
-  } else if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     // Update the spacing around the menu buttons
     bool use_gtk = theme_service_->UsingNativeTheme();
     int border = use_gtk ? 0 : 2;
@@ -409,18 +421,6 @@ void BrowserToolbarGtk::Observe(int type,
   } else if (type == chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED) {
     is_wrench_menu_model_valid_ = false;
     gtk_widget_queue_draw(wrench_menu_button_->widget());
-  } else if (type == content::NOTIFICATION_ZOOM_LEVEL_CHANGED) {
-    // Since BrowserToolbarGtk create a new |wrench_menu_model_| in
-    // RebuildWrenchMenu(), the ordering of the observers of
-    // NOTIFICATION_ZOOM_LEVEL_CHANGED can change, and result in subtle bugs
-    // like http://crbug.com/118823. Rather than depending on the ordering
-    // of the notification observers, always update the WrenchMenuModel before
-    // updating the WrenchMenu.
-    wrench_menu_model_->UpdateZoomControls();
-
-    // If our zoom level changed, we need to tell the menu to update its state,
-    // since the menu could still be open.
-    wrench_menu_->UpdateMenu();
   } else {
     NOTREACHED();
   }
@@ -442,8 +442,22 @@ bool BrowserToolbarGtk::IsWrenchMenuShowing() const {
 
 // BrowserToolbarGtk, private --------------------------------------------------
 
-void BrowserToolbarGtk::SetUpDragForHomeButton(bool enable) {
-  if (enable) {
+void BrowserToolbarGtk::OnZoomLevelChanged(const std::string& host) {
+  // Since BrowserToolbarGtk create a new |wrench_menu_model_| in
+  // RebuildWrenchMenu(), the ordering of the observers of HostZoomMap
+  // can change, and result in subtle bugs like http://crbug.com/118823.
+  // Rather than depending on the ordering of the observers, always update
+  // the WrenchMenuModel before updating the WrenchMenu.
+  wrench_menu_model_->UpdateZoomControls();
+
+  // If our zoom level changed, we need to tell the menu to update its state,
+  // since the menu could still be open.
+  wrench_menu_->UpdateMenu();
+}
+
+
+void BrowserToolbarGtk::SetUpDragForHomeButton() {
+  if (!home_page_.IsManaged() && !home_page_is_new_tab_page_.IsManaged()) {
     gtk_drag_dest_set(home_->widget(), GTK_DEST_DEFAULT_ALL,
                       NULL, 0, GDK_ACTION_COPY);
     static const int targets[] = { ui::TEXT_PLAIN, ui::TEXT_URI_LIST, -1 };
@@ -500,7 +514,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
       window_->tabstrip()->GetTabStripOriginForWidget(widget);
   // Fill the entire region with the toolbar color.
   GdkColor color = theme_service_->GetGdkColor(
-      ThemeService::COLOR_TOOLBAR);
+      ThemeProperties::COLOR_TOOLBAR);
   gdk_cairo_set_source_color(cr, &color);
   cairo_fill(cr);
 
@@ -524,12 +538,12 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
   if (window_->ShouldDrawContentDropShadow()) {
     // Leave room to draw rounded corners.
-    area = area.Subtract(right).Subtract(left);
+    area.Subtract(right);
+    area.Subtract(left);
   }
 
-  const gfx::Image* background =
-      theme_service_->GetImageNamed(IDR_THEME_TOOLBAR);
-  background->ToCairo()->SetSource(
+  gfx::Image background = theme_service_->GetImageNamed(IDR_THEME_TOOLBAR);
+  background.ToCairo()->SetSource(
       cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
   cairo_rectangle(cr, area.x(), area.y(), area.width(), area.height());
@@ -573,7 +587,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
     // Draw the background. CAIRO_OPERATOR_IN uses the existing pixel data as
     // an alpha mask.
-    background->ToCairo()->SetSource(copy_cr, widget,
+    background.ToCairo()->SetSource(copy_cr, widget,
                                      tabstrip_origin.x(), tabstrip_origin.y());
     cairo_set_operator(copy_cr, CAIRO_OPERATOR_IN);
     cairo_pattern_set_extend(cairo_get_source(copy_cr), CAIRO_EXTEND_REPEAT);
@@ -650,26 +664,13 @@ void BrowserToolbarGtk::OnDragDataReceived(GtkWidget* widget,
     home_page_.SetValue(url.spec());
 }
 
-void BrowserToolbarGtk::NotifyPrefChanged(const std::string* pref) {
-  if (!pref || *pref == prefs::kShowHomeButton) {
-    bool visible = show_home_button_.GetValue() && !ShouldOnlyShowLocation();
-    gtk_widget_set_visible(home_->widget(), visible);
-  }
-
-  if (!pref ||
-      *pref == prefs::kHomePage ||
-      *pref == prefs::kHomePageIsNewTabPage)
-    SetUpDragForHomeButton(!home_page_.IsManaged() &&
-                           !home_page_is_new_tab_page_.IsManaged());
-}
-
 bool BrowserToolbarGtk::ShouldOnlyShowLocation() const {
   // If we're a popup window, only show the location bar (omnibox).
   return !browser_->is_type_tabbed();
 }
 
 void BrowserToolbarGtk::RebuildWrenchMenu() {
-  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_, false, false));
   wrench_menu_.reset(new MenuGtk(this, wrench_menu_model_.get()));
   // The bookmark menu model needs to be able to force the wrench menu to close.
   wrench_menu_model_->bookmark_sub_menu_model()->SetMenuGtk(wrench_menu_.get());
@@ -695,7 +696,7 @@ gboolean BrowserToolbarGtk::OnWrenchMenuButtonExpose(GtkWidget* sender,
   gtk_widget_get_allocation(sender, &allocation);
 
   // Draw the chrome app menu icon onto the canvas.
-  const SkBitmap* badge = theme_service_->GetBitmapNamed(resource_id);
+  const gfx::ImageSkia* badge = theme_service_->GetImageSkiaNamed(resource_id);
   gfx::CanvasSkiaPaint canvas(expose, false);
   int x_offset = base::i18n::IsRTL() ? 0 : allocation.width - badge->width();
   int y_offset = 0;
@@ -704,4 +705,9 @@ gboolean BrowserToolbarGtk::OnWrenchMenuButtonExpose(GtkWidget* sender,
                       allocation.y + y_offset);
 
   return FALSE;
+}
+
+void BrowserToolbarGtk::UpdateShowHomeButton() {
+  bool visible = show_home_button_.GetValue() && !ShouldOnlyShowLocation();
+  gtk_widget_set_visible(home_->widget(), visible);
 }

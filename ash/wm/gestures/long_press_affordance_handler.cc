@@ -65,12 +65,13 @@ views::Widget* CreateAffordanceWidget(aura::RootWindow* root_window) {
   params.keep_on_top = true;
   params.accept_events = false;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.context = root_window;
   params.transparent = true;
   widget->Init(params);
   widget->SetOpacity(0xFF);
-  widget->GetNativeWindow()->SetParent(
-      ash::GetRootWindowController(root_window)->GetContainer(
-          ash::internal::kShellWindowId_OverlayContainer));
+  ash::GetRootWindowController(root_window)->GetContainer(
+      ash::internal::kShellWindowId_OverlayContainer)->AddChild(
+          widget->GetNativeWindow());
   return widget;
 }
 
@@ -105,22 +106,22 @@ void PaintAffordanceGlow(gfx::Canvas* canvas,
   int radius = (end_radius + start_radius) / 2;
   int glow_width = end_radius - start_radius;
   sk_center.iset(center.x(), center.y());
-  SkShader* shader = SkGradientShader::CreateTwoPointRadial(
-      sk_center,
-      SkIntToScalar(start_radius),
-      sk_center,
-      SkIntToScalar(end_radius),
-      colors,
-      pos,
-      num_colors,
-      SkShader::kClamp_TileMode);
+  skia::RefPtr<SkShader> shader = skia::AdoptRef(
+      SkGradientShader::CreateTwoPointRadial(
+          sk_center,
+          SkIntToScalar(start_radius),
+          sk_center,
+          SkIntToScalar(end_radius),
+          colors,
+          pos,
+          num_colors,
+          SkShader::kClamp_TileMode));
   DCHECK(shader);
   SkPaint paint;
   paint.setStyle(SkPaint::kStroke_Style);
   paint.setStrokeWidth(glow_width);
-  paint.setShader(shader);
+  paint.setShader(shader.get());
   paint.setAntiAlias(true);
-  shader->unref();
   SkPath arc_path;
   arc_path.addArc(SkRect::MakeXYWH(center.x() - radius,
                                    center.y() - radius,
@@ -200,12 +201,12 @@ class LongPressAffordanceHandler::LongPressAffordanceView
                       GetPreferredSize().height() / 2);
     canvas->Save();
 
-    ui::Transform scale;
-    scale.SetScale(current_scale_, current_scale_);
+    gfx::Transform scale;
+    scale.Scale(current_scale_, current_scale_);
     // We want to scale from the center.
-    canvas->Translate(gfx::Point(center.x(), center.y()));
+    canvas->Translate(center.OffsetFromOrigin());
     canvas->Transform(scale);
-    canvas->Translate(gfx::Point(-center.x(), -center.y()));
+    canvas->Translate(-center.OffsetFromOrigin());
 
     // Paint affordance glow
     int start_radius = kAffordanceInnerRadius - kAffordanceGlowWidth;
@@ -261,7 +262,8 @@ void LongPressAffordanceHandler::ProcessEvent(aura::Window* target,
       tap_down_location_ = event->root_location();
       tap_down_touch_id_ = touch_id;
       current_animation_type_ = GROW_ANIMATION;
-      tap_down_display_id_ = gfx::Screen::GetDisplayNearestWindow(target).id();
+      tap_down_display_id_ =
+          Shell::GetScreen()->GetDisplayNearestWindow(target).id();
       timer_.Start(FROM_HERE,
                    base::TimeDelta::FromMilliseconds(timer_start_time_ms),
                    this,

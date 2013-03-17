@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "webkit/blob/blob_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace base {
 class TaskRunner;
@@ -22,10 +22,10 @@ namespace webkit_blob {
 // the file to be deleted upon final release and/or to notify a consumer
 // when final release occurs. This class is single-threaded and should
 // only be invoked on the IO thread in chrome.
-class BLOB_EXPORT ShareableFileReference
+class WEBKIT_STORAGE_EXPORT ShareableFileReference
     : public base::RefCounted<ShareableFileReference> {
  public:
-  typedef base::Callback<void(const FilePath&)> FinalReleaseCallback;
+  typedef base::Callback<void(const base::FilePath&)> FinalReleaseCallback;
 
   enum FinalReleasePolicy {
     DELETE_ON_FINAL_RELEASE,
@@ -34,18 +34,18 @@ class BLOB_EXPORT ShareableFileReference
 
   // Returns a ShareableFileReference for the given path, if no reference
   // for this path exists returns NULL.
-  static scoped_refptr<ShareableFileReference> Get(const FilePath& path);
+  static scoped_refptr<ShareableFileReference> Get(const base::FilePath& path);
 
   // Returns a ShareableFileReference for the given path, creating a new
   // reference if none yet exists. If there's a pre-existing reference for
   // the path, the deletable parameter of this method is ignored.
   static scoped_refptr<ShareableFileReference> GetOrCreate(
-      const FilePath& path,
+      const base::FilePath& path,
       FinalReleasePolicy policy,
       base::TaskRunner* file_task_runner);
 
   // The full file path.
-  const FilePath& path() const { return path_; }
+  const base::FilePath& path() const { return path_; }
 
   // Whether it's to be deleted on final release.
   FinalReleasePolicy final_release_policy() const {
@@ -58,12 +58,12 @@ class BLOB_EXPORT ShareableFileReference
   friend class base::RefCounted<ShareableFileReference>;
 
   ShareableFileReference(
-      const FilePath& path,
+      const base::FilePath& path,
       FinalReleasePolicy policy,
       base::TaskRunner* file_task_runner);
   ~ShareableFileReference();
 
-  const FilePath path_;
+  const base::FilePath path_;
   const FinalReleasePolicy final_release_policy_;
   const scoped_refptr<base::TaskRunner> file_task_runner_;
   std::vector<FinalReleaseCallback> final_release_callbacks_;

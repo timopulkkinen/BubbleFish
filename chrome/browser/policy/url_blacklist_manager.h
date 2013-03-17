@@ -14,12 +14,12 @@
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
-#include "chrome/common/extensions/matcher/url_matcher.h"
-#include "content/public/browser/notification_observer.h"
+#include "base/prefs/public/pref_change_registrar.h"
+#include "extensions/common/matcher/url_matcher.h"
 
 class GURL;
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class ListValue;
@@ -48,6 +48,9 @@ class URLBlacklist {
 
   // Returns true if the URL is blocked.
   bool IsURLBlocked(const GURL& url) const;
+
+  // Returns the number of items in the list.
+  size_t Size() const;
 
   // Returns true if the URL has a standard scheme. Only URLs with standard
   // schemes are filtered.
@@ -113,7 +116,7 @@ class URLBlacklist {
 // exists in UI, then a potential destruction on IO will come after any task
 // posted to IO from that method on UI. This is used to go through IO before
 // the actual update starts, and grab a WeakPtr.
-class URLBlacklistManager : public content::NotificationObserver {
+class URLBlacklistManager {
  public:
   // Must be constructed on the UI thread.
   explicit URLBlacklistManager(PrefService* pref_service);
@@ -131,7 +134,7 @@ class URLBlacklistManager : public content::NotificationObserver {
   virtual void SetBlacklist(scoped_ptr<URLBlacklist> blacklist);
 
   // Registers the preferences related to blacklisting in the given PrefService.
-  static void RegisterPrefs(PrefService* pref_service);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
  protected:
   // Used to delay updating the blacklist while the preferences are
@@ -148,10 +151,6 @@ class URLBlacklistManager : public content::NotificationObserver {
                   scoped_ptr<base::ListValue> allow);
 
  private:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // ---------
   // UI thread
   // ---------

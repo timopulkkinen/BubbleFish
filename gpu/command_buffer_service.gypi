@@ -5,12 +5,10 @@
 {
   'include_dirs': [
     '..',
-    '<(DEPTH)/third_party/khronos',
   ],
   'all_dependent_settings': {
     'include_dirs': [
       '..',
-      '<(DEPTH)/third_party/khronos',
     ],
   },
   'dependencies': [
@@ -21,6 +19,9 @@
     '../ui/surface/surface.gyp:surface',
     '../ui/ui.gyp:ui',
     '../third_party/angle/src/build_angle.gyp:translator_glsl',
+    '../third_party/khronos/khronos.gyp:khronos_headers',
+    '../third_party/smhasher/smhasher.gyp:cityhash',
+    '../third_party/re2/re2.gyp:re2',
   ],
   'sources': [
     'command_buffer/service/buffer_manager.h',
@@ -34,6 +35,10 @@
     'command_buffer/service/common_decoder.h',
     'command_buffer/service/context_group.h',
     'command_buffer/service/context_group.cc',
+    'command_buffer/service/context_state.h',
+    'command_buffer/service/context_state_autogen.h',
+    'command_buffer/service/context_state_impl_autogen.h',
+    'command_buffer/service/context_state.cc',
     'command_buffer/service/feature_info.h',
     'command_buffer/service/feature_info.cc',
     'command_buffer/service/framebuffer_manager.h',
@@ -47,14 +52,22 @@
     'command_buffer/service/gles2_cmd_validation.cc',
     'command_buffer/service/gles2_cmd_validation_autogen.h',
     'command_buffer/service/gles2_cmd_validation_implementation_autogen.h',
+    'command_buffer/service/gl_context_virtual.cc',
+    'command_buffer/service/gl_context_virtual.h',
+    'command_buffer/service/gl_state_restorer_impl.cc',
+    'command_buffer/service/gl_state_restorer_impl.h',
     'command_buffer/service/gl_utils.h',
     'command_buffer/service/gpu_scheduler.h',
     'command_buffer/service/gpu_scheduler.cc',
     'command_buffer/service/gpu_scheduler_mock.h',
     'command_buffer/service/gpu_switches.h',
     'command_buffer/service/gpu_switches.cc',
+    'command_buffer/service/gpu_tracer.h',
+    'command_buffer/service/gpu_tracer.cc',
     'command_buffer/service/id_manager.h',
     'command_buffer/service/id_manager.cc',
+    'command_buffer/service/image_manager.cc',
+    'command_buffer/service/image_manager.h',
     'command_buffer/service/mailbox_manager.cc',
     'command_buffer/service/mailbox_manager.h',
     'command_buffer/service/memory_program_cache.h',
@@ -97,7 +110,7 @@
     }],
     ['ui_compositor_image_transport==1', {
       'include_dirs': [
-        '<(DEPTH)/third_party/angle/include',
+        '../third_party/angle/include',
       ],
     }],
   ],

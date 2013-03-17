@@ -2,17 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/views/browser_actions_container.h"
+
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/views/browser_actions_container.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/test/test_utils.h"
 
 using extensions::Extension;
@@ -238,53 +232,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, ForceHide) {
   std::string idA = browser_actions_bar()->GetExtensionId(0);
 
   // Force hide this browser action.
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   service->extension_prefs()->SetBrowserActionVisibility(
       service->GetExtensionById(idA, false), false);
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
-
-  ReloadExtension(idA);
-
-  // The browser action should become visible again.
-  EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
-}
-
-IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, TestCrash57536) {
-  LOG(INFO) << "Test starting\n" << std::flush;
-
-  LOG(INFO) << "Loading extension\n" << std::flush;
-
-  // Load extension A (contains browser action).
-  const Extension* extension = LoadExtension(
-      test_data_dir_.AppendASCII("api_test")
-      .AppendASCII("browser_action")
-      .AppendASCII("crash_57536"));
-  ASSERT_TRUE(extension);
-
-  LOG(INFO) << "Creating bitmap\n" << std::flush;
-
-  // Create and cache and empty bitmap.
-  SkBitmap bitmap;
-  bitmap.setConfig(SkBitmap::kARGB_8888_Config,
-                    Extension::kBrowserActionIconMaxSize,
-                    Extension::kBrowserActionIconMaxSize);
-  bitmap.allocPixels();
-
-  LOG(INFO) << "Set as cached image\n" << std::flush;
-
-  gfx::Size size(Extension::kBrowserActionIconMaxSize,
-                 Extension::kBrowserActionIconMaxSize);
-  const ExtensionIconSet* default_icon =
-      extension->browser_action()->default_icon();
-  const std::string path =
-      default_icon->Get(extension_misc::EXTENSION_ICON_ACTION,
-                        ExtensionIconSet::MATCH_EXACTLY);
-
-  extension->SetCachedImage(extension->GetResource(path), bitmap, size);
-
-  LOG(INFO) << "Disabling extension\n" << std::flush;
-  DisableExtension(extension->id());
-  LOG(INFO) << "Enabling extension\n" << std::flush;
-  EnableExtension(extension->id());
-  LOG(INFO) << "Test ending\n" << std::flush;
 }

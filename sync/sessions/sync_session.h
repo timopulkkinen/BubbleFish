@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,11 +23,11 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 #include "sync/sessions/ordered_commit_set.h"
-#include "sync/sessions/session_state.h"
 #include "sync/sessions/status_controller.h"
 #include "sync/sessions/sync_session_context.h"
 #include "sync/util/extensions_activity_monitor.h"
@@ -41,12 +41,12 @@ class WriteTransaction;
 
 namespace sessions {
 
-class SyncSession {
+class SYNC_EXPORT_PRIVATE SyncSession {
  public:
   // The Delegate services events that occur during the session requiring an
   // explicit (and session-global) action, as opposed to events that are simply
   // recorded in per-session state.
-  class Delegate {
+  class SYNC_EXPORT_PRIVATE Delegate {
    public:
     // The client was throttled and should cease-and-desist syncing activity
     // until the specified time.
@@ -97,9 +97,7 @@ class SyncSession {
 
   SyncSession(SyncSessionContext* context,
               Delegate* delegate,
-              const SyncSourceInfo& source,
-              const ModelSafeRoutingInfo& routing_info,
-              const std::vector<ModelSafeWorker*>& workers);
+              const SyncSourceInfo& source);
   ~SyncSession();
 
   // Builds a thread-safe and read-only copy of the current session state.
@@ -108,46 +106,9 @@ class SyncSession {
   // Builds and sends a snapshot to the session context's listeners.
   void SendEventNotification(SyncEngineEvent::EventCause cause);
 
-  // Returns true if this session contains data that should go through the sync
-  // engine again.
-  bool HasMoreToSync() const;
-
-  // Returns true if we completely ran the session without errors.
-  //
-  // There are many errors that could prevent a sync cycle from succeeding.
-  // These include invalid local state, inability to contact the server,
-  // inability to authenticate with the server, and server errors.  What they
-  // have in common is that the we either need to take some action and then
-  // retry the sync cycle or, in the case of transient errors, retry after some
-  // backoff timer has expired.  Most importantly, the SyncScheduler should not
-  // assume that the original action that triggered the sync cycle (ie. a nudge
-  // or a notification) has been properly serviced.
-  //
-  // This function also returns false if SyncShare has not been called on this
-  // session yet, or if ResetTransientState() has been called on this session
-  // since the last call to SyncShare.
-  bool Succeeded() const;
-
-  // Returns true if we reached the server successfully and the server did not
-  // return any error codes. Returns false if no connection was attempted.
-  bool SuccessfullyReachedServer() const;
-
-  // Collects all state pertaining to how and why |s| originated and unions it
-  // with corresponding state in |this|, leaving |s| unchanged.  Allows |this|
-  // to take on the responsibilities |s| had (e.g. certain data types) in the
-  // next SyncShare operation using |this|, rather than needed two separate
-  // sessions.
-  void Coalesce(const SyncSession& session);
-
-  // Compares the routing_info_, workers and payload map with the passed in
-  // session. Purges types from the above 3 which are not in session. Useful
-  // to update the sync session when the user has disabled some types from
-  // syncing.
-  void RebaseRoutingInfoWithLatest(const SyncSession& session);
-
-  // Should be called any time |this| is being re-used in a new call to
-  // SyncShare (e.g., HasMoreToSync returned true).
-  void PrepareForAnotherSyncCycle();
+  // Overwrite the sync update source with the most recent and merge the
+  // type/state map.
+  void CoalesceSources(const SyncSourceInfo& source);
 
   // TODO(akalin): Split this into context() and mutable_context().
   SyncSessionContext* context() const { return context_; }
@@ -167,21 +128,7 @@ class SyncSession {
     return &extensions_activity_;
   }
 
-  const std::vector<ModelSafeWorker*>& workers() const { return workers_; }
-  const ModelSafeRoutingInfo& routing_info() const { return routing_info_; }
   const SyncSourceInfo& source() const { return source_; }
-
-  // Returns the set of groups which have enabled types.
-  const std::set<ModelSafeGroup>& GetEnabledGroups() const;
-
-  // Returns the set of enabled groups that have conflicts.
-  std::set<ModelSafeGroup> GetEnabledGroupsWithConflicts() const;
-
-  // Returns the set of enabled groups that have verified updates.
-  std::set<ModelSafeGroup> GetEnabledGroupsWithVerifiedUpdates() const;
-
-  // Mark the session has having finished all the sync steps it needed.
-  void SetFinished();
 
  private:
   // Extend the encapsulation boundary to utilities for internal member
@@ -195,6 +142,10 @@ class SyncSession {
   // The source for initiating this sync session.
   SyncSourceInfo source_;
 
+  // A list of sources for sessions that have been merged with this one.
+  // Currently used only for logging.
+  std::vector<SyncSourceInfo> debug_info_sources_list_;
+
   // Information about extensions activity since the last successful commit.
   ExtensionsActivityMonitor::Records extensions_activity_;
 
@@ -206,23 +157,6 @@ class SyncSession {
 
   // Our controller for various status and error counters.
   scoped_ptr<StatusController> status_controller_;
-
-  // The set of active ModelSafeWorkers for the duration of this session.
-  // This can change if this session is Coalesce()'d with another.
-  std::vector<ModelSafeWorker*> workers_;
-
-  // The routing info for the duration of this session, dictating which
-  // datatypes should be synced and which workers should be used when working
-  // on those datatypes.
-  ModelSafeRoutingInfo routing_info_;
-
-  // The set of groups with enabled types.  Computed from
-  // |routing_info_|.
-  std::set<ModelSafeGroup> enabled_groups_;
-
-  // Whether this session has reached its last step or not. Gets reset on each
-  // new cycle (via PrepareForAnotherSyncCycle).
-  bool finished_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSession);
 };

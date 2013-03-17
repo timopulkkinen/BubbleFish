@@ -10,18 +10,18 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service_factory.h"
 #include "chrome/common/content_settings.h"
-#include "content/public/browser/notification_observer.h"
 
 class ContentSettingsPattern;
 class CookieSettingsWrapper;
 class GURL;
 class PrefService;
+class PrefRegistrySyncable;
 class Profile;
 
 // A frontend to the cookie settings of |HostContentSettingsMap|. Handles
@@ -29,8 +29,7 @@ class Profile;
 // thread and read on any thread. One instance per profile.
 
 class CookieSettings
-    : public content::NotificationObserver,
-      public RefcountedProfileKeyedService {
+    : public RefcountedProfileKeyedService {
  public:
   CookieSettings(
       HostContentSettingsMap* host_content_settings_map,
@@ -91,11 +90,6 @@ class CookieSettings
   void ResetCookieSetting(const ContentSettingsPattern& primary_pattern,
                           const ContentSettingsPattern& secondary_pattern);
 
-  // |NotificationObserver| implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // Detaches the |CookieSettings| from all |Profile|-related objects like
   // |PrefService|. This methods needs to be called before destroying the
   // |Profile|. Afterwards, only const methods can be called.
@@ -108,7 +102,7 @@ class CookieSettings
       bool setting_cookie,
       content_settings::SettingSource* source) const;
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   class Factory : public RefcountedProfileKeyedServiceFactory {
    public:
@@ -126,7 +120,7 @@ class CookieSettings
     virtual ~Factory();
 
     // |ProfileKeyedBaseFactory| methods:
-    virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
+    virtual void RegisterUserPrefs(PrefRegistrySyncable* registry) OVERRIDE;
     virtual bool ServiceRedirectedInIncognito() const OVERRIDE;
     virtual scoped_refptr<RefcountedProfileKeyedService>
         BuildServiceInstanceFor(Profile* profile) const OVERRIDE;
@@ -134,6 +128,8 @@ class CookieSettings
 
  private:
   virtual ~CookieSettings();
+
+  void OnBlockThirdPartyCookiesChanged();
 
   // Returns true if the "block third party cookies" preference is set.
   //

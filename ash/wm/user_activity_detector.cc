@@ -12,7 +12,7 @@ namespace ash {
 
 const double UserActivityDetector::kNotifyIntervalMs = 200.0;
 
-UserActivityDetector::UserActivityDetector() {
+UserActivityDetector::UserActivityDetector() : ignore_next_mouse_event_(false) {
 }
 
 UserActivityDetector::~UserActivityDetector() {
@@ -30,31 +30,32 @@ void UserActivityDetector::RemoveObserver(UserActivityObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool UserActivityDetector::PreHandleKeyEvent(aura::Window* target,
-                                             ui::KeyEvent* event) {
-  MaybeNotify();
-  return false;
+void UserActivityDetector::OnAllOutputsTurnedOff() {
+  ignore_next_mouse_event_ = true;
 }
 
-bool UserActivityDetector::PreHandleMouseEvent(aura::Window* target,
-                                               ui::MouseEvent* event) {
-  if (!(event->flags() & ui::EF_IS_SYNTHESIZED))
+void UserActivityDetector::OnKeyEvent(ui::KeyEvent* event) {
+  MaybeNotify();
+}
+
+void UserActivityDetector::OnMouseEvent(ui::MouseEvent* event) {
+  VLOG_IF(1, ignore_next_mouse_event_) << "ignoring mouse event";
+  if (!(event->flags() & ui::EF_IS_SYNTHESIZED) &&
+      !ignore_next_mouse_event_)
     MaybeNotify();
-  return false;
+  ignore_next_mouse_event_ = false;
 }
 
-ui::TouchStatus UserActivityDetector::PreHandleTouchEvent(
-    aura::Window* target,
-    ui::TouchEvent* event) {
+void UserActivityDetector::OnScrollEvent(ui::ScrollEvent* event) {
   MaybeNotify();
-  return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::EventResult UserActivityDetector::PreHandleGestureEvent(
-    aura::Window* target,
-    ui::GestureEvent* event) {
+void UserActivityDetector::OnTouchEvent(ui::TouchEvent* event) {
   MaybeNotify();
-  return ui::ER_UNHANDLED;
+}
+
+void UserActivityDetector::OnGestureEvent(ui::GestureEvent* event) {
+  MaybeNotify();
 }
 
 void UserActivityDetector::MaybeNotify() {

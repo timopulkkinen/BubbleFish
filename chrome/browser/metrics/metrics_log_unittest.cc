@@ -5,20 +5,25 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/message_loop.h"
 #include "base/port.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
 #include "base/tracked_objects.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/metrics/proto/profiler_event.pb.h"
 #include "chrome/common/metrics/proto/system_profile.pb.h"
+#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/size.h"
@@ -37,7 +42,8 @@ const int kScreenWidth = 1024;
 const int kScreenHeight = 768;
 const int kScreenCount = 3;
 const float kScreenScaleFactor = 2;
-const chrome_variations::SelectedGroupId kFieldTrialIds[] = {
+const char kBrandForTesting[] = "brand_for_testing";
+const chrome_variations::ActiveGroupId kFieldTrialIds[] = {
   {37, 43},
   {13, 47},
   {23, 17}
@@ -46,8 +52,9 @@ const chrome_variations::SelectedGroupId kFieldTrialIds[] = {
 class TestMetricsLog : public MetricsLog {
  public:
   TestMetricsLog(const std::string& client_id, int session_id)
-      : MetricsLog(client_id, session_id) {
-    chrome::RegisterLocalState(&prefs_);
+      : MetricsLog(client_id, session_id),
+        brand_for_testing_(kBrandForTesting) {
+    chrome::RegisterLocalState(prefs_.registry());
 
 #if defined(OS_CHROMEOS)
     prefs_.SetInteger(prefs::kStabilityChildProcessCrashCount, 10);
@@ -76,7 +83,7 @@ class TestMetricsLog : public MetricsLog {
   }
 
   virtual void GetFieldTrialIds(
-      std::vector<chrome_variations::SelectedGroupId>* field_trial_ids) const
+      std::vector<chrome_variations::ActiveGroupId>* field_trial_ids) const
       OVERRIDE {
     ASSERT_TRUE(field_trial_ids->empty());
 
@@ -97,7 +104,9 @@ class TestMetricsLog : public MetricsLog {
     return kScreenCount;
   }
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSimple prefs_;
+
+  google_util::BrandForTesting brand_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(TestMetricsLog);
 };
@@ -105,6 +114,8 @@ class TestMetricsLog : public MetricsLog {
 }  // namespace
 
 class MetricsLogTest : public testing::Test {
+ public:
+  MetricsLogTest() : message_loop_(MessageLoop::TYPE_IO) {}
  protected:
   void TestRecordEnvironment(bool proto_only) {
     TestMetricsLog log(kClientId, kSessionId);
@@ -126,6 +137,8 @@ class MetricsLogTest : public testing::Test {
       EXPECT_EQ(kFieldTrialIds[i].group, field_trial.group_id());
     }
 
+    EXPECT_EQ(kBrandForTesting, system_profile.brand_code());
+
     const metrics::SystemProfileProto::Hardware& hardware =
         system_profile.hardware();
     EXPECT_EQ(kScreenWidth, hardware.primary_screen_width());
@@ -136,6 +149,18 @@ class MetricsLogTest : public testing::Test {
     // TODO(isherman): Verify other data written into the protobuf as a result
     // of this call.
   }
+
+  virtual void TearDown() OVERRIDE {
+    // Drain the blocking pool from PostTaskAndReply executed by
+    // MetrticsLog.network_observer_.
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
+    content::RunAllPendingInMessageLoop();
+  }
+
+ private:
+  // This is necessary because eventually some tests call base::RepeatingTimer
+  // functions and a message loop is required for that.
+  MessageLoop message_loop_;
 };
 
 TEST_F(MetricsLogTest, RecordEnvironment) {
@@ -191,9 +216,9 @@ TEST_F(MetricsLogTest, RecordProfilerData) {
 
     const ProfilerEventProto::TrackedObject* tracked_object =
         &log.uma_proto().profiler_event(0).tracked_object(0);
-    EXPECT_EQ(GG_UINT64_C(13962325592283560029),
-              tracked_object->source_file_name_hash());
     EXPECT_EQ(GG_UINT64_C(10123486280357988687),
+              tracked_object->source_file_name_hash());
+    EXPECT_EQ(GG_UINT64_C(13962325592283560029),
               tracked_object->source_function_name_hash());
     EXPECT_EQ(1337, tracked_object->source_line_number());
     EXPECT_EQ(GG_UINT64_C(3400908935414830400),
@@ -210,9 +235,9 @@ TEST_F(MetricsLogTest, RecordProfilerData) {
               tracked_object->process_type());
 
     tracked_object = &log.uma_proto().profiler_event(0).tracked_object(1);
-    EXPECT_EQ(GG_UINT64_C(55232426147951219),
-              tracked_object->source_file_name_hash());
     EXPECT_EQ(GG_UINT64_C(2025659946535236365),
+              tracked_object->source_file_name_hash());
+    EXPECT_EQ(GG_UINT64_C(55232426147951219),
               tracked_object->source_function_name_hash());
     EXPECT_EQ(1773, tracked_object->source_line_number());
     EXPECT_EQ(GG_UINT64_C(15727396632046120663),
@@ -256,9 +281,9 @@ TEST_F(MetricsLogTest, RecordProfilerData) {
 
     const ProfilerEventProto::TrackedObject* tracked_object =
         &log.uma_proto().profiler_event(0).tracked_object(2);
-    EXPECT_EQ(GG_UINT64_C(5081672290546182009),
-              tracked_object->source_file_name_hash());
     EXPECT_EQ(GG_UINT64_C(2686523203278102732),
+              tracked_object->source_file_name_hash());
+    EXPECT_EQ(GG_UINT64_C(5081672290546182009),
               tracked_object->source_function_name_hash());
     EXPECT_EQ(7331, tracked_object->source_line_number());
     EXPECT_EQ(GG_UINT64_C(8768512930949373716),

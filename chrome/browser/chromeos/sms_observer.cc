@@ -5,10 +5,12 @@
 #include "chrome/browser/chromeos/sms_observer.h"
 
 #include "ash/shell.h"
-#include "ash/system/network/sms_observer.h"
+#include "ash/system/chromeos/network/sms_observer.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chromeos/network/cros_network_functions.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -111,7 +113,7 @@ void SmsObserver::OnNewMessage(const std::string& modem_device_path,
   base::DictionaryValue dict;
   dict.SetString(ash::kSmsNumberKey, message.number);
   dict.SetString(ash::kSmsTextKey, message.text);
-  ash::Shell::GetInstance()->system_tray()->sms_observer()->AddMessage(dict);
+  ash::Shell::GetInstance()->system_tray_notifier()->NotifyAddSmsMessage(dict);
 }
 
 }  // namespace chromeos

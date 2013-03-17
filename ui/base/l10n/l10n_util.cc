@@ -23,11 +23,11 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "third_party/icu/public/common/unicode/rbbi.h"
+#include "third_party/icu/public/common/unicode/uloc.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
-#include "unicode/rbbi.h"
-#include "unicode/uloc.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/locale_utils.h"
@@ -306,8 +306,7 @@ bool CheckAndResolveLocale(const std::string& locale,
     }
   }
 
-  // Google updater uses no, iw and en for our nb, he, and en-US, and
-  // Android uses iw-*, in-*, and ji-*.  We need to map them to our codes.
+  // Google updater uses no, tl, iw and en for our nb, fil, he, and en-US.
   struct {
     const char* source;
     const char* dest;
@@ -316,8 +315,6 @@ bool CheckAndResolveLocale(const std::string& locale,
       {"tl", "fil"},
       {"iw", "he"},
       {"en", "en-US"},
-      {"in", "id"},
-      {"ji", "yi"},
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(alias_map); ++i) {
@@ -415,9 +412,8 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
 
 #elif defined(OS_ANDROID)
 
-  // TODO(jcivelli): use the application locale preference for now.
-  if (!pref_locale.empty())
-    candidates.push_back(pref_locale);
+  // On Android, query java.util.Locale for the default locale.
+  candidates.push_back(base::android::GetDefaultLocale());
 
 #elif defined(OS_LINUX)
   // If we're on a different Linux system, we have glib.
@@ -507,9 +503,9 @@ string16 GetDisplayNameForLocale(const std::string& locale,
     display_name.resize(actual_size);
   }
 
-  // Add an RTL mark so parentheses are properly placed.
+  // Add directional markup so parentheses are properly placed.
   if (is_for_ui && base::i18n::IsRTL())
-    display_name.push_back(static_cast<char16>(base::i18n::kRightToLeftMark));
+    base::i18n::AdjustStringForLocaleDirection(&display_name);
   return display_name;
 }
 

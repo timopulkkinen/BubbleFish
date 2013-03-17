@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/gpu_feature_checker.h"
+#include "chrome/browser/gpu/gpu_feature_checker.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest.h"
@@ -14,6 +14,10 @@
 #include "content/public/common/gpu_feature_type.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#endif // defined(OS_WIN)
 
 namespace extensions {
 
@@ -36,6 +40,12 @@ void RequirementsChecker::Check(scoped_refptr<const Extension> extension,
     errors_.push_back(
         l10n_util::GetStringUTF8(IDS_EXTENSION_NPAPI_NOT_SUPPORTED));
 #endif  // defined(OS_CHROMEOS)
+#if defined(OS_WIN)
+    if (base::win::IsMetroProcess()) {
+      errors_.push_back(
+          l10n_util::GetStringUTF8(IDS_EXTENSION_NPAPI_NOT_SUPPORTED));
+    }
+#endif  // defined(OS_WIN)
   }
 
   if (requirements.webgl) {

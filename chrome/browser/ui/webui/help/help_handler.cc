@@ -23,8 +23,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/content_client.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -36,12 +38,12 @@
 #include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/i18n/time_formatting.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #endif
@@ -87,7 +89,7 @@ bool CanChangeReleaseChannel() {
       return false;
     // Get the currently logged in user and strip the domain part only.
     std::string domain = "";
-    std::string user = chromeos::UserManager::Get()->GetLoggedInUser().email();
+    std::string user = chromeos::UserManager::Get()->GetLoggedInUser()->email();
     size_t at_pos = user.find('@');
     if (at_pos != std::string::npos && at_pos + 1 < user.length())
       domain = user.substr(user.find('@') + 1);
@@ -114,10 +116,7 @@ HelpHandler::HelpHandler()
 HelpHandler::~HelpHandler() {
 }
 
-void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
-  DCHECK(localized_strings);
-  DCHECK(localized_strings->empty());
-
+void HelpHandler::GetLocalizedValues(content::WebUIDataSource* source) {
   struct L10nResources {
     const char* name;
     int ids;
@@ -163,11 +162,11 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(resources); ++i) {
-    localized_strings->SetString(resources[i].name,
-                                 l10n_util::GetStringUTF16(resources[i].ids));
+    source->AddString(resources[i].name,
+                      l10n_util::GetStringUTF16(resources[i].ids));
   }
 
-  localized_strings->SetString(
+  source->AddString(
       "browserVersion",
       l10n_util::GetStringFUTF16(IDS_ABOUT_PRODUCT_VERSION,
                                  BuildBrowserVersionString()));
@@ -176,31 +175,29 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
       IDS_ABOUT_VERSION_LICENSE,
       ASCIIToUTF16(chrome::kChromiumProjectURL),
       ASCIIToUTF16(chrome::kChromeUICreditsURL));
-  localized_strings->SetString("productLicense", license);
+  source->AddString("productLicense", license);
 
 #if defined(OS_CHROMEOS)
   string16 os_license = l10n_util::GetStringFUTF16(
       IDS_ABOUT_CROS_VERSION_LICENSE,
       ASCIIToUTF16(chrome::kChromeUIOSCreditsURL));
-  localized_strings->SetString("productOsLicense", os_license);
+  source->AddString("productOsLicense", os_license);
 #endif
 
   string16 tos = l10n_util::GetStringFUTF16(
       IDS_ABOUT_TERMS_OF_SERVICE, UTF8ToUTF16(chrome::kChromeUITermsURL));
-  localized_strings->SetString("productTOS", tos);
+  source->AddString("productTOS", tos);
 
-  localized_strings->SetString("webkitVersion",
-                               webkit_glue::GetWebKitVersion());
+  source->AddString("webkitVersion", webkit_glue::GetWebKitVersion());
 
-  localized_strings->SetString("jsEngine", "V8");
-  localized_strings->SetString("jsEngineVersion", v8::V8::GetVersion());
+  source->AddString("jsEngine", "V8");
+  source->AddString("jsEngineVersion", v8::V8::GetVersion());
 
-  localized_strings->SetString("userAgentInfo",
-                               content::GetUserAgent(GURL()));
+  source->AddString("userAgentInfo", content::GetUserAgent(GURL()));
 
   CommandLine::StringType command_line =
       CommandLine::ForCurrentProcess()->GetCommandLineString();
-  localized_strings->SetString("commandLineInfo", command_line);
+  source->AddString("commandLineInfo", command_line);
 }
 
 void HelpHandler::RegisterMessages() {
@@ -247,11 +244,13 @@ void HelpHandler::Observe(int type, const content::NotificationSource& source,
 void HelpHandler::OnPageLoaded(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   // Version information is loaded from a callback
-  loader_.GetVersion(&consumer_, base::Bind(&HelpHandler::OnOSVersion,
-                                            base::Unretained(this)),
-                     chromeos::VersionLoader::VERSION_FULL);
-  loader_.GetFirmware(&consumer_, base::Bind(&HelpHandler::OnOSFirmware,
-                                             base::Unretained(this)));
+  loader_.GetVersion(
+      chromeos::VersionLoader::VERSION_FULL,
+      base::Bind(&HelpHandler::OnOSVersion, base::Unretained(this)),
+      &tracker_);
+  loader_.GetFirmware(
+      base::Bind(&HelpHandler::OnOSFirmware, base::Unretained(this)),
+      &tracker_);
 
   scoped_ptr<base::Value> can_change_channel_value(
       base::Value::CreateBooleanValue(CanChangeReleaseChannel()));
@@ -298,14 +297,14 @@ void HelpHandler::RelaunchNow(const ListValue* args) {
 
 void HelpHandler::OpenFeedbackDialog(const ListValue* args) {
   DCHECK(args->empty());
-  Browser* browser = browser::FindBrowserWithWebContents(
+  Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
   chrome::OpenFeedbackDialog(browser);
 }
 
 void HelpHandler::OpenHelpPage(const base::ListValue* args) {
   DCHECK(args->empty());
-  Browser* browser = browser::FindBrowserWithWebContents(
+  Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
   chrome::ShowHelp(browser, chrome::HELP_SOURCE_WEBUI);
 }
@@ -396,15 +395,13 @@ void HelpHandler::SetPromotionState(VersionUpdater::PromotionState state) {
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_CHROMEOS)
-void HelpHandler::OnOSVersion(chromeos::VersionLoader::Handle handle,
-                              const std::string& version) {
+void HelpHandler::OnOSVersion(const std::string& version) {
   scoped_ptr<Value> version_string(Value::CreateStringValue(version));
   web_ui()->CallJavascriptFunction("help.HelpPage.setOSVersion",
                                    *version_string);
 }
 
-void HelpHandler::OnOSFirmware(chromeos::VersionLoader::Handle handle,
-                               const std::string& firmware) {
+void HelpHandler::OnOSFirmware(const std::string& firmware) {
   scoped_ptr<Value> firmware_string(Value::CreateStringValue(firmware));
   web_ui()->CallJavascriptFunction("help.HelpPage.setOSFirmware",
                                    *firmware_string);

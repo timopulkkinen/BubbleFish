@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "sync/engine/syncer_proto_util.h"
 #include "sync/sessions/sync_session.h"
 #include "sync/syncable/mutable_entry.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 
 namespace syncer {
 
@@ -144,7 +144,7 @@ SyncerError BuildAndPostCommitsImpl(Syncer* syncer,
 
 SyncerError BuildAndPostCommits(Syncer* syncer,
                                 sessions::SyncSession* session) {
-  sessions::OrderedCommitSet commit_set(session->routing_info());
+  sessions::OrderedCommitSet commit_set(session->context()->routing_info());
   SyncerError result = BuildAndPostCommitsImpl(syncer, session, &commit_set);
   if (result != SYNCER_OK) {
     ClearSyncingBits(session->context()->directory(), commit_set);

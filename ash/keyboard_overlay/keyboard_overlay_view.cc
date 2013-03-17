@@ -19,17 +19,18 @@ using ui::WebDialogDelegate;
 
 namespace {
 
-// Keys to invoke Cancel (Escape, Ctrl+Alt+/, or Shift+Ctrl+Alt+/).
-const struct KeyEventData {
-  ui::KeyboardCode key_code;
-  int flags;
-} kCancelKeys[] = {
+// Keys to invoke Cancel (Escape, Ctrl+Alt+/, or Shift+Ctrl+Alt+/, Help, F14).
+const ash::KeyboardOverlayView::KeyEventData kCancelKeys[] = {
   { ui::VKEY_ESCAPE, ui::EF_NONE},
   { ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN },
   { ui::VKEY_OEM_2, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN },
+  { ui::VKEY_HELP, ui::EF_NONE },
+  { ui::VKEY_F14, ui::EF_NONE },
 };
 
 }
+
+namespace ash {
 
 KeyboardOverlayView::KeyboardOverlayView(
     content::BrowserContext* context,
@@ -42,7 +43,7 @@ KeyboardOverlayView::~KeyboardOverlayView() {
 }
 
 void KeyboardOverlayView::Cancel() {
-  ash::Shell::GetInstance()->overlay_filter()->Deactivate();
+  Shell::GetInstance()->overlay_filter()->Deactivate();
   views::Widget* widget = GetWidget();
   if (widget)
     widget->Close();
@@ -75,9 +76,20 @@ void KeyboardOverlayView::ShowDialog(
       new KeyboardOverlayView(context, delegate, handler);
   delegate->Show(view);
 
-  ash::Shell::GetInstance()->overlay_filter()->Activate(view);
+  Shell::GetInstance()->overlay_filter()->Activate(view);
 }
 
 void KeyboardOverlayView::WindowClosing() {
   Cancel();
 }
+
+// static
+void KeyboardOverlayView::GetCancelingKeysForTesting(
+    std::vector<KeyboardOverlayView::KeyEventData>* canceling_keys) {
+  CHECK(canceling_keys);
+  canceling_keys->clear();
+  for (size_t i = 0; i < arraysize(kCancelKeys); ++i)
+    canceling_keys->push_back(kCancelKeys[i]);
+}
+
+}  // namespace ash

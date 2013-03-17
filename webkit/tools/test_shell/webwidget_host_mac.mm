@@ -8,12 +8,12 @@
 
 #include "base/logging.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebScreenInfoFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/webkit_glue.h"
@@ -97,10 +97,10 @@ void WebWidgetHost::DidInvalidateRect(const gfx::Rect& damaged_rect) {
   // If this invalidate overlaps with a pending scroll, then we have to
   // downgrade to invalidating the scroll rect.
   if (damaged_rect.Intersects(scroll_rect_)) {
-    paint_rect_ = paint_rect_.Union(scroll_rect_);
+    paint_rect_.Union(scroll_rect_);
     ResetScrollRect();
   }
-  paint_rect_ = paint_rect_.Union(damaged_rect);
+  paint_rect_.Union(damaged_rect);
 
   NSRect r = NSRectFromCGRect(damaged_rect.ToCGRect());
   // flip to cocoa coordinates
@@ -114,9 +114,9 @@ void WebWidgetHost::DidScrollRect(int dx, int dy, const gfx::Rect& clip_rect) {
   // If we already have a pending scroll operation or if this scroll operation
   // intersects the existing paint region, then just failover to invalidating.
   if (!scroll_rect_.IsEmpty() || paint_rect_.Intersects(clip_rect)) {
-    paint_rect_ = paint_rect_.Union(scroll_rect_);
+    paint_rect_.Union(scroll_rect_);
     ResetScrollRect();
-    paint_rect_ = paint_rect_.Union(clip_rect);
+    paint_rect_.Union(clip_rect);
   }
 
   // We will perform scrolling lazily, when requested to actually paint.
@@ -161,7 +161,7 @@ WebWidgetHost::~WebWidgetHost() {
 }
 
 void WebWidgetHost::UpdatePaintRect(const gfx::Rect& rect) {
-  paint_rect_ = paint_rect_.Union(rect);
+  paint_rect_.Union(rect);
 }
 
 void WebWidgetHost::Paint() {
@@ -173,7 +173,7 @@ void WebWidgetHost::Paint() {
   if (!canvas_.get()) {
     ResetScrollRect();
     paint_rect_ = client_rect;
-    canvas_.reset(new skia::PlatformCanvas(
+    canvas_.reset(skia::CreatePlatformCanvas(
         paint_rect_.width(), paint_rect_.height(), true));
   }
 
@@ -190,10 +190,10 @@ void WebWidgetHost::Paint() {
   webwidget_->layout();
 
   // Scroll the canvas if necessary
-  scroll_rect_ = client_rect.Intersect(scroll_rect_);
+  scroll_rect_.Intersect(client_rect);
   if (!scroll_rect_.IsEmpty()) {
     // add to invalidate rect, since there's no equivalent of ScrollDC.
-    paint_rect_ = paint_rect_.Union(scroll_rect_);
+    paint_rect_.Union(scroll_rect_);
   }
   ResetScrollRect();
 
@@ -201,7 +201,7 @@ void WebWidgetHost::Paint() {
   // first time we call it.  This is necessary because some WebCore rendering
   // objects update their layout only when painted.
   for (int i = 0; i < 2; ++i) {
-    paint_rect_ = client_rect.Intersect(paint_rect_);
+    paint_rect_.Intersect(client_rect);
     if (!paint_rect_.IsEmpty()) {
       gfx::Rect rect(paint_rect_);
       paint_rect_ = gfx::Rect();

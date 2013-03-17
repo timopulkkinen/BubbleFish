@@ -25,6 +25,10 @@ LOCAL_PUBLIC_TEMPLATES_PATH = os.path.join('docs',
                                            'templates',
                                            'public')
 
+def _ReadFile(filename):
+  with open(filename) as f:
+    return f.read()
+
 def _ListFilesInPublic():
   all_files = []
   for path, dirs, files in os.walk(LOCAL_PUBLIC_TEMPLATES_PATH):
@@ -78,6 +82,8 @@ def _CheckHeadingIDs(input_api):
   headings_re = re.compile('<h[23].*?>')
   bad_files = []
   for name in input_api.AbsoluteLocalPaths():
+    if not os.path.exists(name):
+      continue
     if (fnmatch.fnmatch(name, '*%s*' % INTROS_PATH) or
         fnmatch.fnmatch(name, '*%s*' % ARTICLES_PATH)):
       contents = input_api.ReadFile(name)
@@ -85,6 +91,60 @@ def _CheckHeadingIDs(input_api):
           len(re.findall(ids_re, contents))):
         bad_files.append(name)
   return bad_files
+
+def _CheckVersions(input_api, output_api, results):
+  version = '_VERSION ='
+  for affected_file in input_api.AffectedFiles():
+    local_path = affected_file.LocalPath()
+    if not fnmatch.fnmatch(local_path, '%s*' % SERVER2_PATH):
+      continue
+    if local_path.endswith('PRESUBMIT.py'):
+      continue
+    if any(version in line for line in affected_file.NewContents()):
+      found = False
+      for _, text in affected_file.ChangedContents():
+        if version in text:
+          found = True
+          break
+      if not found:
+        results.append(output_api.PresubmitPromptWarning(
+            '_VERSION of %s needs to be incremented.' % affected_file))
+
+def _CheckLinks(input_api, output_api, results):
+  for affected_file in input_api.AffectedFiles():
+    name = affected_file.LocalPath()
+    absolute_path = affected_file.AbsoluteLocalPath()
+    if not os.path.exists(absolute_path):
+      continue
+    if (fnmatch.fnmatch(name, '%s*' % PUBLIC_TEMPLATES_PATH) or
+        fnmatch.fnmatch(name, '%s*' % INTROS_PATH) or
+        fnmatch.fnmatch(name, '%s*' % ARTICLES_PATH) or
+        fnmatch.fnmatch(name, '%s*' % API_PATH)):
+      contents = _ReadFile(absolute_path)
+      args = []
+      if input_api.platform == 'win32':
+        args = [input_api.python_executable]
+      args.extend([os.path.join('docs', 'server2', 'link_converter.py'),
+                   '-o',
+                   '-f',
+                   absolute_path])
+      output = input_api.subprocess.check_output(
+          args,
+          cwd=input_api.PresubmitLocalPath(),
+          universal_newlines=True)
+      if output != contents:
+        changes = ''
+        for i, (line1, line2) in enumerate(
+            zip(contents.split('\n'), output.split('\n'))):
+          if line1 != line2:
+            changes = ('%s\nLine %d:\n-%s\n+%s\n' %
+                (changes, i + 1, line1, line2))
+        if changes:
+          results.append(output_api.PresubmitPromptWarning(
+              'File %s may have an old-style <a> link to an API page. Please '
+              'run docs/server2/link_converter.py to convert the link[s], or '
+              'convert them manually.\n\nSuggested changes are: %s' %
+              (name, changes)))
 
 def _CheckChange(input_api, output_api):
   results = [
@@ -102,6 +162,8 @@ def _CheckChange(input_api, output_api):
                                     cwd=input_api.PresubmitLocalPath())
   except input_api.subprocess.CalledProcessError:
     results.append(output_api.PresubmitError('IntegrationTest failed!'))
+  _CheckVersions(input_api, output_api, results)
+  _CheckLinks(input_api, output_api, results)
   return results
 
 def CheckChangeOnUpload(input_api, output_api):

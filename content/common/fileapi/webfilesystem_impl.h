@@ -7,13 +7,15 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 
 namespace WebKit {
 class WebURL;
 class WebFileWriter;
 class WebFileWriterClient;
 }
+
+namespace content {
 
 class WebFileSystemImpl : public WebKit::WebFileSystem {
  public:
@@ -58,9 +60,16 @@ class WebFileSystemImpl : public WebKit::WebFileSystem {
   virtual WebKit::WebFileWriter* createFileWriter(
       const WebKit::WebURL& path, WebKit::WebFileWriterClient*) OVERRIDE;
   virtual void createSnapshotFileAndReadMetadata(
+      const WebKit::WebURL& path,
+      WebKit::WebFileSystemCallbacks*);
+
+  // DEPRECATED variant being replaced by the above.
+  virtual void createSnapshotFileAndReadMetadata(
       const WebKit::WebURL& blobURL,
       const WebKit::WebURL& path,
-      WebKit::WebFileSystemCallbacks*) OVERRIDE;
+      WebKit::WebFileSystemCallbacks*);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_FILEAPI_WEBFILESYSTEM_IMPL_H_

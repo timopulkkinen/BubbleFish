@@ -5,7 +5,7 @@
 #include "chrome/browser/extensions/api/system_info_cpu/cpu_info_provider.h"
 
 #include <cstdio>
-#include <iostream>
+#include <sstream>
 
 #include "base/file_util.h"
 #include "base/format_macros.h"
@@ -22,7 +22,7 @@ bool CpuInfoProvider::QueryCpuTimePerProcessor(std::vector<CpuTime>* times) {
   DCHECK(times);
 
   std::string contents;
-  if (!file_util::ReadFileToString(FilePath(kProcStat), &contents))
+  if (!file_util::ReadFileToString(base::FilePath(kProcStat), &contents))
      return false;
 
   std::istringstream iss(contents);

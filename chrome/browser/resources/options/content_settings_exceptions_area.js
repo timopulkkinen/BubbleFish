@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 cr.define('options.contentSettings', function() {
+  /** @const */ var ControlledSettingIndicator =
+                    options.ControlledSettingIndicator;
   /** @const */ var InlineEditableItemList = options.InlineEditableItemList;
   /** @const */ var InlineEditableItem = options.InlineEditableItem;
   /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
@@ -107,6 +109,17 @@ cr.define('options.contentSettings', function() {
       if (this.pattern)
         select.setAttribute('displaymode', 'edit');
 
+      if (this.contentType == 'media-stream') {
+        this.settingLabel.classList.add('media-audio-setting');
+
+        var videoSettingLabel = cr.doc.createElement('span');
+        videoSettingLabel.textContent = this.videoSettingForDisplay();
+        videoSettingLabel.className = 'exception-setting';
+        videoSettingLabel.classList.add('media-video-setting');
+        videoSettingLabel.setAttribute('displaymode', 'static');
+        this.contentElement.appendChild(videoSettingLabel);
+      }
+
       // Used to track whether the URL pattern in the input is valid.
       // This will be true if the browser process has informed us that the
       // current text in the input is valid. Changing the text resets this to
@@ -132,19 +145,34 @@ cr.define('options.contentSettings', function() {
         this.editable = false;
       }
 
-      // If the source of the content setting exception is not the user
-      // preference, then the content settings exception is managed and the user
-      // can't edit it.
-      if (this.dataItem.source &&
-          this.dataItem.source != 'preference') {
-        this.setAttribute('managedby', this.dataItem.source);
+      // If the source of the content setting exception is not a user
+      // preference, that source controls the exception and the user cannot edit
+      // or delete it.
+      var controlledBy =
+          this.dataItem.source && this.dataItem.source != 'preference' ?
+              this.dataItem.source : null;
+
+      if (controlledBy) {
+        this.setAttribute('controlled-by', controlledBy);
         this.deletable = false;
         this.editable = false;
       }
 
+      if (controlledBy == 'policy' || controlledBy == 'extension') {
+        this.querySelector('.row-delete-button').hidden = true;
+        var indicator = ControlledSettingIndicator();
+        indicator.setAttribute('content-exception', this.contentType);
+        // Create a synthetic pref change event decorated as
+        // CoreOptionsHandler::CreateValueForPref() does.
+        var event = new cr.Event(this.contentType);
+        event.value = { controlledBy: controlledBy };
+        indicator.handlePrefChange(event);
+        this.appendChild(indicator);
+      }
+
       // If the exception comes from a hosted app, display the name and the
       // icon of the app.
-      if (this.dataItem.source == 'HostedApp') {
+      if (controlledBy == 'HostedApp') {
         this.title =
             loadTimeData.getString('set_by') + ' ' + this.dataItem.appName;
         var button = this.querySelector('.row-delete-button');
@@ -210,10 +238,29 @@ cr.define('options.contentSettings', function() {
     /**
      * Gets a human-readable setting string.
      *
-     * @type {string}
+     * @return {string} The display string.
      */
     settingForDisplay: function() {
-      var setting = this.setting;
+      return this.getDisplayStringForSetting(this.setting);
+    },
+
+    /**
+     * media video specific function.
+     * Gets a human-readable video setting string.
+     *
+     * @return {string} The display string.
+     */
+    videoSettingForDisplay: function() {
+      return this.getDisplayStringForSetting(this.dataItem.video);
+    },
+
+    /**
+     * Gets a human-readable display string for setting.
+     *
+     * @param {string} setting The setting to be displayed.
+     * @return {string} The display string.
+     */
+    getDisplayStringForSetting: function(setting) {
       if (setting == 'allow')
         return loadTimeData.getString('allowException');
       else if (setting == 'block')
@@ -264,12 +311,12 @@ cr.define('options.contentSettings', function() {
         settingOption.selected = true;
     },
 
-    /** @inheritDoc */
+    /** @override */
     get currentInputIsValid() {
       return this.inputValidityKnown && this.inputIsValid;
     },
 
-    /** @inheritDoc */
+    /** @override */
     get hasBeenEdited() {
       var livePattern = this.input.value;
       var liveSetting = this.select.value;
@@ -369,7 +416,7 @@ cr.define('options.contentSettings', function() {
       this.input.value = '';
     },
 
-    /** @inheritDoc */
+    /** @override */
     get hasBeenEdited() {
       return this.input.value != '';
     },
@@ -418,8 +465,7 @@ cr.define('options.contentSettings', function() {
       this.mode = this.getAttribute('mode');
 
       // Whether the exceptions in this list allow an 'Ask every time' option.
-      this.enableAskOption = this.contentType == 'plugins' ||
-                             this.contentType == 'pepper-flash-cameramic';
+      this.enableAskOption = this.contentType == 'plugins';
 
       this.autoExpands = true;
       this.reset();
@@ -507,7 +553,7 @@ cr.define('options.contentSettings', function() {
       }
     },
 
-    /** @inheritDoc */
+    /** @override */
     deleteItemAtIndex: function(index) {
       var listItem = this.getListItemByIndex(index);
       if (!listItem.deletable)
@@ -575,6 +621,9 @@ cr.define('options.contentSettings', function() {
         else
           divs[i].hidden = true;
       }
+
+      var media_header = this.pageDiv.querySelector('.media-header');
+      media_header.hidden = type != 'media-stream';
     },
 
     /**

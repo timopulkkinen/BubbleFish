@@ -8,13 +8,12 @@
 
 #include "base/string_util.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_type.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -30,7 +29,6 @@ namespace {
 ExtensionCustomBindings::ExtensionCustomBindings(Dispatcher* dispatcher)
     : ChromeV8Extension(dispatcher) {
   RouteStaticFunction("GetExtensionViews", &GetExtensionViews);
-  RouteStaticFunction("OpenChannelToExtension", &OpenChannelToExtension);
 }
 
 // static
@@ -93,34 +91,6 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
   }
 
   return v8_views;
-}
-
-// static
-v8::Handle<v8::Value> ExtensionCustomBindings::OpenChannelToExtension(
-    const v8::Arguments& args) {
-  // Get the current RenderView so that we can send a routed IPC message from
-  // the correct source.
-  content::RenderView* renderview = GetCurrentRenderView();
-  if (!renderview)
-    return v8::Undefined();
-
-  // The Javascript code should validate/fill the arguments.
-  CHECK(args.Length() >= 3 &&
-        args[0]->IsString() &&
-        args[1]->IsString() &&
-        args[2]->IsString());
-
-  std::string source_id = *v8::String::Utf8Value(args[0]->ToString());
-  std::string target_id = *v8::String::Utf8Value(args[1]->ToString());
-  std::string channel_name = *v8::String::Utf8Value(args[2]->ToString());
-  int port_id = -1;
-  renderview->Send(new ExtensionHostMsg_OpenChannelToExtension(
-      renderview->GetRoutingID(),
-      source_id,
-      target_id,
-      channel_name,
-      &port_id));
-  return v8::Integer::New(port_id);
 }
 
 }  // namespace extensions

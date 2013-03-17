@@ -5,23 +5,23 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 
-#include "base/values.h"
+#include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/stop_find_action.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 
-class FilePath;
 class GURL;
 struct WebDropData;
 
-namespace webkit_glue {
-struct WebPreferences;
-}
-
 namespace gfx {
 class Point;
+}
+
+namespace base {
+class FilePath;
+class Value;
 }
 
 namespace ui {
@@ -34,9 +34,14 @@ struct WebMediaPlayerAction;
 struct WebPluginAction;
 }
 
+namespace webkit_glue {
+struct WebPreferences;
+}
+
 namespace content {
 
 class ChildProcessSecurityPolicy;
+class RenderProcessHost;
 class RenderViewHostDelegate;
 class SessionStorageNamespace;
 class SiteInstance;
@@ -55,6 +60,8 @@ struct CustomContextMenuContext;
 // WebContents (see WebContents for an example) but also as views, etc.
 class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
  public:
+  typedef base::Callback<void(const base::Value*)> JavascriptResultCallback;
+
   // Returns the RenderViewHost given its ID and the ID of its render process.
   // Returns NULL if the IDs do not correspond to a live RenderViewHost.
   static RenderViewHost* FromID(int render_process_id, int render_view_id);
@@ -66,7 +73,7 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // Checks that the given renderer can request |url|, if not it sets it to
   // about:blank.
   // |empty_allowed| must be set to false for navigations for security reasons.
-  static void FilterURL(int renderer_id,
+  static void FilterURL(const RenderProcessHost* process,
                         bool empty_allowed,
                         GURL* url);
 
@@ -106,7 +113,7 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // Notifies the listener that a directory enumeration is complete.
   virtual void DirectoryEnumerationFinished(
       int request_id,
-      const std::vector<FilePath>& files) = 0;
+      const std::vector<base::FilePath>& files) = 0;
 
   // Tells the renderer not to add scrollbars with height and width below a
   // threshold.
@@ -170,13 +177,11 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
                                            const string16& jscript) = 0;
 
   // Runs some javascript within the context of a frame in the page. The result
-  // is sent back via the notification EXECUTE_JAVASCRIPT_RESULT.
-  virtual int ExecuteJavascriptInWebFrameNotifyResult(
+  // is sent back via the provided callback.
+  virtual void ExecuteJavascriptInWebFrameCallbackResult(
       const string16& frame_xpath,
-      const string16& jscript) = 0;
-
-  virtual Value* ExecuteJavascriptAndGetValue(const string16& frame_xpath,
-                                              const string16& jscript) = 0;
+      const string16& jscript,
+      const JavascriptResultCallback& callback) = 0;
 
   // Tells the renderer to perform the given action on the plugin located at
   // the given point.
@@ -228,6 +233,10 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // because it is overridden by TestRenderViewHost.
   virtual bool IsRenderViewLive() const = 0;
 
+  // Returns true if the RenderView is responsible for displaying a subframe
+  // in a different process from its parent page.
+  virtual bool IsSubframe() const = 0;
+
   // Let the renderer know that the menu has been closed.
   virtual void NotifyContextMenuClosed(
       const CustomContextMenuContext& context) = 0;
@@ -265,6 +274,9 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // Passes a list of Webkit preferences to the renderer.
   virtual void UpdateWebkitPreferences(
       const webkit_glue::WebPreferences& prefs) = 0;
+
+  // Informs the renderer process of a change in timezone.
+  virtual void NotifyTimezoneChange() = 0;
 
 #if defined(OS_ANDROID)
   // Selects and zooms to the find result nearest to the point (x,y)

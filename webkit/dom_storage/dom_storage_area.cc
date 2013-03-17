@@ -7,8 +7,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/time.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/database/database_util.h"
 #include "webkit/dom_storage/dom_storage_map.h"
 #include "webkit/dom_storage/dom_storage_namespace.h"
@@ -18,7 +20,6 @@
 #include "webkit/dom_storage/session_storage_database.h"
 #include "webkit/dom_storage/session_storage_database_adapter.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/glue/webkit_glue.h"
 
 using webkit_database::DatabaseUtil;
 
@@ -33,28 +34,28 @@ DomStorageArea::CommitBatch::~CommitBatch() {}
 
 
 // static
-const FilePath::CharType DomStorageArea::kDatabaseFileExtension[] =
+const base::FilePath::CharType DomStorageArea::kDatabaseFileExtension[] =
     FILE_PATH_LITERAL(".localstorage");
 
 // static
-FilePath DomStorageArea::DatabaseFileNameFromOrigin(const GURL& origin) {
+base::FilePath DomStorageArea::DatabaseFileNameFromOrigin(const GURL& origin) {
   std::string filename = fileapi::GetOriginIdentifierFromURL(origin);
-  // There is no FilePath.AppendExtension() method, so start with just the
+  // There is no base::FilePath.AppendExtension() method, so start with just the
   // extension as the filename, and then InsertBeforeExtension the desired
   // name.
-  return FilePath().Append(kDatabaseFileExtension).
+  return base::FilePath().Append(kDatabaseFileExtension).
       InsertBeforeExtensionASCII(filename);
 }
 
 // static
-GURL DomStorageArea::OriginFromDatabaseFileName(const FilePath& name) {
+GURL DomStorageArea::OriginFromDatabaseFileName(const base::FilePath& name) {
   DCHECK(name.MatchesExtension(kDatabaseFileExtension));
-  WebKit::WebString origin_id = webkit_glue::FilePathToWebString(
+  WebKit::WebString origin_id = webkit_base::FilePathToWebString(
       name.BaseName().RemoveExtension());
   return DatabaseUtil::GetOriginFromIdentifier(origin_id);
 }
 
-DomStorageArea::DomStorageArea(const GURL& origin, const FilePath& directory,
+DomStorageArea::DomStorageArea(const GURL& origin, const base::FilePath& directory,
                                DomStorageTaskRunner* task_runner)
     : namespace_id_(kLocalStorageNamespaceId), origin_(origin),
       directory_(directory),
@@ -64,7 +65,7 @@ DomStorageArea::DomStorageArea(const GURL& origin, const FilePath& directory,
       is_shutdown_(false),
       commit_batches_in_flight_(0) {
   if (!directory.empty()) {
-    FilePath path = directory.Append(DatabaseFileNameFromOrigin(origin_));
+    base::FilePath path = directory.Append(DatabaseFileNameFromOrigin(origin_));
     backing_.reset(new LocalStorageDatabaseAdapter(path));
     is_initial_import_done_ = false;
   }
@@ -172,6 +173,25 @@ bool DomStorageArea::Clear() {
   return true;
 }
 
+void DomStorageArea::FastClear() {
+  // TODO(marja): Unify clearing localStorage and sessionStorage. The problem is
+  // to make the following 3 to work together: 1) FastClear, 2) PurgeMemory and
+  // 3) not creating events when clearing an empty area.
+  if (is_shutdown_)
+    return;
+
+  map_ = new DomStorageMap(kPerAreaQuota + kPerAreaOverQuotaAllowance);
+  // This ensures no import will happen while we're waiting to clear the data
+  // from the database. This mechanism fails if PurgeMemory is called.
+  is_initial_import_done_ = true;
+
+  if (backing_.get()) {
+    CommitBatch* commit_batch = CreateCommitBatchIfNeeded();
+    commit_batch->clear_all_first = true;
+    commit_batch->changed_values.clear();
+  }
+}
+
 DomStorageArea* DomStorageArea::ShallowCopy(
     int64 destination_namespace_id,
     const std::string& destination_persistent_namespace_id) {
@@ -222,6 +242,8 @@ void DomStorageArea::DeleteOrigin() {
 
 void DomStorageArea::PurgeMemory() {
   DCHECK(!is_shutdown_);
+  // Purging sessionStorage is not supported; it won't work with FastClear.
+  DCHECK(!session_storage_backing_.get());
   if (!is_initial_import_done_ ||  // We're not using any memory.
       !backing_.get() ||  // We can't purge anything.
       HasUncommittedChanges())  // We leave things alone with changes pending.
@@ -256,10 +278,35 @@ void DomStorageArea::InitialImportIfNeeded() {
 
   DCHECK(backing_.get());
 
+  base::TimeTicks before = base::TimeTicks::Now();
   ValuesMap initial_values;
   backing_->ReadAllValues(&initial_values);
   map_->SwapValues(&initial_values);
   is_initial_import_done_ = true;
+  base::TimeDelta time_to_import = base::TimeTicks::Now() - before;
+  UMA_HISTOGRAM_TIMES("LocalStorage.BrowserTimeToPrimeLocalStorage",
+                      time_to_import);
+
+  size_t local_storage_size_kb = map_->bytes_used() / 1024;
+  // Track localStorage size, from 0-6MB. Note that the maximum size should be
+  // 5MB, but we add some slop since we want to make sure the max size is always
+  // above what we see in practice, since histograms can't change.
+  UMA_HISTOGRAM_CUSTOM_COUNTS("LocalStorage.BrowserLocalStorageSizeInKB",
+                              local_storage_size_kb,
+                              0, 6 * 1024, 50);
+  if (local_storage_size_kb < 100) {
+    UMA_HISTOGRAM_TIMES(
+        "LocalStorage.BrowserTimeToPrimeLocalStorageUnder100KB",
+        time_to_import);
+  } else if (local_storage_size_kb < 1000) {
+    UMA_HISTOGRAM_TIMES(
+        "LocalStorage.BrowserTimeToPrimeLocalStorage100KBTo1MB",
+        time_to_import);
+  } else {
+    UMA_HISTOGRAM_TIMES(
+        "LocalStorage.BrowserTimeToPrimeLocalStorage1MBTo5MB",
+        time_to_import);
+  }
 }
 
 DomStorageArea::CommitBatch* DomStorageArea::CreateCommitBatchIfNeeded() {

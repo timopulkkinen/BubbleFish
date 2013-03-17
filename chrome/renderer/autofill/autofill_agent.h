@@ -11,26 +11,24 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer.h"
 #include "chrome/renderer/autofill/form_cache.h"
 #include "chrome/renderer/page_click_listener.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 
-namespace webkit {
-namespace forms {
-struct FormData;
-struct FormDataPredictions;
-struct FormField;
-}
-}
+struct FormFieldData;
 
 namespace WebKit {
 class WebNode;
+class WebView;
 }
 
 namespace autofill {
 
+struct WebElementDescriptor;
 class PasswordAutofillManager;
 
 // AutofillAgent deals with Autofill related communications between WebKit and
@@ -60,8 +58,13 @@ class AutofillAgent : public content::RenderViewObserver,
   // RenderView::Observer:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidFinishDocumentLoad(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void DidStartProvisionalLoad(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void DidFailProvisionalLoad(
+      WebKit::WebFrame* frame,
+      const WebKit::WebURLError& error) OVERRIDE;
+  virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
+                                        bool is_new_navigation) OVERRIDE;
   virtual void FrameDetached(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
   virtual void WillSubmitForm(WebKit::WebFrame* frame,
                               const WebKit::WebFormElement& form) OVERRIDE;
   virtual void ZoomLevelChanged() OVERRIDE;
@@ -94,18 +97,21 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual void textFieldDidReceiveKeyDown(
       const WebKit::WebInputElement& element,
       const WebKit::WebKeyboardEvent& event) OVERRIDE;
+  virtual void didRequestAutocomplete(
+      WebKit::WebFrame* frame,
+      const WebKit::WebFormElement& form) OVERRIDE;
+  virtual void setIgnoreTextChanges(bool ignore) OVERRIDE;
 
   void OnSuggestionsReturned(int query_id,
                              const std::vector<string16>& values,
                              const std::vector<string16>& labels,
                              const std::vector<string16>& icons,
                              const std::vector<int>& unique_ids);
-  void OnFormDataFilled(int query_id, const webkit::forms::FormData& form);
+  void OnFormDataFilled(int query_id, const FormData& form);
   void OnFieldTypePredictionsAvailable(
-      const std::vector<webkit::forms::FormDataPredictions>& forms);
+      const std::vector<FormDataPredictions>& forms);
 
   // For external Autofill selection.
-  void OnSelectAutofillSuggestionAtIndex(int listIndex);
   void OnSetAutofillActionFill();
   void OnClearForm();
   void OnSetAutofillActionPreview();
@@ -113,6 +119,25 @@ class AutofillAgent : public content::RenderViewObserver,
   void OnSetNodeText(const string16& value);
   void OnAcceptDataListSuggestion(const string16& value);
   void OnAcceptPasswordAutofillSuggestion(const string16& value);
+
+  // Called when interactive autocomplete finishes.
+  void OnRequestAutocompleteResult(
+      WebKit::WebFormElement::AutocompleteResult result,
+      const FormData& form_data);
+
+  // Called when an autocomplete request succeeds or fails with the |result|.
+  void FinishAutocompleteRequest(
+      WebKit::WebFormElement::AutocompleteResult result);
+
+  // Called when the Autofill server hints that this page should be filled using
+  // Autocheckout. All the relevant form fields in |form_data| will be filled
+  // and then element specified by |element_descriptor| will be clicked to
+  // proceed to the next step of the form.
+  void OnFillFormsAndClick(const std::vector<FormData>& form_data,
+                           const WebElementDescriptor& element_descriptor);
+
+  // Called when clicking an Autocheckout proceed element fails to do anything.
+  void ClickFailed();
 
   // Called in a posted task by textFieldDidChange() to work-around a WebKit bug
   // http://bugs.webkit.org/show_bug.cgi?id=16976
@@ -163,11 +188,17 @@ class AutofillAgent : public content::RenderViewObserver,
   // |node|. Returns true if the data was found; and false otherwise.
   bool FindFormAndFieldForNode(
       const WebKit::WebNode& node,
-      webkit::forms::FormData* form,
-      webkit::forms::FormField* field) WARN_UNUSED_RESULT;
+      FormData* form,
+      FormFieldData* field) WARN_UNUSED_RESULT;
 
   // Set |node| to display the given |value|.
   void SetNodeText(const string16& value, WebKit::WebInputElement* node);
+
+  // Hides any currently showing Autofill popups in the renderer or browser.
+  void HidePopups();
+
+  // Hides any currently showing Autofill popups in the browser only.
+  void HideHostPopups();
 
   FormCache form_cache_;
 
@@ -180,8 +211,21 @@ class AutofillAgent : public content::RenderViewObserver,
   // The element corresponding to the last request sent for form field Autofill.
   WebKit::WebInputElement element_;
 
+  // The form element currently requesting an interactive autocomplete.
+  WebKit::WebFormElement in_flight_request_form_;
+
+  // All the form elements seen in the top frame.
+  std::vector<WebKit::WebFormElement> form_elements_;
+
   // The action to take when receiving Autofill data from the AutofillManager.
   AutofillAction autofill_action_;
+
+  // Pointer to the current topmost frame.  Used in autocheckout flows so
+  // elements can be clicked.
+  WebKit::WebFrame* topmost_frame_;
+
+  // Pointer to the WebView. Used to access page scale factor.
+  WebKit::WebView* web_view_;
 
   // Should we display a warning if autofill is disabled?
   bool display_warning_if_disabled_;
@@ -196,11 +240,24 @@ class AutofillAgent : public content::RenderViewObserver,
   // If true we just set the node text so we shouldn't show the popup.
   bool did_set_node_text_;
 
+  // Watchdog timer for clicking in Autocheckout flows.
+  base::OneShotTimer<AutofillAgent> click_timer_;
+
+  // Used to signal that we need to watch for loading failures in an
+  // Autocheckout flow.
+  bool autocheckout_click_in_progress_;
+
+  // Whether or not to ignore text changes.  Useful for when we're committing
+  // a composition when we are defocusing the WebView and we don't want to
+  // trigger an autofill popup to show.
+  bool ignore_text_changes_;
+
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_;
 
   friend class PasswordAutofillManagerTest;
-  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, SendForms);
   FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, FillFormElement);
+  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, SendForms);
+  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, ShowAutofillWarning);
   FRIEND_TEST_ALL_PREFIXES(PasswordAutofillManagerTest, WaitUsername);
   FRIEND_TEST_ALL_PREFIXES(PasswordAutofillManagerTest, SuggestionAccept);
   FRIEND_TEST_ALL_PREFIXES(PasswordAutofillManagerTest, SuggestionSelect);

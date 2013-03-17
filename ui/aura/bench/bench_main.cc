@@ -12,11 +12,11 @@
 #include "base/time.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkXfermode.h"
+#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_display_manager.h"
-#include "ui/aura/shared/root_window_capture_client.h"
+#include "ui/aura/test/test_screen.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -32,8 +32,8 @@
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 
 #if defined(USE_X11)
 #include "base/message_pump_aurax11.h"
@@ -95,9 +95,8 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {}
 
-  virtual void OnCompositingWillStart(Compositor* compositor) OVERRIDE {}
-
-  virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {}
+  virtual void OnCompositingStarted(Compositor* compositor,
+                                    base::TimeTicks start_time) OVERRIDE {}
 
   virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
     if (start_time_.is_null()) {
@@ -120,6 +119,14 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingAborted(Compositor* compositor) OVERRIDE {}
 
+  virtual void OnCompositingLockStateChanged(
+      Compositor* compositor) OVERRIDE {}
+
+  virtual void OnUpdateVSyncParameters(ui::Compositor* compositor,
+                                       base::TimeTicks timebase,
+                                       base::TimeDelta interval) OVERRIDE {
+  }
+
   virtual void Draw() {}
 
   int frames() const { return frames_; }
@@ -136,9 +143,9 @@ class WebGLTexture : public ui::Texture {
  public:
   WebGLTexture(WebGraphicsContext3D* context, const gfx::Size& size)
       : ui::Texture(false, size, 1.0f),
-        context_(context) {
-    set_texture_id(context_->createTexture());
-    context_->bindTexture(GL_TEXTURE_2D, texture_id());
+        context_(context),
+        texture_id_(context_->createTexture()) {
+    context_->bindTexture(GL_TEXTURE_2D, texture_id_);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -148,16 +155,21 @@ class WebGLTexture : public ui::Texture {
                          GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   }
 
+  virtual unsigned int PrepareTexture() OVERRIDE {
+    return texture_id_;
+  }
+
   virtual WebGraphicsContext3D* HostContext3D() OVERRIDE {
     return context_;
   }
 
  private:
   virtual ~WebGLTexture() {
-    context_->deleteTexture(texture_id());
+    context_->deleteTexture(texture_id_);
   }
 
   WebGraphicsContext3D* context_;
+  unsigned texture_id_;
 
   DISALLOW_COPY_AND_ASSIGN(WebGLTexture);
 };
@@ -205,7 +217,7 @@ class WebGLBench : public BenchCompositorObserver {
     context_->bindFramebuffer(GL_FRAMEBUFFER, fbo_);
     context_->framebufferTexture2D(
         GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, texture_->texture_id(), 0);
+        GL_TEXTURE_2D, texture_->PrepareTexture(), 0);
     context_->clearColor(0.f, 1.f, 0.f, 1.f);
     context_->clear(GL_COLOR_BUFFER_BIT);
     context_->flush();
@@ -291,17 +303,18 @@ int main(int argc, char** argv) {
 
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
-  aura::SingleDisplayManager* manager = new aura::SingleDisplayManager;
-  manager->set_use_fullscreen_host_window(true);
-  aura::Env::GetInstance()->SetDisplayManager(manager);
+  aura::Env::GetInstance();
+  scoped_ptr<aura::TestScreen> test_screen(
+      aura::TestScreen::CreateFullscreen());
+  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, test_screen.get());
   scoped_ptr<aura::RootWindow> root_window(
-      aura::DisplayManager::CreateRootWindowForPrimaryDisplay());
+      test_screen->CreateRootWindowForPrimaryDisplay());
   aura::client::SetCaptureClient(
       root_window.get(),
-      new aura::shared::RootWindowCaptureClient(root_window.get()));
+      new aura::client::DefaultCaptureClient(root_window.get()));
 
-  scoped_ptr<aura::FocusManager> focus_manager(new aura::FocusManager);
-  root_window->set_focus_manager(focus_manager.get());
+  scoped_ptr<aura::client::FocusClient> focus_client(new aura::FocusManager);
+  aura::client::SetFocusClient(root_window.get(), focus_client.get());
 
   // add layers
   ColoredLayer background(SK_ColorRED);
@@ -345,7 +358,7 @@ int main(int argc, char** argv) {
 
   root_window->ShowRootWindow();
   MessageLoopForUI::current()->Run();
-  focus_manager.reset();
+  focus_client.reset();
   root_window.reset();
 
   ui::CompositorTestSupport::Terminate();

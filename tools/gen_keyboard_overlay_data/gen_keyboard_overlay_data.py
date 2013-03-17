@@ -47,14 +47,13 @@ HOTKEY_SPREADSHEET_KEY = '0AqzoqbAMLyEPdE1RQXdodk1qVkFyTWtQbUxROVM1cXc'
 CC_OUTDIR = 'chrome/browser/ui/webui/chromeos'
 CC_FILENAME = 'keyboard_overlay_ui.cc'
 GRD_OUTDIR = 'chrome/app'
-GRD_FILENAME = 'generated_resources.grd'
+GRD_FILENAME = 'chromeos_strings.grdp'
 JS_OUTDIR = 'chrome/browser/resources/chromeos'
 JS_FILENAME = 'keyboard_overlay_data.js'
 CC_START = r'IDS_KEYBOARD_OVERLAY_INSTRUCTIONS_HIDE },'
 CC_END = r'};'
-GRD_START = """Escape to hide
-      </message>"""
-GRD_END = r'    </if>'
+GRD_START = r'  <!-- BEGIN GENERATED KEYBOARD OVERLAY STRINGS -->'
+GRD_END = r'  <!-- END GENERATED KEYBOARD OVERLAY STRINGS -->'
 
 LABEL_MAP = {
   'glyph_arrow_down': 'down',
@@ -155,16 +154,18 @@ INPUT_METHOD_ID_TO_OVERLAY_ID = {
   'zinnia-japanese': 'ja',
 }
 
-COPYRIGHT_HEADER_TEMPLATE=(
-"""// Copyright (c) %s The Chromium Authors. All rights reserved.
+# The file was first generated in 2012 and we have a policy of not updating
+# copyright dates.
+COPYRIGHT_HEADER=\
+"""// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-""")
+"""
 
 # A snippet for grd file
-GRD_SNIPPET_TEMPLATE="""      <message name="%s" desc="%s">
-        %s
-      </message>
+GRD_SNIPPET_TEMPLATE="""  <message name="%s" desc="%s">
+    %s
+  </message>
 """
 
 # A snippet for C++ file
@@ -226,9 +227,9 @@ def ToKeys(hotkey):
   """
   values = hotkey.split(' - ')
   modifiers = sorted(value.upper() for value in values
-                     if value in ['Shift', 'Ctrl', 'Alt'])
+                     if value in ['Shift', 'Ctrl', 'Alt', 'Search'])
   keycode = [value.lower() for value in values
-             if value not in ['Shift', 'Ctrl', 'Alt']]
+             if value not in ['Shift', 'Ctrl', 'Alt', 'Search']]
   # The keys which are highlighted even without modifier keys.
   base_keys = ['backspace', 'power']
   if not modifiers and (keycode and keycode[0] not in base_keys):
@@ -405,11 +406,6 @@ def FetchHotkeyData(client):
   return result
 
 
-def GenerateCopyrightHeader():
-  """Generates the copyright header for JavaScript code."""
-  return COPYRIGHT_HEADER_TEMPLATE % datetime.date.today().year
-
-
 def UniqueBehaviors(hotkey_data):
   """Retrieves a sorted list of unique behaviors from |hotkey_data|."""
   return sorted(set((behavior, description) for (behavior, _, description)
@@ -428,7 +424,7 @@ def GetPath(path_from_src):
 def OutputFile(outpath, snippet):
   """Output the snippet into the specified path."""
   out = file(outpath, 'w')
-  out.write(GenerateCopyrightHeader() + '\n')
+  out.write(COPYRIGHT_HEADER + '\n')
   out.write(snippet)
   print 'Output ' + os.path.normpath(outpath)
 
@@ -481,6 +477,10 @@ def OutputGrd(hotkey_data, outdir):
   """Outputs a part of messages in the grd file."""
   snippet = cStringIO.StringIO()
   for (behavior, description) in UniqueBehaviors(hotkey_data):
+    # Do not generate message for 'Show wrench menu'. It is handled manually
+    # based on branding.
+    if behavior == 'Show wrench menu':
+      continue
     snippet.write(GRD_SNIPPET_TEMPLATE %
                   (ToMessageName(behavior), ToMessageDesc(description),
                    behavior))

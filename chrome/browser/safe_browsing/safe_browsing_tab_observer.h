@@ -6,9 +6,8 @@
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_TAB_OBSERVER_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
-#include "chrome/browser/common/web_contents_user_data.h"
-#include "content/public/browser/notification_observer.h"
+#include "base/prefs/public/pref_change_registrar.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 namespace content {
 class WebContents;
@@ -20,19 +19,13 @@ class ClientSideDetectionHost;
 
 // Per-tab class to handle safe-browsing functionality.
 class SafeBrowsingTabObserver
-    : public content::NotificationObserver,
-      public WebContentsUserData<SafeBrowsingTabObserver> {
+    : public content::WebContentsUserData<SafeBrowsingTabObserver> {
  public:
   virtual ~SafeBrowsingTabObserver();
 
  private:
   explicit SafeBrowsingTabObserver(content::WebContents* web_contents);
-  friend class WebContentsUserData<SafeBrowsingTabObserver>;
-
-  // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  friend class content::WebContentsUserData<SafeBrowsingTabObserver>;
 
   // Internal helpers ----------------------------------------------------------
 

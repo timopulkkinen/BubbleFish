@@ -11,14 +11,14 @@
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
+#include "ppapi/host/host_message_context.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/proxy/resource_message_params.h"
-
-class RenderViewImpl;
 
 namespace content {
 
 class RendererPpapiHost;
+class RenderViewImpl;
 
 class CONTENT_EXPORT PepperFileChooserHost
     : public ppapi::host::ResourceHost,
@@ -45,21 +45,21 @@ class CONTENT_EXPORT PepperFileChooserHost
  private:
   class CompletionHandler;
 
-  int32_t OnMsgShow(ppapi::host::HostMessageContext* context,
-                    bool save_as,
-                    bool open_multiple,
-                    const std::string& suggested_file_name,
-                    const std::vector<std::string>& accept_mime_types);
+  int32_t OnShow(ppapi::host::HostMessageContext* context,
+                 bool save_as,
+                 bool open_multiple,
+                 const std::string& suggested_file_name,
+                 const std::vector<std::string>& accept_mime_types);
 
   // Non-owning pointer.
   RendererPpapiHost* renderer_ppapi_host_;
 
-  ppapi::proxy::ResourceMessageReplyParams reply_params_;
+  ppapi::host::ReplyMessageContext reply_context_;
   CompletionHandler* handler_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperFileChooserHost);
 };
 
-}  // namespace ppapi
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_PEPPER_PEPPER_FILE_CHOOSER_HOST_H_

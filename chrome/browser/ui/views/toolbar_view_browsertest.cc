@@ -57,7 +57,7 @@ void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
       found_reload = true;
     if (view->id() == VIEW_ID_APP_MENU)
       found_app_menu = true;
-    if (view->id() == VIEW_ID_LOCATION_BAR || view->id() == VIEW_ID_OMNIBOX)
+    if (view->id() == VIEW_ID_OMNIBOX)
       found_location_bar = true;
     if (ids.size() > 100)
       GTEST_FAIL() << "Tabbed 100 times, still haven't cycled back!";
@@ -88,18 +88,21 @@ void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
     EXPECT_EQ(ids[i], reverse_ids[count - 2 - i]);
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/152938 Flaky on win.
-#define MAYBE_ToolbarCycleFocus DISABLED_ToolbarCycleFocus
-#else
-#define MAYBE_ToolbarCycleFocus ToolbarCycleFocus
-#endif
-
-IN_PROC_BROWSER_TEST_F(ToolbarViewTest, MAYBE_ToolbarCycleFocus) {
+// The test is flaky on Win (http://crbug.com/152938) and crashes on CrOS under
+// AddressSanitizer (http://crbug.com/154657).
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest, DISABLED_ToolbarCycleFocus) {
   RunToolbarCycleFocusTest(browser());
 }
 
-IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocusWithBookmarkBar) {
+#if defined(OS_WIN)
+// http://crbug.com/152938 Flaky on win.
+#define MAYBE_ToolbarCycleFocusWithBookmarkBar \
+    DISABLED_ToolbarCycleFocusWithBookmarkBar
+#else
+#define MAYBE_ToolbarCycleFocusWithBookmarkBar ToolbarCycleFocusWithBookmarkBar
+#endif
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest,
+                       MAYBE_ToolbarCycleFocusWithBookmarkBar) {
   CommandUpdater* updater = browser()->command_controller()->command_updater();
   updater->ExecuteCommand(IDC_SHOW_BOOKMARK_BAR);
 

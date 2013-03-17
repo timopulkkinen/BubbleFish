@@ -53,12 +53,14 @@ remoting.ClientPlugin.prototype.isSupportedVersion = function() {};
  * @enum {string}
  */
 remoting.ClientPlugin.Feature = {
-  HIGH_QUALITY_SCALING: 'highQualityScaling',
   INJECT_KEY_EVENT: 'injectKeyEvent',
   NOTIFY_CLIENT_DIMENSIONS: 'notifyClientDimensions',
+  NOTIFY_CLIENT_RESOLUTION: 'notifyClientResolution',
   PAUSE_VIDEO: 'pauseVideo',
+  PAUSE_AUDIO: 'pauseAudio',
   REMAP_KEY: 'remapKey',
-  SEND_CLIPBOARD_ITEM: 'sendClipboardItem'
+  SEND_CLIPBOARD_ITEM: 'sendClipboardItem',
+  TRAP_KEY: 'trapKey'
 };
 
 /**
@@ -123,6 +125,14 @@ remoting.ClientPlugin.prototype.remapKey =
     function(fromKeycode, toKeycode) {};
 
 /**
+ * Enable/disable redirection of the specified key to the web-app.
+ *
+ * @param {number} keycode The USB-style code of the key.
+ * @param {Boolean} trap True to enable trapping, False to disable.
+ */
+remoting.ClientPlugin.prototype.trapKey = function(keycode, trap) {}
+
+/**
  * Returns an associative array with a set of stats for this connection.
  *
  * @return {remoting.ClientSession.PerfStats} The connection statistics.
@@ -138,13 +148,14 @@ remoting.ClientPlugin.prototype.getPerfStats = function() {};
 remoting.ClientPlugin.prototype.sendClipboardItem = function(mimeType, item) {};
 
 /**
- * Notifies the host that the client has the specified dimensions.
+ * Notifies the host that the client has the specified size and pixel density.
  *
- * @param {number} width The available client width.
- * @param {number} height The available client height.
+ * @param {number} width The available client width in DIPs.
+ * @param {number} height The available client height in DIPs.
+ * @param {number} device_scale The number of device pixels per DIP.
  */
-remoting.ClientPlugin.prototype.notifyClientDimensions =
-    function(width, height) {};
+remoting.ClientPlugin.prototype.notifyClientResolution =
+    function(width, height, device_scale) {};
 
 /**
  * Requests that the host pause or resume sending video updates.
@@ -152,4 +163,12 @@ remoting.ClientPlugin.prototype.notifyClientDimensions =
  * @param {boolean} pause True to suspend video updates, false otherwise.
  */
 remoting.ClientPlugin.prototype.pauseVideo =
+    function(pause) {};
+
+/**
+ * Requests that the host pause or resume sending audio updates.
+ *
+ * @param {boolean} pause True to suspend audio updates, false otherwise.
+ */
+remoting.ClientPlugin.prototype.pauseAudio =
     function(pause) {};

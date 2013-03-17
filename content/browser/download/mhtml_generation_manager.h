@@ -12,23 +12,24 @@
 #include "base/process.h"
 #include "ipc/ipc_platform_file.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace content {
 class WebContents;
-}
 
 class MHTMLGenerationManager {
  public:
   static MHTMLGenerationManager* GetInstance();
 
-  typedef base::Callback<void(const FilePath& /* path to the MHTML file */,
+  typedef base::Callback<void(const base::FilePath& /* path to the MHTML file */,
       int64 /* size of the file */)> GenerateMHTMLCallback;
 
   // Instructs the render view to generate a MHTML representation of the current
   // page for |web_contents|.
-  void GenerateMHTML(content::WebContents* web_contents,
-                     const FilePath& file,
+  void GenerateMHTML(WebContents* web_contents,
+                     const base::FilePath& file,
                      const GenerateMHTMLCallback& callback);
 
   // Notification from the renderer that the MHTML generation finished.
@@ -43,7 +44,7 @@ class MHTMLGenerationManager {
     Job();
     ~Job();
 
-    FilePath file_path;
+    base::FilePath file_path;
 
     // The handles to file the MHTML is saved to, for the browser and renderer
     // processes.
@@ -63,7 +64,7 @@ class MHTMLGenerationManager {
 
   // Called on the file thread to create |file|.
   void CreateFile(int job_id,
-                  const FilePath& file,
+                  const base::FilePath& file,
                   base::ProcessHandle renderer_process);
 
   // Called on the UI thread when the file that should hold the MHTML data has
@@ -87,5 +88,7 @@ class MHTMLGenerationManager {
 
   DISALLOW_COPY_AND_ASSIGN(MHTMLGenerationManager);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_MHTML_GENERATION_MANAGER_H_

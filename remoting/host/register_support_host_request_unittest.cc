@@ -32,6 +32,7 @@ using testing::SaveArg;
 namespace remoting {
 
 namespace {
+const char kTestBotJid[] = "remotingunittest@bot.talk.google.com";
 const char kTestJid[] = "user@gmail.com/chromoting123";
 const int64 kTestTime = 123123123;
 const char kSupportId[] = "AB4RF3";
@@ -80,6 +81,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
 
   scoped_ptr<RegisterSupportHostRequest> request(
       new RegisterSupportHostRequest(&signal_strategy_, &key_pair_,
+                                     kTestBotJid,
                                      base::Bind(&MockCallback::OnResponse,
                                                 base::Unretained(&callback_))));
 
@@ -90,14 +92,14 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   request->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Verify format of the query.
   scoped_ptr<XmlElement> stanza(sent_iq);
   ASSERT_TRUE(stanza != NULL);
 
   EXPECT_EQ(stanza->Attr(buzz::QName("", "to")),
-            std::string(kChromotingBotJid));
+            std::string(kTestBotJid));
   EXPECT_EQ(stanza->Attr(buzz::QName("", "type")), "set");
 
   EXPECT_EQ(QName(kChromotingXmlNamespace, "register-support-host"),
@@ -127,7 +129,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
                                     base::TimeDelta::FromSeconds(300)));
 
   scoped_ptr<XmlElement> response(new XmlElement(buzz::QN_IQ));
-  response->AddAttr(QName("", "from"), kChromotingBotJid);
+  response->AddAttr(QName("", "from"), kTestBotJid);
   response->AddAttr(QName("", "type"), "result");
   response->AddAttr(QName("", "id"), kStanzaId);
 
@@ -155,7 +157,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
   }
   EXPECT_EQ(1, consumed);
 
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 }  // namespace remoting

@@ -6,20 +6,20 @@
 
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/api/test/test_api.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/browser_test_utils.h"
 #include "net/base/net_util.h"
+#include "net/test/test_server.h"
 
 namespace {
 
@@ -103,6 +103,7 @@ void ExtensionApiTest::SetUpInProcessBrowserTestFixture() {
   test_config_.reset(new DictionaryValue());
   test_config_->SetString(kTestDataDirectory,
                           net::FilePathToFileURL(test_data_dir_).spec());
+  test_config_->SetInteger(kTestWebSocketPort, 0);
   extensions::TestGetConfigFunction::set_test_config_state(
       test_config_.get());
 }
@@ -191,7 +192,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 
   const extensions::Extension* extension = NULL;
   if (!std::string(extension_name).empty()) {
-    FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
+    base::FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
     if (load_as_component) {
       extension = LoadExtensionAsComponent(extension_path);
     } else {
@@ -234,11 +235,11 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
       ui_test_utils::NavigateToURL(browser(), url);
 
   } else if (launch_platform_app) {
-    application_launch::LaunchParams params(browser()->profile(), extension,
-                                            extension_misc::LAUNCH_NONE,
-                                            NEW_WINDOW);
+    chrome::AppLaunchParams params(browser()->profile(), extension,
+                                   extension_misc::LAUNCH_NONE,
+                                   NEW_WINDOW);
     params.command_line = CommandLine::ForCurrentProcess();
-    application_launch::OpenApplication(params);
+    chrome::OpenApplication(params);
   }
 
   if (!catcher.GetNextResult()) {
@@ -251,14 +252,15 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 
 // Test that exactly one extension is loaded, and return it.
 const extensions::Extension* ExtensionApiTest::GetSingleLoadedExtension() {
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
 
   const extensions::Extension* extension = NULL;
   for (ExtensionSet::const_iterator it = service->extensions()->begin();
        it != service->extensions()->end(); ++it) {
     // Ignore any component extensions. They are automatically loaded into all
     // profiles and aren't the extension we're looking for here.
-    if ((*it)->location() == extensions::Extension::COMPONENT)
+    if ((*it)->location() == extensions::Manifest::COMPONENT)
       continue;
 
     if (extension != NULL) {
@@ -292,31 +294,23 @@ bool ExtensionApiTest::StartTestServer() {
   return true;
 }
 
-bool ExtensionApiTest::StartWebSocketServer(const FilePath& root_directory) {
-  websocket_server_.reset(new content::TestWebSocketServer());
-  int port = websocket_server_->UseRandomPort();
-  if (!websocket_server_->Start(root_directory))
+bool ExtensionApiTest::StartWebSocketServer(
+    const base::FilePath& root_directory) {
+  websocket_server_.reset(new net::TestServer(
+      net::TestServer::TYPE_WS,
+      net::TestServer::kLocalhost,
+      root_directory));
+
+  if (!websocket_server_->Start())
     return false;
 
-  test_config_->SetInteger(kTestWebSocketPort, port);
+  test_config_->SetInteger(kTestWebSocketPort,
+                           websocket_server_->host_port_pair().port());
+
   return true;
 }
 
 void ExtensionApiTest::SetUpCommandLine(CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   test_data_dir_ = test_data_dir_.AppendASCII("api_test");
-}
-
-PlatformAppApiTest::PlatformAppApiTest() {}
-
-PlatformAppApiTest::~PlatformAppApiTest() {}
-
-void PlatformAppApiTest::SetUpCommandLine(CommandLine* command_line) {
-  ExtensionApiTest::SetUpCommandLine(command_line);
-
-  // If someone is using this class, we're going to insist on management of the
-  // relevant flags. If these flags are already set, die.
-  DCHECK(!command_line->HasSwitch(switches::kEnableExperimentalExtensionApis));
-
-  command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
 }

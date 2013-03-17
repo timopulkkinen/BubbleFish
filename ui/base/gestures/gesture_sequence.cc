@@ -5,9 +5,11 @@
 #include "ui/base/gestures/gesture_sequence.h"
 
 #include <cmath>
+#include <stdlib.h>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
@@ -280,10 +282,23 @@ unsigned int ComputeTouchBitmask(const GesturePoint* points) {
   return touch_bitmask;
 }
 
+const float kFlingCurveNormalization = 1.0f / 1875.f;
+
 float CalibrateFlingVelocity(float velocity) {
-  const float velocity_scaling  =
-      GestureConfiguration::touchscreen_fling_acceleration_adjustment();
-  return velocity_scaling * velocity;
+  const unsigned last_coefficient =
+      GestureConfiguration::NumAccelParams - 1;
+  float normalized_velocity = fabs(velocity * kFlingCurveNormalization);
+  float nu = 0.0f, x = 1.f;
+
+  for (int i = last_coefficient ; i >= 0; i--) {
+    float a = GestureConfiguration::fling_acceleration_curve_coefficients(i);
+    nu += x * a;
+    x *= normalized_velocity;
+  }
+  if (velocity < 0.f)
+    return std::max(nu * velocity, -GestureConfiguration::fling_velocity_cap());
+  else
+    return std::min(nu * velocity, GestureConfiguration::fling_velocity_cap());
 }
 
 }  // namespace
@@ -297,7 +312,6 @@ GestureSequence::GestureSequence(GestureEventHelper* helper)
       pinch_distance_start_(0.f),
       pinch_distance_current_(0.f),
       scroll_type_(ST_FREE),
-      long_press_timer_(CreateTimer()),
       point_count_(0),
       helper_(helper) {
 }
@@ -310,7 +324,7 @@ GestureSequence::Gestures* GestureSequence::ProcessTouchEventForGesture(
     EventResult result) {
   StopLongPressTimerIfRequired(event);
   last_touch_location_ = event.location();
-  if (result & ER_ASYNC)
+  if (result & ER_CONSUMED)
     return NULL;
 
   // Set a limit on the number of simultaneous touches in a gesture.
@@ -350,7 +364,6 @@ GestureSequence::Gestures* GestureSequence::ProcessTouchEventForGesture(
   if (event.type() == ui::ET_TOUCH_PRESSED)
     AppendBeginGestureEvent(point, gestures.get());
 
-  CHECK_NE(ER_ASYNC, result);
   TouchStatusInternal status_internal = (result == ER_UNHANDLED) ?
       TSI_NOT_PROCESSED : TSI_PROCESSED;
 
@@ -385,7 +398,8 @@ GestureSequence::Gestures* GestureSequence::ProcessTouchEventForGesture(
       }
       break;
     case GST_PENDING_SYNTHETIC_CLICK_FIRST_MOVED_PROCESSED:
-      point.UpdateForScroll();
+      // TODO(rbyers): This should be able to trigger a TapCancel
+      // if we moved far enough. crbug.com/146397
       break;
     case GST_PENDING_SYNTHETIC_CLICK_FIRST_RELEASED_HANDLED:
     case GST_PENDING_SYNTHETIC_CLICK_FIRST_CANCELLED:
@@ -493,7 +507,7 @@ GestureSequence::Gestures* GestureSequence::ProcessTouchEventForGesture(
              << " touch id: " << event.touch_id();
 
   if (last_state == GS_PENDING_SYNTHETIC_CLICK && state_ != last_state)
-    long_press_timer_->Stop();
+    GetLongPressTimer()->Stop();
 
   // The set of point_ids must be contiguous and include 0.
   // When a touch point is released, all points with ids greater than the
@@ -522,22 +536,28 @@ GestureSequence::Gestures* GestureSequence::ProcessTouchEventForGesture(
 void GestureSequence::RecreateBoundingBox() {
   // TODO(sad): Recreating the bounding box at every touch-event is not very
   // efficient. This should be made better.
-  int left = INT_MAX, top = INT_MAX, right = INT_MIN, bottom = INT_MIN;
-  for (int i = 0; i < kMaxGesturePoints; ++i) {
-    if (!points_[i].in_use())
-      continue;
-    gfx::Rect rect = points_[i].enclosing_rectangle();
-    if (left > rect.x())
-      left = rect.x();
-    if (right < rect.right())
-      right = rect.right();
-    if (top > rect.y())
-      top = rect.y();
-    if (bottom < rect.bottom())
-      bottom = rect.bottom();
+  if (point_count_ == 0) {
+    bounding_box_.SetRect(0, 0, 0, 0);
+  } else if (point_count_ == 1) {
+    bounding_box_ = GetPointByPointId(0)->enclosing_rectangle();
+  } else {
+    int left = INT_MAX / 20, top = INT_MAX / 20;
+    int right = INT_MIN / 20, bottom = INT_MIN / 20;
+    for (int i = 0; i < kMaxGesturePoints; ++i) {
+      if (!points_[i].in_use())
+        continue;
+      // Using the |enclosing_rectangle()| for the touch-points would be ideal.
+      // However, this becomes brittle especially when a finger is in motion
+      // because the change in radius can overshadow the actual change in
+      // position. So the actual position of the point is used instead.
+      const gfx::Point& point = points_[i].last_touch_position();
+      left = std::min(left, point.x());
+      right = std::max(right, point.x());
+      top = std::min(top, point.y());
+      bottom = std::max(bottom, point.y());
+    }
+    bounding_box_.SetRect(left, top, right - left, bottom - top);
   }
-  bounding_box_last_center_ = bounding_box_.CenterPoint();
-  bounding_box_.SetRect(left, top, right - left, bottom - top);
 }
 
 void GestureSequence::ResetVelocities() {
@@ -552,6 +572,12 @@ void GestureSequence::ResetVelocities() {
 
 base::OneShotTimer<GestureSequence>* GestureSequence::CreateTimer() {
   return new base::OneShotTimer<GestureSequence>();
+}
+
+base::OneShotTimer<GestureSequence>* GestureSequence::GetLongPressTimer() {
+  if (!long_press_timer_.get())
+    long_press_timer_.reset(CreateTimer());
+  return long_press_timer_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -707,25 +733,25 @@ void GestureSequence::AppendScrollGestureEnd(const GesturePoint& point,
 }
 
 void GestureSequence::AppendScrollGestureUpdate(GesturePoint& point,
-                                                const gfx::Point& location,
                                                 Gestures* gestures) {
-  float dx, dy;
+  gfx::Vector2d d;
+  gfx::Point location;
   if (point_count_ == 1) {
-    dx = point.x_delta();
-    dy = point.y_delta();
+    d = point.ScrollDelta();
+    location = point.last_touch_position();
   } else {
-    gfx::Point current_center = bounding_box_.CenterPoint();
-    dx = current_center.x() - bounding_box_last_center_.x();
-    dy = current_center.y() - bounding_box_last_center_.y();
+    location = bounding_box_.CenterPoint();
+    d = location - latest_multi_scroll_update_location_;
+    latest_multi_scroll_update_location_ = location;
   }
   if (scroll_type_ == ST_HORIZONTAL)
-    dy = 0;
+    d.set_y(0);
   else if (scroll_type_ == ST_VERTICAL)
-    dx = 0;
-  if (dx == 0 && dy == 0)
+    d.set_x(0);
+  if (d.IsZero())
     return;
 
-  GestureEventDetails details(ui::ET_GESTURE_SCROLL_UPDATE, dx, dy);
+  GestureEventDetails details(ui::ET_GESTURE_SCROLL_UPDATE, d.x(), d.y());
   details.SetScrollVelocity(
       scroll_type_ == ST_VERTICAL ? 0 : point.XVelocity(),
       scroll_type_ == ST_HORIZONTAL ? 0 : point.YVelocity());
@@ -789,8 +815,11 @@ void GestureSequence::AppendSwipeGesture(const GesturePoint& point,
 
 void GestureSequence::AppendTwoFingerTapGestureEvent(Gestures* gestures) {
   const GesturePoint* point = GetPointByPointId(0);
+  const gfx::Rect rect = point->enclosing_rectangle();
   gestures->push_back(CreateGestureEvent(
-      GestureEventDetails(ui::ET_GESTURE_TWO_FINGER_TAP, 0, 0),
+      GestureEventDetails(ui::ET_GESTURE_TWO_FINGER_TAP,
+                          rect.width(),
+                          rect.height()),
       point->enclosing_rectangle().CenterPoint(),
       flags_,
       base::Time::FromDoubleT(point->last_touch_time()),
@@ -807,6 +836,9 @@ bool GestureSequence::Click(const TouchEvent& event,
     if (double_tap)
       AppendDoubleClickGestureEvent(point, gestures);
     return true;
+  } else if (point.IsInsideManhattanSquare(event) &&
+      !GetLongPressTimer()->IsRunning()) {
+    AppendLongTapGestureEvent(point, gestures);
   }
   return false;
 }
@@ -815,9 +847,8 @@ bool GestureSequence::ScrollStart(const TouchEvent& event,
                                   GesturePoint& point,
                                   Gestures* gestures) {
   DCHECK(state_ == GS_PENDING_SYNTHETIC_CLICK);
-  if (point.IsInClickWindow(event) ||
-      !point.IsInScrollWindow(event) ||
-      !point.HasEnoughDataToEstablishRail())
+  if (!point.IsConsistentScrollingActionUnderway() &&
+      !point.IsInScrollWindow(event))
     return false;
   AppendScrollGestureBegin(point, point.first_touch_position(), gestures);
   if (point.IsInHorizontalRailWindow())
@@ -847,7 +878,7 @@ bool GestureSequence::ScrollUpdate(const TouchEvent& event,
   DCHECK(state_ == GS_SCROLL);
   if (!point.DidScroll(event, 0))
     return false;
-  AppendScrollGestureUpdate(point, point.last_touch_position(), gestures);
+  AppendScrollGestureUpdate(point, gestures);
   return true;
 }
 
@@ -856,7 +887,7 @@ bool GestureSequence::TouchDown(const TouchEvent& event,
                                 Gestures* gestures) {
   DCHECK(state_ == GS_NO_GESTURE);
   AppendTapDownGestureEvent(point, gestures);
-  long_press_timer_->Start(
+  GetLongPressTimer()->Start(
       FROM_HERE,
       base::TimeDelta::FromMilliseconds(
           GestureConfiguration::long_press_time_in_seconds() * 1000),
@@ -915,6 +946,18 @@ void GestureSequence::AppendLongPressGestureEvent() {
   helper_->DispatchLongPressGestureEvent(gesture.get());
 }
 
+void GestureSequence::AppendLongTapGestureEvent(const GesturePoint& point,
+                                                Gestures* gestures) {
+  gfx::Rect er = point.enclosing_rectangle();
+  gfx::Point center = er.CenterPoint();
+  gestures->push_back(CreateGestureEvent(
+      GestureEventDetails(ui::ET_GESTURE_LONG_TAP, 0, 0),
+      center,
+      flags_,
+      base::Time::FromDoubleT(point.last_touch_time()),
+      1 << point.touch_id()));
+}
+
 bool GestureSequence::ScrollEnd(const TouchEvent& event,
                                 GesturePoint& point,
                                 Gestures* gestures) {
@@ -944,6 +987,7 @@ bool GestureSequence::PinchStart(const TouchEvent& event,
 
   pinch_distance_current_ = BoundingBoxDiagonal(bounding_box_);
   pinch_distance_start_ = pinch_distance_current_;
+  latest_multi_scroll_update_location_ = bounding_box_.CenterPoint();
   AppendPinchGestureBegin(*point1, *point2, gestures);
 
   if (state_ == GS_PENDING_SYNTHETIC_CLICK ||
@@ -967,7 +1011,7 @@ bool GestureSequence::PinchUpdate(const TouchEvent& event,
   // of the fingers moved enough before a pinch or scroll update is created.
   bool did_scroll = false;
   for (int i = 0; i < kMaxGesturePoints; ++i) {
-    if (!points_[i].in_use() || !points_[i].DidScroll(event, 2))
+    if (!points_[i].in_use() || !points_[i].DidScroll(event, 0))
       continue;
     did_scroll = true;
     break;
@@ -983,10 +1027,8 @@ bool GestureSequence::PinchUpdate(const TouchEvent& event,
     AppendPinchGestureUpdate(point,
         distance / pinch_distance_current_, gestures);
     pinch_distance_current_ = distance;
-  } else {
-    gfx::Point center = bounding_box_.CenterPoint();
-    AppendScrollGestureUpdate(point, center, gestures);
   }
+  AppendScrollGestureUpdate(point, gestures);
 
   return true;
 }
@@ -1025,8 +1067,8 @@ bool GestureSequence::MaybeSwipe(const TouchEvent& event,
 
   velocity_x = points_[i].XVelocity();
   velocity_y = points_[i].YVelocity();
-  sign_x = velocity_x < 0 ? -1 : 1;
-  sign_y = velocity_y < 0 ? -1 : 1;
+  sign_x = velocity_x < 0.f ? -1 : 1;
+  sign_y = velocity_y < 0.f ? -1 : 1;
 
   for (++i; i < kMaxGesturePoints; ++i) {
     if (!points_[i].in_use())
@@ -1076,7 +1118,7 @@ bool GestureSequence::MaybeSwipe(const TouchEvent& event,
 }
 
 void GestureSequence::StopLongPressTimerIfRequired(const TouchEvent& event) {
-  if (!long_press_timer_->IsRunning() ||
+  if (!GetLongPressTimer()->IsRunning() ||
       event.type() != ui::ET_TOUCH_MOVED)
     return;
 
@@ -1084,7 +1126,7 @@ void GestureSequence::StopLongPressTimerIfRequired(const TouchEvent& event) {
   const GesturePoint* point = GetPointByPointId(0);
   if (!ui::gestures::IsInsideManhattanSquare(point->first_touch_position(),
       event.location()))
-    long_press_timer_->Stop();
+    GetLongPressTimer()->Stop();
 }
 
 }  // namespace ui

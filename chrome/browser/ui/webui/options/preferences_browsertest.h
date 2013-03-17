@@ -10,10 +10,10 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_types.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -32,8 +32,7 @@ class RenderViewHost;
 // Tests verifying that the JavaScript Preferences class, the underlying C++
 // CoreOptionsHandler and the specialized classes handling Chrome OS device and
 // proxy prefs behave correctly.
-class PreferencesBrowserTest : public InProcessBrowserTest,
-                               public content::NotificationObserver {
+class PreferencesBrowserTest : public InProcessBrowserTest {
  public:
   PreferencesBrowserTest();
   ~PreferencesBrowserTest();
@@ -41,10 +40,7 @@ class PreferencesBrowserTest : public InProcessBrowserTest,
   // InProcessBrowserTest implementation:
   virtual void SetUpOnMainThread() OVERRIDE;
 
-  // content::NotificationObserver implementation:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void OnPreferenceChanged(const std::string& pref_name);
 
  protected:
   MOCK_METHOD1(OnCommit, void(const PrefService::Preference*));
@@ -62,14 +58,12 @@ class PreferencesBrowserTest : public InProcessBrowserTest,
   // Set user-modified pref values directly in the C++ backend.
   void SetUserValues(const std::vector<std::string>& names,
                      const std::vector<base::Value*>& values);
-  // Helper deleting a vector of values.
-  void DeleteValues(std::vector<base::Value*>& values);
 
   // Verifies that a dictionary contains a (key, value) pair. Takes ownership of
   // |expected|.
-  void VerifyKeyValue(const base::DictionaryValue* dict,
+  void VerifyKeyValue(const base::DictionaryValue& dict,
                       const std::string& key,
-                      base::Value* expected);
+                      const base::Value& expected);
   // Verifies that a dictionary contains a given pref and that its value has
   // been decorated correctly.
   void VerifyPref(const base::DictionaryValue* prefs,

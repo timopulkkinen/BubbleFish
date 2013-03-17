@@ -6,21 +6,23 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "base/time.h"
 #include "chrome/browser/performance_monitor/database.h"
 #include "chrome/browser/performance_monitor/key_builder.h"
 #include "chrome/browser/performance_monitor/metric.h"
 #include "chrome/browser/performance_monitor/performance_monitor_util.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/iterator.h"
 
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace performance_monitor {
 
@@ -88,7 +90,7 @@ class TestingClock : public Database::Clock {
       : counter_(other.counter_) {
   }
   virtual ~TestingClock() {}
-  base::Time GetTime() {
+  virtual base::Time GetTime() OVERRIDE {
     return base::Time::FromInternalValue(++counter_);
   }
  private:
@@ -105,7 +107,7 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
     db_->set_clock(scoped_ptr<Database::Clock>(clock_));
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(db_.get());
     PopulateDB();
   }
@@ -120,7 +122,7 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
 
   scoped_ptr<Database> db_;
   Database::Clock* clock_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   scoped_ptr<Event> install_event_1_;
   scoped_ptr<Event> install_event_2_;
   scoped_ptr<Event> uninstall_event_1_;
@@ -130,19 +132,19 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
   void InitEvents() {
     install_event_1_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_INSTALL, clock_->GetTime(), "a", "extension 1",
-        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://foo.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     install_event_2_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_INSTALL, clock_->GetTime(), "b", "extension 2",
-        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://bar.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     uninstall_event_1_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "a", "extension 1",
-        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://foo.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
     uninstall_event_2_ = util::CreateExtensionEvent(
         EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "b", "extension 2",
-        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "http://bar.com", static_cast<int>(Manifest::UNPACKED), "0.1",
         "Test Test");
   }
 };
@@ -158,7 +160,7 @@ class PerformanceMonitorDatabaseMetricTest : public ::testing::Test {
     activity_ = std::string("A");
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(db_.get());
     PopulateDB();
   }
@@ -180,13 +182,13 @@ class PerformanceMonitorDatabaseMetricTest : public ::testing::Test {
 
   scoped_ptr<Database> db_;
   Database::Clock* clock_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   std::string activity_;
 };
 
 ////// PerformanceMonitorDatabaseSetupTests ////////////////////////////////////
 TEST(PerformanceMonitorDatabaseSetupTest, OpenClose) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   scoped_ptr<Database> db = Database::Create(temp_dir.path());
   ASSERT_TRUE(db.get());
@@ -195,7 +197,7 @@ TEST(PerformanceMonitorDatabaseSetupTest, OpenClose) {
 }
 
 TEST(PerformanceMonitorDatabaseSetupTest, ActiveInterval) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   TestingClock* clock_1 = new TestingClock();
@@ -235,7 +237,7 @@ TEST(PerformanceMonitorDatabaseSetupTest, ActiveInterval) {
 
 TEST(PerformanceMonitorDatabaseSetupTest,
      ActiveIntervalRetrievalDuringActiveInterval) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   TestingClock* clock = new TestingClock();
@@ -256,7 +258,7 @@ TEST(PerformanceMonitorDatabaseSetupTest,
 
 TEST(PerformanceMonitorDatabaseSetupTest,
      ActiveIntervalRetrievalAfterActiveInterval) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   TestingClock* clock = new TestingClock();
@@ -311,8 +313,8 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetAllEventTypes) {
 
 TEST_F(PerformanceMonitorDatabaseEventTest, GetEventInTimeRange) {
   base::Time start_time = clock_->GetTime();
-  scoped_ptr<Event> crash_event = util::CreateRendererFreezeEvent(
-      clock_->GetTime(), "chrome://freeze");
+  scoped_ptr<Event> crash_event = util::CreateRendererFailureEvent(
+      clock_->GetTime(), EVENT_RENDERER_CRASH, "http://www.google.com/");
   db_->AddEvent(*crash_event.get());
   Database::EventVector events = db_->GetEvents(start_time, clock_->GetTime());
   ASSERT_EQ(1u, events.size());
@@ -356,12 +358,12 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetEventsTimeRange) {
   scoped_ptr<Event> new_install_event =
       util::CreateExtensionEvent(EVENT_EXTENSION_INSTALL, clock_->GetTime(),
                                  "c", "test extension", "http://foo.com",
-                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 static_cast<int>(Manifest::UNPACKED), "0.1",
                                  "Test Test");
   scoped_ptr<Event> new_uninstall_event =
       util::CreateExtensionEvent(EVENT_EXTENSION_UNINSTALL, clock_->GetTime(),
                                  "c", "test extension", "http://foo.com",
-                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 static_cast<int>(Manifest::UNPACKED), "0.1",
                                  "Test Test");
   base::Time end_time = clock_->GetTime();
   db_->AddEvent(*new_install_event.get());
@@ -396,7 +398,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetRecentMetric) {
   ASSERT_TRUE(db_->GetRecentStatsForActivityAndMetric(METRIC_CPU_USAGE, &stat));
   EXPECT_EQ(50.5, stat.value);
 
-  ScopedTempDir dir;
+  base::ScopedTempDir dir;
   CHECK(dir.CreateUniqueTempDir());
   scoped_ptr<Database> db = Database::Create(dir.path());
   CHECK(db.get());
@@ -421,25 +423,25 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetStateOverride) {
 }
 
 TEST_F(PerformanceMonitorDatabaseMetricTest, GetStatsForActivityAndMetric) {
-  Database::MetricVector stats = db_->GetStatsForActivityAndMetric(
+  Database::MetricVector stats = *db_->GetStatsForActivityAndMetric(
       activity_, METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   ASSERT_EQ(1u, stats.size());
   EXPECT_EQ(13.1, stats[0].value);
   base::Time before = clock_->GetTime();
   db_->AddMetric(activity_,
                  Metric(METRIC_CPU_USAGE, clock_->GetTime(), 18.0));
-  stats = db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE,
+  stats = *db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE,
                                             before, clock_->GetTime());
   ASSERT_EQ(1u, stats.size());
   EXPECT_EQ(18, stats[0].value);
-  stats = db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE);
+  stats = *db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE);
   ASSERT_EQ(2u, stats.size());
   EXPECT_EQ(13.1, stats[0].value);
   EXPECT_EQ(18, stats[1].value);
-  stats = db_->GetStatsForActivityAndMetric(METRIC_PRIVATE_MEMORY_USAGE);
+  stats = *db_->GetStatsForActivityAndMetric(METRIC_PRIVATE_MEMORY_USAGE);
   ASSERT_EQ(1u, stats.size());
   EXPECT_EQ(1000000, stats[0].value);
-  stats = db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE,
+  stats = *db_->GetStatsForActivityAndMetric(activity_, METRIC_CPU_USAGE,
                                             clock_->GetTime(),
                                             clock_->GetTime());
   EXPECT_TRUE(stats.empty());
@@ -476,7 +478,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, InvalidMetrics) {
 
   // Find the original number of entries in the database.
   size_t original_number_of_entries = helper.GetNumberOfMetricEntries();
-  Database::MetricVector stats = db_->GetStatsForActivityAndMetric(
+  Database::MetricVector stats = *db_->GetStatsForActivityAndMetric(
       activity_, METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   size_t original_number_of_cpu_entries = stats.size();
 
@@ -484,7 +486,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, InvalidMetrics) {
   EXPECT_FALSE(db_->AddMetric(invalid_metric));
 
   // Verify that it was not inserted into the database.
-  stats = db_->GetStatsForActivityAndMetric(
+  stats = *db_->GetStatsForActivityAndMetric(
       activity_, METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   ASSERT_EQ(original_number_of_cpu_entries, stats.size());
 
@@ -493,7 +495,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, InvalidMetrics) {
   ASSERT_EQ(original_number_of_entries + 1u, helper.GetNumberOfMetricEntries());
 
   // Try to retrieve it; should only get one result.
-  stats = db_->GetStatsForActivityAndMetric(
+  stats = *db_->GetStatsForActivityAndMetric(
       activity_, METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   ASSERT_EQ(original_number_of_cpu_entries, stats.size());
 
@@ -507,7 +509,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetFullRange) {
   db_->AddMetric(kProcessChromeAggregate,
                  Metric(METRIC_CPU_USAGE, clock_->GetTime(), 21.0));
   Database::MetricVector stats =
-      db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE);
+      *db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE);
   ASSERT_EQ(3u, stats.size());
   ASSERT_EQ(50.5, stats[0].value);
   ASSERT_EQ(3.4, stats[1].value);
@@ -524,7 +526,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetRange) {
   db_->AddMetric(kProcessChromeAggregate,
                  Metric(METRIC_CPU_USAGE, clock_->GetTime(), 21.0));
   Database::MetricVector stats =
-      db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE, start, end);
+      *db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE, start, end);
   ASSERT_EQ(2u, stats.size());
   ASSERT_EQ(3, stats[0].value);
   ASSERT_EQ(9, stats[1].value);

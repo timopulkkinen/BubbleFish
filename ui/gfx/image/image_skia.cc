@@ -48,14 +48,28 @@ class Matcher {
 
 // A helper class such that ImageSkia can be cheaply copied. ImageSkia holds a
 // refptr instance of ImageSkiaStorage, which in turn holds all of ImageSkia's
-// information.
-class ImageSkiaStorage : public base::RefCounted<ImageSkiaStorage>,
+// information. Having both |base::RefCountedThreadSafe| and
+// |base::NonThreadSafe| may sounds strange but necessary to turn
+// the 'thread-non-safe modifiable ImageSkiaStorage' into
+// the 'thread-safe read-only ImageSkiaStorage'.
+class ImageSkiaStorage : public base::RefCountedThreadSafe<ImageSkiaStorage>,
                          public base::NonThreadSafe {
  public:
   ImageSkiaStorage(ImageSkiaSource* source, const gfx::Size& size)
       : source_(source),
         size_(size),
         read_only_(false) {
+  }
+
+  ImageSkiaStorage(ImageSkiaSource* source, ui::ScaleFactor scale_factor)
+      : source_(source),
+        read_only_(false) {
+    ImageSkia::ImageSkiaReps::iterator it =
+        FindRepresentation(scale_factor, true);
+    if (it == image_reps_.end() || it->is_null())
+      source_.reset();
+    else
+      size_.SetSize(it->GetWidth(), it->GetHeight());
   }
 
   bool has_source() const { return source_.get() != NULL; }
@@ -162,11 +176,11 @@ class ImageSkiaStorage : public base::RefCounted<ImageSkiaStorage>,
   scoped_ptr<ImageSkiaSource> source_;
 
   // Size of the image in DIP.
-  const gfx::Size size_;
+  gfx::Size size_;
 
   bool read_only_;
 
-  friend class base::RefCounted<ImageSkiaStorage>;
+  friend class base::RefCountedThreadSafe<ImageSkiaStorage>;
 };
 
 }  // internal
@@ -181,8 +195,11 @@ ImageSkia::ImageSkia(ImageSkiaSource* source, const gfx::Size& size)
   DetachStorageFromThread();
 }
 
-ImageSkia::ImageSkia(const SkBitmap& bitmap) {
-  Init(ImageSkiaRep(bitmap, ui::SCALE_FACTOR_100P));
+ImageSkia::ImageSkia(ImageSkiaSource* source, ui::ScaleFactor scale_factor)
+    : storage_(new internal::ImageSkiaStorage(source, scale_factor)) {
+  DCHECK(source);
+  if (!storage_->has_source())
+    storage_ = NULL;
   // No other thread has reference to this, so it's safe to detach the thread.
   DetachStorageFromThread();
 }
@@ -204,23 +221,28 @@ ImageSkia& ImageSkia::operator=(const ImageSkia& other) {
 ImageSkia::~ImageSkia() {
 }
 
-ImageSkia ImageSkia::DeepCopy() const {
-  ImageSkia copy;
+// static
+ImageSkia ImageSkia::CreateFrom1xBitmap(const SkBitmap& bitmap) {
+  return ImageSkia(ImageSkiaRep(bitmap, ui::SCALE_FACTOR_100P));
+}
+
+scoped_ptr<ImageSkia> ImageSkia::DeepCopy() const {
+  ImageSkia* copy = new ImageSkia;
   if (isNull())
-    return copy;
+    return scoped_ptr<ImageSkia>(copy);
 
   CHECK(CanRead());
 
   std::vector<gfx::ImageSkiaRep>& reps = storage_->image_reps();
   for (std::vector<gfx::ImageSkiaRep>::iterator iter = reps.begin();
        iter != reps.end(); ++iter) {
-    copy.AddRepresentation(*iter);
+    copy->AddRepresentation(*iter);
   }
   // The copy has its own storage. Detach the copy from the current
   // thread so that other thread can use this.
-  if (!copy.isNull())
-    copy.storage_->DetachFromThread();
-  return copy;
+  if (!copy->isNull())
+    copy->storage_->DetachFromThread();
+  return scoped_ptr<ImageSkia>(copy);
 }
 
 bool ImageSkia::BackedBySameObjectAs(const gfx::ImageSkia& other) const {
@@ -234,7 +256,7 @@ void ImageSkia::AddRepresentation(const ImageSkiaRep& image_rep) {
   // and replace the existing rep if there is already one with the
   // same scale factor so that we can guarantee that a ImageSkia
   // instance contians only one image rep per scale factor. This is
-  // not possible now as ImageLoadingTracker currently stores need
+  // not possible now as ImageLoader currently stores need
   // this feature, but this needs to be fixed.
   if (isNull()) {
     Init(image_rep);

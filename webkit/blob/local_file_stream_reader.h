@@ -7,12 +7,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
-#include "base/platform_file.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
+#include "base/platform_file.h"
 #include "base/time.h"
-#include "webkit/blob/blob_export.h"
 #include "webkit/blob/file_stream_reader.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace base {
 class TaskRunner;
@@ -26,7 +26,7 @@ namespace webkit_blob {
 
 // A thin wrapper of net::FileStream with range support for sliced file
 // handling.
-class BLOB_EXPORT LocalFileStreamReader : public FileStreamReader {
+class WEBKIT_STORAGE_EXPORT LocalFileStreamReader : public FileStreamReader {
  public:
   // Creates a new FileReader for a local file |file_path|.
   // |initial_offset| specifies the offset in the file where the first read
@@ -39,7 +39,7 @@ class BLOB_EXPORT LocalFileStreamReader : public FileStreamReader {
   // it does any succeeding read operations should fail with
   // ERR_UPLOAD_FILE_CHANGED error.
   LocalFileStreamReader(base::TaskRunner* task_runner,
-                        const FilePath& file_path,
+                        const base::FilePath& file_path,
                         int64 initial_offset,
                    const base::Time& expected_modification_time);
   virtual ~LocalFileStreamReader();
@@ -47,14 +47,8 @@ class BLOB_EXPORT LocalFileStreamReader : public FileStreamReader {
   // FileStreamReader overrides.
   virtual int Read(net::IOBuffer* buf, int buf_len,
                    const net::CompletionCallback& callback) OVERRIDE;
-
-  // Returns the length of the file if it could successfully retrieve the
-  // file info *and* its last modification time equals to
-  // expected_modification_time_ (rv >= 0 cases).
-  // Otherwise, a negative error code is returned (rv < 0 cases).
-  // If the stream is deleted while it has an in-flight GetLength operation
-  // |callback| will not be called.
-  int GetLength(const net::Int64CompletionCallback& callback);
+  virtual int GetLength(
+      const net::Int64CompletionCallback& callback) OVERRIDE;
 
  private:
   int Open(const net::CompletionCallback& callback);
@@ -77,7 +71,7 @@ class BLOB_EXPORT LocalFileStreamReader : public FileStreamReader {
 
   scoped_refptr<base::TaskRunner> task_runner_;
   scoped_ptr<net::FileStream> stream_impl_;
-  const FilePath file_path_;
+  const base::FilePath file_path_;
   const int64 initial_offset_;
   const base::Time expected_modification_time_;
   bool has_pending_open_;

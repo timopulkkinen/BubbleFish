@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <deque>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -127,6 +128,30 @@ struct SBChunkDelete {
   std::vector<ChunkRange> chunk_del;
 };
 
+// Different types of threats that SafeBrowsing protects against.
+enum SBThreatType {
+  // No threat at all.
+  SB_THREAT_TYPE_SAFE,
+
+  // The URL is being used for phishing.
+  SB_THREAT_TYPE_URL_PHISHING,
+
+  // The URL hosts malware.
+  SB_THREAT_TYPE_URL_MALWARE,
+
+  // The download URL is malware.
+  SB_THREAT_TYPE_BINARY_MALWARE_URL,
+
+  // The hash of the download contents is malware.
+  SB_THREAT_TYPE_BINARY_MALWARE_HASH,
+
+  // Url detected by the client-side phishing model.  Note that unlike the
+  // above values, this does not correspond to a downloaded list.
+  SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL,
+
+  // The Chrome extension or app (given by its ID) is malware.
+  SB_THREAT_TYPE_EXTENSION,
+};
 
 // SBEntry ---------------------------------------------------------------------
 
@@ -266,6 +291,8 @@ extern const char kBinHashList[];
 extern const char kCsdWhiteList[];
 // SafeBrowsing download whitelist list name.
 extern const char kDownloadWhiteList[];
+// SafeBrowsing extension list name.
+extern const char kExtensionBlacklist[];
 
 enum ListType {
   INVALID = -1,
@@ -278,13 +305,15 @@ enum ListType {
   // available for a potential second list that we would store in the
   // csd-whitelist store file.
   DOWNLOADWHITELIST = 6,
+  // See above comment. Leave 7 available.
+  EXTENSIONBLACKLIST = 8,
 };
 
 // Maps a list name to ListType.
-int GetListId(const std::string& name);
-// Maps a ListId to list name. Return false if fails.
-bool GetListName(int list_id, std::string* list);
+ListType GetListId(const std::string& name);
 
+// Maps a ListId to list name. Return false if fails.
+bool GetListName(ListType list_id, std::string* list);
 
 // Canonicalizes url as per Google Safe Browsing Specification.
 // See section 6.1 in
@@ -316,13 +345,15 @@ bool IsPhishingList(const std::string& list_name);
 bool IsMalwareList(const std::string& list_name);
 bool IsBadbinurlList(const std::string& list_name);
 bool IsBadbinhashList(const std::string& list_name);
+bool IsExtensionList(const std::string& list_name);
 
 GURL GeneratePhishingReportUrl(const std::string& report_page,
                                const std::string& url_to_report,
                                bool is_client_side_detection);
 
-void StringToSBFullHash(const std::string& hash_in, SBFullHash* hash_out);
+SBFullHash StringToSBFullHash(const std::string& hash_in);
 std::string SBFullHashToString(const SBFullHash& hash_out);
+
 }  // namespace safe_browsing_util
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_UTIL_H_

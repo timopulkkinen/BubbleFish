@@ -4,7 +4,6 @@
 
 // Multiply-included message file, so no include guard.
 
-#include "base/time.h"
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
@@ -15,12 +14,12 @@
 // File utilities messages sent from the renderer to the browser.
 
 IPC_SYNC_MESSAGE_CONTROL1_2(FileUtilitiesMsg_GetFileInfo,
-                            FilePath /* path */,
+                            base::FilePath /* path */,
                             base::PlatformFileInfo /* result */,
                             base::PlatformFileError /* status */)
 
 // Open the file.
 IPC_SYNC_MESSAGE_CONTROL2_1(FileUtilitiesMsg_OpenFile,
-                            FilePath /* path */,
+                            base::FilePath /* path */,
                             int /* mode */,
                             IPC::PlatformFileForTransit /* result */)

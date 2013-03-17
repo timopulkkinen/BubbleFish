@@ -12,12 +12,13 @@
 #include "media/filters/gpu_video_decoder.h"
 #include "ui/gfx/size.h"
 
-class ContentGLContext;
-class GpuChannelHost;
-class WebGraphicsContext3DCommandBufferImpl;
 namespace base {
 class WaitableEvent;
 }
+
+namespace content {
+class GpuChannelHost;
+class WebGraphicsContext3DCommandBufferImpl;
 
 // Glue code to expose functionality needed by media::GpuVideoDecoder to
 // RenderViewImpl.  This class is entirely an implementation detail of
@@ -39,20 +40,18 @@ class CONTENT_EXPORT RendererGpuVideoDecoderFactories
       const scoped_refptr<base::MessageLoopProxy>& message_loop,
       WebGraphicsContext3DCommandBufferImpl* wgc3dcbi);
 
+  // media::GpuVideoDecoder::Factories implementation.
   virtual media::VideoDecodeAccelerator* CreateVideoDecodeAccelerator(
       media::VideoCodecProfile profile,
       media::VideoDecodeAccelerator::Client* client) OVERRIDE;
-
   virtual bool CreateTextures(int32 count, const gfx::Size& size,
                               std::vector<uint32>* texture_ids,
                               uint32 texture_target) OVERRIDE;
-
   virtual void DeleteTexture(uint32 texture_id) OVERRIDE;
-
   virtual void ReadPixels(uint32 texture_id, uint32 texture_target,
                           const gfx::Size& size, void* pixels) OVERRIDE;
-
   virtual base::SharedMemory* CreateSharedMemory(size_t size) OVERRIDE;
+  virtual scoped_refptr<base::MessageLoopProxy> GetMessageLoop() OVERRIDE;
 
  protected:
   friend class base::RefCountedThreadSafe<RendererGpuVideoDecoderFactories>;
@@ -89,5 +88,7 @@ class CONTENT_EXPORT RendererGpuVideoDecoderFactories
   base::WeakPtr<WebGraphicsContext3DCommandBufferImpl> context_;
   DISALLOW_IMPLICIT_CONSTRUCTORS(RendererGpuVideoDecoderFactories);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_RENDERER_GPU_VIDEO_DECODER_FACTORIES_H_

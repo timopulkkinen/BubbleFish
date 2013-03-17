@@ -18,9 +18,8 @@ namespace media {
 class VideoCaptureHandlerProxy;
 }
 
-class VideoCaptureImplManager;
-
 namespace content {
+class VideoCaptureImplManager;
 
 // This class takes raw frames from video capture engine via VideoCaptureProxy
 // and passes them to media player as a video frame provider.
@@ -69,7 +68,7 @@ class CONTENT_EXPORT LocalVideoCapture
   media::VideoCapture* capture_engine_;
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
   scoped_ptr<media::VideoCaptureHandlerProxy> handler_proxy_;
-  video_capture::State state_;
+  VideoCaptureState state_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalVideoCapture);
 };

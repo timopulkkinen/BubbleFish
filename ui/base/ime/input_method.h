@@ -20,6 +20,7 @@ namespace internal {
 class InputMethodDelegate;
 }  // namespace internal
 
+class KeyEvent;
 class TextInputClient;
 
 // An interface implemented by an object that encapsulates a native input method
@@ -79,6 +80,8 @@ class InputMethod {
   virtual void DispatchKeyEvent(const base::NativeEvent& native_key_event) = 0;
 
   // TODO(yusukes): Add DispatchFabricatedKeyEvent to support virtual keyboards.
+  // TODO(yusukes): both win and ibus override to do nothing. Is this needed?
+  virtual void DispatchFabricatedKeyEvent(const ui::KeyEvent& event) = 0;
 
   // Called by the focused client whenever its text input type is changed.
   // Before calling this method, the focused client must confirm or clear

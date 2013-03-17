@@ -39,6 +39,8 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
+namespace content {
+
 namespace {
 
 class EnsureTerminateMessageFilter : public IPC::ChannelProxy::MessageFilter {
@@ -49,7 +51,7 @@ class EnsureTerminateMessageFilter : public IPC::ChannelProxy::MessageFilter {
   virtual ~EnsureTerminateMessageFilter() {}
 
   // IPC::ChannelProxy::MessageFilter:
-  virtual void OnChannelError() {
+  virtual void OnChannelError() OVERRIDE {
     // How long we wait before forcibly shutting down the process.
     const base::TimeDelta kPluginProcessTerminateTimeout =
         base::TimeDelta::FromSeconds(3);
@@ -75,8 +77,9 @@ static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls =
 
 PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL) {
-  FilePath plugin_path = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-      switches::kPluginPath);
+  base::FilePath plugin_path =
+      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          switches::kPluginPath);
 
   lazy_tls.Pointer()->Set(this);
 #if defined(USE_AURA)
@@ -121,10 +124,10 @@ PluginThread::PluginThread()
     plugin->set_defer_unload(true);
   }
 
-  content::GetContentClient()->plugin()->PluginProcessStarted(
+  GetContentClient()->plugin()->PluginProcessStarted(
       plugin.get() ? plugin->plugin_info().name : string16());
 
-  content::GetContentClient()->AddNPAPIPlugins(
+  GetContentClient()->AddNPAPIPlugins(
       webkit::npapi::PluginList::Singleton());
 
   // Certain plugins, such as flash, steal the unhandled exception filter
@@ -183,3 +186,5 @@ void PluginThread::OnCreateChannel(int renderer_id,
 void PluginThread::OnNotifyRenderersOfPendingShutdown() {
   PluginChannel::NotifyRenderersOfPendingShutdown();
 }
+
+}  // namespace content

@@ -8,21 +8,21 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util_proxy.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "net/url_request/url_request_job.h"
 #include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
 class FileSystemContext;
 class FileSystemOperation;
 
 // A request job that handles reading filesystem: URLs for directories.
-class FILEAPI_EXPORT_PRIVATE FileSystemDirURLRequestJob
+class WEBKIT_STORAGE_EXPORT_PRIVATE FileSystemDirURLRequestJob
     : public net::URLRequestJob {
  public:
   FileSystemDirURLRequestJob(

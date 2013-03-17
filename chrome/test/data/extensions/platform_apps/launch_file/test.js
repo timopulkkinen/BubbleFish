@@ -3,20 +3,15 @@
 // found in the LICENSE file.
 
 chrome.app.runtime.onLaunched.addListener(function (launchData) {
-  // Test that there is a launchData.intent, it is set up proerly, and that the
-  // FileEntry in launchData.intent.data can be read.
+  // Test that the id and items fields in FileEntry can be read.
   chrome.test.runTests([
-    function testIntent() {
+    function testFileHandler() {
       chrome.test.assertFalse(!launchData, "No launchData");
-      chrome.test.assertFalse(!launchData.intent, "No launchData.intent");
-      chrome.test.assertEq(launchData.intent.action,
-          "http://webintents.org/view");
-      chrome.test.assertEq(launchData.intent.type,
-          "chrome-extension://fileentry");
-      chrome.test.assertFalse(!launchData.intent.data,
-          "No launchData.intent.data");
+      chrome.test.assertEq(typeof launchData.id, 'string',
+          "launchData.id not received");
+      chrome.test.assertEq(launchData.items.length, 1);
 
-      launchData.intent.data.file(function(file) {
+      launchData.items[0].entry.file(function(file) {
         var reader = new FileReader();
         reader.onloadend = function(e) {
           chrome.test.assertEq(

@@ -8,10 +8,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_nsobject.h"
+#include "chrome/browser/devtools/devtools_window.h"
 
-@class NSSplitView;
-@class NSView;
-
+@class GraySplitView;
 class Profile;
 
 namespace content {
@@ -24,9 +23,13 @@ class WebContents;
 @interface DevToolsController : NSObject<NSSplitViewDelegate> {
  @private
   // A view hosting docked devTools contents.
-  scoped_nsobject<NSSplitView> splitView_;
+  scoped_nsobject<GraySplitView> splitView_;
 
-  BOOL dockToRight_;
+  DevToolsDockSide dockSide_;
+
+  // Docked devtools window instance. NULL when current tab is not inspected
+  // or is inspected with undocked version of DevToolsWindow.
+  DevToolsWindow* devToolsWindow_;
 }
 
 - (id)init;
@@ -44,9 +47,8 @@ class WebContents;
 - (void)updateDevToolsForWebContents:(content::WebContents*)contents
                          withProfile:(Profile*)profile;
 
-// Specifies whether devtools should dock to right.
-- (void)setDockToRight:(BOOL)dock_to_right
-           withProfile:(Profile*)profile;
+- (void)setTopContentOffset:(CGFloat)offset;
+
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_DEV_TOOLS_CONTROLLER_H_

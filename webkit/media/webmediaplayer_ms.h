@@ -8,14 +8,16 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
 #include "googleurl/src/gurl.h"
+#include "media/filters/skcanvas_video_renderer.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
-#include "webkit/media/skcanvas_video_renderer.h"
 
 namespace WebKit {
 class WebFrame;
 class WebMediaPlayerClient;
+class WebVideoFrame;
 }
 
 namespace media {
@@ -24,6 +26,7 @@ class MediaLog;
 
 namespace webkit_media {
 
+class MediaStreamAudioRenderer;
 class MediaStreamClient;
 class VideoFrameProvider;
 class WebMediaPlayerDelegate;
@@ -150,17 +153,29 @@ class WebMediaPlayerMS
 
   MediaStreamClient* media_stream_client_;
   scoped_refptr<VideoFrameProvider> video_frame_provider_;
-  bool video_frame_provider_started_;
   bool paused_;
+  // |current_frame_| is updated only on main thread.
   scoped_refptr<media::VideoFrame> current_frame_;
+  // |current_frame_used_| is updated on both main and compositing thread.
+  // It's used to track whether |current_frame_| was painted for detecting
+  // when to increase |dropped_frame_count_|.
+  bool current_frame_used_;
+  base::Lock current_frame_lock_;
   bool pending_repaint_;
-  bool got_first_frame_;
+  bool received_first_frame_;
+  bool sequence_started_;
   base::TimeDelta start_time_;
   unsigned total_frame_count_;
   unsigned dropped_frame_count_;
-  SkCanvasVideoRenderer video_renderer_;
+  media::SkCanvasVideoRenderer video_renderer_;
+
+  scoped_refptr<MediaStreamAudioRenderer> audio_renderer_;
 
   scoped_refptr<media::MediaLog> media_log_;
+
+  // Used to auto mute the local media streams when getting the first
+  // SetVolume() from WebMediaPlayer.
+  bool volume_modified_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMS);
 };

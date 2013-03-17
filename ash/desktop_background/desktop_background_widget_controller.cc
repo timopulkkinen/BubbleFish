@@ -4,18 +4,24 @@
 
 #include "ash/desktop_background/desktop_background_widget_controller.h"
 
+#include "ash/ash_export.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/window_property.h"
 #include "ui/views/widget/widget.h"
 
-DECLARE_WINDOW_PROPERTY_TYPE(ash::internal::DesktopBackgroundWidgetController*);
-DECLARE_WINDOW_PROPERTY_TYPE(ash::internal::ComponentWrapper*);
+// Exported for tests.
+DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(
+    ASH_EXPORT, ash::internal::DesktopBackgroundWidgetController*);
+DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(
+    ASH_EXPORT, ash::internal::AnimatingDesktopController*);
 
 namespace ash {
 namespace internal {
 
 DEFINE_OWNED_WINDOW_PROPERTY_KEY(DesktopBackgroundWidgetController,
-                                 kWindowDesktopComponent, NULL);
-DEFINE_OWNED_WINDOW_PROPERTY_KEY(ComponentWrapper, kComponentWrapper, NULL);
+                                 kDesktopController, NULL);
+DEFINE_OWNED_WINDOW_PROPERTY_KEY(AnimatingDesktopController,
+                                 kAnimatingDesktopController, NULL);
 
 DesktopBackgroundWidgetController::DesktopBackgroundWidgetController(
     views::Widget* widget) : widget_(widget) {
@@ -37,7 +43,8 @@ DesktopBackgroundWidgetController::~DesktopBackgroundWidgetController() {
     layer_.reset(NULL);
 }
 
-void DesktopBackgroundWidgetController::OnWidgetClosing(views::Widget* widget) {
+void DesktopBackgroundWidgetController::OnWidgetDestroying(
+    views::Widget* widget) {
   widget_->RemoveObserver(this);
   widget_ = NULL;
 }
@@ -67,19 +74,27 @@ bool DesktopBackgroundWidgetController::Reparent(aura::RootWindow* root_window,
   return false;
 }
 
-ComponentWrapper::ComponentWrapper(
+AnimatingDesktopController::AnimatingDesktopController(
     DesktopBackgroundWidgetController* component) {
-  component_.reset(component);
+  controller_.reset(component);
 }
 
-ComponentWrapper::~ComponentWrapper() {
+AnimatingDesktopController::~AnimatingDesktopController() {
 }
 
-DesktopBackgroundWidgetController* ComponentWrapper::GetComponent(
+void AnimatingDesktopController::StopAnimating() {
+  if (controller_) {
+    ui::Layer* layer = controller_->layer() ? controller_->layer() :
+        controller_->widget()->GetNativeView()->layer();
+    layer->GetAnimator()->StopAnimating();
+  }
+}
+
+DesktopBackgroundWidgetController* AnimatingDesktopController::GetController(
     bool pass_ownership) {
   if (pass_ownership)
-    return component_.release();
-  return component_.get();
+    return controller_.release();
+  return controller_.get();
 }
 
 }  // namespace internal

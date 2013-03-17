@@ -6,7 +6,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
-#include "chrome/common/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/text/text_elider.h"
@@ -50,11 +50,11 @@ void PaintExtensionActionBackground(const ExtensionAction& action,
     color_utils::AlphaBlend(text_color, background_color, 0x13),
     color_utils::AlphaBlend(text_color, background_color, 0x1d)
   };
-  SkShader* gradient = SkGradientShader::CreateLinear(
-      gradient_bounds, gradient_colors, NULL, 2, SkShader::kClamp_TileMode);
+  skia::RefPtr<SkShader> gradient = skia::AdoptRef(
+      SkGradientShader::CreateLinear(gradient_bounds, gradient_colors,
+                                     NULL, 2, SkShader::kClamp_TileMode));
   SkPaint paint;
-  paint.setShader(gradient);
-  gradient->unref();
+  paint.setShader(gradient.get());
   canvas->DrawRect(bounds, paint);
 
   SkColor border_color =

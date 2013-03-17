@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/timer.h"
 #include "base/values.h"
 #include "chrome/browser/net/predictor.h"
@@ -138,7 +138,7 @@ TEST_F(PredictorTest, ShutdownWhenResolutionIsPendingTest) {
   testing_master.Shutdown();
 
   // Clean up after ourselves.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 }
 
 TEST_F(PredictorTest, SingleLookupTest) {
@@ -158,7 +158,7 @@ TEST_F(PredictorTest, SingleLookupTest) {
 
   EXPECT_TRUE(testing_master.WasFound(goog));
 
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   EXPECT_GT(testing_master.peak_pending_lookups(), names.size() / 2);
   EXPECT_LE(testing_master.peak_pending_lookups(), names.size());
@@ -203,7 +203,7 @@ TEST_F(PredictorTest, ConcurrentLookupTest) {
   EXPECT_FALSE(testing_master.WasFound(bad1));
   EXPECT_FALSE(testing_master.WasFound(bad2));
 
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   EXPECT_FALSE(testing_master.WasFound(bad1));
   EXPECT_FALSE(testing_master.WasFound(bad2));
@@ -232,7 +232,7 @@ TEST_F(PredictorTest, MassiveConcurrentLookupTest) {
 
   WaitForResolution(&testing_master, names);
 
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   EXPECT_LE(testing_master.peak_pending_lookups(), names.size());
   EXPECT_LE(testing_master.peak_pending_lookups(),

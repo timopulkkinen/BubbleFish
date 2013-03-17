@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/observer_list.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/common/web_contents_user_data.h"
+#include "base/observer_list.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class AutomationTabHelper;
 
@@ -34,11 +34,11 @@ class TabEventObserver {
   // TODO(kkania): Track other types of scheduled navigations.
 
   // Called when the tab that had no pending loads now has a new pending
-  // load. |tab_contents| will always be valid.
+  // load. |web_contents| will always be valid.
   virtual void OnFirstPendingLoad(content::WebContents* web_contents) { }
 
   // Called when the tab that had one or more pending loads now has no
-  // pending loads. |tab_contents| will always be valid.
+  // pending loads. |web_contents| will always be valid.
   //
   // This method will always be called if |OnFirstPendingLoad| was called.
   virtual void OnNoMorePendingLoads(content::WebContents* web_contents) { }
@@ -78,7 +78,7 @@ class TabEventObserver {
 class AutomationTabHelper
     : public content::WebContentsObserver,
       public base::SupportsWeakPtr<AutomationTabHelper>,
-      public WebContentsUserData<AutomationTabHelper> {
+      public content::WebContentsUserData<AutomationTabHelper> {
  public:
   virtual ~AutomationTabHelper();
 
@@ -99,7 +99,7 @@ class AutomationTabHelper
 
  private:
   explicit AutomationTabHelper(content::WebContents* web_contents);
-  friend class WebContentsUserData<AutomationTabHelper>;
+  friend class content::WebContentsUserData<AutomationTabHelper>;
 
   friend class AutomationTabHelperTest;
 

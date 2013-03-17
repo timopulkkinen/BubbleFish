@@ -6,25 +6,22 @@
 #define CHROME_BROWSER_CHROMEOS_AUDIO_AUDIO_HANDLER_H_
 
 #include "base/basictypes.h"
-#include "base/observer_list.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_source.h"
 
 template <typename T> struct DefaultSingletonTraits;
 
 class PrefChangeRegistrar;
+class PrefRegistrySimple;
 class PrefService;
 
 namespace chromeos {
 
 class AudioMixer;
 
-class AudioHandler : public content::NotificationObserver {
+class AudioHandler {
  public:
   class VolumeObserver {
    public:
@@ -47,12 +44,14 @@ class AudioHandler : public content::NotificationObserver {
   static AudioHandler* GetInstance();
 
   // Registers volume and mute preferences.
-  static void RegisterPrefs(PrefService* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Gets volume level in our internal 0-100% range, 0 being pure silence.
   double GetVolumePercent();
 
-  // Sets volume level from 0-100%.
+  // Sets volume level from 0-100%. If less than kMuteThresholdPercent, then
+  // mutes the sound. If it was muted, and |volume_percent| is larger than
+  // the threshold, then the sound is unmuted.
   void SetVolumePercent(double volume_percent);
 
   // Adjusts volume up (positive percentage) or down (negative percentage).
@@ -67,16 +66,12 @@ class AudioHandler : public content::NotificationObserver {
   // Is the capture volume currently muted?
   bool IsCaptureMuted();
 
-  // Mutes or unmutes all capture devices.
+  // Mutes or unmutes all capture devices. If unmutes and the volume was set
+  // to 0, then increases volume to a minimum value (5%).
   void SetCaptureMuted(bool do_mute);
 
   void AddVolumeObserver(VolumeObserver* observer);
   void RemoveVolumeObserver(VolumeObserver* observer);
-
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Defines the delete on exit Singleton traits we like.  Best to have this
@@ -94,6 +89,9 @@ class AudioHandler : public content::NotificationObserver {
   // change notification is received.
   void ApplyAudioPolicy();
 
+  // Sets volume to specified value and notifies observers.
+  void SetVolumePercentInternal(double volume_percent);
+
   scoped_ptr<AudioMixer> mixer_;
 
   ObserverList<VolumeObserver> volume_observers_;
@@ -101,7 +99,6 @@ class AudioHandler : public content::NotificationObserver {
   PrefService* local_state_;  // not owned
 
   PrefChangeRegistrar pref_change_registrar_;
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioHandler);
 };

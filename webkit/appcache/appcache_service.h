@@ -11,20 +11,18 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_storage.h"
-
-class FilePath;
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace net {
 class URLRequestContext;
 }  // namespace net
 
 namespace base {
+class FilePath;
 class MessageLoopProxy;
 }
 
@@ -40,7 +38,7 @@ class AppCacheQuotaClient;
 class AppCachePolicy;
 
 // Refcounted container to avoid copying the collection in callbacks.
-struct APPCACHE_EXPORT AppCacheInfoCollection
+struct WEBKIT_STORAGE_EXPORT AppCacheInfoCollection
     : public base::RefCountedThreadSafe<AppCacheInfoCollection> {
   AppCacheInfoCollection();
 
@@ -54,13 +52,13 @@ struct APPCACHE_EXPORT AppCacheInfoCollection
 // Class that manages the application cache service. Sends notifications
 // to many frontends.  One instance per user-profile. Each instance has
 // exclusive access to its cache_directory on disk.
-class APPCACHE_EXPORT AppCacheService {
+class WEBKIT_STORAGE_EXPORT AppCacheService {
  public:
   // If not using quota management, the proxy may be NULL.
   explicit AppCacheService(quota::QuotaManagerProxy* quota_manager_proxy);
   virtual ~AppCacheService();
 
-  void Initialize(const FilePath& cache_directory,
+  void Initialize(const base::FilePath& cache_directory,
                   base::MessageLoopProxy* db_thread,
                   base::MessageLoopProxy* cache_thread);
 

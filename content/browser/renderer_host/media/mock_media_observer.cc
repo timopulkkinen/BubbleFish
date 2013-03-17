@@ -4,6 +4,14 @@
 
 #include "content/browser/renderer_host/media/mock_media_observer.h"
 
+namespace content {
+
 MockMediaObserver::MockMediaObserver() {}
 
 MockMediaObserver::~MockMediaObserver() {}
+
+MockMediaInternals::MockMediaInternals() {}
+
+MockMediaInternals::~MockMediaInternals() {}
+
+}  // namespace content

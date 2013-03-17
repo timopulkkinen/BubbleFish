@@ -8,13 +8,16 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
+#include "content/public/browser/web_contents_user_data.h"
 
-class TabContents;
+namespace content {
+class WebContents;
+}
 
 class TabContentsSyncedTabDelegate
-    : public browser_sync::SyncedTabDelegate {
+    : public browser_sync::SyncedTabDelegate,
+      public content::WebContentsUserData<TabContentsSyncedTabDelegate> {
  public:
-  explicit TabContentsSyncedTabDelegate(TabContents* tab_contents);
   virtual ~TabContentsSyncedTabDelegate();
 
   // Methods from SyncedTabDelegate.
@@ -32,7 +35,10 @@ class TabContentsSyncedTabDelegate
   virtual bool IsPinned() const OVERRIDE;
 
  private:
-  TabContents* tab_contents_;
+  explicit TabContentsSyncedTabDelegate(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<TabContentsSyncedTabDelegate>;
+
+  content::WebContents* web_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsSyncedTabDelegate);
 };

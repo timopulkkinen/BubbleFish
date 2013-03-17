@@ -5,15 +5,15 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_BACKEND_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_BACKEND_H_
 
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
-#include "base/file_path.h"
+#include "base/containers/mru_cache.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/mru_cache.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/common/url_database/template_url_id.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/history/text_database_manager.h"
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 #include "sql/init_status.h"
 #include "ui/base/layout.h"
 
@@ -29,17 +30,15 @@ class BookmarkService;
 class TestingProfile;
 struct ThumbnailScore;
 
-namespace content {
-struct DownloadPersistentStoreInfo;
-}
-
 namespace history {
 #if defined(OS_ANDROID)
 class AndroidProviderBackend;
 #endif
+
 class CommitLaterTask;
 class HistoryPublisher;
 class VisitFilter;
+struct DownloadRow;
 
 // The maximum number of icons URLs per page which can be stored in the
 // thumbnail database.
@@ -121,7 +120,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // may be NULL.
   //
   // This constructor is fast and does no I/O, so can be called at any time.
-  HistoryBackend(const FilePath& history_dir,
+  HistoryBackend(const base::FilePath& history_dir,
                  int id,
                  Delegate* delegate,
                  BookmarkService* bookmark_service);
@@ -145,6 +144,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Navigation ----------------------------------------------------------------
 
+  // |request.time| must be unique with high probability.
   void AddPage(const HistoryAddPageArgs& request);
   virtual void SetPageTitle(const GURL& url, const string16& title);
   void AddPageNoVisitForBookmark(const GURL& url, const string16& title);
@@ -173,7 +173,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void ScheduleAutocomplete(HistoryURLProvider* provider,
                             HistoryURLProviderParams* params);
 
-  void IterateURLs(HistoryService::URLEnumerator* enumerator);
+  void IterateURLs(
+      const scoped_refptr<components::VisitedLinkDelegate::URLEnumerator>&
+          enumerator);
   void QueryURL(scoped_refptr<QueryURLRequest> request,
                 const GURL& url,
                 bool want_visits);
@@ -257,32 +259,32 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Favicon -------------------------------------------------------------------
 
-  void GetFavicons(scoped_refptr<GetFaviconRequest> request,
-                   const std::vector<GURL>& icon_urls,
-                   int icon_types,
-                   int desired_size_in_dip,
-                   const std::vector<ui::ScaleFactor>& desired_scale_factors);
+  void GetFavicons(const std::vector<GURL>& icon_urls,
+                    int icon_types,
+                    int desired_size_in_dip,
+                    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+                    std::vector<FaviconBitmapResult>* bitmap_results);
 
   void GetFaviconsForURL(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL& page_url,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      std::vector<FaviconBitmapResult>* bitmap_results);
 
   void GetFaviconForID(
-      scoped_refptr<GetFaviconRequest> request,
       FaviconID favicon_id,
       int desired_size_in_dip,
-      ui::ScaleFactor desired_scale_factor);
+      ui::ScaleFactor desired_scale_factor,
+      std::vector<FaviconBitmapResult>* bitmap_results);
 
   void UpdateFaviconMappingsAndFetch(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL& page_url,
       const std::vector<GURL>& icon_urls,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      std::vector<FaviconBitmapResult>* bitmap_results);
 
   void MergeFavicon(const GURL& page_url,
                     const GURL& icon_url,
@@ -293,8 +295,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void SetFavicons(
       const GURL& page_url,
       IconType icon_type,
-      const std::vector<FaviconBitmapData>& favicon_bitmap_data,
-      const IconURLSizesMap& icon_url_sizes);
+      const std::vector<FaviconBitmapData>& favicon_bitmap_data);
 
   void SetFaviconsOutOfDateForPage(const GURL& page_url);
 
@@ -305,18 +306,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Downloads -----------------------------------------------------------------
 
-  void GetNextDownloadId(scoped_refptr<DownloadNextIdRequest> request);
-  void QueryDownloads(scoped_refptr<DownloadQueryRequest> request);
+  void GetNextDownloadId(int* id);
+  void QueryDownloads(std::vector<DownloadRow>* rows);
   void CleanUpInProgressEntries();
-  void UpdateDownload(const content::DownloadPersistentStoreInfo& data);
-  void UpdateDownloadPath(const FilePath& path, int64 db_handle);
-  void CreateDownload(scoped_refptr<DownloadCreateRequest> request,
-                      int32 id,
-                      const content::DownloadPersistentStoreInfo& info);
-  void RemoveDownload(int64 db_handle);
-  void RemoveDownloadsBetween(const base::Time remove_begin,
-                              const base::Time remove_end);
-  void RemoveDownloads(const base::Time remove_end);
+  void UpdateDownload(const DownloadRow& data);
+  void CreateDownload(const history::DownloadRow& history_info,
+                      int64* db_handle);
+  void RemoveDownloads(const std::set<int64>& db_handles);
 
   // Segment usage -------------------------------------------------------------
 
@@ -324,7 +320,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          const base::Time from_time,
                          int max_result_count);
   void DeleteOldSegmentData();
-  void SetSegmentPresentationIndex(SegmentID segment_id, int index);
+
+  void IncreaseSegmentDuration(const GURL& url,
+                               base::Time time,
+                               base::TimeDelta delta);
+
+  void QuerySegmentDuration(scoped_refptr<QuerySegmentUsageRequest> request,
+                            const base::Time from_time,
+                            int max_result_count);
 
   // Keyword search terms ------------------------------------------------------
 
@@ -435,16 +438,27 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Calls ExpireHistoryBackend::ExpireHistoryBetween and commits the change.
   void ExpireHistoryBetween(
-      scoped_refptr<CancelableRequest<base::Closure> > request,
       const std::set<GURL>& restrict_urls,
       base::Time begin_time,
       base::Time end_time);
+
+  // Calls ExpireHistoryBackend::ExpireHistoryForTimes and commits the change.
+  void ExpireHistoryForTimes(const std::vector<base::Time>& times);
 
   // Bookmarks -----------------------------------------------------------------
 
   // Notification that a URL is no longer bookmarked. If there are no visits
   // for the specified url, it is deleted.
   void URLsNoLongerBookmarked(const std::set<GURL>& urls);
+
+  // Callbacks To Kill Database When It Gets Corrupted -------------------------
+
+  // Raze the history database. It will be recreated in a future run. Hopefully
+  // things go better then. Continue running but without reading or storing any
+  // state into the HistoryBackend databases. Close all of the databases managed
+  // HistoryBackend as there are no provisions for accessing the other databases
+  // managed by HistoryBackend when the history database cannot be accessed.
+  void KillHistoryDatabase();
 
   // Testing -------------------------------------------------------------------
 
@@ -470,6 +484,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // code to avoid syncing visits that would immediately be expired).
   virtual bool IsExpiredVisitTime(const base::Time& time);
 
+  base::Time GetFirstRecordedTimeForTest() {
+    return first_recorded_time_;
+  }
+
  protected:
   virtual ~HistoryBackend();
 
@@ -477,7 +495,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class base::RefCountedThreadSafe<HistoryBackend>;
   friend class CommitLaterTask;  // The commit task needs to call Commit().
   friend class HistoryBackendTest;
-  friend class HistoryTest;  // So the unit tests can poke our innards.
+  friend class HistoryBackendDBTest;  // So the unit tests can poke our innards.
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllThenAddData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ImportedFaviconsTest);
@@ -496,15 +514,17 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                            SetFaviconMappingsForPageAndRedirects);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconMappingsForPageDuplicates);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFavicons);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconsDeleteBitmaps);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconsReplaceBitmapData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconsSameFaviconURLForTwoPages);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           UpdateFaviconMappingsAndFetchNoChange);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconPageURLNotInDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconPageURLInDB);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconIconURLInDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconMaxFaviconsPerPage);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           MergeFaviconIconURLMappedToDifferentPageURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            MergeFaviconMaxFaviconBitmapsPerIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
@@ -517,7 +537,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBSingleIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBIconType);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBExpired);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsNoDB);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           UpdateFaviconMappingsAndFetchNoDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            CloneFaviconIsRestrictedToSameDomain);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
@@ -526,17 +547,17 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class ::TestingProfile;
 
   // Computes the name of the specified database on disk.
-  FilePath GetThumbnailFileName() const;
+  base::FilePath GetThumbnailFileName() const;
 
   // Returns the name of the Favicons database. This is the new name
   // of the Thumbnails database.
   // See ThumbnailDatabase::RenameAndDropThumbnails.
-  FilePath GetFaviconsFileName() const;
-  FilePath GetArchivedFileName() const;
+  base::FilePath GetFaviconsFileName() const;
+  base::FilePath GetArchivedFileName() const;
 
 #if defined(OS_ANDROID)
   // Returns the name of android cache database.
-  FilePath GetAndroidCacheFileName() const;
+  base::FilePath GetAndroidCacheFileName() const;
 #endif
 
   class URLQuerier;
@@ -544,6 +565,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Does the work of Init.
   void InitImpl(const std::string& languages);
+
+  // Closes all databases managed by HistoryBackend. Commits any pending
+  // transactions.
+  void CloseAllDatabases();
 
   // Adds a single visit to the database, updating the URL information such
   // as visit and typed count. The visit ID of the added visit and the URL ID
@@ -638,49 +663,41 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // If multiple icon types are specified, |page_url| will be mapped to the
   // icon URLs of the largest type available in the database.
   void UpdateFaviconMappingsAndFetchImpl(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL* page_url,
       const std::vector<GURL>& icon_urls,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      std::vector<FaviconBitmapResult>* results);
 
   // Set the favicon bitmaps for |icon_id|.
   // For each entry in |favicon_bitmap_data|, if a favicon bitmap already
   // exists at the entry's pixel size, replace the favicon bitmap's data with
   // the entry's bitmap data. Otherwise add a new favicon bitmap.
-  // |favicon_bitmap_added| is set to true if the function has added a favicon
-  // bitmap.
+  // Any favicon bitmaps already mapped to |icon_id| whose pixel sizes are not
+  // in |favicon_bitmap_data| are deleted.
+  // If not NULL, |favicon_bitmaps_changed| is set to whether any of the bitmap
+  // data at |icon_id| is changed as a result of calling this method.
+  // Computing |favicon_bitmaps_changed| requires additional database queries
+  // so should be avoided if unnecessary.
   void SetFaviconBitmaps(
       FaviconID icon_id,
       const std::vector<FaviconBitmapData>& favicon_bitmap_data,
-      bool* favicon_bitmap_added);
+      bool* favicon_bitmaps_changed);
 
-  // Returns true if |favicon_bitmap_data| and |icon_url_sizes| passed to
-  // SetFavicons() are valid.
+  // Returns true if |favicon_bitmap_data| passed to SetFavicons() is valid.
   // Criteria:
-  // 1) |icon_url_sizes| contains no more than
-  //      kMaxFaviconsPerPage icon URLs.
-  //      kMaxFaviconBitmapsPerIconURL favicon sizes for each icon URL.
-  // 2) The icon URLs and favicon sizes of |favicon_bitmap_data| are a subset
-  //    of |icon_url_sizes|.
-  // 3) The favicon sizes for entries in |icon_url_sizes| which have associated
-  //    data in |favicon_bitmap_data| is not history::GetDefaultFaviconSizes().
-  // 4) FaviconBitmapData::bitmap_data contains non NULL bitmap data.
+  // 1) |favicon_bitmap_data| contains no more than
+  //      kMaxFaviconsPerPage unique icon URLs.
+  //      kMaxFaviconBitmapsPerIconURL favicon bitmaps for each icon URL.
+  // 2) FaviconBitmapData::bitmap_data contains non NULL bitmap data.
   bool ValidateSetFaviconsParams(
-      const std::vector<FaviconBitmapData>& favicon_bitmap_data,
-      const IconURLSizesMap& icon_url_sizes) const;
+      const std::vector<FaviconBitmapData>& favicon_bitmap_data) const;
 
-  // Sets the sizes that the thumbnail database knows that the favicon at
-  // |icon_id| is available from the web. See history_types.h for a more
-  // detailed description of FaviconSizes.
-  // Deletes any favicon bitmaps currently mapped to |icon_id| whose pixel
-  // sizes are not contained in |favicon_sizes|.
-  // |favicon_bitmap_removed| is set to true if the function removed a favicon
-  // bitmap.
-  void SetFaviconSizes(FaviconID icon_id,
-                       const FaviconSizes& favicon_sizes,
-                       bool* favicon_bitmap_removed);
+  // Returns true if the bitmap data at |bitmap_id| equals |new_bitmap_data|.
+  bool IsFaviconBitmapDataEqual(
+      FaviconBitmapID bitmap_id,
+      const scoped_refptr<base::RefCountedMemory>& new_bitmap_data);
 
   // Returns true if there are favicons for |page_url| and one of the types in
   // |icon_types|.
@@ -693,16 +710,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // TOUCH_PRECOMPOSED_ICON, TOUCH_ICON, and FAVICON. See the comment for
   // GetFaviconResultsForBestMatch() for more details on how
   // |favicon_bitmap_results| is constructed.
-  // |icon_url_sizes| is set to a mapping of all the icon URLs which are mapped
-  // to |page_url| to the sizes of the favicon bitmaps available at each icon
-  // URL on the web.
   bool GetFaviconsFromDB(
       const GURL& page_url,
       int icon_types,
       const int desired_size_in_dip,
       const std::vector<ui::ScaleFactor>& desired_scale_factors,
-      std::vector<FaviconBitmapResult>* favicon_bitmap_results,
-      IconURLSizesMap* icon_url_sizes);
+      std::vector<FaviconBitmapResult>* favicon_bitmap_results);
 
   // Returns the favicon bitmaps which most closely match |desired_size_in_dip|
   // and |desired_scale_factors| in |favicon_bitmap_results|. If
@@ -718,15 +731,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       int desired_size_in_dip,
       const std::vector<ui::ScaleFactor>& desired_scale_factors,
       std::vector<FaviconBitmapResult>* favicon_bitmap_results);
-
-  // Build mapping of the icon URLs for |favicon_ids| to the sizes of the
-  // favicon bitmaps available at each icon URL on the web. Favicon bitmaps
-  // might not be cached in the thumbnail database for any of the sizes in the
-  // returned map. See history_types.h for a more detailed description of
-  // IconURLSizesMap.
-  // Returns true if map was successfully built.
-  bool BuildIconURLSizesMap(const std::vector<FaviconID>& favicon_ids,
-                            IconURLSizesMap* icon_url_sizes);
 
   // Maps the favicon ids in |icon_ids| to |page_url| (and all redirects)
   // for |icon_type|.
@@ -810,7 +814,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   int id_;
 
   // Directory where database files will be stored.
-  FilePath history_dir_;
+  base::FilePath history_dir_;
 
   // The history/thumbnail databases. Either MAY BE NULL if the database could
   // not be opened, all users must first check for NULL and return immediately
@@ -846,19 +850,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // destination of the redirect (i.e., the key into recent_redirects_);
   typedef base::MRUCache<GURL, history::RedirectList> RedirectCache;
   RedirectCache recent_redirects_;
-
-  // Timestamp of the last page addition request. We use this to detect when
-  // multiple additions are requested at the same time (within the resolution
-  // of the timer), so we can try to ensure they're unique when they're added
-  // to the database by using the last_recorded_time_ (q.v.). We still can't
-  // enforce or guarantee uniqueness, since the user might set his clock back.
-  base::Time last_requested_time_;
-
-  // Timestamp of the last page addition, as it was recorded in the database.
-  // If two or more requests come in at the same time, we increment that time
-  // by 1 us between them so it's more likely to be unique in the database.
-  // This keeps track of that higher-resolution timestamp.
-  base::Time last_recorded_time_;
 
   // Timestamp of the first entry in our database.
   base::Time first_recorded_time_;

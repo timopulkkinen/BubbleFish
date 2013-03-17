@@ -11,8 +11,8 @@ TestGlobals::TestGlobals()
       callback_tracker_(new CallbackTracker) {
 }
 
-TestGlobals::TestGlobals(PpapiGlobals::ForTest for_test)
-    : ppapi::PpapiGlobals(for_test),
+TestGlobals::TestGlobals(PpapiGlobals::PerThreadForTest per_thread_for_test)
+    : ppapi::PpapiGlobals(per_thread_for_test),
       callback_tracker_(new CallbackTracker) {
 }
 
@@ -58,15 +58,25 @@ base::Lock* TestGlobals::GetProxyLock() {
 }
 
 void TestGlobals::LogWithSource(PP_Instance instance,
-                                PP_LogLevel_Dev level,
+                                PP_LogLevel level,
                                 const std::string& source,
                                 const std::string& value) {
 }
 
 void TestGlobals::BroadcastLogWithSource(PP_Module module,
-                                         PP_LogLevel_Dev level,
+                                         PP_LogLevel level,
                                          const std::string& source,
                                          const std::string& value) {
+}
+
+MessageLoopShared* TestGlobals::GetCurrentMessageLoop() {
+  return NULL;
+}
+
+bool TestGlobals::IsHostGlobals() const {
+  // Pretend to be the host-side, for code that expects one or the other.
+  // TODO(dmichael): just make it settable which one we're pretending to be?
+  return true;
 }
 
 }  // namespace ppapi

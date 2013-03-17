@@ -16,16 +16,18 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/string16.h"
-#include "base/threading/thread.h"
 #include "base/win/scoped_comptr.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
-class FilePath;
 class RegistryListPreferencesHolder;
 interface IBrowserService;
 interface IWebBrowser2;
 struct ContextMenuModel;
+
+namespace base {
+class FilePath;
+}
 
 // utils.h : Various utility functions and classes
 extern const char kGCFProtocol[];
@@ -208,7 +210,7 @@ IEVersion GetIEVersion();
 // hosted. Returns 0 if the current process is not IE or any other error occurs.
 uint32 GetIEMajorVersion();
 
-FilePath GetIETemporaryFilesFolder();
+base::FilePath GetIETemporaryFilesFolder();
 
 // Retrieves the file version from a module handle without extra round trips
 // to the disk (as happens with the regular GetFileVersionInfo API).
@@ -394,28 +396,6 @@ STDMETHODIMP QueryInterfaceIfDelegateSupports(void* obj, REFIID iid,
 // Queries the delegated COM object for an interface, bypassing the wrapper.
 #define COM_INTERFACE_BLIND_DELEGATE() \
     COM_INTERFACE_ENTRY_FUNC_BLIND(0, CheckOutgoingInterface<_ComMapClass>)
-
-// Thread that enters STA and has a UI message loop.
-class STAThread : public base::Thread {
- public:
-  explicit STAThread(const char *name) : Thread(name) {}
-  ~STAThread() {
-    Stop();
-  }
-  bool Start() {
-    return StartWithOptions(Options(MessageLoop::TYPE_UI, 0));
-  }
- protected:
-  // Called just prior to starting the message loop
-  virtual void Init() {
-    ::CoInitialize(0);
-  }
-
-  // Called just after the message loop ends
-  virtual void CleanUp() {
-    ::CoUninitialize();
-  }
-};
 
 std::wstring GuidToString(const GUID& guid);
 
@@ -624,6 +604,6 @@ bool IncreaseWinInetConnections(DWORD connections);
 // Sets |profile_path| to the path for the Chrome Frame |profile_name|
 // profile.
 void GetChromeFrameProfilePath(const string16& profile_name,
-                               FilePath* profile_path);
+                               base::FilePath* profile_path);
 
 #endif  // CHROME_FRAME_UTILS_H_

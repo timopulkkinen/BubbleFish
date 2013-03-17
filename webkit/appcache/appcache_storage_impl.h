@@ -12,13 +12,17 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_disk_cache.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_storage.h"
+#include "webkit/storage/webkit_storage_export.h"
+
+namespace content {
+class ChromeAppCacheServiceTest;
+}
 
 namespace appcache {
 
@@ -27,7 +31,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   explicit AppCacheStorageImpl(AppCacheService* service);
   virtual ~AppCacheStorageImpl();
 
-  void Initialize(const FilePath& cache_directory,
+  void Initialize(const base::FilePath& cache_directory,
                   base::MessageLoopProxy* db_thread,
                   base::MessageLoopProxy* cache_thread);
   void Disable();
@@ -127,10 +131,10 @@ class AppCacheStorageImpl : public AppCacheStorage {
       const GURL& namespace_entry_url, const AppCacheEntry& fallback_entry,
       int64 cache_id, int64 group_id, const GURL& manifest_url);
 
-  APPCACHE_EXPORT AppCacheDiskCache* disk_cache();
+  WEBKIT_STORAGE_EXPORT AppCacheDiskCache* disk_cache();
 
   // The directory in which we place files in the file system.
-  FilePath cache_directory_;
+  base::FilePath cache_directory_;
   bool is_incognito_;
 
   // This class operates primarily on the IO thread, but schedules
@@ -167,7 +171,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   std::deque<base::Closure> pending_simple_tasks_;
   base::WeakPtrFactory<AppCacheStorageImpl> weak_factory_;
 
-  friend class ChromeAppCacheServiceTest;
+  friend class content::ChromeAppCacheServiceTest;
 };
 
 }  // namespace appcache

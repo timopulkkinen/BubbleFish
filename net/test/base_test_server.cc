@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,7 @@ namespace {
 
 std::string GetHostname(BaseTestServer::Type type,
                         const BaseTestServer::SSLOptions& options) {
-  if ((type == BaseTestServer::TYPE_HTTPS ||
-       type == BaseTestServer::TYPE_WSS) &&
+  if (BaseTestServer::UsingSSL(type) &&
       options.server_certificate ==
           BaseTestServer::SSLOptions::CERT_MISMATCHED_NAME) {
     // Return a different hostname string that resolves to the same hostname.
@@ -43,13 +42,13 @@ std::string GetHostname(BaseTestServer::Type type,
 
 void GetCiphersList(int cipher, base::ListValue* values) {
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_RC4)
-    values->Append(base::Value::CreateStringValue("rc4"));
+    values->Append(new base::StringValue("rc4"));
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES128)
-    values->Append(base::Value::CreateStringValue("aes128"));
+    values->Append(new base::StringValue("aes128"));
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES256)
-    values->Append(base::Value::CreateStringValue("aes256"));
+    values->Append(new base::StringValue("aes256"));
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_3DES)
-    values->Append(base::Value::CreateStringValue("3des"));
+    values->Append(new base::StringValue("3des"));
 }
 
 }  // namespace
@@ -72,23 +71,23 @@ BaseTestServer::SSLOptions::SSLOptions(
 
 BaseTestServer::SSLOptions::~SSLOptions() {}
 
-FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
+base::FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
   switch (server_certificate) {
     case CERT_OK:
     case CERT_MISMATCHED_NAME:
-      return FilePath(FILE_PATH_LITERAL("ok_cert.pem"));
+      return base::FilePath(FILE_PATH_LITERAL("ok_cert.pem"));
     case CERT_EXPIRED:
-      return FilePath(FILE_PATH_LITERAL("expired_cert.pem"));
+      return base::FilePath(FILE_PATH_LITERAL("expired_cert.pem"));
     case CERT_CHAIN_WRONG_ROOT:
       // This chain uses its own dedicated test root certificate to avoid
       // side-effects that may affect testing.
-      return FilePath(FILE_PATH_LITERAL("redundant-server-chain.pem"));
+      return base::FilePath(FILE_PATH_LITERAL("redundant-server-chain.pem"));
     case CERT_AUTO:
-      return FilePath();
+      return base::FilePath();
     default:
       NOTREACHED();
   }
-  return FilePath();
+  return base::FilePath();
 }
 
 std::string BaseTestServer::SSLOptions::GetOCSPArgument() const {
@@ -113,7 +112,6 @@ std::string BaseTestServer::SSLOptions::GetOCSPArgument() const {
 }
 
 const char BaseTestServer::kLocalhost[] = "127.0.0.1";
-const char BaseTestServer::kGDataAuthToken[] = "testtoken";
 
 BaseTestServer::BaseTestServer(Type type, const std::string& host)
     : type_(type),
@@ -127,7 +125,7 @@ BaseTestServer::BaseTestServer(Type type, const SSLOptions& ssl_options)
       type_(type),
       started_(false),
       log_to_console_(false) {
-  DCHECK(type == TYPE_HTTPS || type == TYPE_WSS);
+  DCHECK(UsingSSL(type));
   Init(GetHostname(type, ssl_options));
 }
 
@@ -138,7 +136,7 @@ const HostPortPair& BaseTestServer::host_port_pair() const {
   return host_port_pair_;
 }
 
-const DictionaryValue& BaseTestServer::server_data() const {
+const base::DictionaryValue& BaseTestServer::server_data() const {
   DCHECK(started_);
   DCHECK(server_data_.get());
   return *server_data_;
@@ -148,9 +146,7 @@ std::string BaseTestServer::GetScheme() const {
   switch (type_) {
     case TYPE_FTP:
       return "ftp";
-    case TYPE_GDATA:
     case TYPE_HTTP:
-    case TYPE_SYNC:
       return "http";
     case TYPE_HTTPS:
       return "https";
@@ -169,10 +165,7 @@ std::string BaseTestServer::GetScheme() const {
 bool BaseTestServer::GetAddressList(AddressList* address_list) const {
   DCHECK(address_list);
 
-  scoped_ptr<HostResolver> resolver(
-      CreateSystemHostResolver(HostResolver::kDefaultParallelism,
-                               HostResolver::kDefaultRetryAttempts,
-                               NULL));
+  scoped_ptr<HostResolver> resolver(HostResolver::CreateDefaultResolver(NULL));
   HostResolver::RequestInfo info(host_port_pair_);
   TestCompletionCallback callback;
   int rv = resolver->Resolve(info, address_list, callback.callback(), NULL,
@@ -254,8 +247,8 @@ void BaseTestServer::Init(const std::string& host) {
   log_to_console_ = true;
 }
 
-void BaseTestServer::SetResourcePath(const FilePath& document_root,
-                                     const FilePath& certificates_dir) {
+void BaseTestServer::SetResourcePath(const base::FilePath& document_root,
+                                     const base::FilePath& certificates_dir) {
   // This method shouldn't get called twice.
   DCHECK(certificates_dir_.empty());
   document_root_ = document_root;
@@ -266,14 +259,14 @@ void BaseTestServer::SetResourcePath(const FilePath& document_root,
 bool BaseTestServer::ParseServerData(const std::string& server_data) {
   VLOG(1) << "Server data: " << server_data;
   base::JSONReader json_reader;
-  scoped_ptr<Value> value(json_reader.ReadToValue(server_data));
-  if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY)) {
+  scoped_ptr<base::Value> value(json_reader.ReadToValue(server_data));
+  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Could not parse server data: "
                << json_reader.GetErrorMessage();
     return false;
   }
 
-  server_data_.reset(static_cast<DictionaryValue*>(value.release()));
+  server_data_.reset(static_cast<base::DictionaryValue*>(value.release()));
   int port = 0;
   if (!server_data_->GetInteger("port", &port)) {
     LOG(ERROR) << "Could not find port value";
@@ -294,9 +287,9 @@ bool BaseTestServer::LoadTestRootCert() const {
     return false;
 
   // Should always use absolute path to load the root certificate.
-  FilePath root_certificate_path = certificates_dir_;
+  base::FilePath root_certificate_path = certificates_dir_;
   if (!certificates_dir_.IsAbsolute()) {
-    FilePath src_dir;
+    base::FilePath src_dir;
     if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
       return false;
     root_certificate_path = src_dir.Append(certificates_dir_);
@@ -309,7 +302,7 @@ bool BaseTestServer::LoadTestRootCert() const {
 bool BaseTestServer::SetupWhenServerStarted() {
   DCHECK(host_port_pair_.port());
 
-  if ((type_ == TYPE_HTTPS || type_ == TYPE_WSS) && !LoadTestRootCert())
+  if (UsingSSL(type_) && !LoadTestRootCert())
       return false;
 
   started_ = true;
@@ -340,12 +333,10 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
   if (VLOG_IS_ON(1) || log_to_console_)
     arguments->Set("log-to-console", base::Value::CreateNullValue());
 
-  if (type_ == TYPE_HTTPS) {
-    arguments->Set("https", base::Value::CreateNullValue());
-
+  if (UsingSSL(type_)) {
     // Check the certificate arguments of the HTTPS server.
-    FilePath certificate_path(certificates_dir_);
-    FilePath certificate_file(ssl_options_.GetCertificateFile());
+    base::FilePath certificate_path(certificates_dir_);
+    base::FilePath certificate_file(ssl_options_.GetCertificateFile());
     if (!certificate_file.value().empty()) {
       certificate_path = certificate_path.Append(certificate_file);
       if (certificate_path.IsAbsolute() &&
@@ -357,16 +348,12 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->SetString("cert-and-key-file", certificate_path.value());
     }
 
-    std::string ocsp_arg = ssl_options_.GetOCSPArgument();
-    if (!ocsp_arg.empty())
-      arguments->SetString("ocsp", ocsp_arg);
-
     // Check the client certificate related arguments.
     if (ssl_options_.request_client_certificate)
       arguments->Set("ssl-client-auth", base::Value::CreateNullValue());
     scoped_ptr<base::ListValue> ssl_client_certs(new base::ListValue());
 
-    std::vector<FilePath>::const_iterator it;
+    std::vector<base::FilePath>::const_iterator it;
     for (it = ssl_options_.client_authorities.begin();
          it != ssl_options_.client_authorities.end(); ++it) {
       if (it->IsAbsolute() && !file_util::PathExists(*it)) {
@@ -374,11 +361,19 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
                    << " doesn't exist. Can't launch https server.";
         return false;
       }
-      ssl_client_certs->Append(base::Value::CreateStringValue(it->value()));
+      ssl_client_certs->Append(new base::StringValue(it->value()));
     }
 
     if (ssl_client_certs->GetSize())
       arguments->Set("ssl-client-ca", ssl_client_certs.release());
+  }
+
+  if (type_ == TYPE_HTTPS) {
+    arguments->Set("https", base::Value::CreateNullValue());
+
+    std::string ocsp_arg = ssl_options_.GetOCSPArgument();
+    if (!ocsp_arg.empty())
+      arguments->SetString("ocsp", ocsp_arg);
 
     // Check bulk cipher argument.
     scoped_ptr<base::ListValue> bulk_cipher_values(new base::ListValue());
@@ -389,9 +384,15 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->Set("https-record-resume", base::Value::CreateNullValue());
     if (ssl_options_.tls_intolerant != SSLOptions::TLS_INTOLERANT_NONE) {
       arguments->Set("tls-intolerant",
-          base::Value::CreateIntegerValue(ssl_options_.tls_intolerant));
+                     new base::FundamentalValue(ssl_options_.tls_intolerant));
     }
   }
+
+  return GenerateAdditionalArguments(arguments);
+}
+
+bool BaseTestServer::GenerateAdditionalArguments(
+    base::DictionaryValue* arguments) const {
   return true;
 }
 

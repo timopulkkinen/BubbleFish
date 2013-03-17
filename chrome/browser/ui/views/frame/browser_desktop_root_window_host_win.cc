@@ -6,12 +6,17 @@
 
 #include <dwmapi.h>
 
-#include "base/command_line.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
+#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/theme_image_mapper.h"
+#include "grit/theme_resources.h"
 #include "ui/base/theme_provider.h"
-#include "ui/views/views_switches.h"
+#include "ui/views/controls/menu/native_menu_win.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -22,6 +27,45 @@ const int kClientEdgeThickness = 3;
 // doesn't show up on our rounded corners.
 const int kDWMFrameTopOffset = 3;
 
+// DesktopThemeProvider maps resource ids using MapThemeImage(). This is
+// necessary for BrowserDesktopRootWindowHostWin so that it uses the windows
+// theme images rather than the ash theme images.
+class DesktopThemeProvider : public ui::ThemeProvider {
+ public:
+  explicit DesktopThemeProvider(ui::ThemeProvider* delegate)
+      : delegate_(delegate) {
+  }
+
+  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE {
+    return delegate_->GetImageSkiaNamed(
+        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+  }
+  virtual SkColor GetColor(int id) const OVERRIDE {
+    return delegate_->GetColor(id);
+  }
+  virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE {
+    return delegate_->GetDisplayProperty(id, result);
+  }
+  virtual bool ShouldUseNativeFrame() const OVERRIDE {
+    return delegate_->ShouldUseNativeFrame();
+  }
+  virtual bool HasCustomImage(int id) const OVERRIDE {
+    return delegate_->HasCustomImage(
+        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+
+  }
+  virtual base::RefCountedMemory* GetRawData(
+      int id,
+      ui::ScaleFactor scale_factor) const OVERRIDE {
+    return delegate_->GetRawData(id, scale_factor);
+  }
+
+ private:
+  ui::ThemeProvider* delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(DesktopThemeProvider);
+};
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,15 +73,49 @@ const int kDWMFrameTopOffset = 3;
 
 BrowserDesktopRootWindowHostWin::BrowserDesktopRootWindowHostWin(
     views::internal::NativeWidgetDelegate* native_widget_delegate,
+    views::DesktopNativeWidgetAura* desktop_native_widget_aura,
     const gfx::Rect& initial_bounds,
     BrowserView* browser_view,
     BrowserFrame* browser_frame)
-    : DesktopRootWindowHostWin(native_widget_delegate, initial_bounds),
+    : DesktopRootWindowHostWin(native_widget_delegate,
+                               desktop_native_widget_aura,
+                               initial_bounds),
       browser_view_(browser_view),
       browser_frame_(browser_frame) {
+  scoped_ptr<ui::ThemeProvider> theme_provider(
+      new DesktopThemeProvider(ThemeServiceFactory::GetForProfile(
+                                   browser_view->browser()->profile())));
+  browser_frame->SetThemeProvider(theme_provider.Pass());
 }
 
 BrowserDesktopRootWindowHostWin::~BrowserDesktopRootWindowHostWin() {
+}
+
+views::NativeMenuWin* BrowserDesktopRootWindowHostWin::GetSystemMenu() {
+  if (!system_menu_.get()) {
+    SystemMenuInsertionDelegateWin insertion_delegate;
+    system_menu_.reset(
+        new views::NativeMenuWin(browser_frame_->GetSystemMenuModel(),
+                                 GetHWND()));
+    system_menu_->Rebuild(&insertion_delegate);
+  }
+  return system_menu_.get();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// BrowserDesktopRootWindowHostWin, BrowserDesktopRootWindowHost implementation:
+
+views::DesktopRootWindowHost*
+    BrowserDesktopRootWindowHostWin::AsDesktopRootWindowHost() {
+  return this;
+}
+
+int BrowserDesktopRootWindowHostWin::GetMinimizeButtonOffset() const {
+  return minimize_button_metrics_.GetMinimizeButtonOffsetX();
+}
+
+bool BrowserDesktopRootWindowHostWin::UsesNativeSystemMenu() const {
+  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -83,17 +161,28 @@ bool BrowserDesktopRootWindowHostWin::PreHandleMSG(UINT message,
                                                    LPARAM l_param,
                                                    LRESULT* result) {
   switch (message) {
-  case WM_ENDSESSION:
-    browser::SessionEnding();
-    return true;
+    case WM_ACTIVATE:
+      if (LOWORD(w_param) != WA_INACTIVE)
+        minimize_button_metrics_.OnHWNDActivated();
+      return false;
+    case WM_ENDSESSION:
+      chrome::SessionEnding();
+      return true;
+    case WM_INITMENUPOPUP:
+      GetSystemMenu()->UpdateStates();
+      return true;
   }
-  return false;
+  return DesktopRootWindowHostWin::PreHandleMSG(
+      message, w_param, l_param, result);
 }
 
 void BrowserDesktopRootWindowHostWin::PostHandleMSG(UINT message,
                                                     WPARAM w_param,
                                                     LPARAM l_param) {
   switch (message) {
+  case WM_CREATE:
+    minimize_button_metrics_.Init(GetHWND());
+    break;
   case WM_WINDOWPOSCHANGED:
     UpdateDWMFrame();
 
@@ -132,11 +221,18 @@ bool BrowserDesktopRootWindowHostWin::IsUsingCustomFrame() const {
 
   // Otherwise, we use the native frame when we're told we should by the theme
   // provider (e.g. no custom theme is active).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      views::switches::kEnableNativeFrame)) {
-    return !GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
-  }
-  return true;
+  return !GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
+}
+
+bool BrowserDesktopRootWindowHostWin::ShouldUseNativeFrame() {
+  if (!views::DesktopRootWindowHostWin::ShouldUseNativeFrame())
+    return false;
+  // This function can get called when the Browser window is closed i.e. in the
+  // context of the BrowserView destructor.
+  if (!browser_view_->browser())
+    return false;
+  return chrome::ShouldUseNativeFrame(browser_view_,
+                                      GetWidget()->GetThemeProvider());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -181,3 +277,20 @@ void BrowserDesktopRootWindowHostWin::UpdateDWMFrame() {
   DwmExtendFrameIntoClientArea(GetHWND(), &margins);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// BrowserDesktopRootWindowHost, public:
+
+// static
+BrowserDesktopRootWindowHost*
+    BrowserDesktopRootWindowHost::CreateBrowserDesktopRootWindowHost(
+        views::internal::NativeWidgetDelegate* native_widget_delegate,
+        views::DesktopNativeWidgetAura* desktop_native_widget_aura,
+        const gfx::Rect& initial_bounds,
+        BrowserView* browser_view,
+        BrowserFrame* browser_frame) {
+  return new BrowserDesktopRootWindowHostWin(native_widget_delegate,
+                                             desktop_native_widget_aura,
+                                             initial_bounds,
+                                             browser_view,
+                                             browser_frame);
+}

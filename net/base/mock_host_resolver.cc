@@ -71,6 +71,7 @@ int MockHostResolverBase::Resolve(const RequestInfo& info,
                                   RequestHandle* handle,
                                   const BoundNetLog& net_log) {
   DCHECK(CalledOnValidThread());
+  num_resolve_++;
   size_t id = next_request_id_++;
   int rv = ResolveFromIPLiteralOrCache(info, addresses);
   if (rv != ERR_DNS_CACHE_MISS) {
@@ -84,16 +85,20 @@ int MockHostResolverBase::Resolve(const RequestInfo& info,
   requests_[id] = req;
   if (handle)
     *handle = reinterpret_cast<RequestHandle>(id);
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   base::Bind(&MockHostResolverBase::ResolveNow,
-                                              AsWeakPtr(),
-                                              id));
+
+  if (!ondemand_mode_) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&MockHostResolverBase::ResolveNow, AsWeakPtr(), id));
+  }
+
   return ERR_IO_PENDING;
 }
 
 int MockHostResolverBase::ResolveFromCache(const RequestInfo& info,
                                            AddressList* addresses,
                                            const BoundNetLog& net_log) {
+  num_resolve_from_cache_++;
   DCHECK(CalledOnValidThread());
   next_request_id_++;
   int rv = ResolveFromIPLiteralOrCache(info, addresses);
@@ -117,11 +122,24 @@ HostCache* MockHostResolverBase::GetHostCache() {
   return cache_.get();
 }
 
+void MockHostResolverBase::ResolveAllPending() {
+  DCHECK(CalledOnValidThread());
+  DCHECK(ondemand_mode_);
+  for (RequestMap::iterator i = requests_.begin(); i != requests_.end(); ++i) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&MockHostResolverBase::ResolveNow, AsWeakPtr(), i->first));
+  }
+}
+
 // start id from 1 to distinguish from NULL RequestHandle
 MockHostResolverBase::MockHostResolverBase(bool use_caching)
-    : synchronous_mode_(false), next_request_id_(1) {
+    : synchronous_mode_(false),
+      ondemand_mode_(false),
+      next_request_id_(1),
+      num_resolve_(0),
+      num_resolve_from_cache_(0) {
   rules_ = CreateCatchAllHostResolverProc();
-  proc_ = rules_;
 
   if (use_caching) {
     cache_.reset(new HostCache(kMaxCacheEntries));
@@ -145,10 +163,8 @@ int MockHostResolverBase::ResolveFromIPLiteralOrCache(const RequestInfo& info,
     const HostCache::Entry* entry = cache_->Lookup(key, base::TimeTicks::Now());
     if (entry) {
       rv = entry->error;
-      if (rv == OK) {
-        *addresses = entry->addrlist;
-        SetPortOnAddressList(info.port(), addresses);
-      }
+      if (rv == OK)
+        *addresses = AddressList::CopyWithPort(entry->addrlist, info.port());
     }
   }
   return rv;
@@ -158,11 +174,11 @@ int MockHostResolverBase::ResolveProc(size_t id,
                                       const RequestInfo& info,
                                       AddressList* addresses) {
   AddressList addr;
-  int rv = proc_->Resolve(info.hostname(),
-                          info.address_family(),
-                          info.host_resolver_flags(),
-                          &addr,
-                          NULL);
+  int rv = rules_->Resolve(info.hostname(),
+                           info.address_family(),
+                           info.host_resolver_flags(),
+                           &addr,
+                           NULL);
   if (cache_.get()) {
     HostCache::Key key(info.hostname(),
                        info.address_family(),
@@ -171,12 +187,10 @@ int MockHostResolverBase::ResolveProc(size_t id,
     base::TimeDelta ttl;
     if (rv == OK)
       ttl = base::TimeDelta::FromSeconds(kCacheEntryTTLSeconds);
-    cache_->Set(key, rv, addr, base::TimeTicks::Now(), ttl);
+    cache_->Set(key, HostCache::Entry(rv, addr), base::TimeTicks::Now(), ttl);
   }
-  if (rv == OK) {
-    *addresses = addr;
-    SetPortOnAddressList(info.port(), addresses);
-  }
+  if (rv == OK)
+    *addresses = AddressList::CopyWithPort(addr, info.port());
   return rv;
 }
 
@@ -293,6 +307,10 @@ void RuleBasedHostResolverProc::AddSimulatedFailure(
   Rule rule(Rule::kResolverTypeFail, host_pattern, ADDRESS_FAMILY_UNSPECIFIED,
             flags, "", "", 0);
   rules_.push_back(rule);
+}
+
+void RuleBasedHostResolverProc::ClearRules() {
+  rules_.clear();
 }
 
 int RuleBasedHostResolverProc::Resolve(const std::string& host,

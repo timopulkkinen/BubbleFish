@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 
 #include "../common/gles2_cmd_utils.h"
 #include "../common/gles2_cmd_format.h"
@@ -198,6 +199,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_TEXTURE_BINDING_EXTERNAL_OES:
       return 1;
     case GL_TEXTURE_BINDING_RECTANGLE_ARB:
+      return 1;
+    case GL_TEXTURE_IMMUTABLE_FORMAT_EXT:
       return 1;
     case GL_UNPACK_ALIGNMENT:
       return 1;

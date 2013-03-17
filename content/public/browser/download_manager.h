@@ -32,21 +32,17 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/time.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 
-class DownloadRequestHandle;
 class GURL;
-struct DownloadCreateInfo;
-struct DownloadRetrieveInfo;
 
 namespace content {
 
@@ -54,16 +50,15 @@ class BrowserContext;
 class ByteStreamReader;
 class DownloadManagerDelegate;
 class DownloadQuery;
+class DownloadRequestHandle;
 class DownloadUrlParameters;
+struct DownloadCreateInfo;
+struct DownloadRetrieveInfo;
 
 // Browser's download manager: manages all downloads and destination view.
 class CONTENT_EXPORT DownloadManager
     : public base::RefCountedThreadSafe<DownloadManager> {
  public:
-  // A method that can be used in tests to ensure that all the internal download
-  // classes have no pending downloads.
-  static bool EnsureNoPendingDownloadsForTesting();
-
   // Sets/Gets the delegate for this DownloadManager. The delegate has to live
   // past its Shutdown method being called (by the DownloadManager).
   virtual void SetDelegate(DownloadManagerDelegate* delegate) = 0;
@@ -79,20 +74,19 @@ class CONTENT_EXPORT DownloadManager
   // to the DownloadManager's collection of downloads.
   class CONTENT_EXPORT Observer {
    public:
-    // A DownloadItem was created.  Unlike ModelChanged, this item may be
-    // visible before the filename is determined; in this case the return value
-    // of GetTargetFileName() will be null.  This method may be called an
-    // arbitrary number of times, e.g. when loading history on startup.  As a
-    // result, consumers should avoid doing large amounts of work in
-    // OnDownloadCreated().  TODO(<whoever>): When we've fully specified the
-    // possible states of the DownloadItem in download_item.h and removed
-    // ModelChanged, we should remove the caveat above.
+    // A DownloadItem was created. This item may be visible before the filename
+    // is determined; in this case the return value of GetTargetFileName() will
+    // be null.  This method may be called an arbitrary number of times, e.g.
+    // when loading history on startup.  As a result, consumers should avoid
+    // doing large amounts of work in OnDownloadCreated().  TODO(<whoever>):
+    // When we've fully specified the possible states of the DownloadItem in
+    // download_item.h, we should remove the caveat above.
     virtual void OnDownloadCreated(
         DownloadManager* manager, DownloadItem* item) {}
 
-    // New or deleted download, observers should query us for the current set
-    // of downloads.
-    virtual void ModelChanged(DownloadManager* manager) {}
+    // A SavePackage has successfully finished.
+    virtual void OnSavePackageSuccessfullyFinished(
+        DownloadManager* manager, DownloadItem* item) {}
 
     // Called when the DownloadManager is being destroyed to prevent Observers
     // from calling back to a stale pointer.
@@ -115,36 +109,13 @@ class CONTENT_EXPORT DownloadManager
   // to initiate the non-source portions of a download.
   // Returns the id assigned to the download.  If the DownloadCreateInfo
   // specifies an id, that id will be used.
-  virtual DownloadId StartDownload(
+  virtual DownloadItem* StartDownload(
       scoped_ptr<DownloadCreateInfo> info,
       scoped_ptr<ByteStreamReader> stream) = 0;
-
-  // Notifications sent from the download thread to the UI thread
-  virtual void UpdateDownload(int32 download_id,
-                              int64 bytes_so_far,
-                              int64 bytes_per_sec,
-                              const std::string& hash_state) = 0;
-
-  // |download_id| is the ID of the download.
-  // |size| is the number of bytes that have been downloaded.
-  // |hash| is sha256 hash for the downloaded file. It is empty when the hash
-  // is not available.
-  virtual void OnResponseCompleted(int32 download_id, int64 size,
-                           const std::string& hash) = 0;
 
   // Offthread target for cancelling a particular download.  Will be a no-op
   // if the download has already been cancelled.
   virtual void CancelDownload(int32 download_id) = 0;
-
-  // Called when there is an error in the download.
-  // |download_id| is the ID of the download.
-  // |size| is the number of bytes that are currently downloaded.
-  // |hash_state| is the current state of the hash of the data that has been
-  // downloaded.
-  // |reason| is a download interrupt reason code.
-  virtual void OnDownloadInterrupted(
-      int32 download_id,
-      DownloadInterruptReason reason) = 0;
 
   // Remove downloads after remove_begin (inclusive) and before remove_end
   // (exclusive). You may pass in null Time values to do an unbounded delete
@@ -172,15 +143,23 @@ class CONTENT_EXPORT DownloadManager
 
   // Called by the embedder, after creating the download manager, to let it know
   // about downloads from previous runs of the browser.
-  virtual void OnPersistentStoreQueryComplete(
-      std::vector<DownloadPersistentStoreInfo>* entries) = 0;
-
-  // Called by the embedder, in response to
-  // DownloadManagerDelegate::AddItemToPersistentStore.
-  virtual void OnItemAddedToPersistentStore(int32 download_id,
-                                            int64 db_handle) = 0;
+  virtual DownloadItem* CreateDownloadItem(
+      const base::FilePath& current_path,
+      const base::FilePath& target_path,
+      const std::vector<GURL>& url_chain,
+      const GURL& referrer_url,
+      const base::Time& start_time,
+      const base::Time& end_time,
+      int64 received_bytes,
+      int64 total_bytes,
+      DownloadItem::DownloadState state,
+      DownloadDangerType danger_type,
+      DownloadInterruptReason interrupt_reason,
+      bool opened) = 0;
 
   // The number of in progress (including paused) downloads.
+  // Performance note: this loops over all items. If profiling finds that this
+  // is too slow, use an AllDownloadItemNotifier to count in-progress items.
   virtual int InProgressCount() const = 0;
 
   virtual BrowserContext* GetBrowserContext() const = 0;
@@ -193,9 +172,6 @@ class CONTENT_EXPORT DownloadManager
   // Get the download item for |id| if present, no matter what type of download
   // it is or state it's in.
   virtual DownloadItem* GetDownload(int id) = 0;
-
-  // Called when Save Page download is done.
-  virtual void SavePageDownloadFinished(DownloadItem* download) = 0;
 
  protected:
   virtual ~DownloadManager() {}

@@ -1,7 +1,9 @@
 include_rules = [
-  "+base",
   "+skia",
-  "+testing",
   "+third_party/skia",
   "+ui",
+  "+grit",
+
+  # Allow inclusion of third-party code:
+  "+third_party/GTM", # Google Toolbox for Mac.
 ]

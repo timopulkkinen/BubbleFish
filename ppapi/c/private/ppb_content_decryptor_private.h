@@ -4,7 +4,7 @@
  */
 
 /* From private/ppb_content_decryptor_private.idl,
- *   modified Thu Aug 16 20:19:22 2012.
+ *   modified Mon Dec 10 21:43:51 2012.
  */
 
 #ifndef PPAPI_C_PRIVATE_PPB_CONTENT_DECRYPTOR_PRIVATE_H_
@@ -18,10 +18,10 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/private/pp_content_decryptor.h"
 
-#define PPB_CONTENTDECRYPTOR_PRIVATE_INTERFACE_0_1 \
-    "PPB_ContentDecryptor_Private;0.1"
+#define PPB_CONTENTDECRYPTOR_PRIVATE_INTERFACE_0_6 \
+    "PPB_ContentDecryptor_Private;0.6"
 #define PPB_CONTENTDECRYPTOR_PRIVATE_INTERFACE \
-    PPB_CONTENTDECRYPTOR_PRIVATE_INTERFACE_0_1
+    PPB_CONTENTDECRYPTOR_PRIVATE_INTERFACE_0_6
 
 /**
  * @file
@@ -42,7 +42,7 @@
  * browser side support for the Content Decryption Module (CDM) for v0.1 of the
  * proposed Encrypted Media Extensions: http://goo.gl/rbdnR
  */
-struct PPB_ContentDecryptor_Private_0_1 {
+struct PPB_ContentDecryptor_Private_0_6 {
   /**
    * The decryptor requires a key that has not been provided.
    *
@@ -63,7 +63,7 @@ struct PPB_ContentDecryptor_Private_0_1 {
    * <code>PP_VARTYPE_STRING</code> containing the session ID.
    *
    * @param[in] init_data A <code>PP_Var</code> of type
-   * <code>PP_VARTYPE_ARRAYBUFFER</code> containing container-specific
+   * <code>PP_VARTYPE_ARRAY_BUFFER</code> containing container-specific
    * initialization data.
    */
   void (*NeedKey)(PP_Instance instance,
@@ -112,8 +112,8 @@ struct PPB_ContentDecryptor_Private_0_1 {
    * @param[in] session_id A <code>PP_Var</code> of type
    * <code>PP_VARTYPE_STRING</code> containing the session ID.
    *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to a
-   * <code>PPB_Buffer_Dev</code> resource that contains the message.
+   * @param[in] message A <code>PP_Var</code> of type
+   * <code>PP_VARTYPE_ARRAY_BUFFER</code> that contains the message.
    *
    * @param[in] default_url A <code>PP_Var</code> of type
    * <code>PP_VARTYPE_STRING</code> containing the default URL for the message.
@@ -121,7 +121,7 @@ struct PPB_ContentDecryptor_Private_0_1 {
   void (*KeyMessage)(PP_Instance instance,
                      struct PP_Var key_system,
                      struct PP_Var session_id,
-                     PP_Resource message,
+                     struct PP_Var message,
                      struct PP_Var default_url);
   /**
    * An error occurred in a <code>PPP_ContentDecryptor_Private</code> method,
@@ -147,12 +147,16 @@ struct PPB_ContentDecryptor_Private_0_1 {
    * <code>PPP_ContentDecryptor_Private</code> interface completes to
    * deliver decrypted_block to the browser for decoding and rendering.
    *
+   * The plugin must not hold a reference to the encrypted buffer resource
+   * provided to <code>Decrypt()</code> when it calls this method. The browser
+   * will reuse the buffer in a subsequent <code>Decrypt()</code> call.
+   *
    * @param[in] decrypted_block A <code>PP_Resource</code> corresponding to a
    * <code>PPB_Buffer_Dev</code> resource that contains a decrypted data
    * block.
    *
    * @param[in] decrypted_block_info A <code>PP_DecryptedBlockInfo</code> that
-   * contains the tracking info and result code associated with the
+   * contains the result code and tracking info associated with the
    * <code>decrypted_block</code>.
    */
   void (*DeliverBlock)(
@@ -160,28 +164,100 @@ struct PPB_ContentDecryptor_Private_0_1 {
       PP_Resource decrypted_block,
       const struct PP_DecryptedBlockInfo* decrypted_block_info);
   /**
+   * Called after the <code>InitializeAudioDecoder()</code> or
+   * <code>InitializeVideoDecoder()</code> method on the
+   * <code>PPP_ContentDecryptor_Private</code> interface completes to report
+   * decoder initialization status to the browser.
+   *
+   * @param[in] success A <code>PP_Bool</code> that is set to
+   * <code>PP_TRUE</code> when the decoder initialization request associated
+   * with <code>request_id</code> was successful.
+   *
+   * @param[in] decoder_type A <code>PP_DecryptorStreamType</code> identifying
+   * the decoder type for which this initialization status response was sent.
+   *
+   * @param[in] request_id The <code>request_id</code> value passed to
+   * <code>InitializeAudioDecoder</code> or <code>InitializeVideoDecoder</code>
+   * in <code>PP_AudioDecoderConfig</code> or
+   * <code>PP_VideoDecoderConfig</code>.
+   */
+  void (*DecoderInitializeDone)(PP_Instance instance,
+                                PP_DecryptorStreamType decoder_type,
+                                uint32_t request_id,
+                                PP_Bool success);
+  /**
+   * Called after the <code>DeinitializeDecoder()</code> method on the
+   * <code>PPP_ContentDecryptor_Private</code> interface completes to report
+   * decoder de-initialization completion to the browser.
+   *
+   * @param[in] decoder_type The <code>PP_DecryptorStreamType</code> passed to
+   * <code>DeinitializeDecoder()</code>.
+   *
+   * @param[in] request_id The <code>request_id</code> value passed to
+   * <code>DeinitializeDecoder()</code>.
+   */
+  void (*DecoderDeinitializeDone)(PP_Instance instance,
+                                  PP_DecryptorStreamType decoder_type,
+                                  uint32_t request_id);
+  /**
+   * Called after the <code>ResetDecoder()</code> method on the
+   * <code>PPP_ContentDecryptor_Private</code> interface completes to report
+   * decoder reset completion to the browser.
+   *
+   * @param[in] decoder_type The <code>PP_DecryptorStreamType</code> passed to
+   * <code>ResetDecoder()</code>.
+   *
+   * @param[in] request_id The <code>request_id</code> value passed to
+   * <code>ResetDecoder()</code>.
+   */
+  void (*DecoderResetDone)(PP_Instance instance,
+                           PP_DecryptorStreamType decoder_type,
+                           uint32_t request_id);
+  /**
    * Called after the <code>DecryptAndDecode()</code> method on the
    * <code>PPP_ContentDecryptor_Private</code> interface completes to deliver
    * a decrypted and decoded video frame to the browser for rendering.
    *
+   * The plugin must not hold a reference to the encrypted buffer resource
+   * provided to <code>DecryptAndDecode()</code> when it calls this method. The
+   * browser will reuse the buffer in a subsequent
+   * <code>DecryptAndDecode()</code> call.
+   *
    * @param[in] decrypted_frame A <code>PP_Resource</code> corresponding to a
    * <code>PPB_Buffer_Dev</code> resource that contains a video frame.
    *
-   * @param[in] decrypted_block_info A <code>PP_DecryptedBlockInfo</code> that
-   * contains the tracking info and result code associated with the
-   * <code>decrypted_block</code>.
+   * @param[in] decrypted_frame_info A <code>PP_DecryptedFrameInfo</code> that
+   * contains the result code, tracking info, and buffer format associated with
+   * <code>decrypted_frame</code>.
    */
   void (*DeliverFrame)(
       PP_Instance instance,
       PP_Resource decrypted_frame,
-      const struct PP_DecryptedBlockInfo* decrypted_block_info);
+      const struct PP_DecryptedFrameInfo* decrypted_frame_info);
   /**
    * Called after the <code>DecryptAndDecode()</code> method on the
-   * <code>PPP_ContentDecryptor_Private</code> interface completes to
-   * deliver a buffer of decrypted and decoded audio samples to the browser for
+   * <code>PPP_ContentDecryptor_Private</code> interface completes to deliver
+   * a buffer of decrypted and decoded audio samples to the browser for
    * rendering.
    *
-   * @param[in] decrypted_samples A <code>PP_Resource</code> corresponding to a
+   * The plugin must not hold a reference to the encrypted buffer resource
+   * provided to <code>DecryptAndDecode()</code> when it calls this method. The
+   * browser will reuse the buffer in a subsequent
+   * <code>DecryptAndDecode()</code> call.
+   *
+   * <code>audio_frames</code> can contain multiple audio output buffers. Each
+   * buffer is serialized in this format:
+   *
+   * |<------------------- serialized audio buffer ------------------->|
+   * | int64_t timestamp | int64_t length | length bytes of audio data |
+   *
+   * For example, with three audio output buffers, |audio_frames| will look
+   * like this:
+   *
+   * |<---------------- audio_frames ------------------>|
+   * | audio buffer 0 | audio buffer 1 | audio buffer 2 |
+   *
+   * @param[in] audio_frames A <code>PP_Resource</code> corresponding to a
    * <code>PPB_Buffer_Dev</code> resource that contains a decrypted buffer
    * of decoded audio samples.
    *
@@ -191,11 +267,11 @@ struct PPB_ContentDecryptor_Private_0_1 {
    */
   void (*DeliverSamples)(
       PP_Instance instance,
-      PP_Resource decrypted_samples,
+      PP_Resource audio_frames,
       const struct PP_DecryptedBlockInfo* decrypted_block_info);
 };
 
-typedef struct PPB_ContentDecryptor_Private_0_1 PPB_ContentDecryptor_Private;
+typedef struct PPB_ContentDecryptor_Private_0_6 PPB_ContentDecryptor_Private;
 /**
  * @}
  */

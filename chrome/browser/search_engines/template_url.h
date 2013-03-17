@@ -10,8 +10,9 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
-#include "chrome/browser/common/url_database/template_url_id.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 #include "googleurl/src/gurl.h"
+#include "googleurl/src/url_parse.h"
 
 class Profile;
 class SearchTermsData;
@@ -40,11 +41,13 @@ class TemplateURLRef {
   };
 
   // Which kind of URL within our owner we are.  This allows us to get at the
-  // correct string field.
+  // correct string field. Use |INDEXED| to indicate that the numerical
+  // |index_in_owner_| should be used instead.
   enum Type {
     SEARCH,
     SUGGEST,
     INSTANT,
+    INDEXED
   };
 
   // This struct encapsulates arguments passed to
@@ -67,9 +70,14 @@ class TemplateURLRef {
 
     // TODO: Remove along with "aq" CGI param.
     int accepted_suggestion;
+
+    // The 0-based position of the cursor within the query string at the time
+    // the request was issued.  Set to string16::npos if not used.
+    size_t cursor_position;
   };
 
   TemplateURLRef(TemplateURL* owner, Type type);
+  TemplateURLRef(TemplateURL* owner, size_t index_in_owner);
   ~TemplateURLRef();
 
   // Returns the raw URL. None of the parameters will have been replaced.
@@ -128,6 +136,15 @@ class TemplateURLRef {
   // {google:baseURL} or {google:baseSuggestURL}.
   bool HasGoogleBaseURLs() const;
 
+  // Use the pattern referred to by this TemplateURLRef to match the provided
+  // |url| and extract |search_terms| from it. Returns true if the pattern
+  // matches, even if |search_terms| is empty. Returns false and an empty
+  // |search_terms| if the pattern does not match.
+  bool ExtractSearchTermsFromURL(
+      const GURL& url,
+      string16* search_terms,
+      const SearchTermsData& search_terms_data) const;
+
  private:
   friend class TemplateURL;
   FRIEND_TEST_ALL_PREFIXES(TemplateURLTest, SetPrepopulatedAndParse);
@@ -142,13 +159,15 @@ class TemplateURLRef {
   // Enumeration of the known types.
   enum ReplacementType {
     ENCODING,
-    GOOGLE_ACCEPTED_SUGGESTION,
     GOOGLE_ASSISTED_QUERY_STATS,
     GOOGLE_BASE_URL,
     GOOGLE_BASE_SUGGEST_URL,
+    GOOGLE_CURSOR_POSITION,
     GOOGLE_INSTANT_ENABLED,
+    GOOGLE_INSTANT_EXTENDED_ENABLED,
     GOOGLE_ORIGINAL_QUERY_FOR_SUGGESTION,
     GOOGLE_RLZ,
+    GOOGLE_SEARCH_CLIENT,
     GOOGLE_SEARCH_FIELDTRIAL_GROUP,
     GOOGLE_UNESCAPED_SEARCH_TERMS,
     LANGUAGE,
@@ -212,6 +231,10 @@ class TemplateURLRef {
   // What kind of URL we are.
   const Type type_;
 
+  // If |type_| is |INDEXED|, this |index_in_owner_| is used instead to refer to
+  // a url within our owner.
+  const size_t index_in_owner_;
+
   // Whether the URL has been parsed.
   mutable bool parsed_;
 
@@ -229,11 +252,12 @@ class TemplateURLRef {
   // into the string, and may be empty.
   mutable Replacements replacements_;
 
-  // Host, path and key of the search term. These are only set if the url
-  // contains one search term.
+  // Host, path, key and location of the search term. These are only set if the
+  // url contains one search term.
   mutable std::string host_;
   mutable std::string path_;
   mutable std::string search_term_key_;
+  mutable url_parse::Parsed::ComponentType search_term_key_location_;
 
   // Whether the contained URL is a pre-populated URL.
   bool prepopulated_;
@@ -325,6 +349,14 @@ struct TemplateURLData {
   // regardless of whether they have been associated with Sync.
   std::string sync_guid;
 
+  // A list of URL patterns that can be used, in addition to |url_|, to extract
+  // search terms from a URL.
+  std::vector<std::string> alternate_urls;
+
+  // A parameter that, if present in the query or ref parameters of a search_url
+  // or instant_url, causes Chrome to replace the URL with the search term.
+  std::string search_terms_replacement_key;
+
  private:
   // Private so we can enforce using the setters and thus enforce that these
   // fields are never empty.
@@ -369,6 +401,9 @@ class TemplateURL {
   const std::string& url() const { return data_.url(); }
   const std::string& suggestions_url() const { return data_.suggestions_url; }
   const std::string& instant_url() const { return data_.instant_url; }
+  const std::vector<std::string>& alternate_urls() const {
+    return data_.alternate_urls;
+  }
   const GURL& favicon_url() const { return data_.favicon_url; }
 
   const GURL& originating_url() const { return data_.originating_url; }
@@ -397,6 +432,11 @@ class TemplateURL {
 
   const std::string& sync_guid() const { return data_.sync_guid; }
 
+  // TODO(beaudoin): Rename this when renaming HasSearchTermsReplacementKey().
+  const std::string& search_terms_replacement_key() const {
+    return data_.search_terms_replacement_key;
+  }
+
   const TemplateURLRef& url_ref() const { return url_ref_; }
   const TemplateURLRef& suggestions_url_ref() const {
     return suggestions_url_ref_;
@@ -421,6 +461,53 @@ class TemplateURL {
 
   std::string GetExtensionId() const;
   bool IsExtensionKeyword() const;
+
+  // Returns the total number of URLs comprised in this template, including
+  // search and alternate URLs.
+  size_t URLCount() const;
+
+  // Gets the search URL at the given index. The alternate URLs, if any, are
+  // numbered starting at 0, and the primary search URL follows. This is used
+  // to decode the search term given a search URL (see
+  // ExtractSearchTermsFromURL()).
+  const std::string& GetURL(size_t index) const;
+
+  // Use the alternate URLs and the search URL to match the provided |url|
+  // and extract |search_terms| from it. Returns false and an empty
+  // |search_terms| if no search terms can be matched. The order in which the
+  // alternate URLs are listed dictates their priority, the URL at index 0 is
+  // treated as the highest priority and the primary search URL is treated as
+  // the lowest priority (see GetURL()).  For example, if a TemplateURL has
+  // alternate URL "http://foo/#q={searchTerms}" and search URL
+  // "http://foo/?q={searchTerms}", and the URL to be decoded is
+  // "http://foo/?q=a#q=b", the alternate URL will match first and the decoded
+  // search term will be "b".
+  bool ExtractSearchTermsFromURL(const GURL& url, string16* search_terms);
+
+  // Like ExtractSearchTermsFromURL but usable on threads other than the UI
+  // thread.
+  bool ExtractSearchTermsFromURLUsingTermsData(
+      const GURL& url,
+      string16* search_terms,
+      const SearchTermsData& search_terms_data);
+
+  // Returns true if non-empty search terms could be extracted from |url| using
+  // ExtractSearchTermsFromURL(). In other words, this returns whether |url|
+  // could be the result of performing a search with |this|.
+  bool IsSearchURL(const GURL& url);
+
+  // Like IsSearchURL but usable on threads other than the UI thread.
+  bool IsSearchURLUsingTermsData(
+      const GURL& url,
+      const SearchTermsData& search_terms_data);
+
+  // Returns true if the specified |url| contains the search terms replacement
+  // key in either the query or the ref. This method does not verify anything
+  // else about the URL. In particular, it does not check that the domain
+  // matches that of this TemplateURL.
+  // TODO(beaudoin): Rename this to reflect that it really checks for an
+  // InstantExtended capable URL.
+  bool HasSearchTermsReplacementKey(const GURL& url) const;
 
  private:
   friend class TemplateURLService;

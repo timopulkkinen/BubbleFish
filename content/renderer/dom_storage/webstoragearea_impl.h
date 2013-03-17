@@ -7,14 +7,16 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageArea.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebStorageArea.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 
 class GURL;
 
 namespace dom_storage {
 class DomStorageCachedArea;
 }
+
+namespace content {
 
 class WebStorageAreaImpl : public WebKit::WebStorageArea {
  public:
@@ -39,5 +41,7 @@ class WebStorageAreaImpl : public WebKit::WebStorageArea {
   int connection_id_;
   scoped_refptr<dom_storage::DomStorageCachedArea> cached_area_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_DOM_STORAGE_WEBSTORAGEAREA_IMPL_H_

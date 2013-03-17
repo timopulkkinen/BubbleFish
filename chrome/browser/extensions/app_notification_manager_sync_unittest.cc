@@ -5,7 +5,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/app_notification.h"
 #include "chrome/browser/extensions/app_notification_manager.h"
 #include "chrome/test/base/testing_profile.h"
@@ -37,7 +37,7 @@ class TestChangeProcessor : public syncer::SyncChangeProcessor {
   // Store a copy of all the changes passed in so we can examine them later.
   virtual syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) {
+      const syncer::SyncChangeList& change_list) OVERRIDE {
     // change_map_.erase(change_map_.begin(), change_map_.end());
     for (syncer::SyncChangeList::const_iterator iter = change_list.begin();
         iter != change_list.end(); ++iter) {
@@ -100,7 +100,7 @@ class AppNotificationManagerSyncTest : public testing::Test {
         sync_processor_delegate_(new SyncChangeProcessorDelegate(
             sync_processor_.get())) {}
 
-  ~AppNotificationManagerSyncTest() {
+  virtual ~AppNotificationManagerSyncTest() {
     model_ = NULL;
   }
 
@@ -229,7 +229,7 @@ class AppNotificationManagerSyncTest : public testing::Test {
   content::TestBrowserThread file_thread_;
 
   // We keep two TemplateURLServices to test syncing between them.
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<AppNotificationManager> model_;
 
@@ -479,7 +479,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptyTitleMismatch) {
       syncer::APP_NOTIFICATIONS,
       initial_data,
       PassProcessor(),
-      error_handler.PassAs<syncer::SyncErrorFactory>());
+      error_handler.PassAs<syncer::SyncErrorFactory>()).error();
 
   EXPECT_TRUE(sync_error.IsSet());
   EXPECT_EQ(syncer::APP_NOTIFICATIONS, sync_error.type());
@@ -512,7 +512,7 @@ TEST_F(AppNotificationManagerSyncTest, ModelAssocBothNonEmptyMatchesLocal) {
       syncer::APP_NOTIFICATIONS,
       initial_data,
       PassProcessor(),
-      error_handler.PassAs<syncer::SyncErrorFactory>());
+      error_handler.PassAs<syncer::SyncErrorFactory>()).error();
 
   EXPECT_TRUE(sync_error.IsSet());
   EXPECT_EQ(syncer::APP_NOTIFICATIONS, sync_error.type());
@@ -571,7 +571,9 @@ TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesNonEmptyModel) {
 }
 
 // Process sync changes should ignore a bad ADD.
-TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadAdd) {
+// Hangs: http://crbug.com/149712
+TEST_F(AppNotificationManagerSyncTest,
+       DISABLED_ProcessSyncChangesIgnoreBadAdd) {
   AppNotification* n1 = CreateNotification(1);
   model()->Add(n1);
   AppNotification* n2 = CreateNotification(2);
@@ -619,7 +621,9 @@ TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadDelete) {
 }
 
 // Process sync changes should ignore bad UPDATEs.
-TEST_F(AppNotificationManagerSyncTest, ProcessSyncChangesIgnoreBadUpdates) {
+// Hangs: http://crbug.com/149712
+TEST_F(AppNotificationManagerSyncTest,
+       DISABLED_ProcessSyncChangesIgnoreBadUpdates) {
   AppNotification* n1 = CreateNotification(1);
   model()->Add(n1);
   AppNotification* n2 = CreateNotification(2);

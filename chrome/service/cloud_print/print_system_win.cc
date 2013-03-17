@@ -9,12 +9,13 @@
 #include <xpsprint.h>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
+#include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_hdc.h"
 #include "chrome/common/child_process_logging.h"
@@ -124,10 +125,11 @@ HRESULT PrintTicketToDevMode(const std::string& printer_name,
   if (SUCCEEDED(hr)) {
     ULONG size = 0;
     DEVMODE* dm = NULL;
+    // Use kPTJobScope, because kPTDocumentScope breaks duplex.
     hr = printing::XPSModule::ConvertPrintTicketToDevMode(provider,
                                                           pt_stream,
                                                           kUserDefaultDevmode,
-                                                          kPTDocumentScope,
+                                                          kPTJobScope,
                                                           &size,
                                                           &dm,
                                                           NULL);
@@ -360,7 +362,7 @@ class PrintSystemWin : public PrintSystem {
 
     // PrintSystem::JobSpooler implementation.
     virtual bool Spool(const std::string& print_ticket,
-                       const FilePath& print_data_file_path,
+                       const base::FilePath& print_data_file_path,
                        const std::string& print_data_mime_type,
                        const std::string& printer_name,
                        const std::string& job_title,
@@ -389,14 +391,13 @@ class PrintSystemWin : public PrintSystem {
           : last_page_printed_(-1),
             job_id_(-1),
             delegate_(NULL),
-            saved_dc_(0),
-            should_couninit_(false) {
+            saved_dc_(0) {
       }
 
       ~Core() {}
 
       bool Spool(const std::string& print_ticket,
-                 const FilePath& print_data_file_path,
+                 const base::FilePath& print_data_file_path,
                  const std::string& print_data_mime_type,
                  const std::string& printer_name,
                  const std::string& job_title,
@@ -514,10 +515,8 @@ class PrintSystemWin : public PrintSystem {
           job_progress_watcher_.StopWatching();
           job_progress_watcher_.StartWatching(job_progress_event_.Get(), this);
         }
-        if (done && should_couninit_) {
-          CoUninitialize();
-          should_couninit_ = false;
-        }
+        if (done)
+          com_initializer_.reset();
       }
 
       virtual void OnRenderPDFPagesToMetafileFailed() OVERRIDE {
@@ -564,7 +563,7 @@ class PrintSystemWin : public PrintSystem {
 
       // Called on the service process IO thread.
       void RenderPDFPagesInSandbox(
-          const FilePath& pdf_path, const gfx::Rect& render_area,
+          const base::FilePath& pdf_path, const gfx::Rect& render_area,
           int render_dpi, const std::vector<printing::PageRange>& page_ranges,
           const scoped_refptr<base::MessageLoopProxy>&
               client_message_loop_proxy) {
@@ -588,15 +587,16 @@ class PrintSystemWin : public PrintSystem {
 
       bool PrintXPSDocument(const std::string& printer_name,
                             const std::string& job_title,
-                            const FilePath& print_data_file_path,
+                            const base::FilePath& print_data_file_path,
                             const std::string& print_ticket) {
         if (!printing::XPSPrintModule::Init())
           return false;
         job_progress_event_.Set(CreateEvent(NULL, TRUE, FALSE, NULL));
         if (!job_progress_event_.Get())
           return false;
-        should_couninit_ = SUCCEEDED(CoInitializeEx(NULL,
-                                                    COINIT_MULTITHREADED));
+        scoped_ptr<base::win::ScopedCOMInitializer> com_initializer(
+            new base::win::ScopedCOMInitializer(
+                base::win::ScopedCOMInitializer::kMTA));
         base::win::ScopedComPtr<IXpsPrintJobStream> doc_stream;
         base::win::ScopedComPtr<IXpsPrintJobStream> print_ticket_stream;
         bool ret = false;
@@ -628,6 +628,7 @@ class PrintSystemWin : public PrintSystem {
                 if (SUCCEEDED(doc_stream->Close())) {
                   job_progress_watcher_.StartWatching(job_progress_event_.Get(),
                                                       this);
+                  com_initializer_.swap(com_initializer);
                   ret = true;
                 }
               }
@@ -638,10 +639,6 @@ class PrintSystemWin : public PrintSystem {
           if (xps_print_job_) {
             xps_print_job_->Cancel();
             xps_print_job_.Release();
-          }
-          if (should_couninit_) {
-            CoUninitialize();
-            should_couninit_ = false;
           }
         }
         return ret;
@@ -658,11 +655,11 @@ class PrintSystemWin : public PrintSystem {
       PrintSystem::JobSpooler::Delegate* delegate_;
       int saved_dc_;
       base::win::ScopedCreateDC printer_dc_;
-      FilePath print_data_file_path_;
+      base::FilePath print_data_file_path_;
       base::win::ScopedHandle job_progress_event_;
       base::win::ObjectWatcher job_progress_watcher_;
       base::win::ScopedComPtr<IXpsPrintJob> xps_print_job_;
-      bool should_couninit_;
+      scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
 
       DISALLOW_COPY_AND_ASSIGN(Core);
     };

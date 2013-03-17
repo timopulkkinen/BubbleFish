@@ -6,8 +6,9 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/base64.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_number_conversions.h"
 #include "content/common/gpu/gpu_rendering_stats.h"
@@ -18,16 +19,16 @@
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkStream.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebRenderingStats.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewBenchmarkSupport.h"
 #include "v8/include/v8.h"
+#include "webkit/compositor_bindings/web_rendering_stats_impl.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebFrame;
 using WebKit::WebPrivatePtr;
-using WebKit::WebRenderingStats;
+using WebKit::WebRenderingStatsImpl;
 using WebKit::WebSize;
 using WebKit::WebView;
 using WebKit::WebViewBenchmarkSupport;
@@ -48,7 +49,7 @@ void InitSkGraphics() {
 
 class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
  public:
-  explicit SkPictureRecorder(const FilePath& dirpath)
+  explicit SkPictureRecorder(const base::FilePath& dirpath)
       : dirpath_(dirpath),
         layer_id_(0) {
     // Let skia register known effect subclasses. This basically enables
@@ -76,9 +77,36 @@ class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
   }
 
  private:
-  FilePath dirpath_;
+  base::FilePath dirpath_;
   int layer_id_;
   SkPicture picture_;
+};
+
+class RenderingStatsEnumerator : public cc::RenderingStats::Enumerator {
+ public:
+  RenderingStatsEnumerator(v8::Handle<v8::Object> stats_object)
+      : stats_object(stats_object) { }
+
+  virtual void AddInt64(const char* name, int64 value) OVERRIDE {
+    stats_object->Set(v8::String::New(name), v8::Number::New(value));
+  }
+
+  virtual void AddDouble(const char* name, double value) OVERRIDE {
+    stats_object->Set(v8::String::New(name), v8::Number::New(value));
+  }
+
+  virtual void AddInt(const char* name, int value) OVERRIDE {
+    stats_object->Set(v8::String::New(name), v8::Integer::New(value));
+  }
+
+  virtual void AddTimeDeltaInSecondsF(const char* name,
+                                      const base::TimeDelta& value) OVERRIDE {
+    stats_object->Set(v8::String::New(name),
+                      v8::Number::New(value.InSecondsF()));
+  }
+
+ private:
+  v8::Handle<v8::Object> stats_object;
 };
 
 }  // namespace
@@ -103,27 +131,33 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           "  native function PrintToSkPicture();"
           "  return PrintToSkPicture(dirname);"
           "};"
-          "chrome.gpuBenchmarking.beginSmoothScrollDown = "
-          "    function(scroll_far, opt_callback) {"
-          "  scroll_far = scroll_far || false;"
+          "chrome.gpuBenchmarking.smoothScrollBy = "
+          "    function(pixels_to_scroll, opt_callback, opt_mouse_event_x,"
+          "             opt_mouse_event_y) {"
+          "  pixels_to_scroll = pixels_to_scroll || 0;"
           "  callback = opt_callback || function() { };"
           "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(true, scroll_far, callback);"
-          "};"
-          "chrome.gpuBenchmarking.beginSmoothScrollUp = "
-          "    function(scroll_far, opt_callback) {"
-          "  scroll_far = scroll_far || false;"
-          "  callback = opt_callback || function() { };"
-          "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(false, scroll_far, callback);"
+          "  if (typeof opt_mouse_event_x !== 'undefined' &&"
+          "      typeof opt_mouse_event_y !== 'undefined') {"
+          "    return BeginSmoothScroll(pixels_to_scroll >= 0, callback,"
+          "                             Math.abs(pixels_to_scroll),"
+          "                             opt_mouse_event_x, opt_mouse_event_y);"
+          "  } else {"
+          "    return BeginSmoothScroll(pixels_to_scroll >= 0, callback,"
+          "                             Math.abs(pixels_to_scroll));"
+          "  }"
           "};"
           "chrome.gpuBenchmarking.runRenderingBenchmarks = function(filter) {"
           "  native function RunRenderingBenchmarks();"
           "  return RunRenderingBenchmarks(filter);"
+          "};"
+          "chrome.gpuBenchmarking.beginWindowSnapshotPNG = function(callback) {"
+          "  native function BeginWindowSnapshotPNG();"
+          "  BeginWindowSnapshotPNG(callback);"
           "};") {}
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name) {
+      v8::Handle<v8::String> name) OVERRIDE {
     if (name->Equals(v8::String::New("GetRenderingStats")))
       return v8::FunctionTemplate::New(GetRenderingStats);
     if (name->Equals(v8::String::New("PrintToSkPicture")))
@@ -132,13 +166,15 @@ class GpuBenchmarkingWrapper : public v8::Extension {
       return v8::FunctionTemplate::New(BeginSmoothScroll);
     if (name->Equals(v8::String::New("RunRenderingBenchmarks")))
       return v8::FunctionTemplate::New(RunRenderingBenchmarks);
+    if (name->Equals(v8::String::New("BeginWindowSnapshotPNG")))
+      return v8::FunctionTemplate::New(BeginWindowSnapshotPNG);
 
     return v8::Handle<v8::FunctionTemplate>();
   }
 
   static v8::Handle<v8::Value> GetRenderingStats(const v8::Arguments& args) {
 
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -150,46 +186,17 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!render_view_impl)
       return v8::Undefined();
 
-    WebRenderingStats stats;
+    WebRenderingStatsImpl stats;
     render_view_impl->GetRenderingStats(stats);
 
     content::GpuRenderingStats gpu_stats;
     render_view_impl->GetGpuRenderingStats(&gpu_stats);
     v8::Handle<v8::Object> stats_object = v8::Object::New();
-    stats_object->Set(v8::String::New("numAnimationFrames"),
-                      v8::Integer::New(stats.numAnimationFrames));
-    stats_object->Set(v8::String::New("numFramesSentToScreen"),
-                      v8::Integer::New(stats.numFramesSentToScreen));
-    stats_object->Set(v8::String::New("droppedFrameCount"),
-                      v8::Integer::New(stats.droppedFrameCount));
-    stats_object->Set(v8::String::New("totalPaintTimeInSeconds"),
-                      v8::Number::New(stats.totalPaintTimeInSeconds));
-    stats_object->Set(v8::String::New("totalRasterizeTimeInSeconds"),
-                      v8::Number::New(stats.totalRasterizeTimeInSeconds));
-    stats_object->Set(v8::String::New("totalCommitTimeInSeconds"),
-                      v8::Number::New(stats.totalCommitTimeInSeconds));
-    stats_object->Set(v8::String::New("totalCommitCount"),
-                      v8::Integer::New(stats.totalCommitCount));
 
-    stats_object->Set(v8::String::New("globalTextureUploadCount"),
-                      v8::Number::New(gpu_stats.global_texture_upload_count));
-    stats_object->Set(
-        v8::String::New("globalTotalTextureUploadTimeInSeconds"),
-        v8::Number::New(
-            gpu_stats.global_total_texture_upload_time.InSecondsF()));
-    stats_object->Set(v8::String::New("textureUploadCount"),
-                      v8::Number::New(gpu_stats.texture_upload_count));
-    stats_object->Set(
-        v8::String::New("totalTextureUploadTimeInSeconds"),
-        v8::Number::New(gpu_stats.total_texture_upload_time.InSecondsF()));
-    stats_object->Set(
-        v8::String::New("globalTotalProcessingCommandsTimeInSeconds"),
-        v8::Number::New(
-            gpu_stats.global_total_processing_commands_time.InSecondsF()));
-    stats_object->Set(
-        v8::String::New("totalProcessingCommandsTimeInSeconds"),
-        v8::Number::New(
-            gpu_stats.total_processing_commands_time.InSecondsF()));
+    RenderingStatsEnumerator enumerator(stats_object);
+    stats.rendering_stats.EnumerateFields(&enumerator);
+    gpu_stats.EnumerateFields(&enumerator);
+
     return stats_object;
   }
 
@@ -201,7 +208,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (dirname.length() == 0)
       return v8::Undefined();
 
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -213,8 +220,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!benchmark_support)
       return v8::Undefined();
 
-    FilePath dirpath(FilePath::StringType(*dirname,
-                                          *dirname + dirname.length()));
+    base::FilePath dirpath(
+        base::FilePath::StringType(*dirname, *dirname + dirname.length()));
     if (!file_util::CreateDirectory(dirpath) ||
         !file_util::PathIsWritable(dirpath)) {
       std::string msg("Path is not writable: ");
@@ -240,12 +247,13 @@ class GpuBenchmarkingWrapper : public v8::Extension {
                                               0,
                                               NULL);
     }
-    callback.Dispose();
-    context.Dispose();
+    v8::Isolate* isolate = context->GetIsolate();
+    callback.Dispose(isolate);
+    context.Dispose(isolate);
   }
 
   static v8::Handle<v8::Value> BeginSmoothScroll(const v8::Arguments& args) {
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -257,30 +265,54 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!render_view_impl)
       return v8::Undefined();
 
-    if (args.Length() != 3 ||
+    // Account for the 2 optional arguments, mouse_event_x and mouse_event_y.
+    int arglen = args.Length();
+    if (arglen < 3 ||
         !args[0]->IsBoolean() ||
-        !args[1]->IsBoolean() ||
-        !args[2]->IsFunction())
+        !args[1]->IsFunction() ||
+        !args[2]->IsNumber())
       return v8::False();
 
     bool scroll_down = args[0]->BooleanValue();
-    bool scroll_far = args[1]->BooleanValue();
     v8::Local<v8::Function> callback_local =
-        v8::Local<v8::Function>(v8::Function::Cast(*args[2]));
+        v8::Local<v8::Function>(v8::Function::Cast(*args[1]));
+    v8::Isolate* isolate = args.GetIsolate();
     v8::Persistent<v8::Function> callback =
-        v8::Persistent<v8::Function>::New(callback_local);
+        v8::Persistent<v8::Function>::New(isolate, callback_local);
     v8::Persistent<v8::Context> context =
-        v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
+        v8::Persistent<v8::Context>::New(isolate,
+                                         web_frame->mainWorldScriptContext());
+
+    int pixels_to_scroll = args[2]->IntegerValue();
+
+    int mouse_event_x = 0;
+    int mouse_event_y = 0;
+
+    if (arglen == 3) {
+      WebKit::WebRect rect = render_view_impl->windowRect();
+      mouse_event_x = rect.x + rect.width / 2;
+      mouse_event_y = rect.y + rect.height / 2;
+    } else {
+      if (arglen != 5 ||
+          !args[3]->IsNumber() ||
+          !args[4]->IsNumber())
+        return v8::False();
+
+      mouse_event_x = args[3]->IntegerValue();
+      mouse_event_y = args[4]->IntegerValue();
+    }
 
     // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
     // progress, we will leak the callback and context. This needs to be fixed,
     // somehow.
     render_view_impl->BeginSmoothScroll(
         scroll_down,
-        scroll_far,
         base::Bind(&OnSmoothScrollCompleted,
                    callback,
-                   context));
+                   context),
+        pixels_to_scroll,
+        mouse_event_x,
+        mouse_event_y);
 
     return v8::True();
   }
@@ -304,7 +336,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
       name_filter = std::string(filter);
     }
 
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -339,6 +371,83 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     }
 
     return results;
+  }
+
+  static void OnSnapshotCompleted(v8::Persistent<v8::Function> callback,
+                                  v8::Persistent<v8::Context> context,
+                                  const gfx::Size& size,
+                                  const std::vector<unsigned char>& png) {
+    v8::HandleScope scope;
+    v8::Context::Scope context_scope(context);
+    WebFrame* frame = WebFrame::frameForContext(context);
+    if (frame) {
+
+      v8::Handle<v8::Value> result;
+
+      if(!size.IsEmpty()) {
+        v8::Handle<v8::Object> result_object;
+        result_object = v8::Object::New();
+
+        result_object->Set(v8::String::New("width"),
+                           v8::Number::New(size.width()));
+        result_object->Set(v8::String::New("height"),
+                           v8::Number::New(size.height()));
+
+        std::string base64_png;
+        base::Base64Encode(base::StringPiece(
+            reinterpret_cast<const char*>(&*png.begin()), png.size()),
+            &base64_png);
+
+        result_object->Set(v8::String::New("data"),
+            v8::String::New(base64_png.c_str(), base64_png.size()));
+
+        result = result_object;
+      } else {
+        result = v8::Null();
+      }
+
+      v8::Handle<v8::Value> argv[] = { result };
+
+      frame->callFunctionEvenIfScriptDisabled(callback,
+                                              v8::Object::New(),
+                                              1,
+                                              argv);
+    }
+    v8::Isolate* isolate = context->GetIsolate();
+    callback.Dispose(isolate);
+    context.Dispose(isolate);
+  }
+
+  static v8::Handle<v8::Value> BeginWindowSnapshotPNG(
+      const v8::Arguments& args) {
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
+    if (!web_frame)
+      return v8::Undefined();
+
+    WebView* web_view = web_frame->view();
+    if (!web_view)
+      return v8::Undefined();
+
+    RenderViewImpl* render_view_impl = RenderViewImpl::FromWebView(web_view);
+    if (!render_view_impl)
+      return v8::Undefined();
+
+    if (!args[0]->IsFunction())
+      return v8::Undefined();
+
+    v8::Local<v8::Function> callback_local =
+        v8::Local<v8::Function>(v8::Function::Cast(*args[0]));
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Persistent<v8::Function> callback =
+        v8::Persistent<v8::Function>::New(isolate, callback_local);
+    v8::Persistent<v8::Context> context =
+        v8::Persistent<v8::Context>::New(isolate,
+                                         web_frame->mainWorldScriptContext());
+
+    render_view_impl->GetWindowSnapshot(
+        base::Bind(&OnSnapshotCompleted, callback, context));
+
+    return v8::Undefined();
   }
 };
 

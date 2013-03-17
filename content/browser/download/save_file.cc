@@ -8,20 +8,20 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/base/file_stream.h"
 
-using content::BrowserThread;
+namespace content {
 
 // TODO(asanka): SaveFile should use the target directory of the save package as
 //               the default download directory when initializing |file_|.
 //               Unfortunately, as it is, constructors of SaveFile don't always
 //               have access to the SavePackage at this point.
 SaveFile::SaveFile(const SaveFileCreateInfo* info, bool calculate_hash)
-    : file_(FilePath(),
+    : file_(base::FilePath(),
             info->url,
             GURL(),
             0,
             calculate_hash,
             "",
-            linked_ptr<net::FileStream>(),
+            scoped_ptr<net::FileStream>(),
             net::BoundNetLog()),
       info_(info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
@@ -34,15 +34,16 @@ SaveFile::~SaveFile() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 }
 
-net::Error SaveFile::Initialize() {
-  return file_.Initialize(FilePath());
+DownloadInterruptReason SaveFile::Initialize() {
+  return file_.Initialize(base::FilePath());
 }
 
-net::Error SaveFile::AppendDataToFile(const char* data, size_t data_len) {
+DownloadInterruptReason SaveFile::AppendDataToFile(const char* data,
+                                                   size_t data_len) {
   return file_.AppendDataToFile(data, data_len);
 }
 
-net::Error SaveFile::Rename(const FilePath& full_path) {
+DownloadInterruptReason SaveFile::Rename(const base::FilePath& full_path) {
   return file_.Rename(full_path);
 }
 
@@ -62,7 +63,7 @@ void SaveFile::AnnotateWithSourceInformation() {
   file_.AnnotateWithSourceInformation();
 }
 
-FilePath SaveFile::FullPath() const {
+base::FilePath SaveFile::FullPath() const {
   return file_.full_path();
 }
 
@@ -81,3 +82,5 @@ bool SaveFile::GetHash(std::string* hash) {
 std::string SaveFile::DebugString() const {
   return file_.DebugString();
 }
+
+}  // namespace content

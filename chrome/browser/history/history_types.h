@@ -12,13 +12,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/containers/stack_container.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/stack_container.h"
 #include "base/string16.h"
 #include "base/time.h"
-#include "chrome/browser/common/url_database/template_url_id.h"
-#include "chrome/browser/common/url_database/url_database_types.h"
 #include "chrome/browser/history/snippet.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/thumbnail_score.h"
 #include "content/public/common/page_transition_types.h"
@@ -42,8 +41,157 @@ typedef std::map<GURL, scoped_refptr<RefCountedVector<GURL> > > RedirectMap;
 typedef std::vector<GURL> RedirectList;
 
 typedef int64 DownloadID;   // Identifier for a download.
+typedef int64 FaviconID;  // For favicons.
 typedef int64 FaviconBitmapID; // Identifier for a bitmap in a favicon.
 typedef int64 SegmentID;  // URL segments for the most visited view.
+typedef int64 SegmentDurationID;  // Unique identifier for segment_duration.
+typedef int64 IconMappingID; // For page url and icon mapping.
+
+// URLRow ---------------------------------------------------------------------
+
+typedef int64 URLID;
+
+// Holds all information globally associated with one URL (one row in the
+// URL table).
+//
+// This keeps track of dirty bits, which are currently unused:
+//
+// TODO(brettw) the dirty bits are broken in a number of respects. First, the
+// database will want to update them on a const object, so they need to be
+// mutable.
+//
+// Second, there is a problem copying. If you make a copy of this structure
+// (as we allow since we put this into vectors in various places) then the
+// dirty bits will not be in sync for these copies.
+class URLRow {
+ public:
+  URLRow();
+
+  explicit URLRow(const GURL& url);
+
+  // We need to be able to set the id of a URLRow that's being passed through
+  // an IPC message.  This constructor should probably not be used otherwise.
+  URLRow(const GURL& url, URLID id);
+
+  virtual ~URLRow();
+  URLRow& operator=(const URLRow& other);
+
+  URLID id() const { return id_; }
+
+  // Sets the id of the row. The id should only be manually set when a row has
+  // been retrieved from the history database or other dataset based on criteria
+  // other than its id (i.e. by URL) and when the id has not yet been set in the
+  // row.
+  void set_id(URLID id) { id_ = id; }
+
+  const GURL& url() const { return url_; }
+
+  const string16& title() const {
+    return title_;
+  }
+  void set_title(const string16& title) {
+    // The title is frequently set to the same thing, so we don't bother
+    // updating unless the string has changed.
+    if (title != title_) {
+      title_ = title;
+    }
+  }
+
+  // The number of times this URL has been visited. This will often match the
+  // number of entries in the visit table for this URL, but won't always. It's
+  // really designed for autocomplete ranking, so some "useless" transitions
+  // from the visit table aren't counted in this tally.
+  int visit_count() const {
+    return visit_count_;
+  }
+  void set_visit_count(int visit_count) {
+    visit_count_ = visit_count;
+  }
+
+  // Number of times the URL was typed in the Omnibox. This "should" match
+  // the number of TYPED transitions in the visit table. It's used primarily
+  // for faster autocomplete ranking. If you need to know the actual number of
+  // TYPED transitions, you should query the visit table since there could be
+  // something out of sync.
+  int typed_count() const {
+    return typed_count_;
+  }
+  void set_typed_count(int typed_count) {
+    typed_count_ = typed_count;
+  }
+
+  base::Time last_visit() const {
+    return last_visit_;
+  }
+  void set_last_visit(base::Time last_visit) {
+    last_visit_ = last_visit;
+  }
+
+  // If this is set, we won't autocomplete this URL.
+  bool hidden() const {
+    return hidden_;
+  }
+  void set_hidden(bool hidden) {
+    hidden_ = hidden;
+  }
+
+  // Helper functor that determines if an URLRow refers to a given URL.
+  class URLRowHasURL {
+   public:
+    explicit URLRowHasURL(const GURL& url) : url_(url) {}
+
+    bool operator()(const URLRow& row) {
+      return row.url() == url_;
+    }
+
+   private:
+    const GURL& url_;
+  };
+
+ protected:
+  // Swaps the contents of this URLRow with another, which allows it to be
+  // destructively copied without memory allocations.
+  void Swap(URLRow* other);
+
+ private:
+  // This class writes directly into this structure and clears our dirty bits
+  // when reading out of the DB.
+  friend class URLDatabase;
+  friend class HistoryBackend;
+
+  // Initializes all values that need initialization to their defaults.
+  // This excludes objects which autoinitialize such as strings.
+  void Initialize();
+
+  // The row ID of this URL from the history database. This is immutable except
+  // when retrieving the row from the database or when determining if the URL
+  // referenced by the URLRow already exists in the database.
+  URLID id_;
+
+  // The URL of this row. Immutable except for the database which sets it
+  // when it pulls them out. If clients want to change it, they must use
+  // the constructor to make a new one.
+  GURL url_;
+
+  string16 title_;
+
+  // Total number of times this URL has been visited.
+  int visit_count_;
+
+  // Number of times this URL has been manually entered in the URL bar.
+  int typed_count_;
+
+  // The date of the last visit of this URL, which saves us from having to
+  // loop up in the visit table for things like autocomplete and expiration.
+  base::Time last_visit_;
+
+  // Indicates this entry should now be shown in typical UI or queries, this
+  // is usually for subframes.
+  bool hidden_;
+
+  // We support the implicit copy constuctor and operator=.
+};
+typedef std::vector<URLRow> URLRows;
 
 // The enumeration of all possible sources of visits is listed below.
 // The source will be propagated along with a URL or a visit item
@@ -208,6 +356,9 @@ class QueryResults {
   size_t size() const { return results_.size(); }
   bool empty() const { return results_.empty(); }
 
+  URLResult& back() { return *results_.back(); }
+  const URLResult& back() const { return *results_.back(); }
+
   URLResult& operator[](size_t i) { return *results_[i]; }
   const URLResult& operator[](size_t i) const { return *results_[i]; }
 
@@ -238,12 +389,6 @@ class QueryResults {
   // object will be cleared after this call.
   void AppendURLBySwapping(URLResult* result);
 
-  // Appends a new result set to the other. The |other| results will be
-  // destroyed because the pointer ownership will just be transferred. When
-  // |remove_dupes| is set, each URL that appears in this array will be removed
-  // from the |other| array before appending.
-  void AppendResultsBySwapping(QueryResults* other, bool remove_dupes);
-
   // Removes all instances of the given URL from the result set.
   void DeleteURL(const GURL& url);
 
@@ -255,7 +400,7 @@ class QueryResults {
   // time an entry with that URL appears. Normally, each URL will have one or
   // very few indices after it, so we optimize this to use statically allocated
   // memory when possible.
-  typedef std::map<GURL, StackVector<size_t, 4> > URLToResultIndices;
+  typedef std::map<GURL, base::StackVector<size_t, 4> > URLToResultIndices;
 
   // Inserts an entry into the |url_to_results_| map saying that the given URL
   // is at the given index in the results_.
@@ -285,18 +430,14 @@ class QueryResults {
 struct QueryOptions {
   QueryOptions();
 
-  // The time range to search for matches in.
+  // The time range to search for matches in. The beginning is inclusive and
+  // the ending is exclusive. Either one (or both) may be null.
   //
-  // This will match only the one recent visit of a URL.  For text search
-  // queries, if the URL was visited in the given time period, but has also been
-  // visited more recently than that, it will not be returned. When the text
-  // query is empty, this will return the most recent visit within the time
-  // range.
-  //
-  // As a special case, if both times are is_null(), then the entire database
-  // will be searched. However, if you set one, you must set the other.
-  //
-  // The beginning is inclusive and the ending is exclusive.
+  // This will match only the one recent visit of a URL. For text search
+  // queries, if the URL was visited in the given time period, but has also
+  // been visited more recently than that, it will not be returned. When the
+  // text query is empty, this will return the most recent visit within the
+  // time range.
   base::Time begin_time;
   base::Time end_time;
 
@@ -311,6 +452,52 @@ struct QueryOptions {
   // Only search within the page body if true, otherwise search all columns
   // including url and time. Defaults to false.
   bool body_only;
+
+  enum DuplicateHandling {
+    // Omit visits for which there is a more recent visit to the same URL.
+    // Each URL in the results will appear only once.
+    REMOVE_ALL_DUPLICATES,
+
+    // Omit visits for which there is a more recent visit to the same URL on
+    // the same day. Each URL will appear no more than once per day, where the
+    // day is defined by the local timezone.
+    REMOVE_DUPLICATES_PER_DAY
+  };
+
+  // Allows the caller to specify how duplicate URLs in the result set should
+  // be handled. The default is REMOVE_DUPLICATES.
+  DuplicateHandling duplicate_policy;
+
+  // Helpers to get the effective parameters values, since a value of 0 means
+  // "unspecified".
+  int EffectiveMaxCount() const;
+  int64 EffectiveBeginTime() const;
+  int64 EffectiveEndTime() const;
+};
+
+// KeywordSearchTermVisit -----------------------------------------------------
+
+// KeywordSearchTermVisit is returned from GetMostRecentKeywordSearchTerms. It
+// gives the time and search term of the keyword visit.
+struct KeywordSearchTermVisit {
+  KeywordSearchTermVisit();
+  ~KeywordSearchTermVisit();
+
+  string16 term;    // The search term that was used.
+  int visits;       // The visit count.
+  base::Time time;  // The time of the most recent visit.
+};
+
+// KeywordSearchTermRow --------------------------------------------------------
+
+// Used for URLs that have a search term associated with them.
+struct KeywordSearchTermRow {
+  KeywordSearchTermRow();
+  ~KeywordSearchTermRow();
+
+  TemplateURLID keyword_id;  // ID of the keyword.
+  URLID url_id;              // ID of the url.
+  string16 term;             // The search term that was used.
 };
 
 // MostVisitedURL --------------------------------------------------------------
@@ -475,6 +662,41 @@ base::Time AutocompleteAgeThreshold();
 // AutocompleteAgeThreshold() (or any other desired time in the past).
 bool RowQualifiesAsSignificant(const URLRow& row, const base::Time& threshold);
 
+// Favicons -------------------------------------------------------------------
+
+// Defines the icon types. They are also stored in icon_type field of favicons
+// table.
+// The values of the IconTypes are used to select the priority in which favicon
+// data is returned in HistoryBackend and ThumbnailDatabase. Data for the
+// largest IconType takes priority if data for multiple IconTypes is available.
+enum IconType {
+  INVALID_ICON = 0x0,
+  FAVICON = 1 << 0,
+  TOUCH_ICON = 1 << 1,
+  TOUCH_PRECOMPOSED_ICON = 1 << 2
+};
+
+// Used for the mapping between the page and icon.
+struct IconMapping {
+  IconMapping();
+  ~IconMapping();
+
+  // The unique id of the mapping.
+  IconMappingID mapping_id;
+
+  // The url of a web page.
+  GURL page_url;
+
+  // The unique id of the icon.
+  FaviconID icon_id;
+
+  // The url of the icon.
+  GURL icon_url;
+
+  // The type of icon.
+  IconType icon_type;
+};
+
 // Defines a favicon bitmap which best matches the desired DIP size and one of
 // the desired scale factors.
 struct FaviconBitmapResult {
@@ -534,9 +756,6 @@ typedef std::vector<gfx::Size> FaviconSizes;
 // are unknown.
 const FaviconSizes& GetDefaultFaviconSizes();
 
-// A map from an icon URL to the FaviconSizes for that URL.
-typedef std::map<GURL, FaviconSizes> IconURLSizesMap;
-
 // Defines a favicon bitmap and its associated pixel size.
 struct FaviconBitmapIDSize {
   FaviconBitmapIDSize();
@@ -595,7 +814,7 @@ struct BriefVisitInfo {
 // An observer of VisitDatabase.
 class VisitDatabaseObserver {
  public:
-  virtual ~VisitDatabaseObserver() {}
+  virtual ~VisitDatabaseObserver();
   virtual void OnAddVisit(const BriefVisitInfo& info) = 0;
 };
 

@@ -13,61 +13,7 @@
 #include "ui/gl/gl_context_cgl.h"
 #endif  // OS_MACOSX
 
-namespace {
-
-#if defined(OS_MACOSX)
-bool SupportsOnlineAndOfflineRenderers() {
-  // Enumerate all hardware-accelerated renderers. If we find one
-  // online and one offline, assume we're on a dual-GPU system.
-  GLuint display_mask = static_cast<GLuint>(-1);
-  CGLRendererInfoObj renderer_info = NULL;
-  GLint num_renderers = 0;
-
-  bool found_online = false;
-  bool found_offline = false;
-
-  if (CGLQueryRendererInfo(display_mask,
-                           &renderer_info,
-                           &num_renderers) != kCGLNoError) {
-    return false;
-  }
-
-  gfx::ScopedCGLRendererInfoObj scoper(renderer_info);
-
-  for (GLint i = 0; i < num_renderers; ++i) {
-    GLint accelerated = 0;
-    if (CGLDescribeRenderer(renderer_info,
-                            i,
-                            kCGLRPAccelerated,
-                            &accelerated) != kCGLNoError) {
-      return false;
-    }
-
-    if (!accelerated)
-      continue;
-
-    GLint online = 0;
-    if (CGLDescribeRenderer(renderer_info,
-                            i,
-                            kCGLRPOnline,
-                            &online) != kCGLNoError) {
-      return false;
-    }
-
-    if (online) {
-      found_online = true;
-    } else {
-      found_offline = true;
-    }
-  }
-
-  return (found_online && found_offline);
-}
-#endif  // OS_MACOSX
-
-}  // namespace anonymous
-
-namespace gfx {
+namespace ui {
 
 // static
 GpuSwitchingManager* GpuSwitchingManager::GetInstance() {
@@ -75,10 +21,11 @@ GpuSwitchingManager* GpuSwitchingManager::GetInstance() {
 }
 
 GpuSwitchingManager::GpuSwitchingManager()
-    : gpu_switching_option_(PreferIntegratedGpu),
+    : gpu_switching_option_(gfx::PreferIntegratedGpu),
       gpu_switching_option_set_(false),
       supports_dual_gpus_(false),
-      supports_dual_gpus_set_(false) {
+      supports_dual_gpus_set_(false),
+      gpu_count_(0) {
 #if defined(OS_MACOSX)
   discrete_pixel_format_ = NULL;
 #endif  // OS_MACOSX
@@ -94,9 +41,9 @@ GpuSwitchingManager::~GpuSwitchingManager() {
 void GpuSwitchingManager::ForceUseOfIntegratedGpu() {
   DCHECK(SupportsDualGpus());
   if (gpu_switching_option_set_) {
-    DCHECK_EQ(gpu_switching_option_, PreferIntegratedGpu);
+    DCHECK_EQ(gpu_switching_option_, gfx::PreferIntegratedGpu);
   } else {
-    gpu_switching_option_ = PreferIntegratedGpu;
+    gpu_switching_option_ = gfx::PreferIntegratedGpu;
     gpu_switching_option_set_ = true;
   }
 }
@@ -104,9 +51,9 @@ void GpuSwitchingManager::ForceUseOfIntegratedGpu() {
 void GpuSwitchingManager::ForceUseOfDiscreteGpu() {
   DCHECK(SupportsDualGpus());
   if (gpu_switching_option_set_) {
-    DCHECK_EQ(gpu_switching_option_, PreferDiscreteGpu);
+    DCHECK_EQ(gpu_switching_option_, gfx::PreferDiscreteGpu);
   } else {
-    gpu_switching_option_ = PreferDiscreteGpu;
+    gpu_switching_option_ = gfx::PreferDiscreteGpu;
     gpu_switching_option_set_ = true;
 #if defined(OS_MACOSX)
     // Create a pixel format that lasts the lifespan of Chrome, so Chrome
@@ -135,7 +82,7 @@ bool GpuSwitchingManager::SupportsDualGpus() {
       // Browser process.
       // We only compute this flag in the browser process.
 #if defined(OS_MACOSX)
-      flag = SupportsOnlineAndOfflineRenderers();
+      flag = (gpu_count_ == 2);
       if (flag && command_line.HasSwitch(switches::kUseGL) &&
           command_line.GetSwitchValueASCII(switches::kUseGL) !=
             gfx::kGLImplementationDesktopName)
@@ -151,8 +98,12 @@ bool GpuSwitchingManager::SupportsDualGpus() {
   return supports_dual_gpus_;
 }
 
-GpuPreference GpuSwitchingManager::AdjustGpuPreference(
-    GpuPreference gpu_preference) {
+void GpuSwitchingManager::SetGpuCount(size_t gpu_count) {
+  gpu_count_ = gpu_count;
+}
+
+gfx::GpuPreference GpuSwitchingManager::AdjustGpuPreference(
+    gfx::GpuPreference gpu_preference) {
   if (!gpu_switching_option_set_)
     return gpu_preference;
   return gpu_switching_option_;
@@ -169,5 +120,4 @@ void GpuSwitchingManager::SwitchToDiscreteGpuMac() {
 }
 #endif  // OS_MACOSX
 
-}  // namespace gfx
-
+}  // namespace ui

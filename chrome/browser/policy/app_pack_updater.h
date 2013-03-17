@@ -12,14 +12,12 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/extensions/updater/extension_downloader_delegate.h"
-#include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "net/base/network_change_notifier.h"
 
 class GURL;
 
@@ -40,18 +38,16 @@ class Location;
 namespace policy {
 
 class AppPackExternalLoader;
-class BrowserPolicyConnector;
+class EnterpriseInstallAttributes;
 
 // The AppPackUpdater manages a set of extensions that are configured via a
 // device policy to be locally cached and installed into the Demo user account
 // at login time.
-class AppPackUpdater : public CloudPolicySubsystem::Observer,
-                       public content::NotificationObserver,
-                       public net::NetworkChangeNotifier::IPAddressObserver,
+class AppPackUpdater : public content::NotificationObserver,
                        public extensions::ExtensionDownloaderDelegate {
  public:
   // Callback to listen for updates to the screensaver extension's path.
-  typedef base::Callback<void(const FilePath&)> ScreenSaverUpdateCallback;
+  typedef base::Callback<void(const base::FilePath&)> ScreenSaverUpdateCallback;
 
   // Keys for the entries in the AppPack dictionary policy.
   static const char kExtensionId[];
@@ -59,7 +55,7 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
 
   // The |request_context| is used for the update checks.
   AppPackUpdater(net::URLRequestContextGetter* request_context,
-                 BrowserPolicyConnector* connector);
+                 EnterpriseInstallAttributes* install_attributes);
   virtual ~AppPackUpdater();
 
   // Creates an extensions::ExternalLoader that will load the crx files
@@ -73,37 +69,29 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
   // |callback| can be used to remove a previous callback.
   void SetScreenSaverUpdateCallback(const ScreenSaverUpdateCallback& callback);
 
- private:
-  struct AppPackEntry {
-    std::string update_url;
-    bool update_checked;
-  };
+  // If a user of one of the AppPack's extensions detects that the extension
+  // is damaged then this method can be used to remove it from the cache and
+  // retry to download it after a restart.
+  void OnDamagedFileDetected(const base::FilePath& path);
 
+ private:
   struct CacheEntry {
     std::string path;
     std::string cached_version;
   };
 
-  // Maps an extension ID to its update URL and update information.
-  typedef std::map<std::string, AppPackEntry> PolicyEntryMap;
+  // Maps an extension ID to its update URL.
+  typedef std::map<std::string, std::string> PolicyEntryMap;
 
   // Maps an extension ID to a CacheEntry.
   typedef std::map<std::string, CacheEntry> CacheEntryMap;
 
   void Init();
 
-  // CloudPolicySubsystem::Observer:
-  virtual void OnPolicyStateChanged(
-      CloudPolicySubsystem::PolicySubsystemState state,
-      CloudPolicySubsystem::ErrorDetails error_details) OVERRIDE;
-
   // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // net::NetworkChangeNotifier::IPAddressObserver:
-  virtual void OnIPAddressChanged() OVERRIDE;
 
   // Loads the current policy and schedules a cache update.
   void LoadPolicy();
@@ -140,20 +128,23 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
   virtual void OnExtensionDownloadFailed(
       const std::string& id,
       Error error,
-      const PingResult& ping_result) OVERRIDE;
+      const PingResult& ping_result,
+      const std::set<int>& request_ids) OVERRIDE;
 
   virtual void OnExtensionDownloadFinished(
       const std::string& id,
-      const FilePath& path,
+      const base::FilePath& path,
       const GURL& download_url,
       const std::string& version,
-      const PingResult& ping_result) OVERRIDE;
+      const PingResult& ping_result,
+      const std::set<int>& request_ids) OVERRIDE;
 
   virtual void OnBlacklistDownloadFinished(
       const std::string& data,
       const std::string& package_hash,
       const std::string& version,
-      const PingResult& ping_result) OVERRIDE;
+      const PingResult& ping_result,
+      const std::set<int>& request_ids) OVERRIDE;
 
   virtual bool IsExtensionPending(const std::string& id) OVERRIDE;
 
@@ -164,7 +155,7 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
   static void BlockingInstallCacheEntry(
       base::WeakPtr<AppPackUpdater> app_pack_updater,
       const std::string& id,
-      const FilePath& path,
+      const base::FilePath& path,
       const std::string& version);
 
   // Invoked on the UI thread when a new AppPack entry has been installed in
@@ -183,17 +174,9 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
 
   // Sets |screen_saver_path_| and invokes |screen_saver_update_callback_| if
   // appropriate.
-  void SetScreenSaverPath(const FilePath& path);
-
-  // Marks extension |id| in |app_pack_extensions_| as having already been
-  // checked for updates, if it exists.
-  void SetUpdateChecked(const std::string& id);
+  void SetScreenSaverPath(const base::FilePath& path);
 
   base::WeakPtrFactory<AppPackUpdater> weak_ptr_factory_;
-
-  // Observes updates to the |device_cloud_policy_subsystem_|, to detect
-  // device enrollment.
-  scoped_ptr<CloudPolicySubsystem::ObserverRegistrar> policy_registrar_;
 
   // Observes failures to install CRX files.
   content::NotificationRegistrar notification_registrar_;
@@ -201,6 +184,10 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
   // Unique sequence token so that tasks posted by the AppPackUpdater are
   // executed sequentially in the blocking pool.
   base::SequencedWorkerPool::SequenceToken worker_pool_token_;
+
+  // Whether the updater has initialized. This is only done if the device is in
+  // kiosk mode and the app pack policy is present.
+  bool initialized_;
 
   // This is the list of extensions currently configured by the policy.
   PolicyEntryMap app_pack_extensions_;
@@ -212,7 +199,7 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
   // The extension ID and path of the CRX file of the screen saver extension,
   // if it is configured by the policy. Otherwise these fields are empty.
   std::string screen_saver_id_;
-  FilePath screen_saver_path_;
+  base::FilePath screen_saver_path_;
 
   // Callback to invoke whenever the screen saver's extension path changes.
   // Can be null.
@@ -229,6 +216,9 @@ class AppPackUpdater : public CloudPolicySubsystem::Observer,
 
   // Request context used by the |downloader_|.
   net::URLRequestContextGetter* request_context_;
+
+  // For checking the device mode.
+  EnterpriseInstallAttributes* install_attributes_;
 
   DISALLOW_COPY_AND_ASSIGN(AppPackUpdater);
 };

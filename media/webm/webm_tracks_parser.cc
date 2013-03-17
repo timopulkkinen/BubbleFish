@@ -15,30 +15,28 @@ namespace media {
 // Values for TrackType element.
 static const int kWebMTrackTypeVideo = 1;
 static const int kWebMTrackTypeAudio = 2;
+static const int kWebMTrackTypeSubtitlesOrCaptions = 0x11;
+static const int kWebMTrackTypeDescriptionsOrMetadata = 0x21;
 
-WebMTracksParser::WebMTracksParser()
+WebMTracksParser::WebMTracksParser(const LogCB& log_cb)
     : track_type_(-1),
       track_num_(-1),
+      text_track_kind_(kTextNone),
       audio_track_num_(-1),
-      video_track_num_(-1) {
+      video_track_num_(-1),
+      log_cb_(log_cb) {
 }
 
 WebMTracksParser::~WebMTracksParser() {}
 
-const std::string& WebMTracksParser::video_encryption_key_id() const {
-  if (!video_content_encodings_client_.get())
-    return EmptyString();
-
-  DCHECK(!video_content_encodings_client_->content_encodings().empty());
-  return video_content_encodings_client_->content_encodings()[0]->
-      encryption_key_id();
-}
-
 int WebMTracksParser::Parse(const uint8* buf, int size) {
   track_type_ =-1;
   track_num_ = -1;
+  text_track_kind_ = kTextNone;
   audio_track_num_ = -1;
   video_track_num_ = -1;
+  text_tracks_.clear();
+  ignored_tracks_.clear();
 
   WebMListParser parser(kWebMIdTracks, this);
   int result = parser.Parse(buf, size);
@@ -50,17 +48,18 @@ int WebMTracksParser::Parse(const uint8* buf, int size) {
   return parser.IsParsingComplete() ? result : 0;
 }
 
-
 WebMParserClient* WebMTracksParser::OnListStart(int id) {
   if (id == kWebMIdContentEncodings) {
     DCHECK(!track_content_encodings_client_.get());
-    track_content_encodings_client_.reset(new WebMContentEncodingsClient);
+    track_content_encodings_client_.reset(
+        new WebMContentEncodingsClient(log_cb_));
     return track_content_encodings_client_->OnListStart(id);
   }
 
   if (id == kWebMIdTrackEntry) {
     track_type_ = -1;
     track_num_ = -1;
+    text_track_kind_ = kTextNone;
     return this;
   }
 
@@ -75,32 +74,85 @@ bool WebMTracksParser::OnListEnd(int id) {
 
   if (id == kWebMIdTrackEntry) {
     if (track_type_ == -1 || track_num_ == -1) {
-      DVLOG(1) << "Missing TrackEntry data"
-               << " TrackType " << track_type_
-               << " TrackNum " << track_num_;
+      MEDIA_LOG(log_cb_) << "Missing TrackEntry data for "
+                         << " TrackType " << track_type_
+                         << " TrackNum " << track_num_;
       return false;
     }
 
-    if (track_type_ == kWebMTrackTypeVideo) {
-      video_track_num_ = track_num_;
-      if (track_content_encodings_client_.get()) {
-        video_content_encodings_client_ =
-            track_content_encodings_client_.Pass();
+    if (track_type_ != kWebMTrackTypeAudio &&
+        track_type_ != kWebMTrackTypeVideo &&
+        track_type_ != kWebMTrackTypeSubtitlesOrCaptions &&
+        track_type_ != kWebMTrackTypeDescriptionsOrMetadata) {
+      MEDIA_LOG(log_cb_) << "Unexpected TrackType " << track_type_;
+      return false;
+    }
+
+    if (track_type_ == kWebMTrackTypeSubtitlesOrCaptions) {
+      if (text_track_kind_ == kTextNone) {
+        MEDIA_LOG(log_cb_) << "Missing TrackEntry CodecID"
+                           << " TrackNum " << track_num_;
+        return false;
       }
-    } else if (track_type_ == kWebMTrackTypeAudio) {
-      audio_track_num_ = track_num_;
-      if (track_content_encodings_client_.get()) {
-        audio_content_encodings_client_ =
-            track_content_encodings_client_.Pass();
+
+      if (text_track_kind_ != kTextSubtitles &&
+          text_track_kind_ != kTextCaptions) {
+        MEDIA_LOG(log_cb_) << "Wrong TrackEntry CodecID"
+                           << " TrackNum " << track_num_;
+        return false;
       }
+    } else if (track_type_ == kWebMTrackTypeDescriptionsOrMetadata) {
+      if (text_track_kind_ == kTextNone) {
+        MEDIA_LOG(log_cb_) << "Missing TrackEntry CodecID"
+                           << " TrackNum " << track_num_;
+        return false;
+      }
+
+      if (text_track_kind_ != kTextDescriptions &&
+          text_track_kind_ != kTextMetadata) {
+        MEDIA_LOG(log_cb_) << "Wrong TrackEntry CodecID"
+                           << " TrackNum " << track_num_;
+        return false;
+      }
+    }
+
+    std::string encryption_key_id;
+    if (track_content_encodings_client_.get()) {
+      DCHECK(!track_content_encodings_client_->content_encodings().empty());
+      // If we have multiple ContentEncoding in one track. Always choose the
+      // key id in the first ContentEncoding as the key id of the track.
+      encryption_key_id = track_content_encodings_client_->
+          content_encodings()[0]->encryption_key_id();
+    }
+
+    if (track_type_ == kWebMTrackTypeAudio) {
+      if (audio_track_num_ == -1) {
+        audio_track_num_ = track_num_;
+        audio_encryption_key_id_ = encryption_key_id;
+      } else {
+        MEDIA_LOG(log_cb_) << "Ignoring audio track " << track_num_;
+        ignored_tracks_.insert(track_num_);
+      }
+    } else if (track_type_ == kWebMTrackTypeVideo) {
+      if (video_track_num_ == -1) {
+        video_track_num_ = track_num_;
+        video_encryption_key_id_ = encryption_key_id;
+      } else {
+        MEDIA_LOG(log_cb_) << "Ignoring video track " << track_num_;
+        ignored_tracks_.insert(track_num_);
+      }
+    } else if (track_type_ == kWebMTrackTypeSubtitlesOrCaptions ||
+               track_type_ == kWebMTrackTypeDescriptionsOrMetadata) {
+      text_tracks_.insert(track_num_);
     } else {
-      DVLOG(1) << "Unexpected TrackType " << track_type_;
+      MEDIA_LOG(log_cb_) << "Unexpected TrackType " << track_type_;
       return false;
     }
 
     track_type_ = -1;
     track_num_ = -1;
     track_content_encodings_client_.reset();
+    text_track_kind_ = kTextNone;
     return true;
   }
 
@@ -122,7 +174,8 @@ bool WebMTracksParser::OnUInt(int id, int64 val) {
   }
 
   if (*dst != -1) {
-    DVLOG(1) << "Multiple values for id " << std::hex << id << " specified";
+    MEDIA_LOG(log_cb_) << "Multiple values for id " << std::hex << id
+                       << " specified";
     return false;
   }
 
@@ -139,8 +192,34 @@ bool WebMTracksParser::OnBinary(int id, const uint8* data, int size) {
 }
 
 bool WebMTracksParser::OnString(int id, const std::string& str) {
-  if (id == kWebMIdCodecID && str != "A_VORBIS" && str != "V_VP8") {
-    DVLOG(1) << "Unexpected CodecID " << str;
+  if (id == kWebMIdCodecID) {
+    if (str == "V_VP8")
+      return true;
+
+    if (str == "A_VORBIS")
+      return true;
+
+    if (str == "D_WEBVTT/SUBTITLES") {
+      text_track_kind_ = kTextSubtitles;
+      return true;
+    }
+
+    if (str == "D_WEBVTT/CAPTIONS") {
+      text_track_kind_ = kTextCaptions;
+      return true;
+    }
+
+    if (str == "D_WEBVTT/DESCRIPTIONS") {
+      text_track_kind_ = kTextDescriptions;
+      return true;
+    }
+
+    if (str == "D_WEBVTT/METADATA") {
+      text_track_kind_ = kTextMetadata;
+      return true;
+    }
+
+    MEDIA_LOG(log_cb_) << "Unexpected CodecID " << str;
     return false;
   }
 

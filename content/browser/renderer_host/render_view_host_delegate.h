@@ -18,11 +18,10 @@
 #include "content/public/common/media_stream_request.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class GURL;
 class SkBitmap;
-class WebContentsImpl;
 class WebKeyboardEvent;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
@@ -48,10 +47,6 @@ class Rect;
 class Size;
 }
 
-namespace WebKit {
-class WebLayer;
-}
-
 namespace content {
 
 class BrowserContext;
@@ -59,6 +54,7 @@ class RenderViewHost;
 class RenderViewHostDelegateView;
 class SessionStorageNamespace;
 class WebContents;
+class WebContentsImpl;
 struct ContextMenuParams;
 struct FileChooserParams;
 struct GlobalRequestID;
@@ -152,8 +148,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   virtual void DidStartProvisionalLoadForFrame(
       RenderViewHost* render_view_host,
       int64 frame_id,
+      int64 parent_frame_id,
       bool main_frame,
-      const GURL& opener_url,
       const GURL& url) {}
 
   // The RenderView processed a redirect during a provisional load.
@@ -164,7 +160,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   virtual void DidRedirectProvisionalLoad(
       RenderViewHost* render_view_host,
       int32 page_id,
-      const GURL& opener_url,
       const GURL& source_url,
       const GURL& target_url) {}
 
@@ -220,6 +215,10 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // entirely loaded).
   virtual void DidChangeLoadProgress(double progress) {}
 
+  // The RenderView set its opener to null, disowning it for the lifetime of
+  // the window.
+  virtual void DidDisownOpener(RenderViewHost* rvh) {}
+
   // The RenderView has changed its frame hierarchy, so we need to update all
   // other renderers interested in this event.
   virtual void DidUpdateFrameTree(RenderViewHost* rvh) {}
@@ -238,7 +237,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
                               const GURL& url,
                               const Referrer& referrer,
                               WindowOpenDisposition disposition,
-                              int64 source_frame_id) {}
+                              int64 source_frame_id,
+                              bool is_redirect) {}
 
   // The page wants to transfer the request to a new renderer.
   virtual void RequestTransferURL(
@@ -246,7 +246,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
       const Referrer& referrer,
       WindowOpenDisposition disposition,
       int64 source_frame_id,
-      const GlobalRequestID& old_request_id) {}
+      const GlobalRequestID& old_request_id,
+      bool is_redirect) {}
 
   // The page wants to close the active view in this tab.
   virtual void RouteCloseEvent(RenderViewHost* rvh) {}
@@ -412,13 +413,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // |request|, and the client should grant or deny that permission by
   // calling |callback|.
   virtual void RequestMediaAccessPermission(
-      const MediaStreamRequest* request,
+      const MediaStreamRequest& request,
       const MediaResponseCallback& callback) {}
-
-#if defined(OS_ANDROID)
-  virtual void AttachLayer(WebKit::WebLayer* layer) {}
-  virtual void RemoveLayer(WebKit::WebLayer* layer) {}
-#endif
 
  protected:
   virtual ~RenderViewHostDelegate() {}

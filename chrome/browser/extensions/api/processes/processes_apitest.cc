@@ -25,6 +25,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Processes) {
   ASSERT_TRUE(RunExtensionTest("processes/api")) << message_;
 }
 
+// http://crbug.com/31663
+// TODO(linux_aura) http://crbug.com/163931
+#if !(defined(OS_WIN) && defined(USE_AURA)) && !(defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
+
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ProcessesVsTaskManager) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
@@ -54,3 +58,5 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ProcessesVsTaskManager) {
   UnloadExtension(last_loaded_extension_id_);
   EXPECT_EQ(1, model->update_requests_);
 }
+
+#endif

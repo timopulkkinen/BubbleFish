@@ -10,10 +10,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "googleurl/src/gurl.h"
 
-typedef std::vector<std::pair<int, FilePath> > FinalNameList;
+namespace content {
+typedef std::vector<std::pair<int, base::FilePath> > FinalNameList;
 typedef std::vector<int> SaveIDList;
 
 // This structure is used to handle and deliver some info
@@ -32,7 +33,7 @@ struct SaveFileCreateInfo {
     SAVE_FILE_FROM_FILE
   };
 
-  SaveFileCreateInfo(const FilePath& path,
+  SaveFileCreateInfo(const base::FilePath& path,
                      const GURL& url,
                      SaveFileSource save_source,
                      int32 save_id);
@@ -43,7 +44,7 @@ struct SaveFileCreateInfo {
 
   // SaveItem fields.
   // The local file path of saved file.
-  FilePath path;
+  base::FilePath path;
   // Original URL of the saved resource.
   GURL url;
   // Final URL of the saved resource since some URL might be redirected.
@@ -63,5 +64,7 @@ struct SaveFileCreateInfo {
   // Source type of saved file.
   SaveFileSource save_source;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_SAVE_TYPES_H_

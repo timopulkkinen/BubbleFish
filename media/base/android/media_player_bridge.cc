@@ -19,8 +19,8 @@ using base::android::AttachCurrentThread;
 using base::android::CheckException;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::GetClass;
-using base::android::GetMethodID;
 using base::android::JavaRef;
+using base::android::MethodID;
 using base::android::ScopedJavaLocalRef;
 
 // These constants are from the android source tree and need to be kept in
@@ -56,13 +56,15 @@ MediaPlayerBridge::MediaPlayerBridge(
     const MediaPreparedCB& media_prepared_cb,
     const PlaybackCompleteCB& playback_complete_cb,
     const SeekCompleteCB& seek_complete_cb,
-    const TimeUpdateCB& time_update_cb)
+    const TimeUpdateCB& time_update_cb,
+    const MediaInterruptedCB& media_interrupted_cb)
     : media_error_cb_(media_error_cb),
       video_size_changed_cb_(video_size_changed_cb),
       buffering_update_cb_(buffering_update_cb),
       media_prepared_cb_(media_prepared_cb),
       playback_complete_cb_(playback_complete_cb),
       seek_complete_cb_(seek_complete_cb),
+      media_interrupted_cb_(media_interrupted_cb),
       time_update_cb_(time_update_cb),
       player_id_(player_id),
       prepared_(false),
@@ -125,6 +127,8 @@ void MediaPlayerBridge::Prepare() {
 void MediaPlayerBridge::GetCookiesCallback(const std::string& cookies) {
   cookies_ = cookies;
   has_cookies_ = true;
+  if (j_media_player_.is_null())
+    return;
 
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
@@ -145,7 +149,7 @@ void MediaPlayerBridge::GetCookiesCallback(const std::string& cookies) {
     JNI_MediaPlayer::Java_MediaPlayer_prepareAsync(
         env, j_media_player_.obj());
   } else {
-    media_error_cb_.Run(player_id_, MEDIA_ERROR_UNKNOWN);
+    media_error_cb_.Run(player_id_, MEDIA_ERROR_FORMAT);
   }
 }
 
@@ -171,7 +175,6 @@ void MediaPlayerBridge::Pause() {
       pending_play_ = false;
   }
 }
-
 
 bool MediaPlayerBridge::IsPlaying() {
   if (!prepared_)
@@ -244,6 +247,8 @@ void MediaPlayerBridge::Release() {
   JNIEnv* env = AttachCurrentThread();
   JNI_MediaPlayer::Java_MediaPlayer_release(env, j_media_player_.obj());
   j_media_player_.Reset();
+
+  listener_.ReleaseMediaPlayerListenerResources();
 }
 
 void MediaPlayerBridge::SetVolume(float left_volume, float right_volume) {
@@ -278,6 +283,12 @@ void MediaPlayerBridge::OnBufferingUpdate(int percent) {
 void MediaPlayerBridge::OnPlaybackComplete() {
   time_update_timer_.Stop();
   playback_complete_cb_.Run(player_id_);
+}
+
+
+void MediaPlayerBridge::OnMediaInterrupted() {
+  time_update_timer_.Stop();
+  media_interrupted_cb_.Run(player_id_);
 }
 
 void MediaPlayerBridge::OnSeekComplete() {
@@ -319,8 +330,8 @@ void MediaPlayerBridge::GetMetadata() {
 
   ScopedJavaLocalRef<jclass> media_player_class(
       GetClass(env, "android/media/MediaPlayer"));
-  jmethodID method = GetMethodID(
-      env, media_player_class, "getMetadata",
+  jmethodID method = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, media_player_class.obj(), "getMetadata",
       "(ZZ)Landroid/media/Metadata;");
   ScopedJavaLocalRef<jobject> j_metadata(
       env, env->CallObjectMethod(
@@ -331,8 +342,8 @@ void MediaPlayerBridge::GetMetadata() {
 
   ScopedJavaLocalRef<jclass> metadata_class(
       GetClass(env, "android/media/Metadata"));
-  jmethodID get_boolean = GetMethodID(
-      env, metadata_class, "getBoolean", "(I)Z");
+  jmethodID get_boolean = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, metadata_class.obj(), "getBoolean", "(I)Z");
   can_pause_ = env->CallBooleanMethod(j_metadata.obj(),
                                       get_boolean,
                                       kPauseAvailable);

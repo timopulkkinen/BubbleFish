@@ -22,19 +22,19 @@ class SymmetricKey;
 
 namespace media {
 
-class DecryptorClient;
-
 // Decrypts an AES encrypted buffer into an unencrypted buffer. The AES
 // encryption must be CTR with a key size of 128bits.
 class MEDIA_EXPORT AesDecryptor : public Decryptor {
  public:
-  // The AesDecryptor does not take ownership of the |client|. The |client|
-  // must be valid throughout the lifetime of the AesDecryptor.
-  explicit AesDecryptor(DecryptorClient* client);
+  AesDecryptor(const KeyAddedCB& key_added_cb,
+               const KeyErrorCB& key_error_cb,
+               const KeyMessageCB& key_message_cb,
+               const NeedKeyCB& need_key_cb);
   virtual ~AesDecryptor();
 
   // Decryptor implementation.
   virtual bool GenerateKeyRequest(const std::string& key_system,
+                                  const std::string& type,
                                   const uint8* init_data,
                                   int init_data_length) OVERRIDE;
   virtual void AddKey(const std::string& key_system,
@@ -45,12 +45,24 @@ class MEDIA_EXPORT AesDecryptor : public Decryptor {
                       const std::string& session_id) OVERRIDE;
   virtual void CancelKeyRequest(const std::string& key_system,
                                 const std::string& session_id) OVERRIDE;
-  // Decrypts |encrypted| buffer. |encrypted| should not be NULL. Returns a
-  // DecoderBuffer with the decrypted data if the decryption succeeded through
-  // |decrypt_cb|.
-  virtual void Decrypt(const scoped_refptr<DecoderBuffer>& encrypted,
+  virtual void RegisterNewKeyCB(StreamType stream_type,
+                                const NewKeyCB& key_added_cb) OVERRIDE;
+  virtual void Decrypt(StreamType stream_type,
+                       const scoped_refptr<DecoderBuffer>& encrypted,
                        const DecryptCB& decrypt_cb) OVERRIDE;
-  virtual void CancelDecrypt() OVERRIDE;
+  virtual void CancelDecrypt(StreamType stream_type) OVERRIDE;
+  virtual void InitializeAudioDecoder(scoped_ptr<AudioDecoderConfig> config,
+                                      const DecoderInitCB& init_cb) OVERRIDE;
+  virtual void InitializeVideoDecoder(scoped_ptr<VideoDecoderConfig> config,
+                                      const DecoderInitCB& init_cb) OVERRIDE;
+  virtual void DecryptAndDecodeAudio(
+      const scoped_refptr<DecoderBuffer>& encrypted,
+      const AudioDecodeCB& audio_decode_cb) OVERRIDE;
+  virtual void DecryptAndDecodeVideo(
+      const scoped_refptr<DecoderBuffer>& encrypted,
+      const VideoDecodeCB& video_decode_cb) OVERRIDE;
+  virtual void ResetDecoder(StreamType stream_type) OVERRIDE;
+  virtual void DeinitializeDecoder(StreamType stream_type) OVERRIDE;
 
  private:
   // TODO(fgalligan): Remove this and change KeyMap to use crypto::SymmetricKey
@@ -83,6 +95,12 @@ class MEDIA_EXPORT AesDecryptor : public Decryptor {
   // the key. Returns NULL if no key is associated with |key_id|.
   DecryptionKey* GetKey(const std::string& key_id) const;
 
+  // Callbacks for firing key events.
+  KeyAddedCB key_added_cb_;
+  KeyErrorCB key_error_cb_;
+  KeyMessageCB key_message_cb_;
+  NeedKeyCB need_key_cb_;
+
   // KeyMap owns the DecryptionKey* and must delete them when they are
   // not needed any more.
   typedef base::hash_map<std::string, DecryptionKey*> KeyMap;
@@ -98,7 +116,8 @@ class MEDIA_EXPORT AesDecryptor : public Decryptor {
   // https://www.w3.org/Bugs/Public/show_bug.cgi?id=16739#c0
   static uint32 next_session_id_;
 
-  DecryptorClient* const client_;
+  NewKeyCB new_audio_key_cb_;
+  NewKeyCB new_video_key_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(AesDecryptor);
 };

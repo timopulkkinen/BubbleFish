@@ -4,19 +4,21 @@
 
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/browser_event_router.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_switch_utils.h"
+#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -107,21 +109,24 @@ ExtensionToolbarModel::Action ExtensionToolbarModel::ExecuteBrowserAction(
     const Extension* extension,
     Browser* browser,
     GURL* popup_url_out) {
-  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
-  if (!tab_contents)
+  content::WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  if (!web_contents)
     return ACTION_NONE;
 
-  int tab_id = ExtensionTabUtil::GetTabId(tab_contents->web_contents());
+  int tab_id = ExtensionTabUtil::GetTabId(web_contents);
   if (tab_id < 0)
     return ACTION_NONE;
 
-  ExtensionAction* browser_action = extension->browser_action();
+  ExtensionAction* browser_action =
+      extensions::ExtensionActionManager::Get(service_->profile())->
+      GetBrowserAction(*extension);
 
   // For browser actions, visibility == enabledness.
   if (!browser_action->GetIsVisible(tab_id))
     return ACTION_NONE;
 
-  extensions::TabHelper::FromWebContents(tab_contents->web_contents())->
+  extensions::TabHelper::FromWebContents(web_contents)->
       active_tab_permission_granter()->GrantIfRequested(extension);
 
   if (browser_action->HasPopup(tab_id)) {
@@ -167,7 +172,7 @@ void ExtensionToolbarModel::Observe(
     // hides the browser action and then disables and enables the extension.
     if (list_with_extension)
       return;
-    if (extensions::switch_utils::IsExtensionsInActionBoxEnabled())
+    if (extensions::FeatureSwitch::extensions_in_action_box()->IsEnabled())
       AddExtension(extension, &action_box_menu_items_);
     else if (service_->extension_prefs()->GetBrowserActionVisibility(extension))
       AddExtension(extension, &toolbar_items_);
@@ -176,7 +181,7 @@ void ExtensionToolbarModel::Observe(
       RemoveExtension(extension, list_with_extension);
   } else if (type ==
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED) {
-    if (extensions::switch_utils::IsExtensionsInActionBoxEnabled()) {
+    if (extensions::FeatureSwitch::extensions_in_action_box()->IsEnabled()) {
       // TODO(yefim): Implement this when implementing drag & drop
       // for action box menu.
     } else if (
@@ -193,8 +198,10 @@ void ExtensionToolbarModel::Observe(
 void ExtensionToolbarModel::AddExtension(const Extension* extension,
                                          ExtensionList* list) {
   // We only care about extensions with browser actions.
-  if (!extension->browser_action())
+  if (!extensions::ExtensionActionManager::Get(service_->profile())->
+      GetBrowserAction(*extension)) {
     return;
+  }
 
   if (extension->id() == last_extension_removed_ &&
       last_extension_removed_index_ < list->size()) {
@@ -259,7 +266,7 @@ extensions::ExtensionList* ExtensionToolbarModel::FindListWithExtension(
 void ExtensionToolbarModel::InitializeExtensionLists() {
   DCHECK(service_->is_ready());
 
-  if (extensions::switch_utils::IsExtensionsInActionBoxEnabled())
+  if (extensions::FeatureSwitch::extensions_in_action_box()->IsEnabled())
     PopulateForActionBoxMode();
   else
     PopulateForNonActionBoxMode();
@@ -276,12 +283,15 @@ void ExtensionToolbarModel::PopulateForActionBoxMode() {
   extensions::ExtensionIdList action_box_order =
       service_->extension_prefs()->GetActionBoxOrder();
 
+  extensions::ExtensionActionManager* extension_action_manager =
+      extensions::ExtensionActionManager::Get(service_->profile());
+
   // Add all browser actions not already in the toolbar or action box
   // to the action box (the prefs list may omit some extensions).
   for (ExtensionSet::const_iterator iter = service_->extensions()->begin();
        iter != service_->extensions()->end(); ++iter) {
     const Extension* extension = *iter;
-    if (!extension->browser_action())
+    if (!extension_action_manager->GetBrowserAction(*extension))
       continue;
 
     if (std::find(toolbar_order.begin(), toolbar_order.end(),
@@ -308,11 +318,14 @@ void ExtensionToolbarModel::PopulateForNonActionBoxMode() {
   // The items that don't have a pref for their position.
   ExtensionList unsorted;
 
+  extensions::ExtensionActionManager* extension_action_manager =
+      extensions::ExtensionActionManager::Get(service_->profile());
+
   // Create the lists.
   for (ExtensionSet::const_iterator it = service_->extensions()->begin();
        it != service_->extensions()->end(); ++it) {
     const Extension* extension = *it;
-    if (!extension->browser_action())
+    if (!extension_action_manager->GetBrowserAction(*extension))
       continue;
     if (!service_->extension_prefs()->GetBrowserActionVisibility(extension))
       continue;

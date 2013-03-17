@@ -4,12 +4,13 @@
 
 #include "chrome/browser/extensions/api/web_request/upload_data_presenter.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_request/form_data_parser.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_constants.h"
-#include "net/base/upload_element.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_file_element_reader.h"
 #include "net/url_request/url_request.h"
 
 using base::BinaryValue;
@@ -29,7 +30,7 @@ ListValue* GetOrCreateList(DictionaryValue* dictionary,
   ListValue* list = NULL;
   if (!dictionary->GetList(key, &list)) {
     list = new ListValue();
-    dictionary->Set(key, list);
+    dictionary->SetWithoutPathExpansion(key, list);
   }
   return list;
 }
@@ -37,6 +38,16 @@ ListValue* GetOrCreateList(DictionaryValue* dictionary,
 }  // namespace
 
 namespace extensions {
+
+namespace subtle {
+
+void AppendKeyValuePair(const char* key, Value* value, ListValue* list) {
+  DictionaryValue* dictionary = new DictionaryValue;
+  dictionary->SetWithoutPathExpansion(key, value);
+  list->Append(dictionary);
+}
+
+}  // namespace subtle
 
 // Implementation of UploadDataPresenter.
 
@@ -50,18 +61,19 @@ RawDataPresenter::RawDataPresenter()
 }
 RawDataPresenter::~RawDataPresenter() {}
 
-void RawDataPresenter::FeedNext(const net::UploadElement& element) {
+void RawDataPresenter::FeedNext(const net::UploadElementReader& reader) {
   if (!success_)
     return;
 
-  switch (element.type()) {
-    case net::UploadElement::TYPE_BYTES:
-      FeedNextBytes(element.bytes(), element.bytes_length());
-      break;
-    case net::UploadElement::TYPE_FILE:
-      // Insert the file path instead of the contents, which may be too large.
-      FeedNextFile(element.file_path().AsUTF8Unsafe());
-      break;
+  if (reader.AsBytesReader()) {
+    const net::UploadBytesElementReader* bytes_reader = reader.AsBytesReader();
+    FeedNextBytes(bytes_reader->bytes(), bytes_reader->length());
+  } else if (reader.AsFileReader()) {
+    // Insert the file path instead of the contents, which may be too large.
+    const net::UploadFileElementReader* file_reader = reader.AsFileReader();
+    FeedNextFile(file_reader->path().AsUTF8Unsafe());
+  } else {
+    NOTIMPLEMENTED();
   }
 }
 
@@ -76,33 +88,22 @@ scoped_ptr<Value> RawDataPresenter::Result() {
   return list_.PassAs<Value>();
 }
 
-// static
-void RawDataPresenter::AppendResultWithKey(
-    ListValue* list, const char* key, Value* value) {
-  DictionaryValue* dictionary = new DictionaryValue;
-  dictionary->Set(key, value);
-  list->Append(dictionary);
-}
-
-void RawDataPresenter::Abort() {
-  success_ = false;
-  list_.reset();
-}
-
 void RawDataPresenter::FeedNextBytes(const char* bytes, size_t size) {
-  AppendResultWithKey(list_.get(), keys::kRequestBodyRawBytesKey,
-                      BinaryValue::CreateWithCopiedBuffer(bytes, size));
+  subtle::AppendKeyValuePair(keys::kRequestBodyRawBytesKey,
+                             BinaryValue::CreateWithCopiedBuffer(bytes, size),
+                             list_.get());
 }
 
 void RawDataPresenter::FeedNextFile(const std::string& filename) {
   // Insert the file path instead of the contents, which may be too large.
-  AppendResultWithKey(list_.get(), keys::kRequestBodyRawFileKey,
-                      Value::CreateStringValue(filename));
+  subtle::AppendKeyValuePair(keys::kRequestBodyRawFileKey,
+                             Value::CreateStringValue(filename),
+                             list_.get());
 }
 
 // Implementation of ParsedDataPresenter.
 
-ParsedDataPresenter::ParsedDataPresenter(const net::URLRequest* request)
+ParsedDataPresenter::ParsedDataPresenter(const net::URLRequest& request)
   : parser_(FormDataParser::Create(request)),
     success_(parser_.get() != NULL),
     dictionary_(success_ ? new DictionaryValue() : NULL) {
@@ -110,15 +111,16 @@ ParsedDataPresenter::ParsedDataPresenter(const net::URLRequest* request)
 
 ParsedDataPresenter::~ParsedDataPresenter() {}
 
-void ParsedDataPresenter::FeedNext(const net::UploadElement& element) {
+void ParsedDataPresenter::FeedNext(const net::UploadElementReader& reader) {
   if (!success_)
     return;
 
-  if (element.type() != net::UploadElement::TYPE_BYTES) {
+  const net::UploadBytesElementReader* bytes_reader = reader.AsBytesReader();
+  if (!bytes_reader) {
     return;
   }
-  if (!parser_->SetSource(base::StringPiece(element.bytes(),
-                                            element.bytes_length()))) {
+  if (!parser_->SetSource(base::StringPiece(bytes_reader->bytes(),
+                                            bytes_reader->length()))) {
     Abort();
     return;
   }
@@ -141,6 +143,18 @@ scoped_ptr<Value> ParsedDataPresenter::Result() {
     return scoped_ptr<Value>();
 
   return dictionary_.PassAs<Value>();
+}
+
+// static
+scoped_ptr<ParsedDataPresenter> ParsedDataPresenter::CreateForTests() {
+  const std::string form_type("application/x-www-form-urlencoded");
+  return scoped_ptr<ParsedDataPresenter>(new ParsedDataPresenter(form_type));
+}
+
+ParsedDataPresenter::ParsedDataPresenter(const std::string& form_type)
+  : parser_(FormDataParser::CreateFromContentTypeHeader(&form_type)),
+    success_(parser_.get() != NULL),
+    dictionary_(success_ ? new DictionaryValue() : NULL) {
 }
 
 void ParsedDataPresenter::Abort() {

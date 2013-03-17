@@ -7,56 +7,27 @@
 
 #include "third_party/skia/include/core/SkColor.h"
 
-namespace gfx {
-class Font;
-}
-
 namespace chrome {
 namespace search {
 
-// Background color of the NTP.
-extern const SkColor kNTPBackgroundColor;
+// The minimum height of the content view for which the detached bookmark bar
+// should be visible. This value is calculated from the
+// chrome/browser/resources/ntp_search/ tile_page.js
+// HEIGHT_FOR_BOTTOM_PANEL constant.
+static const int kMinContentHeightForBottomBookmarkBar = 531;
 
-// Color for the placeholder text on NTP.
-extern const SkColor kNTPPlaceholderTextColor;
+// The maximum width of the detached bookmark bar.
+static const int kMaxWidthForBottomBookmarkBar = 720;
 
-// Color for the omnibox background
-extern const SkColor kOmniboxBackgroundColor;
+// The left and right padding of the detached bookmark bar.
+static const int kHorizontalPaddingForBottomBookmarkBar = 130;
 
-// Color for the separator between results and the page.
-extern const SkColor kResultsSeparatorColor;
+// The alpha used to draw the bookmark bar background when themed.
+// This value ranges from 0.0 (fully transparent) to 1.0 (fully opaque).
+static const float kBookmarkBarThemeBackgroundAlphaFactor = 0.8f;
 
-// Background color for search results.
-extern const SkColor kSearchBackgroundColor;
-
-// Background color for suggest overlay.
-extern const SkColor kSuggestBackgroundColor;
-
-// Font size use in the omnibox for non-NTP pages.
-// See the comments in browser_defaults on kAutocompleteEditFontPixelSize.
-extern const int kOmniboxFontSize;
-
-// Y-coordinate of the logo relative to its container.
-extern const int kLogoYPosition;
-
-// Gap between bottom of the logo and the top of the omnibox.
-extern const int kLogoBottomGap;
-
-// Default height of omnibox on NTP page.  This is an initial default, actual
-// value varies with font size.  See |GetNTPOmniboxHeight| below.
-extern const int kNTPOmniboxHeight;
-
-// Gap between bottom of the omnibox and the top of the content area.
-extern const int kOmniboxBottomGap;
-
-// Initial height of the search results, relative to top of the NTP overlay.
-extern const int kSearchResultsHeight;
-
-// Returns the derived |font| for NTP omnibox use.
-gfx::Font GetNTPOmniboxFont(const gfx::Font& font);
-
-// Returns the height of NTP given the |font| to be used.
-int GetNTPOmniboxHeight(const gfx::Font& font);
+// Returns the color to use to draw the bookmark bar separator when not themed.
+SkColor GetBookmarkBarNoThemeSeparatorColor();
 
 }  // namespace search
 }  // namespace chrome

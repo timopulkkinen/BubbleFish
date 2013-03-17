@@ -11,7 +11,7 @@
 
 namespace crypto {
 
-// A helper class that takes care of destroying OpenSSL objects when it goes out
+// A helper class that takes care of destroying OpenSSL objects when they go out
 // of scope.
 template <typename T, void (*destructor)(T*)>
 class ScopedOpenSSL {
@@ -23,6 +23,11 @@ class ScopedOpenSSL {
   }
 
   T* get() const { return ptr_; }
+  T* release() {
+    T* ptr = ptr_;
+    ptr_ = NULL;
+    return ptr;
+  }
   void reset(T* ptr) {
     if (ptr != ptr_) {
       if (ptr_) (*destructor)(ptr_);
@@ -85,7 +90,8 @@ void CRYPTO_EXPORT EnsureOpenSSLInit();
 // Drains the OpenSSL ERR_get_error stack. On a debug build the error codes
 // are send to VLOG(1), on a release build they are disregarded. In most
 // cases you should pass FROM_HERE as the |location|.
-void ClearOpenSSLERRStack(const tracked_objects::Location& location);
+void CRYPTO_EXPORT ClearOpenSSLERRStack(
+    const tracked_objects::Location& location);
 
 // Place an instance of this class on the call stack to automatically clear
 // the OpenSSL error stack on function exit.

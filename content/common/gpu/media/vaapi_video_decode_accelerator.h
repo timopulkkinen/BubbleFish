@@ -8,8 +8,6 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_VAAPI_VIDEO_DECODE_ACCELERATOR_H_
 #define CONTENT_COMMON_GPU_MEDIA_VAAPI_VIDEO_DECODE_ACCELERATOR_H_
 
-#include <GL/glx.h>
-
 #include <queue>
 #include <utility>
 #include <vector>
@@ -28,6 +26,9 @@
 #include "media/base/bitstream_buffer.h"
 #include "media/video/picture.h"
 #include "media/video/video_decode_accelerator.h"
+#include "ui/gl/gl_bindings.h"
+
+namespace content {
 
 // Class to provide video decode acceleration for Intel systems with hardware
 // support for it, and on which libva is available.
@@ -199,16 +200,21 @@ private:
   base::WeakPtr<Client> client_;
 
   base::Thread decoder_thread_;
-  content::VaapiH264Decoder decoder_;
+  VaapiH264Decoder decoder_;
 
   int num_frames_at_client_;
   int num_stream_bufs_at_decoder_;
 
-  // Posted onto ChildThread by the decoder to submit a GPU job to put decoded
-  // picture into output buffer.
-  void Sync(int32 output_id);
+  // Posted onto ChildThread by the decoder to submit a GPU job to decode
+  // and put the decoded picture into output buffer. Takes ownership of
+  // the queues' memory.
+  void SubmitDecode(int32 output_id,
+                    scoped_ptr<std::queue<VABufferID> > va_bufs,
+                    scoped_ptr<std::queue<VABufferID> > slice_bufs);
 
   DISALLOW_COPY_AND_ASSIGN(VaapiVideoDecodeAccelerator);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_MEDIA_VAAPI_VIDEO_DECODE_ACCELERATOR_H_

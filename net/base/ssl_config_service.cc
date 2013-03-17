@@ -123,11 +123,6 @@ uint16 SSLConfigService::default_version_min() {
 }
 
 // static
-void SSLConfigService::SetDefaultVersionMax(uint16 version_max) {
-  g_default_version_max = version_max;
-}
-
-// static
 uint16 SSLConfigService::default_version_max() {
   return g_default_version_max;
 }
@@ -138,6 +133,10 @@ void SSLConfigService::AddObserver(Observer* observer) {
 
 void SSLConfigService::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+void SSLConfigService::NotifySSLConfigChange() {
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());
 }
 
 SSLConfigService::~SSLConfigService() {
@@ -160,7 +159,7 @@ void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
       (orig_config.false_start_enabled != new_config.false_start_enabled);
 
   if (config_changed)
-    FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());
+    NotifySSLConfigChange();
 }
 
 // static

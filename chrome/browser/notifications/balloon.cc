@@ -5,10 +5,20 @@
 #include "chrome/browser/notifications/balloon.h"
 
 #include "base/logging.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
+#include "chrome/browser/profiles/profile.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+
+#if !defined(OS_WIN) && !defined(USE_AURA)
+// static
+int BalloonView::GetHorizontalMargin() {
+  // TODO: implement for linux (non-aura) and mac.
+  return 0;
+}
+#endif
 
 Balloon::Balloon(const Notification& notification, Profile* profile,
                  BalloonCollection* collection)
@@ -60,9 +70,21 @@ void Balloon::OnClose(bool by_user) {
   collection_->OnBalloonClosed(this);
 }
 
+void Balloon::OnButtonClick(int button_index) {
+  notification_->ButtonClick(button_index);
+}
+
 void Balloon::CloseByScript() {
   // A user-initiated close begins with the view and then closes this object;
   // we simulate that with a script-initiated close but pass |by_user|=false.
   DCHECK(balloon_view_.get());
   balloon_view_->Close(false);
+}
+
+std::string Balloon::GetExtensionId() {
+  const ExtensionURLInfo url(notification().origin_url());
+  const ExtensionService* service = profile()->GetExtensionService();
+  const extensions::Extension* extension =
+      service->extensions()->GetExtensionOrAppByURL(url);
+  return extension ? extension->id() : std::string();
 }

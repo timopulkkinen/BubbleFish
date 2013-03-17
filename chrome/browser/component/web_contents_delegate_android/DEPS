@@ -1,3 +1,0 @@
-include_rules = [
-  "+chrome/browser/component/web_contents_delegate_android",
-]

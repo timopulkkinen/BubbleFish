@@ -9,11 +9,10 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
-#include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tab_contents/chrome_web_contents_view_delegate_gtk.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/focus_store_gtk.h"
@@ -34,13 +33,13 @@ bool ConstrainedWindowGtkDelegate::ShouldHaveBorderPadding() const {
 }
 
 ConstrainedWindowGtk::ConstrainedWindowGtk(
-    TabContents* tab_contents,
+    content::WebContents* web_contents,
     ConstrainedWindowGtkDelegate* delegate)
-    : tab_contents_(tab_contents),
+    : web_contents_(web_contents),
       delegate_(delegate),
       visible_(false),
       weak_factory_(this) {
-  DCHECK(tab_contents);
+  DCHECK(web_contents);
   DCHECK(delegate);
   GtkWidget* dialog = delegate->GetWidgetRoot();
 
@@ -57,13 +56,6 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
         ui::kContentAreaBorder, ui::kContentAreaBorder);
   }
 
-  GdkColor background;
-  if (delegate->GetBackgroundColor(&background)) {
-    gtk_widget_modify_base(ebox, GTK_STATE_NORMAL, &background);
-    gtk_widget_modify_fg(ebox, GTK_STATE_NORMAL, &background);
-    gtk_widget_modify_bg(ebox, GTK_STATE_NORMAL, &background);
-  }
-
   if (gtk_widget_get_parent(dialog))
     gtk_widget_reparent(dialog, alignment);
   else
@@ -73,20 +65,29 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
   gtk_container_add(GTK_CONTAINER(ebox), frame);
   border_.Own(ebox);
 
+  BackgroundColorChanged();
+
   gtk_widget_add_events(widget(), GDK_KEY_PRESS_MASK);
   g_signal_connect(widget(), "key-press-event", G_CALLBACK(OnKeyPressThunk),
                    this);
   g_signal_connect(widget(), "hierarchy-changed",
                    G_CALLBACK(OnHierarchyChangedThunk), this);
 
-  tab_contents_->constrained_window_tab_helper()->AddConstrainedDialog(this);
+  // TODO(wittman): Getting/setting data on the widget is a hack to facilitate
+  // looking up the ConstrainedWindowGtk from the GtkWindow during refactoring.
+  // Remove once ConstrainedWindowGtk is gone.
+  g_object_set_data(G_OBJECT(widget()), "ConstrainedWindowGtk", this);
+
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents_);
+  web_contents_modal_dialog_manager->ShowDialog(widget());
 }
 
 ConstrainedWindowGtk::~ConstrainedWindowGtk() {
   border_.Destroy();
 }
 
-void ConstrainedWindowGtk::ShowConstrainedWindow() {
+void ConstrainedWindowGtk::ShowWebContentsModalDialog() {
   gtk_widget_show_all(border_.get());
 
   // We collaborate with WebContentsView and stick ourselves in the
@@ -96,37 +97,49 @@ void ConstrainedWindowGtk::ShowConstrainedWindow() {
   visible_ = true;
 }
 
-void ConstrainedWindowGtk::CloseConstrainedWindow() {
+void ConstrainedWindowGtk::CloseWebContentsModalDialog() {
   if (visible_)
     ContainingView()->RemoveConstrainedWindow(this);
   delegate_->DeleteDelegate();
-  tab_contents_->constrained_window_tab_helper()->WillClose(this);
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents_);
+  web_contents_modal_dialog_manager->WillClose(widget());
 
   delete this;
 }
 
-void ConstrainedWindowGtk::FocusConstrainedWindow() {
+void ConstrainedWindowGtk::FocusWebContentsModalDialog() {
   GtkWidget* focus_widget = delegate_->GetFocusWidget();
   if (!focus_widget)
     return;
 
   // The user may have focused another tab. In this case do not grab focus
   // until this tab is refocused.
-  ConstrainedWindowTabHelper* helper =
-      tab_contents_->constrained_window_tab_helper();
-  if ((!helper->delegate() ||
-       helper->delegate()->ShouldFocusConstrainedWindow()) &&
-      gtk_util::IsWidgetAncestryVisible(focus_widget)) {
+  if (gtk_util::IsWidgetAncestryVisible(focus_widget))
     gtk_widget_grab_focus(focus_widget);
-  } else {
+  else
     ContainingView()->focus_store()->SetWidget(focus_widget);
+}
+
+void ConstrainedWindowGtk::PulseWebContentsModalDialog() {
+}
+
+NativeWebContentsModalDialog ConstrainedWindowGtk::GetNativeDialog() {
+  return widget();
+}
+
+void ConstrainedWindowGtk::BackgroundColorChanged() {
+  GdkColor background;
+  if (delegate_->GetBackgroundColor(&background)) {
+    gtk_widget_modify_base(border_.get(), GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_fg(border_.get(), GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_bg(border_.get(), GTK_STATE_NORMAL, &background);
   }
 }
 
 ConstrainedWindowGtk::TabContentsViewType*
-    ConstrainedWindowGtk::ContainingView() {
-  return
-      ChromeWebContentsViewDelegateGtk::GetFor(tab_contents_->web_contents());
+ConstrainedWindowGtk::ContainingView() {
+  return ChromeWebContentsViewDelegateGtk::GetFor(web_contents_);
 }
 
 gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,
@@ -136,7 +149,7 @@ gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,
     // on widget().
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(&ConstrainedWindowGtk::CloseConstrainedWindow,
+        base::Bind(&ConstrainedWindowGtk::CloseWebContentsModalDialog,
                    weak_factory_.GetWeakPtr()));
     return TRUE;
   }
@@ -150,5 +163,5 @@ void ConstrainedWindowGtk::OnHierarchyChanged(GtkWidget* sender,
   if (!gtk_widget_is_toplevel(gtk_widget_get_toplevel(widget())))
     return;
 
-  FocusConstrainedWindow();
+  FocusWebContentsModalDialog();
 }

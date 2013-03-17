@@ -37,12 +37,12 @@ static const int kRGB24Size = kSourceYSize * 3;
 static const int kRGBSizeConverted = kSourceYSize * kBpp;
 
 // Helper for reading test data into a scoped_array<uint8>.
-static void ReadData(const FilePath::CharType* filename,
+static void ReadData(const base::FilePath::CharType* filename,
                      int expected_size,
                      scoped_array<uint8>* data) {
   data->reset(new uint8[expected_size]);
 
-  FilePath path;
+  base::FilePath path;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &path));
   path = path.Append(FILE_PATH_LITERAL("media"))
              .Append(FILE_PATH_LITERAL("test"))
@@ -170,6 +170,37 @@ class YUVScaleTest : public ::testing::TestWithParam<YUVScaleTestData> {
   scoped_array<uint8> rgb_bytes_;
 };
 
+TEST_P(YUVScaleTest, NoScale) {
+  media::ScaleYUVToRGB32(y_plane(),                    // Y
+                         u_plane(),                    // U
+                         v_plane(),                    // V
+                         rgb_bytes_.get(),             // RGB output
+                         kSourceWidth, kSourceHeight,  // Dimensions
+                         kSourceWidth, kSourceHeight,  // Dimensions
+                         kSourceWidth,                 // YStride
+                         kSourceWidth / 2,             // UvStride
+                         kSourceWidth * kBpp,          // RgbStride
+                         GetParam().yuv_type,
+                         media::ROTATE_0,
+                         GetParam().scale_filter);
+
+  uint32 yuv_hash = DJB2Hash(rgb_bytes_.get(), kRGBSize, kDJB2HashSeed);
+
+  media::ConvertYUVToRGB32(y_plane(),                    // Y
+                           u_plane(),                    // U
+                           v_plane(),                    // V
+                           rgb_bytes_.get(),             // RGB output
+                           kSourceWidth, kSourceHeight,  // Dimensions
+                           kSourceWidth,                 // YStride
+                           kSourceWidth / 2,             // UVStride
+                           kSourceWidth * kBpp,          // RGBStride
+                           GetParam().yuv_type);
+
+  uint32 rgb_hash = DJB2Hash(rgb_bytes_.get(), kRGBSize, kDJB2HashSeed);
+
+  EXPECT_EQ(yuv_hash, rgb_hash);
+}
+
 TEST_P(YUVScaleTest, Normal) {
   media::ScaleYUVToRGB32(y_plane(),                    // Y
                          u_plane(),                    // U
@@ -240,10 +271,10 @@ TEST_P(YUVScaleTest, OddWidthAndHeightNotCrash) {
 INSTANTIATE_TEST_CASE_P(
     YUVScaleFormats, YUVScaleTest,
     ::testing::Values(
-        YUVScaleTestData(media::YV12, media::FILTER_NONE, 4259656254u),
-        YUVScaleTestData(media::YV16, media::FILTER_NONE, 974965419u),
-        YUVScaleTestData(media::YV12, media::FILTER_BILINEAR, 2086305576u),
-        YUVScaleTestData(media::YV16, media::FILTER_BILINEAR, 3857179240u)));
+        YUVScaleTestData(media::YV12, media::FILTER_NONE, 4136904952u),
+        YUVScaleTestData(media::YV16, media::FILTER_NONE, 1501777547u),
+        YUVScaleTestData(media::YV12, media::FILTER_BILINEAR, 3164274689u),
+        YUVScaleTestData(media::YV16, media::FILTER_BILINEAR, 3095878046u)));
 
 // This tests a known worst case YUV value, and for overflow.
 TEST(YUVConvertTest, Clamp) {
@@ -306,7 +337,7 @@ TEST(YUVConvertTest, RGB32ToYUV) {
   scoped_array<uint8> rgb_converted_bytes(new uint8[kRGBSize]);
 
   // Read YUV reference data from file.
-  FilePath yuv_url;
+  base::FilePath yuv_url;
   EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &yuv_url));
   yuv_url = yuv_url.Append(FILE_PATH_LITERAL("media"))
                    .Append(FILE_PATH_LITERAL("test"))
@@ -384,7 +415,7 @@ TEST(YUVConvertTest, YUY2ToYUV) {
 
 TEST(YUVConvertTest, DownScaleYUVToRGB32WithRect) {
   // Read YUV reference data from file.
-  FilePath yuv_url;
+  base::FilePath yuv_url;
   EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &yuv_url));
   yuv_url = yuv_url.Append(FILE_PATH_LITERAL("media"))
                    .Append(FILE_PATH_LITERAL("test"))
@@ -744,6 +775,7 @@ TEST(YUVConvertTest, FilterYUVRows_C_OutOfBounds) {
   }
 }
 
+#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
 TEST(YUVConvertTest, FilterYUVRows_MMX_OutOfBounds) {
   base::CPU cpu;
   if (!cpu.has_mmx()) {
@@ -765,6 +797,7 @@ TEST(YUVConvertTest, FilterYUVRows_MMX_OutOfBounds) {
     EXPECT_EQ(0u, dst[i]);
   }
 }
+#endif  // defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
 
 TEST(YUVConvertTest, FilterYUVRows_SSE2_OutOfBounds) {
   base::CPU cpu;
@@ -787,6 +820,7 @@ TEST(YUVConvertTest, FilterYUVRows_SSE2_OutOfBounds) {
   }
 }
 
+#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
 TEST(YUVConvertTest, FilterYUVRows_MMX_UnalignedDestination) {
   base::CPU cpu;
   if (!cpu.has_mmx()) {
@@ -816,6 +850,7 @@ TEST(YUVConvertTest, FilterYUVRows_MMX_UnalignedDestination) {
 
   EXPECT_EQ(0, memcmp(dst_sample.get(), dst_ptr, 17));
 }
+#endif  // defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
 
 TEST(YUVConvertTest, FilterYUVRows_SSE2_UnalignedDestination) {
   base::CPU cpu;

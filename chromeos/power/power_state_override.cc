@@ -28,36 +28,50 @@ namespace chromeos {
 PowerStateOverride::PowerStateOverride(Mode mode)
     : override_types_(0),
       request_id_(0),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      dbus_thread_manager_(DBusThreadManager::Get()) {
   switch (mode) {
     case BLOCK_DISPLAY_SLEEP:
       override_types_ |= (PowerManagerClient::DISABLE_IDLE_DIM |
                           PowerManagerClient::DISABLE_IDLE_BLANK);
       // fallthrough
     case BLOCK_SYSTEM_SUSPEND:
-      override_types_ |= (PowerManagerClient::DISABLE_IDLE_SUSPEND |
-                          PowerManagerClient::DISABLE_IDLE_LID_SUSPEND);
+      override_types_ |= PowerManagerClient::DISABLE_IDLE_SUSPEND;
       break;
     default:
       NOTREACHED() << "Unhandled mode " << mode;
   }
 
+  dbus_thread_manager_->AddObserver(this);
+
   // request_id_ = 0 will create a new override request.
-  CallRequestPowerStateOverrides();
+  // We do a post task here to ensure that this request runs 'after' our
+  // constructor is done. If not, there is a possibility (though only in
+  // tests at the moment) that the power state override request executes
+  // and returns before the constructor has finished executing. This will
+  // cause an AddRef and a Release, the latter destructing our current
+  // instance even before the constructor has finished executing (as it does
+  // in the DownloadExtensionTest browsertests currently).
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&PowerStateOverride::CallRequestPowerStateOverrides, this));
 
   heartbeat_.Start(FROM_HERE,
                    base::TimeDelta::FromSeconds(kHeartbeatTimeInSecs),
-                   weak_ptr_factory_.GetWeakPtr(),
+                   this,
                    &PowerStateOverride::CallRequestPowerStateOverrides);
 }
 
 PowerStateOverride::~PowerStateOverride() {
-  heartbeat_.Stop();
+  if (dbus_thread_manager_)
+    dbus_thread_manager_->RemoveObserver(this);
+  CancelRequest();
+}
 
-  PowerManagerClient* power_manager =
-      DBusThreadManager::Get()->GetPowerManagerClient();
-  if (power_manager)
-    power_manager->CancelPowerStateOverrides(request_id_);
+void PowerStateOverride::OnDBusThreadManagerDestroying(
+    DBusThreadManager* manager) {
+  DCHECK_EQ(manager, dbus_thread_manager_);
+  CancelRequest();
+  dbus_thread_manager_ = NULL;
 }
 
 void PowerStateOverride::SetRequestId(uint32 request_id) {
@@ -65,16 +79,21 @@ void PowerStateOverride::SetRequestId(uint32 request_id) {
 }
 
 void PowerStateOverride::CallRequestPowerStateOverrides() {
-  PowerManagerClient* power_manager =
-      DBusThreadManager::Get()->GetPowerManagerClient();
-  if (power_manager) {
-    power_manager->RequestPowerStateOverrides(
-        request_id_,
-        base::TimeDelta::FromSeconds(
-            kHeartbeatTimeInSecs + kRequestSlackInSecs),
-        override_types_,
-        base::Bind(&PowerStateOverride::SetRequestId,
-                   weak_ptr_factory_.GetWeakPtr()));
+  DCHECK(dbus_thread_manager_);
+  dbus_thread_manager_->GetPowerManagerClient()->RequestPowerStateOverrides(
+      request_id_,
+      base::TimeDelta::FromSeconds(
+          kHeartbeatTimeInSecs + kRequestSlackInSecs),
+      override_types_,
+      base::Bind(&PowerStateOverride::SetRequestId, this));
+}
+
+void PowerStateOverride::CancelRequest() {
+  if (request_id_) {
+    DCHECK(dbus_thread_manager_);
+    dbus_thread_manager_->GetPowerManagerClient()->
+        CancelPowerStateOverrides(request_id_);
+    request_id_ = 0;
   }
 }
 

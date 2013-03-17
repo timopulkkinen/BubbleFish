@@ -106,6 +106,13 @@ cr.define('options.network', function() {
   var enableDataRoaming_ = false;
 
   /**
+   * Icon to use when not connected to a particular type of network.
+   * @type {!Object.<string, string>} Mapping of network type to icon data url.
+   * @private
+   */
+  var defaultIcons_ = {};
+
+  /**
    * Create an element in the network list for controlling network
    * connectivity.
    * @param {Object} data Description of the network list or command.
@@ -191,7 +198,10 @@ cr.define('options.network', function() {
      * @type {string}
      */
     set iconType(type) {
-      this.icon_.classList.add('network-' + type);
+      if (defaultIcons_[type])
+        this.iconURL = defaultIcons_[type];
+      else
+        this.icon_.classList.add('network-' + type);
     },
 
     /**
@@ -236,7 +246,7 @@ cr.define('options.network', function() {
       this.appendChild(new ManagedNetworkIndicator());
     },
 
-    /* @inheritDoc */
+    /** @override */
     decorate: function() {
       ListItem.prototype.decorate.call(this);
       this.className = 'network-group';
@@ -278,7 +288,7 @@ cr.define('options.network', function() {
      */
     menu_: null,
 
-    /* @inheritDoc */
+    /** @override */
     decorate: function() {
       this.subtitle = null;
       if (this.data.iconType)
@@ -378,7 +388,7 @@ cr.define('options.network', function() {
   NetworkSelectorItem.prototype = {
     __proto__: NetworkMenuItem.prototype,
 
-    /* @inheritDoc */
+    /** @override */
     decorate: function() {
       // TODO(kevers): Generalize method of setting default label.
       var policyManaged = false;
@@ -670,7 +680,7 @@ cr.define('options.network', function() {
   NetworkButtonItem.prototype = {
     __proto__: NetworkListItem.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       if (this.data.subtitle)
         this.subtitle = this.data.subtitle;
@@ -752,7 +762,7 @@ cr.define('options.network', function() {
   NetworkList.prototype = {
     __proto__: List.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       List.prototype.decorate.call(this);
       this.startBatchUpdates();
@@ -887,7 +897,7 @@ cr.define('options.network', function() {
       this.endBatchUpdates();
     },
 
-    /** @inheritDoc */
+    /** @override */
     createItem: function(entry) {
       if (entry.networkList)
         return new NetworkSelectorItem(entry);
@@ -924,6 +934,15 @@ cr.define('options.network', function() {
   };
 
   /**
+   * Sets the default icon to use for each network type if disconnected.
+   * @param {!Object.<string, string>} data Mapping of network type to icon
+   *     data url.
+   */
+  NetworkList.setDefaultNetworkIcons = function(data) {
+    defaultIcons_ = Object.create(data);
+  };
+
+  /**
    * Chrome callback for updating network controls.
    * @param {Object} data Description of available network devices and their
    *     corresponding state.
@@ -940,11 +959,11 @@ cr.define('options.network', function() {
     if (data.accessLocked) {
       $('network-locked-message').hidden = false;
       networkList.disabled = true;
-      $('use-shared-proxies').disabled = true;
+      $('use-shared-proxies').setDisabled('network-lock', true);
     } else {
       $('network-locked-message').hidden = true;
       networkList.disabled = false;
-      $('use-shared-proxies').disabled = false;
+      $('use-shared-proxies').setDisabled('network-lock', false);
     }
 
     // Only show Ethernet control if connected.
@@ -964,39 +983,27 @@ cr.define('options.network', function() {
       networkList.deleteItem('ethernet');
     }
 
-    if (data.wifiEnabled) {
+    if (data.wifiEnabled)
       loadData_('wifi', data.wirelessList, data.rememberedList);
-    } else {
-      var enableWifi = function() {
-        chrome.send('enableWifi');
-      };
-      networkList.update({key: 'wifi',
-                          subtitle: loadTimeData.getString('networkDisabled'),
-                          iconType: 'wifi',
-                          command: enableWifi});
-    }
+    else
+      addEnableNetworkButton_('wifi', 'enableWifi', 'wifi');
 
     // Only show cellular control if available and not in airplane mode.
     if (data.cellularAvailable && !data.airplaneMode) {
-      loadData_('cellular', data.wirelessList, data.rememberedList);
+      if (data.cellularEnabled)
+        loadData_('cellular', data.wirelessList, data.rememberedList);
+      else
+        addEnableNetworkButton_('cellular', 'enableCellular', 'cellular');
     } else {
       networkList.deleteItem('cellular');
     }
 
     // Only show cellular control if available and not in airplane mode.
     if (data.wimaxAvailable && !data.airplaneMode) {
-      if (data.wimaxEnabled) {
+      if (data.wimaxEnabled)
         loadData_('wimax', data.wirelessList, data.rememberedList);
-      } else {
-        var subtitle = loadTimeData.getString('networkDisabled');
-        var enableWimax = function() {
-          chrome.send('enableWimax');
-        };
-        networkList.update({key: 'wimax',
-                            subtitle: subtitle,
-                            iconType: 'cellular',
-                            command: enableWimax});
-      }
+      else
+        addEnableNetworkButton_('wimax', 'enableWimax', 'cellular');
     } else {
       networkList.deleteItem('wimax');
     }
@@ -1013,6 +1020,25 @@ cr.define('options.network', function() {
   };
 
   /**
+   * Replaces a network menu with a button for reenabling the type of network.
+   * @param {string} name The type of network (wifi, cellular or wimax).
+   * @param {string} command The command for reenabling the network.
+   * @param {string} type of icon (wifi or cellular).
+   * @private
+   */
+  function addEnableNetworkButton_(name, command, icon) {
+    var subtitle = loadTimeData.getString('networkDisabled');
+    var enableNetwork = function() {
+      chrome.send(command);
+    };
+    var networkList = $('network-list');
+    networkList.update({key: name,
+                        subtitle: subtitle,
+                        iconType: icon,
+                        command: enableNetwork});
+  }
+
+  /**
    * Element for indicating a policy managed network.
    * @constructor
    */
@@ -1026,17 +1052,16 @@ cr.define('options.network', function() {
   ManagedNetworkIndicator.prototype = {
     __proto__: ControlledSettingIndicator.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       ControlledSettingIndicator.prototype.decorate.call(this);
       this.controlledBy = 'policy';
       var policyLabel = loadTimeData.getString('managedNetwork');
       this.setAttribute('textPolicy', policyLabel);
-      this.className = 'controlled-setting-indicator';
       this.removeAttribute('tabindex');
     },
 
-    /** @inheritDoc */
+    /** @override */
     handleEvent: function(event) {
       // Prevent focus blurring as that would close any currently open menu.
       if (event.type == 'mousedown')
@@ -1055,7 +1080,7 @@ cr.define('options.network', function() {
       event.stopPropagation();
     },
 
-    /** @inheritDoc */
+    /** @override */
     toggleBubble_: function() {
       if (activeMenu_ && !$(activeMenu_).contains(this))
         closeMenu_();

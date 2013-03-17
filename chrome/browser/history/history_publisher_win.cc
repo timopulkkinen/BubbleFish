@@ -5,7 +5,6 @@
 #include "chrome/browser/history/history_publisher.h"
 
 #include <atlsafe.h>
-#include <objbase.h>
 #include <oleauto.h>
 #include <wtypes.h>
 
@@ -70,11 +69,9 @@ double HistoryPublisher::TimeToUTCVariantTime(const base::Time& time) {
 }
 
 HistoryPublisher::HistoryPublisher() {
-  CoInitialize(NULL);
 }
 
 HistoryPublisher::~HistoryPublisher() {
-  CoUninitialize();
 }
 
 bool HistoryPublisher::Init() {
@@ -114,18 +111,6 @@ void HistoryPublisher::PublishDataToIndexers(const PageData& page_data)
   base::win::ScopedVariant psa(thumbnail_arr.m_psa);
   for (size_t i = 0; i < indexers_.size(); ++i) {
     indexers_[i]->SendPageData(time, url, html, title, format, psa);
-  }
-}
-
-void HistoryPublisher::DeleteUserHistoryBetween(const base::Time& begin_time,
-                                                const base::Time& end_time)
-    const {
-  base::win::ScopedVariant var_begin_time(TimeToUTCVariantTime(begin_time),
-                                          VT_DATE);
-  base::win::ScopedVariant var_end_time(TimeToUTCVariantTime(end_time),
-                                        VT_DATE);
-  for (size_t i = 0; i < indexers_.size(); ++i) {
-    indexers_[i]->DeleteUserHistoryBetween(var_begin_time, var_end_time);
   }
 }
 

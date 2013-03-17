@@ -27,6 +27,7 @@ class TestDirectoryBackingStore : public DirectoryBackingStore {
   virtual ~TestDirectoryBackingStore();
   virtual DirOpenResult Load(
       MetahandlesIndex* entry_bucket,
+      JournalIndex* delete_journals,
       Directory::KernelLoadInfo* kernel_load_info) OVERRIDE;
 
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion67To68);
@@ -42,6 +43,12 @@ class TestDirectoryBackingStore : public DirectoryBackingStore {
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion77To78);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion78To79);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion79To80);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion80To81);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion81To82);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion82To83);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion83To84);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion84To85);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, DetectInvalidOrdinal);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, ModelTypeIds);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, Corruption);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, DeleteEntries);

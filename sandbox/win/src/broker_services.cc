@@ -309,9 +309,10 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   HANDLE job_temp;
   result = policy_base->MakeJobObject(&job_temp);
-  base::win::ScopedHandle job(job_temp);
   if (SBOX_ALL_OK != result)
     return result;
+
+  base::win::ScopedHandle job(job_temp);
 
   // Initialize the startup information from the policy.
   base::win::StartupInformation startup_info;
@@ -321,6 +322,7 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
         const_cast<wchar_t*>(desktop.c_str());
   }
 
+  bool inherit_handles = false;
   if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     int attribute_count = 0;
     const AppContainerAttributes* app_container =
@@ -333,6 +335,18 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
     ConvertProcessMitigationsToPolicy(policy->GetProcessMitigations(),
                                       &mitigations, &mitigations_size);
     if (mitigations)
+      ++attribute_count;
+
+    HANDLE stdout_handle = policy_base->GetStdoutHandle();
+    HANDLE stderr_handle = policy_base->GetStderrHandle();
+    HANDLE inherit_handle_list[2];
+    int inherit_handle_count = 0;
+    if (stdout_handle != INVALID_HANDLE_VALUE)
+      inherit_handle_list[inherit_handle_count++] = stdout_handle;
+    // Handles in the list must be unique.
+    if (stderr_handle != stdout_handle && stderr_handle != INVALID_HANDLE_VALUE)
+      inherit_handle_list[inherit_handle_count++] = stderr_handle;
+    if (inherit_handle_count)
       ++attribute_count;
 
     if (!startup_info.InitializeProcThreadAttributeList(attribute_count))
@@ -351,6 +365,22 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
         return SBOX_ERROR_PROC_THREAD_ATTRIBUTES;
       }
     }
+
+    if (inherit_handle_count) {
+      if (!startup_info.UpdateProcThreadAttribute(
+              PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+              inherit_handle_list,
+              sizeof(inherit_handle_list[0]) * inherit_handle_count)) {
+        return SBOX_ERROR_PROC_THREAD_ATTRIBUTES;
+      }
+      startup_info.startup_info()->dwFlags |= STARTF_USESTDHANDLES;
+      startup_info.startup_info()->hStdInput = INVALID_HANDLE_VALUE;
+      startup_info.startup_info()->hStdOutput = stdout_handle;
+      startup_info.startup_info()->hStdError = stderr_handle;
+      // Allowing inheritance of handles is only secure now that we
+      // have limited which handles will be inherited.
+      inherit_handles = true;
+    }
   }
 
   // Construct the thread pool here in case it is expensive.
@@ -366,8 +396,8 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
                                             job,
                                             thread_pool_);
 
-  DWORD win_result = target->Create(exe_path, command_line, startup_info,
-                                    &process_info);
+  DWORD win_result = target->Create(exe_path, command_line, inherit_handles,
+                                    startup_info, &process_info);
   if (ERROR_SUCCESS != win_result)
     return SpawnCleanup(target, win_result);
 
@@ -379,13 +409,24 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   // We are going to keep a pointer to the policy because we'll call it when
   // the job object generates notifications using the completion port.
   policy_base->AddRef();
-  scoped_ptr<JobTracker> tracker(new JobTracker(job.Take(), policy_base));
-  if (!AssociateCompletionPort(tracker->job, job_port_, tracker.get()))
-    return SpawnCleanup(target, 0);
-  // Save the tracker because in cleanup we might need to force closing
-  // the Jobs.
-  tracker_list_.push_back(tracker.release());
-  child_process_ids_.insert(process_info.process_id());
+  if (job.IsValid()) {
+    scoped_ptr<JobTracker> tracker(new JobTracker(job.Take(), policy_base));
+    if (!AssociateCompletionPort(tracker->job, job_port_, tracker.get()))
+      return SpawnCleanup(target, 0);
+    // Save the tracker because in cleanup we might need to force closing
+    // the Jobs.
+    tracker_list_.push_back(tracker.release());
+    child_process_ids_.insert(process_info.process_id());
+  } else {
+    // We have to signal the event once here because the completion port will
+    // never get a message that this target is being terminated thus we should
+    // not block WaitForAllTargets until we have at least one target with job.
+    if (child_process_ids_.empty())
+      ::SetEvent(no_targets_);
+    // We can not track the life time of such processes and it is responsibility
+    // of the host application to make sure that spawned targets without jobs
+    // are terminated when the main application don't need them anymore.
+  }
 
   *target_info = process_info.Take();
   return SBOX_ALL_OK;

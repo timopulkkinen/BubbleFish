@@ -4,13 +4,17 @@
 
 #include "chrome/browser/policy/configuration_policy_handler_list.h"
 
+#include <limits>
+
+#include "base/prefs/pref_value_map.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/policy/configuration_policy_handler.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/prefs/pref_value_map.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/network/onc/onc_constants.h"
 #include "grit/generated_resources.h"
 #include "policy/policy_constants.h"
 
@@ -51,6 +55,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDnsPrefetchingEnabled,
     prefs::kNetworkPredictionEnabled,
     Value::TYPE_BOOLEAN },
+  { key::kBuiltInDnsClientEnabled,
+    prefs::kBuiltInDnsClientEnabled,
+    Value::TYPE_BOOLEAN },
   { key::kDisableSpdy,
     prefs::kDisableSpdy,
     Value::TYPE_BOOLEAN },
@@ -59,6 +66,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_LIST },
   { key::kSafeBrowsingEnabled,
     prefs::kSafeBrowsingEnabled,
+    Value::TYPE_BOOLEAN },
+  { key::kForceSafeSearch,
+    prefs::kForceSafeSearch,
     Value::TYPE_BOOLEAN },
   { key::kPasswordManagerEnabled,
     prefs::kPasswordManagerEnabled,
@@ -95,6 +105,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_BOOLEAN },
   { key::kSavingBrowserHistoryDisabled,
     prefs::kSavingBrowserHistoryDisabled,
+    Value::TYPE_BOOLEAN },
+  { key::kAllowDeletingBrowserHistory,
+    prefs::kAllowDeletingBrowserHistory,
     Value::TYPE_BOOLEAN },
   { key::kDeveloperToolsDisabled,
     prefs::kDevToolsDisabled,
@@ -162,6 +175,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultGeolocationSetting,
     prefs::kManagedDefaultGeolocationSetting,
     Value::TYPE_INTEGER },
+  { key::kSigninAllowed,
+    prefs::kSigninAllowed,
+    Value::TYPE_BOOLEAN },
   { key::kEnableOriginBoundCerts,
     prefs::kEnableOriginBoundCerts,
     Value::TYPE_BOOLEAN },
@@ -303,6 +319,15 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableScreenshots,
     prefs::kDisableScreenshots,
     Value::TYPE_BOOLEAN },
+  { key::kAudioCaptureAllowed,
+    prefs::kAudioCaptureAllowed,
+    Value::TYPE_BOOLEAN },
+  { key::kVideoCaptureAllowed,
+    prefs::kVideoCaptureAllowed,
+    Value::TYPE_BOOLEAN },
+  { key::kHideWebStoreIcon,
+    prefs::kHideWebStoreIcon,
+    Value::TYPE_BOOLEAN },
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -311,11 +336,11 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kChromeOsReleaseChannel,
     prefs::kChromeOsReleaseChannel,
     Value::TYPE_STRING },
-  { key::kGDataDisabled,
-    prefs::kDisableGData,
+  { key::kDriveDisabled,
+    prefs::kDisableDrive,
     Value::TYPE_BOOLEAN },
-  { key::kGDataDisabledOverCellular,
-    prefs::kDisableGDataOverCellular,
+  { key::kDriveDisabledOverCellular,
+    prefs::kDisableDriveOverCellular,
     Value::TYPE_BOOLEAN },
   { key::kExternalStorageDisabled,
     prefs::kExternalStorageDisabled,
@@ -323,8 +348,26 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kAudioOutputAllowed,
     prefs::kAudioOutputAllowed,
     Value::TYPE_BOOLEAN },
-  { key::kAudioCaptureAllowed,
-    prefs::kAudioCaptureAllowed,
+  { key::kShowLogoutButtonInTray,
+    prefs::kShowLogoutButtonInTray,
+    Value::TYPE_BOOLEAN },
+  { key::kShelfAutoHideBehavior,
+    prefs::kShelfAutoHideBehaviorLocal,
+    Value::TYPE_STRING },
+  { key::kSessionLengthLimit,
+    prefs::kSessionLengthLimit,
+    Value::TYPE_INTEGER },
+  { key::kPowerManagementUsesAudioActivity,
+    prefs::kPowerUseAudioActivity,
+    Value::TYPE_BOOLEAN },
+  { key::kPowerManagementUsesVideoActivity,
+    prefs::kPowerUseVideoActivity,
+    Value::TYPE_BOOLEAN },
+  { key::kTermsOfServiceURL,
+    prefs::kTermsOfServiceURL,
+    Value::TYPE_STRING },
+  { key::kShowAccessibilityOptionsInSystemTrayMenu,
+    prefs::kShouldAlwaysShowAccessibilityMenu,
     Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 
@@ -333,6 +376,16 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kBackgroundModeEnabled,
     Value::TYPE_BOOLEAN },
 #endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+};
+
+// Mapping from extension type names to Manifest::Type.
+StringToIntEnumListPolicyHandler::MappingEntry kExtensionAllowedTypesMap[] = {
+  { "extension", extensions::Manifest::TYPE_EXTENSION },
+  { "theme", extensions::Manifest::TYPE_THEME },
+  { "user_script", extensions::Manifest::TYPE_USER_SCRIPT },
+  { "hosted_app", extensions::Manifest::TYPE_HOSTED_APP },
+  { "legacy_packaged_app", extensions::Manifest::TYPE_LEGACY_PACKAGED_APP },
+  { "platform_app", extensions::Manifest::TYPE_PLATFORM_APP },
 };
 
 }  // namespace
@@ -348,7 +401,6 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   handlers_.push_back(new AutofillPolicyHandler());
   handlers_.push_back(new ClearSiteDataOnExitPolicyHandler());
   handlers_.push_back(new DefaultSearchPolicyHandler());
-  handlers_.push_back(new DisabledPluginsByVersionPolicyHandler());
   handlers_.push_back(new DiskCacheDirPolicyHandler());
   handlers_.push_back(new FileSelectionDialogsHandler());
   handlers_.push_back(new IncognitoModePolicyHandler());
@@ -365,10 +417,16 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
       new ExtensionListPolicyHandler(key::kExtensionInstallBlacklist,
                                      prefs::kExtensionInstallDenyList,
                                      true));
+  handlers_.push_back(new ExtensionInstallForcelistPolicyHandler());
   handlers_.push_back(
       new ExtensionURLPatternListPolicyHandler(
           key::kExtensionInstallSources,
           prefs::kExtensionAllowedInstallSites));
+  handlers_.push_back(
+      new StringToIntEnumListPolicyHandler(
+          key::kExtensionAllowedTypes, prefs::kExtensionAllowedTypes,
+          kExtensionAllowedTypesMap,
+          kExtensionAllowedTypesMap + arraysize(kExtensionAllowedTypesMap)));
 
 #if !defined(OS_CHROMEOS)
   handlers_.push_back(new DownloadDirPolicyHandler());
@@ -378,12 +436,68 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   handlers_.push_back(
       new NetworkConfigurationPolicyHandler(
           key::kDeviceOpenNetworkConfiguration,
-          chromeos::NetworkUIData::ONC_SOURCE_DEVICE_POLICY));
+          chromeos::onc::ONC_SOURCE_DEVICE_POLICY));
   handlers_.push_back(
       new NetworkConfigurationPolicyHandler(
           key::kOpenNetworkConfiguration,
-          chromeos::NetworkUIData::ONC_SOURCE_USER_POLICY));
+          chromeos::onc::ONC_SOURCE_USER_POLICY));
   handlers_.push_back(new PinnedLauncherAppsPolicyHandler());
+
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenDimDelayAC,
+          prefs::kPowerAcScreenDimDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenOffDelayAC,
+          prefs::kPowerAcScreenOffDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenLockDelayAC,
+          prefs::kPowerAcScreenLockDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kIdleDelayAC,
+          prefs::kPowerAcIdleDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenDimDelayBattery,
+          prefs::kPowerBatteryScreenDimDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenOffDelayBattery,
+          prefs::kPowerBatteryScreenOffDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kScreenLockDelayBattery,
+          prefs::kPowerBatteryScreenLockDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kIdleDelayBattery,
+          prefs::kPowerBatteryIdleDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kIdleAction,
+          prefs::kPowerIdleAction,
+          0, 3, false));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kLidCloseAction,
+          prefs::kPowerLidClosedAction,
+          0, 3, false));
+  handlers_.push_back(
+      new IntPercentageToDoublePolicyHandler(
+          key::kPresentationIdleDelayScale,
+          prefs::kPowerPresentationIdleDelayFactor,
+          100, INT_MAX, true));
 #endif  // defined(OS_CHROMEOS)
 }
 

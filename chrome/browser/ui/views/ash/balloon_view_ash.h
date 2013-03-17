@@ -5,7 +5,14 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_ASH_BALLOON_VIEW_ASH_H_
 #define CHROME_BROWSER_UI_VIEWS_ASH_BALLOON_VIEW_ASH_H_
 
+#include <vector>
+
+#include "base/memory/linked_ptr.h"
 #include "chrome/browser/notifications/balloon.h"
+
+namespace gfx {
+class ImageSkia;
+}
 
 // On Ash, a "BalloonView" is just a wrapper for ash notification entries.
 class BalloonViewAsh : public BalloonView {
@@ -21,17 +28,28 @@ class BalloonViewAsh : public BalloonView {
   virtual gfx::Size GetSize() const OVERRIDE;
   virtual BalloonHost* GetHost() const OVERRIDE;
 
- private:
-  class IconFetcher;
+  void SetNotificationIcon(const std::string& notification_id,
+                           const gfx::ImageSkia& image);
+  void SetNotificationImage(const std::string& notification_id,
+                            const gfx::ImageSkia& image);
+  void SetNotificationButtonIcon(const std::string& notification_id,
+                                 int button_index,
+                                 const gfx::ImageSkia& image);
 
-  void FetchIcon(const Notification& notification);
-  std::string GetExtensionId(Balloon* balloon);
+ private:
+  class ImageDownload;
+
+  typedef std::vector<linked_ptr<ImageDownload> > ImageDownloads;
+
+  void DownloadImages(const Notification& notification);
 
   BalloonCollection* collection_;
   Balloon* balloon_;
-  scoped_ptr<IconFetcher> icon_fetcher_;
-  // Track the current notification id so that it can be updated properly.
-  std::string current_notification_id_;
+
+  // Track the current notification id and downloads so the notification can be
+  // updated properly.
+  std::string notification_id_;
+  ImageDownloads downloads_;
 
   DISALLOW_COPY_AND_ASSIGN(BalloonViewAsh);
 };

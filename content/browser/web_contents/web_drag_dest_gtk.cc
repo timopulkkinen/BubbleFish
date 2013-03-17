@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -21,7 +21,6 @@
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_screen_util.h"
 
-using content::RenderViewHostImpl;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
 
@@ -84,7 +83,7 @@ WebDragDestGtk::~WebDragDestGtk() {
 void WebDragDestGtk::UpdateDragStatus(WebDragOperation operation) {
   if (context_) {
     is_drop_target_ = operation != WebDragOperationNone;
-    gdk_drag_status(context_, content::WebDragOpToGdkDragAction(operation),
+    gdk_drag_status(context_, WebDragOpToGdkDragAction(operation),
                     drag_over_time_);
   }
 }
@@ -141,7 +140,7 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
     GetRenderViewHost()->DragTargetDragOver(
         ui::ClientPoint(widget_),
         ui::ScreenPoint(widget_),
-        content::GdkDragActionToWebDragOp(context->actions),
+        GdkDragActionToWebDragOp(context->actions),
         GetModifierFlags(widget_));
 
     if (delegate())
@@ -190,7 +189,7 @@ void WebDragDestGtk::OnDragDataReceived(
           // file URLs are never set as the URL content for the drop.
           // TODO(estade): Can the filenames have a non-UTF8 encoding?
           GURL url(*uri_iter);
-          FilePath file_path;
+          base::FilePath file_path;
           if (url.SchemeIs(chrome::kFileScheme) &&
               net::FileURLToFilePath(url, &file_path)) {
             drop_data_->filenames.push_back(
@@ -252,7 +251,7 @@ void WebDragDestGtk::OnDragDataReceived(
         *drop_data_.get(),
         ui::ClientPoint(widget_),
         ui::ScreenPoint(widget_),
-        content::GdkDragActionToWebDragOp(context->actions),
+        GdkDragActionToWebDragOp(context->actions),
         GetModifierFlags(widget_));
 
     if (delegate())

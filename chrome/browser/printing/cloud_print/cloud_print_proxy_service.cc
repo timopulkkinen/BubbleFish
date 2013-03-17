@@ -10,13 +10,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/service/service_process_control.h"
@@ -30,46 +30,8 @@
 
 using content::BrowserThread;
 
-class CloudPrintProxyService::TokenExpiredNotificationDelegate
-    : public NotificationDelegate {
- public:
-  explicit TokenExpiredNotificationDelegate(
-      CloudPrintProxyService* cloud_print_service)
-          : cloud_print_service_(cloud_print_service) {
-  }
-
-  virtual void Display() OVERRIDE {}
-
-  virtual void Error() OVERRIDE {
-    cloud_print_service_->OnTokenExpiredNotificationError();
-  }
-
-  virtual void Close(bool by_user) OVERRIDE {
-    cloud_print_service_->OnTokenExpiredNotificationClosed(by_user);
-  }
-
-  virtual void Click() OVERRIDE {
-    cloud_print_service_->OnTokenExpiredNotificationClick();
-  }
-
-  virtual std::string id() const OVERRIDE {
-    return "cloudprint.tokenexpired";
-  }
-
-  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE {
-    return NULL;
-  }
-
- private:
-  virtual ~TokenExpiredNotificationDelegate() {}
-
-  CloudPrintProxyService* cloud_print_service_;
-  DISALLOW_COPY_AND_ASSIGN(TokenExpiredNotificationDelegate);
-};
-
 CloudPrintProxyService::CloudPrintProxyService(Profile* profile)
     : profile_(profile),
-      token_expired_delegate_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       enforcing_connector_policy_(false) {
 }
@@ -89,7 +51,12 @@ void CloudPrintProxyService::Initialize() {
   }
 
   pref_change_registrar_.Init(profile_->GetPrefs());
-  pref_change_registrar_.Add(prefs::kCloudPrintProxyEnabled, this);
+  pref_change_registrar_.Add(
+      prefs::kCloudPrintProxyEnabled,
+      base::Bind(
+          base::IgnoreResult(
+              &CloudPrintProxyService::ApplyCloudPrintConnectorPolicy),
+          base::Unretained(this)));
 }
 
 void CloudPrintProxyService::RefreshStatusFromService() {
@@ -118,12 +85,14 @@ void CloudPrintProxyService::EnableForUser(const std::string& lsid,
 void CloudPrintProxyService::EnableForUserWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
-    const std::string& user_email) {
+    const std::string& user_email,
+    bool connect_new_printers,
+    const std::vector<std::string>& printer_blacklist) {
   if (profile_->GetPrefs()->GetBoolean(prefs::kCloudPrintProxyEnabled)) {
     InvokeServiceTask(
         base::Bind(&CloudPrintProxyService::EnableCloudPrintProxyWithRobot,
                    weak_factory_.GetWeakPtr(), robot_auth_code, robot_email,
-                   user_email));
+                   user_email, connect_new_printers, printer_blacklist));
   }
 }
 
@@ -131,52 +100,6 @@ void CloudPrintProxyService::DisableForUser() {
   InvokeServiceTask(
       base::Bind(&CloudPrintProxyService::DisableCloudPrintProxy,
                  weak_factory_.GetWeakPtr()));
-}
-
-bool CloudPrintProxyService::ShowTokenExpiredNotification() {
-  // If we already have a pending notification, don't show another one.
-  if (token_expired_delegate_.get())
-    return false;
-
-  // TODO(sanjeevr): Get icon for this notification. crbug.com/132848.
-  string16 title = l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT);
-  string16 message =
-      l10n_util::GetStringFUTF16(IDS_CLOUD_PRINT_TOKEN_EXPIRED_MESSAGE, title);
-  token_expired_delegate_ = new TokenExpiredNotificationDelegate(this);
-  DesktopNotificationService::AddNotification(
-      GURL(), title, message, GURL(), string16(),
-      token_expired_delegate_.get(), profile_);
-  // Keep the browser alive while we are showing the notification.
-  browser::StartKeepAlive();
-  return true;
-}
-
-void CloudPrintProxyService::OnTokenExpiredNotificationError() {
-  TokenExpiredNotificationDone(false);
-}
-
-void CloudPrintProxyService::OnTokenExpiredNotificationClosed(bool by_user) {
-  TokenExpiredNotificationDone(false);
-}
-
-void CloudPrintProxyService::OnTokenExpiredNotificationClick() {
-  TokenExpiredNotificationDone(true);
-  // Clear the cached cloud print email pref so that the cloud print setup
-  // flow happens.
-  profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, std::string());
-  cloud_print_setup_handler_.reset(new CloudPrintSetupHandler(this));
-  CloudPrintSetupFlow::OpenDialog(
-      profile_, cloud_print_setup_handler_->AsWeakPtr(), NULL);
-}
-
-void CloudPrintProxyService::TokenExpiredNotificationDone(bool keep_alive) {
-  if (token_expired_delegate_.get()) {
-    g_browser_process->notification_ui_manager()->CancelById(
-        token_expired_delegate_->id());
-    token_expired_delegate_ = NULL;
-    if (!keep_alive)
-      browser::EndKeepAlive();
-  }
 }
 
 bool CloudPrintProxyService::ApplyCloudPrintConnectorPolicy() {
@@ -201,16 +124,8 @@ bool CloudPrintProxyService::ApplyCloudPrintConnectorPolicy() {
 }
 
 void CloudPrintProxyService::OnCloudPrintSetupClosed() {
-  MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&browser::EndKeepAlive));
-}
-
-void CloudPrintProxyService::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
-  ApplyCloudPrintConnectorPolicy();
+  MessageLoop::current()->PostTask(FROM_HERE,
+                                   base::Bind(&chrome::EndKeepAlive));
 }
 
 void CloudPrintProxyService::RefreshCloudPrintProxyStatus() {
@@ -236,13 +151,15 @@ void CloudPrintProxyService::EnableCloudPrintProxy(const std::string& lsid,
 void CloudPrintProxyService::EnableCloudPrintProxyWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
-    const std::string& user_email) {
+    const std::string& user_email,
+    bool connect_new_printers,
+    const std::vector<std::string>& printer_blacklist) {
   ServiceProcessControl* process_control = GetServiceProcessControl();
   DCHECK(process_control->IsConnected());
-  process_control->Send(new ServiceMsg_EnableCloudPrintProxyWithRobot(
-      robot_auth_code,
-      robot_email,
-      user_email));
+  process_control->Send(
+      new ServiceMsg_EnableCloudPrintProxyWithRobot(
+          robot_auth_code, robot_email, user_email, connect_new_printers,
+          printer_blacklist));
   // Assume the IPC worked.
   profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, user_email);
 }

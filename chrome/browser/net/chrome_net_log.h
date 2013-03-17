@@ -9,11 +9,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
-#include "base/time.h"
 #include "net/base/net_log.h"
 
 class LoadTimingObserver;
 class NetLogLogger;
+class NetLogTempFile;
 
 // ChromeNetLog is an implementation of NetLog that dispatches network log
 // messages to a list of observers.
@@ -39,6 +39,10 @@ class ChromeNetLog : public net::NetLog {
     return load_timing_observer_.get();
   }
 
+  NetLogTempFile* net_log_temp_file() {
+    return net_log_temp_file_.get();
+  }
+
  private:
   // NetLog implementation:
   virtual void OnAddEntry(const net::NetLog::Entry& entry) OVERRIDE;
@@ -62,6 +66,7 @@ class ChromeNetLog : public net::NetLog {
 
   scoped_ptr<LoadTimingObserver> load_timing_observer_;
   scoped_ptr<NetLogLogger> net_log_logger_;
+  scoped_ptr<NetLogTempFile> net_log_temp_file_;
 
   // |lock_| must be acquired whenever reading or writing to this.
   ObserverList<ThreadSafeObserver, true> observers_;

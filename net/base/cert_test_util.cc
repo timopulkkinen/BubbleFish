@@ -4,8 +4,8 @@
 
 #include "net/base/cert_test_util.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "net/base/ev_root_ca_metadata.h"
 #include "net/base/x509_certificate.h"
@@ -13,21 +13,11 @@
 
 namespace net {
 
-FilePath GetTestCertsDirectory() {
-  FilePath certs_dir;
-  PathService::Get(base::DIR_SOURCE_ROOT, &certs_dir);
-  certs_dir = certs_dir.AppendASCII("net");
-  certs_dir = certs_dir.AppendASCII("data");
-  certs_dir = certs_dir.AppendASCII("ssl");
-  certs_dir = certs_dir.AppendASCII("certificates");
-  return certs_dir;
-}
-
 CertificateList CreateCertificateListFromFile(
-    const FilePath& certs_dir,
+    const base::FilePath& certs_dir,
     const std::string& cert_file,
     int format) {
-  FilePath cert_path = certs_dir.AppendASCII(cert_file);
+  base::FilePath cert_path = certs_dir.AppendASCII(cert_file);
   std::string cert_data;
   if (!file_util::ReadFileToString(cert_path, &cert_data))
     return CertificateList();
@@ -37,9 +27,9 @@ CertificateList CreateCertificateListFromFile(
 }
 
 scoped_refptr<X509Certificate> ImportCertFromFile(
-    const FilePath& certs_dir,
+    const base::FilePath& certs_dir,
     const std::string& cert_file) {
-  FilePath cert_path = certs_dir.AppendASCII(cert_file);
+  base::FilePath cert_path = certs_dir.AppendASCII(cert_file);
   std::string cert_data;
   if (!file_util::ReadFileToString(cert_path, &cert_data))
     return NULL;

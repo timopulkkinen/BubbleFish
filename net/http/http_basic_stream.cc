@@ -46,7 +46,6 @@ int HttpBasicStream::InitializeStream(
 
 
 int HttpBasicStream::SendRequest(const HttpRequestHeaders& headers,
-                                 scoped_ptr<UploadDataStream> request_body,
                                  HttpResponseInfo* response,
                                  const CompletionCallback& callback) {
   DCHECK(parser_.get());
@@ -58,8 +57,7 @@ int HttpBasicStream::SendRequest(const HttpRequestHeaders& headers,
                                      request_info_->method.c_str(),
                                      path.c_str());
   response_ = response;
-  return parser_->SendRequest(request_line_, headers, request_body.Pass(),
-                              response, callback);
+  return parser_->SendRequest(request_line_, headers, response, callback);
 }
 
 UploadProgress HttpBasicStream::GetUploadProgress() const {
@@ -112,6 +110,11 @@ void HttpBasicStream::SetConnectionReused() {
 
 bool HttpBasicStream::IsConnectionReusable() const {
   return parser_->IsConnectionReusable();
+}
+
+bool HttpBasicStream::GetLoadTimingInfo(
+    LoadTimingInfo* load_timing_info) const {
+  return connection_->GetLoadTimingInfo(IsConnectionReused(), load_timing_info);
 }
 
 void HttpBasicStream::GetSSLInfo(SSLInfo* ssl_info) {

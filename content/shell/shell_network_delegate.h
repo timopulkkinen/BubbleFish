@@ -16,6 +16,8 @@ class ShellNetworkDelegate : public net::NetworkDelegate {
   ShellNetworkDelegate();
   virtual ~ShellNetworkDelegate();
 
+  static void SetAcceptAllCookies(bool accept);
+
  private:
   // net::NetworkDelegate implementation.
   virtual int OnBeforeURLRequest(net::URLRequest* request,
@@ -29,7 +31,7 @@ class ShellNetworkDelegate : public net::NetworkDelegate {
   virtual int OnHeadersReceived(
       net::URLRequest* request,
       const net::CompletionCallback& callback,
-      net::HttpResponseHeaders* original_response_headers,
+      const net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>*
           override_response_headers) OVERRIDE;
   virtual void OnBeforeRedirect(net::URLRequest* request,
@@ -52,7 +54,7 @@ class ShellNetworkDelegate : public net::NetworkDelegate {
                               const std::string& cookie_line,
                               net::CookieOptions* options) OVERRIDE;
   virtual bool OnCanAccessFile(const net::URLRequest& request,
-                               const FilePath& path) const OVERRIDE;
+                               const base::FilePath& path) const OVERRIDE;
   virtual bool OnCanThrottleRequest(
       const net::URLRequest& request) const OVERRIDE;
   virtual int OnBeforeSocketStreamConnect(

@@ -9,11 +9,17 @@
 namespace webkit_media {
 
 WebMediaPlayerManagerAndroid::WebMediaPlayerManagerAndroid()
-    : next_media_player_id_(0) {
+    : next_media_player_id_(0),
+      fullscreen_frame_(NULL) {
 }
 
 WebMediaPlayerManagerAndroid::~WebMediaPlayerManagerAndroid() {
-  ReleaseMediaResources();
+  std::map<int32, WebMediaPlayerAndroid*>::iterator player_it;
+  for (player_it = media_players_.begin();
+      player_it != media_players_.end(); ++player_it) {
+    WebMediaPlayerAndroid* player = player_it->second;
+    player->Detach();
+  }
 }
 
 int WebMediaPlayerManagerAndroid::RegisterMediaPlayer(
@@ -30,7 +36,11 @@ void WebMediaPlayerManagerAndroid::ReleaseMediaResources() {
   std::map<int32, WebMediaPlayerAndroid*>::iterator player_it;
   for (player_it = media_players_.begin();
       player_it != media_players_.end(); ++player_it) {
-    (player_it->second)->ReleaseMediaResources();
+    WebMediaPlayerAndroid* player = player_it->second;
+
+    // Do not release if an audio track is still playing
+    if (player && (player->paused() || player->hasVideo()))
+      player->ReleaseMediaResources();
   }
 }
 
@@ -41,6 +51,22 @@ WebMediaPlayerAndroid* WebMediaPlayerManagerAndroid::GetMediaPlayer(
   if (iter != media_players_.end())
     return iter->second;
   return NULL;
+}
+
+bool WebMediaPlayerManagerAndroid::CanEnterFullscreen(WebKit::WebFrame* frame) {
+  return !fullscreen_frame_ || IsInFullscreen(frame);
+}
+
+void WebMediaPlayerManagerAndroid::DidEnterFullscreen(WebKit::WebFrame* frame) {
+  fullscreen_frame_ = frame;
+}
+
+void WebMediaPlayerManagerAndroid::DidExitFullscreen() {
+  fullscreen_frame_ = NULL;
+}
+
+bool WebMediaPlayerManagerAndroid::IsInFullscreen(WebKit::WebFrame* frame) {
+  return fullscreen_frame_ == frame;
 }
 
 }  // namespace webkit_media

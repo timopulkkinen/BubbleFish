@@ -10,17 +10,16 @@
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "base/time.h"
-#include "ui/aura/event_filter.h"
+#include "ui/base/events/event_handler.h"
 
 namespace ash {
 
 class UserActivityObserver;
 
 // Watches for input events and notifies observers that the user is active.
-class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
+class ASH_EXPORT UserActivityDetector : public ui::EventHandler {
  public:
-  // Minimum amount of time between notifications to observers that a video is
-  // playing.
+  // Minimum amount of time between notifications to observers.
   static const double kNotifyIntervalMs;
 
   UserActivityDetector();
@@ -32,19 +31,15 @@ class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
   void AddObserver(UserActivityObserver* observer);
   void RemoveObserver(UserActivityObserver* observer);
 
-  // aura::EventFilter implementation.
-  virtual bool PreHandleKeyEvent(
-      aura::Window* target,
-      ui::KeyEvent* event) OVERRIDE;
-  virtual bool PreHandleMouseEvent(
-      aura::Window* target,
-      ui::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(
-      aura::Window* target,
-      ui::TouchEvent* event) OVERRIDE;
-  virtual ui::EventResult PreHandleGestureEvent(
-      aura::Window* target,
-      ui::GestureEvent* event) OVERRIDE;
+  // Called when chrome has received a request to turn of all displays.
+  void OnAllOutputsTurnedOff();
+
+  // ui::EventHandler implementation.
+  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
  private:
   // Notifies observers if enough time has passed since the last notification.
@@ -58,6 +53,11 @@ class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
   // If set, used when the current time is needed.  This can be set by tests to
   // simulate the passage of time.
   base::TimeTicks now_for_test_;
+
+  // When this is true, the next mouse event is ignored. This is to
+  // avoid mis-detecting a mouse enter event that occurs when turning
+  // off display as a user activity.
+  bool ignore_next_mouse_event_;
 
   DISALLOW_COPY_AND_ASSIGN(UserActivityDetector);
 };

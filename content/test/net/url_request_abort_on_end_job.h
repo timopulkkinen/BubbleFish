@@ -13,12 +13,17 @@
 #include "base/memory/weak_ptr.h"
 #include "net/url_request/url_request_job.h"
 
+namespace content {
+
 // This url request simulates a network error which occurs immediately after
 // receiving the very first data.
 
 class URLRequestAbortOnEndJob : public net::URLRequestJob {
  public:
   static const char k400AbortOnEndUrl[];
+
+  URLRequestAbortOnEndJob(net::URLRequest* request,
+                          net::NetworkDelegate* network_delegate);
 
   // net::URLRequestJob
   virtual void Start() OVERRIDE;
@@ -28,15 +33,9 @@ class URLRequestAbortOnEndJob : public net::URLRequestJob {
                            int buf_size,
                            int* bytes_read) OVERRIDE;
 
-  static net::URLRequestJob* Factory(net::URLRequest* request,
-                                     net::NetworkDelegate* network_delegate,
-                                     const std::string& scheme);
-
   static void AddUrlHandler();
 
  private:
-  URLRequestAbortOnEndJob(net::URLRequest* request,
-                          net::NetworkDelegate* network_delegate);
   virtual ~URLRequestAbortOnEndJob();
 
   void GetResponseInfoConst(net::HttpResponseInfo* info) const;
@@ -48,5 +47,7 @@ class URLRequestAbortOnEndJob : public net::URLRequestJob {
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestAbortOnEndJob);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_TEST_NET_URL_REQUEST_ABORT_ON_END_JOB_H_

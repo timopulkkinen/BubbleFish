@@ -5,23 +5,17 @@
 #include "media/audio/ios/audio_manager_ios.h"
 
 #import <AudioToolbox/AudioToolbox.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include "base/sys_info.h"
 #include "media/audio/fake_audio_input_stream.h"
+#include "media/audio/ios/audio_session_util_ios.h"
 #include "media/audio/mac/audio_input_mac.h"
 #include "media/base/limits.h"
 
 namespace media {
 
 enum { kMaxInputChannels = 2 };
-
-// Initializes the audio session, returning a bool indicating whether
-// initialization was successful. Should only be called once.
-static bool InitAudioSessionInternal() {
-  OSStatus error = AudioSessionInitialize(NULL, NULL, NULL, NULL);
-  DCHECK(error != kAudioSessionAlreadyInitialized);
-  return error == kAudioSessionNoError;
-}
 
 AudioManagerIOS::AudioManagerIOS() {
 }
@@ -35,7 +29,7 @@ bool AudioManagerIOS::HasAudioOutputDevices() {
 }
 
 bool AudioManagerIOS::HasAudioInputDevices() {
-  if (!InitAudioSession())
+  if (!InitAudioSessionIOS())
     return false;
   // Note that the |kAudioSessionProperty_AudioInputAvailable| property is a
   // 32-bit integer, not a boolean.
@@ -66,7 +60,7 @@ AudioInputStream* AudioManagerIOS::MakeAudioInputStream(
   if (!params.IsValid() || (params.channels() > kMaxInputChannels))
     return NULL;
 
-  if (params.format() == AudioParameters::AUDIO_MOCK)
+  if (params.format() == AudioParameters::AUDIO_FAKE)
     return FakeAudioInputStream::MakeFakeStream(this, params);
   else if (params.format() == AudioParameters::AUDIO_PCM_LINEAR)
     return new PCMQueueInAudioInputStream(this, params);
@@ -104,11 +98,6 @@ void AudioManagerIOS::ReleaseOutputStream(AudioOutputStream* stream) {
 // Called by the stream when it has been released by calling Close().
 void AudioManagerIOS::ReleaseInputStream(AudioInputStream* stream) {
   delete stream;
-}
-
-bool AudioManagerIOS::InitAudioSession() {
-  static const bool kSessionInitialized = InitAudioSessionInternal();
-  return kSessionInitialized;
 }
 
 // static

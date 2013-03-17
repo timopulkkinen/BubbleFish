@@ -81,17 +81,6 @@ void SimpleMenuModel::AddItemWithStringId(int command_id, int string_id) {
   AddItem(command_id, l10n_util::GetStringUTF16(string_id));
 }
 
-void SimpleMenuModel::AddSeparator(MenuSeparatorType separator_type) {
-#if !defined(USE_AURA)
-  if (separator_type != NORMAL_SEPARATOR) {
-    NOTIMPLEMENTED();
-  }
-#endif
-  Item item = { kSeparatorId, string16(), gfx::Image(), TYPE_SEPARATOR,
-                -1, NULL, NULL , separator_type };
-  AppendItem(item);
-}
-
 void SimpleMenuModel::AddCheckItem(int command_id, const string16& label) {
   Item item = { command_id, label, gfx::Image(), TYPE_CHECK, -1, NULL,
                 NULL, NORMAL_SEPARATOR };
@@ -112,6 +101,32 @@ void SimpleMenuModel::AddRadioItem(int command_id, const string16& label,
 void SimpleMenuModel::AddRadioItemWithStringId(int command_id, int string_id,
                                                int group_id) {
   AddRadioItem(command_id, l10n_util::GetStringUTF16(string_id), group_id);
+}
+
+void SimpleMenuModel::AddSeparator(MenuSeparatorType separator_type)
+{
+  if (items_.empty()) {
+    if (separator_type == NORMAL_SEPARATOR) {
+      return;
+    }
+    DCHECK_EQ(SPACING_SEPARATOR, separator_type);
+  } else if (items_.back().type == TYPE_SEPARATOR) {
+    DCHECK_EQ(NORMAL_SEPARATOR, separator_type);
+    DCHECK_EQ(NORMAL_SEPARATOR, items_.back().separator_type);
+    return;
+  }
+#if !defined(USE_AURA)
+  if (separator_type != NORMAL_SEPARATOR)
+    NOTIMPLEMENTED();
+#endif
+  Item item = { kSeparatorId, string16(), gfx::Image(), TYPE_SEPARATOR,
+                -1, NULL, NULL , separator_type };
+  AppendItem(item);
+}
+
+void SimpleMenuModel::RemoveTrailingSeparators() {
+  while (!items_.empty() && items_.back().type == TYPE_SEPARATOR)
+    items_.pop_back();
 }
 
 void SimpleMenuModel::AddButtonItem(int command_id,
@@ -166,8 +181,7 @@ void SimpleMenuModel::InsertCheckItemAt(
 
 void SimpleMenuModel::InsertCheckItemWithStringIdAt(
     int index, int command_id, int string_id) {
-  InsertCheckItemAt(
-      FlipIndex(index), command_id, l10n_util::GetStringUTF16(string_id));
+  InsertCheckItemAt(index, command_id, l10n_util::GetStringUTF16(string_id));
 }
 
 void SimpleMenuModel::InsertRadioItemAt(
@@ -206,9 +220,8 @@ void SimpleMenuModel::Clear() {
 
 int SimpleMenuModel::GetIndexOfCommandId(int command_id) {
   for (ItemVector::iterator i = items_.begin(); i != items_.end(); ++i) {
-    if (i->command_id == command_id) {
-      return FlipIndex(static_cast<int>(std::distance(items_.begin(), i)));
-    }
+    if (i->command_id == command_id)
+      return static_cast<int>(std::distance(items_.begin(), i));
   }
   return -1;
 }
@@ -230,21 +243,21 @@ int SimpleMenuModel::GetItemCount() const {
 }
 
 MenuModel::ItemType SimpleMenuModel::GetTypeAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].type;
+  return items_[ValidateItemIndex(index)].type;
 }
 
 ui::MenuSeparatorType SimpleMenuModel::GetSeparatorTypeAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].separator_type;
+  return items_[ValidateItemIndex(index)].separator_type;
 }
 
 int SimpleMenuModel::GetCommandIdAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].command_id;
+  return items_[ValidateItemIndex(index)].command_id;
 }
 
 string16 SimpleMenuModel::GetLabelAt(int index) const {
   if (IsItemDynamicAt(index))
     return delegate_->GetLabelForCommandId(GetCommandIdAt(index));
-  return items_[ValidateItemIndex(FlipIndex(index))].label;
+  return items_[ValidateItemIndex(index)].label;
 }
 
 bool SimpleMenuModel::IsItemDynamicAt(int index) const {
@@ -271,7 +284,7 @@ bool SimpleMenuModel::IsItemCheckedAt(int index) const {
 }
 
 int SimpleMenuModel::GetGroupIdAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].group_id;
+  return items_[ValidateItemIndex(index)].group_id;
 }
 
 bool SimpleMenuModel::GetIconAt(int index, gfx::Image* icon) {
@@ -287,7 +300,7 @@ bool SimpleMenuModel::GetIconAt(int index, gfx::Image* icon) {
 }
 
 ButtonMenuItemModel* SimpleMenuModel::GetButtonMenuItemAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].button_model;
+  return items_[ValidateItemIndex(index)].button_model;
 }
 
 bool SimpleMenuModel::IsEnabledAt(int index) const {
@@ -320,7 +333,7 @@ void SimpleMenuModel::ActivatedAt(int index, int event_flags) {
 }
 
 MenuModel* SimpleMenuModel::GetSubmenuModelAt(int index) const {
-  return items_[ValidateItemIndex(FlipIndex(index))].submenu;
+  return items_[ValidateItemIndex(index)].submenu;
 }
 
 void SimpleMenuModel::MenuWillShow() {
@@ -342,13 +355,13 @@ void SimpleMenuModel::SetMenuModelDelegate(
   menu_model_delegate_ = menu_model_delegate;
 }
 
+MenuModelDelegate* SimpleMenuModel::GetMenuModelDelegate() const {
+  return menu_model_delegate_;
+}
+
 void SimpleMenuModel::OnMenuClosed() {
   if (delegate_)
     delegate_->MenuClosed(this);
-}
-
-int SimpleMenuModel::FlipIndex(int index) const {
-  return index;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -367,7 +380,7 @@ void SimpleMenuModel::AppendItem(const Item& item) {
 
 void SimpleMenuModel::InsertItemAtIndex(const Item& item, int index) {
   ValidateItem(item);
-  items_.insert(items_.begin() + FlipIndex(index), item);
+  items_.insert(items_.begin() + index, item);
 }
 
 void SimpleMenuModel::ValidateItem(const Item& item) {

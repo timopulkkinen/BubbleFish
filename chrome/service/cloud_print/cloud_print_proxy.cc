@@ -10,9 +10,9 @@
 #include "base/process_util.h"
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/common/cloud_print/cloud_print_proxy_info.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/print_system.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_process_prefs.h"
@@ -25,7 +25,7 @@ namespace {
 void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
   DCHECK(g_service_process->io_thread()->message_loop_proxy()->
       BelongsToCurrentThread());
-  FilePath exe_path;
+  base::FilePath exe_path;
   PathService::Get(base::FILE_EXE, &exe_path);
   if (exe_path.empty()) {
     NOTREACHED() << "Unable to get browser process binary name.";
@@ -33,7 +33,7 @@ void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
   CommandLine cmd_line(exe_path);
 
   const CommandLine& process_command_line = *CommandLine::ForCurrentProcess();
-  FilePath user_data_dir =
+  base::FilePath user_data_dir =
       process_command_line.GetSwitchValuePath(switches::kUserDataDir);
   if (!user_data_dir.empty())
     cmd_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
@@ -52,18 +52,13 @@ void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
 #endif
 }
 
-// This method is invoked on the IO thread to launch the browser process to
-// display a desktop notification that the Cloud Print token is invalid and
-// needs re-authentication.
-void ShowTokenExpiredNotificationInBrowser() {
-  LaunchBrowserProcessWithSwitch(switches::kNotifyCloudPrintTokenExpired);
-}
-
 void CheckCloudPrintProxyPolicyInBrowser() {
   LaunchBrowserProcessWithSwitch(switches::kCheckCloudPrintConnectorPolicy);
 }
 
 }  // namespace
+
+namespace cloud_print {
 
 CloudPrintProxy::CloudPrintProxy()
     : service_prefs_(NULL),
@@ -122,8 +117,29 @@ void CloudPrintProxy::EnableForUser(const std::string& lsid) {
 void CloudPrintProxy::EnableForUserWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
-    const std::string& user_email) {
+    const std::string& user_email,
+    bool connect_new_printers,
+    const std::vector<std::string>& printer_blacklist) {
   DCHECK(CalledOnValidThread());
+
+  ShutdownBackend();
+  std::string proxy_id(
+      service_prefs_->GetString(prefs::kCloudPrintProxyId, ""));
+  service_prefs_->RemovePref(prefs::kCloudPrintRoot);
+  if (!proxy_id.empty()) {
+    // Keep only proxy id;
+    service_prefs_->SetString(prefs::kCloudPrintProxyId, proxy_id);
+  }
+  service_prefs_->SetBoolean(prefs::kCloudPrintConnectNewPrinters,
+                             connect_new_printers);
+  if (!printer_blacklist.empty()) {
+    scoped_ptr<base::ListValue> printers(new base::ListValue());
+    printers->AppendStrings(printer_blacklist);
+    service_prefs_->SetValue(prefs::kCloudPrintConnectNewPrinters,
+                             printers.release());
+  }
+  service_prefs_->WritePrefs();
+
   if (!CreateBackend())
     return;
   DCHECK(backend_.get());
@@ -151,6 +167,7 @@ bool CloudPrintProxy::CreateBackend() {
     google_apis::GetOAuth2ClientID(google_apis::CLIENT_CLOUD_PRINT);
   oauth_client_info.client_secret =
     google_apis::GetOAuth2ClientSecret(google_apis::CLIENT_CLOUD_PRINT);
+  oauth_client_info.redirect_uri = "oob";
   backend_.reset(new CloudPrintProxyBackend(this, settings_, oauth_client_info,
                                             enable_job_poll));
   return true;
@@ -178,7 +195,7 @@ void CloudPrintProxy::DisableForUser() {
   ShutdownBackend();
 }
 
-void CloudPrintProxy::GetProxyInfo(cloud_print::CloudPrintProxyInfo* info) {
+void CloudPrintProxy::GetProxyInfo(CloudPrintProxyInfo* info) {
   info->enabled = enabled_;
   info->email.clear();
   if (enabled_)
@@ -216,20 +233,11 @@ void CloudPrintProxy::OnAuthenticated(
 
 void CloudPrintProxy::OnAuthenticationFailed() {
   DCHECK(CalledOnValidThread());
-  // If authenticated failed, we will disable the cloud print proxy.
-  // We can't delete printers at this point.
-  DisableForUser();
-  // Also delete the cached robot credentials since they may not be valid any
-  // longer.
-  service_prefs_->RemovePref(prefs::kCloudPrintRobotRefreshToken);
-  service_prefs_->RemovePref(prefs::kCloudPrintRobotEmail);
-  service_prefs_->WritePrefs();
-
-  // Launch the browser to display a notification that the credentials have
-  // expired (unless error dialogs are disabled).
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoErrorDialogs))
-    g_service_process->io_thread()->message_loop_proxy()->PostTask(
-        FROM_HERE, base::Bind(&ShowTokenExpiredNotificationInBrowser));
+  // Don't disable permanently. Could be just connection issue.
+  ShutdownBackend();
+  if (client_) {
+    client_->OnCloudPrintProxyDisabled(false);
+  }
 }
 
 void CloudPrintProxy::OnPrintSystemUnavailable() {
@@ -261,3 +269,5 @@ void CloudPrintProxy::ShutdownBackend() {
     backend_->Shutdown();
   backend_.reset();
 }
+
+}  // namespace cloud_print

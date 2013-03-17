@@ -18,6 +18,7 @@
 #include "net/url_request/url_request_simple_job.h"
 #include "net/url_request/view_cache_helper.h"
 
+namespace content {
 namespace {
 
 // A job subclass that dumps an HTTP cache entry.
@@ -84,7 +85,7 @@ class ViewHttpCacheJob : public net::URLRequestJob {
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
 
-  ~ViewHttpCacheJob() {}
+  virtual ~ViewHttpCacheJob() {}
 
   void StartAsync();
   void OnStartCompleted();
@@ -135,12 +136,12 @@ int ViewHttpCacheJob::Core::Start(const net::URLRequest& request,
 
   AddRef();  // Released on OnIOComplete().
   std::string cache_key =
-      request.url().spec().substr(strlen(chrome::kChromeUINetworkViewCacheURL));
+      request.url().spec().substr(strlen(kChromeUINetworkViewCacheURL));
 
   int rv;
   if (cache_key.empty()) {
     rv = cache_helper_.GetContentsHTML(request.context(),
-                                       chrome::kChromeUINetworkViewCacheURL,
+                                       kChromeUINetworkViewCacheURL,
                                        &data_, callback_);
   } else {
     rv = cache_helper_.GetEntryInfoHTML(cache_key, request.context(),
@@ -200,3 +201,5 @@ net::URLRequestJob* ViewHttpCacheJobFactory::CreateJobForRequest(
     net::URLRequest* request, net::NetworkDelegate* network_delegate) {
   return new ViewHttpCacheJob(request, network_delegate);
 }
+
+}  // namespace content

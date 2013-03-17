@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_H_
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -16,10 +17,14 @@
 #include "ui/gfx/native_widget_types.h"
 
 class CommandLine;
-class FilePath;
 class GURL;
+class PrefRegistrySyncable;
 class Profile;
 class ProcessSingleton;
+
+namespace base {
+class FilePath;
+}
 
 // This namespace contains the chrome first-run installation actions needed to
 // fully test the custom installer. It also contains the opposite actions to
@@ -38,9 +43,18 @@ enum FirstRunBubbleMetric {
   NUM_FIRST_RUN_BUBBLE_METRICS
 };
 
+// Options for the first run bubble. The default is FIRST_RUN_BUBBLE_DONT_SHOW.
+// FIRST_RUN_BUBBLE_SUPPRESS is stronger in that FIRST_RUN_BUBBLE_SHOW should
+// never be set once FIRST_RUN_BUBBLE_SUPPRESS is set.
+enum FirstRunBubbleOptions {
+  FIRST_RUN_BUBBLE_DONT_SHOW,
+  FIRST_RUN_BUBBLE_SUPPRESS,
+  FIRST_RUN_BUBBLE_SHOW,
+};
+
 enum ProcessMasterPreferencesResult {
-  SHOW_FIRST_RUN = 0,           // Should show the first run flow.
-  SKIP_FIRST_RUN,               // Should skip the first run flow.
+  DO_FIRST_RUN_TASKS = 0,       // Should do the first run tasks.
+  SKIP_FIRST_RUN_TASKS,         // Should skip the first run tasks.
   EULA_EXIT_NOW,                // Should immediately exit due to EULA flow.
 };
 
@@ -57,6 +71,7 @@ struct MasterPrefs {
   bool suppress_first_run_default_browser_prompt;
   std::vector<GURL> new_tabs;
   std::vector<GURL> bookmarks;
+  std::string variations_seed;
 };
 
 // Returns true if this is the first time chrome is run for this user.
@@ -65,29 +80,54 @@ bool IsChromeFirstRun();
 // Creates the sentinel file that signals that chrome has been configured.
 bool CreateSentinel();
 
+// Get RLZ ping delay pref name.
+std::string GetPingDelayPrefName();
+
+// Register user preferences used by the MasterPrefs structure.
+void RegisterUserPrefs(PrefRegistrySyncable* registry);
+
 // Removes the sentinel file created in ConfigDone(). Returns false if the
 // sentinel file could not be removed.
 bool RemoveSentinel();
 
-// Sets the kShouldShowFirstRunBubble local state pref so that the browser
+// Sets the kShowFirstRunBubbleOption local state pref so that the browser
 // shows the bubble once the main message loop gets going (or refrains from
-// showing the bubble, if |show_bubble| is false). Returns false if the pref
-// could not be set. This function can be called multiple times, but only the
-// initial call will actually set the preference.
-bool SetShowFirstRunBubblePref(bool show_bubble);
+// showing the bubble, if |show_bubble| is not FIRST_RUN_BUBBLE_SHOW).
+// Once FIRST_RUN_BUBBLE_SUPPRESS is set, no other value can be set.
+// Returns false if the pref service could not be retrieved.
+bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option);
 
-// Sets the kShouldShowWelcomePage local state pref so that the browser
-// loads the welcome tab once the message loop gets going. Returns false
-// if the pref could not be set.
-bool SetShowWelcomePagePref();
+// Sets a flag that will cause ShouldShowWelcomePage to return true
+// exactly once, so that the browser loads the welcome tab once the
+// message loop gets going.
+void SetShouldShowWelcomePage();
 
-// Sets the kAutofillPersonalDataManagerFirstRun local state pref so that the
-// browser loads PersonalDataManager once the main message loop gets going.
-// Returns false if the pref could not be set.
-bool SetPersonalDataManagerFirstRunPref();
+// Returns true if the welcome page should be shown.
+//
+// This will return true only once: The first time it is called after
+// SetShouldShowWelcomePage() is called.
+bool ShouldShowWelcomePage();
+
+// Sets a flag that will cause ShouldDoPersonalDataManagerFirstRun()
+// to return true exactly once, so that the browser loads
+// PersonalDataManager once the main message loop gets going.
+void SetShouldDoPersonalDataManagerFirstRun();
+
+// Returns true if the autofill personal data manager first-run action
+// should be taken.
+//
+// This will return true only once, the first time it is called after
+// SetShouldDoPersonalDataManagerFirstRun() is called.
+bool ShouldDoPersonalDataManagerFirstRun();
 
 // Log a metric for the "FirstRun.SearchEngineBubble" histogram.
 void LogFirstRunMetric(FirstRunBubbleMetric metric);
+
+// Allow a test to specify additional arguments for the profile import process.
+void SetExtraArgumentsForImportProcess(const CommandLine& arguments);
+
+// Get any extra arguments set with SetExtraArgumentsForImportProcess.
+const CommandLine& GetExtraArgumentsForImportProcess();
 
 // -- Platform-specific functions --
 
@@ -97,8 +137,16 @@ void AutoImport(Profile* profile,
                 bool homepage_defined,
                 int import_items,
                 int dont_import_items,
-                bool make_chrome_default,
                 ProcessSingleton* process_singleton);
+
+// Does remaining first run tasks for |profile| and makes Chrome default browser
+// if |make_chrome_default|. This can pop the first run consent dialog on linux.
+void DoPostImportTasks(Profile* profile, bool make_chrome_default);
+
+// Whether a first-run import was triggered before the browser mainloop began.
+// This is used in testing to verify import startup actions that occur before
+// an observer can be registered in the test.
+bool DidPerformProfileImport(bool* exited_successfully);
 
 // Imports bookmarks and/or browser items (depending on platform support)
 // in this process. This function is paired with first_run::ImportSettings().
@@ -107,7 +155,10 @@ void AutoImport(Profile* profile,
 int ImportNow(Profile* profile, const CommandLine& cmdline);
 
 // Returns the path for the master preferences file.
-FilePath MasterPrefsPath();
+base::FilePath MasterPrefsPath();
+
+// Set a master preferences file path that overrides platform defaults.
+void SetMasterPrefsPathForTesting(const base::FilePath& master_prefs);
 
 // The master preferences is a JSON file with the same entries as the
 // 'Default\Preferences' file. This function locates this file from a standard
@@ -123,7 +174,7 @@ FilePath MasterPrefsPath();
 // See chrome/installer/util/master_preferences.h for a description of
 // 'master_preferences' file.
 ProcessMasterPreferencesResult ProcessMasterPreferences(
-    const FilePath& user_data_dir,
+    const base::FilePath& user_data_dir,
     MasterPrefs* out_prefs);
 
 // Show the first run search engine bubble at the first appropriate opportunity.

@@ -8,18 +8,16 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_path.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -91,14 +89,13 @@ const size_t kIndentSize = 4;
 class Writer : public base::RefCountedThreadSafe<Writer> {
  public:
   Writer(base::Value* bookmarks,
-         const FilePath& path,
+         const base::FilePath& path,
          BookmarkFaviconFetcher::URLFaviconMap* favicons_map,
          BookmarksExportObserver* observer)
       : bookmarks_(bookmarks),
         path_(path),
         favicons_map_(favicons_map),
-        observer_(observer),
-        file_stream_(NULL) {
+        observer_(observer) {
   }
 
   // Writing bookmarks and favicons data to file.
@@ -106,7 +103,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     if (!OpenFile())
       return;
 
-    Value* roots;
+    Value* roots = NULL;
     if (!Write(kHeader) ||
         bookmarks_->GetType() != Value::TYPE_DICTIONARY ||
         !static_cast<DictionaryValue*>(bookmarks_.get())->Get(
@@ -118,8 +115,8 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
     DictionaryValue* roots_d_value = static_cast<DictionaryValue*>(roots);
     Value* root_folder_value;
-    Value* other_folder_value;
-    Value* mobile_folder_value;
+    Value* other_folder_value = NULL;
+    Value* mobile_folder_value = NULL;
     if (!roots_d_value->Get(BookmarkCodec::kRootFolderNameKey,
                             &root_folder_value) ||
         root_folder_value->GetType() != Value::TYPE_DICTIONARY ||
@@ -149,7 +146,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     Write(kFolderChildrenEnd);
     Write(kNewline);
     // File stream close is forced so that unit test could read it.
-    file_stream_.CloseSync();
+    file_stream_.reset();
 
     NotifyOnFinish();
   }
@@ -172,8 +169,9 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
   // Opens the file, returning true on success.
   bool OpenFile() {
+    file_stream_.reset(new net::FileStream(NULL));
     int flags = base::PLATFORM_FILE_CREATE_ALWAYS | base::PLATFORM_FILE_WRITE;
-    return (file_stream_.OpenSync(path_, flags) == net::OK);
+    return (file_stream_->OpenSync(path_, flags) == net::OK);
   }
 
   // Increments the indent.
@@ -197,7 +195,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Writes raw text out returning true on success. This does not escape
   // the text in anyway.
   bool Write(const std::string& text) {
-    size_t wrote = file_stream_.WriteSync(text.c_str(), text.length());
+    size_t wrote = file_stream_->WriteSync(text.c_str(), text.length());
     bool result = (wrote == text.length());
     DCHECK(result);
     return result;
@@ -295,7 +293,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
     // Folder.
     std::string last_modified_date;
-    const Value* child_values;
+    const Value* child_values = NULL;
     if (!value.GetString(BookmarkCodec::kDateModifiedKey,
                          &last_modified_date) ||
         !value.Get(BookmarkCodec::kChildrenKey, &child_values) ||
@@ -365,7 +363,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   scoped_ptr<Value> bookmarks_;
 
   // Path we're writing to.
-  FilePath path_;
+  base::FilePath path_;
 
   // Map that stores favicon per URL.
   scoped_ptr<BookmarkFaviconFetcher::URLFaviconMap> favicons_map_;
@@ -374,7 +372,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   BookmarksExportObserver* observer_;
 
   // File we're writing to.
-  net::FileStream file_stream_;
+  scoped_ptr<net::FileStream> file_stream_;
 
   // How much we indent when writing a bookmark/folder. This is modified
   // via IncrementIndent and DecrementIndent.
@@ -387,7 +385,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
 BookmarkFaviconFetcher::BookmarkFaviconFetcher(
     Profile* profile,
-    const FilePath& path,
+    const base::FilePath& path,
     BookmarksExportObserver* observer)
     : profile_(profile),
       path_(path),
@@ -462,11 +460,12 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
       FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
           profile_, Profile::EXPLICIT_ACCESS);
       favicon_service->GetRawFaviconForURL(
-          FaviconService::FaviconForURLParams(profile_, GURL(url),
-              history::FAVICON, gfx::kFaviconSize, &favicon_consumer_),
+          FaviconService::FaviconForURLParams(
+              profile_, GURL(url), history::FAVICON, gfx::kFaviconSize),
           ui::SCALE_FACTOR_100P,
           base::Bind(&BookmarkFaviconFetcher::OnFaviconDataAvailable,
-                     base::Unretained(this)));
+                     base::Unretained(this)),
+          &cancelable_task_tracker_);
       return true;
     } else {
       bookmark_urls_.pop_front();
@@ -476,7 +475,6 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
 }
 
 void BookmarkFaviconFetcher::OnFaviconDataAvailable(
-    FaviconService::Handle handle,
     const history::FaviconBitmapResult& bitmap_result) {
   GURL url;
   if (!bookmark_urls_.empty()) {
@@ -497,7 +495,7 @@ void BookmarkFaviconFetcher::OnFaviconDataAvailable(
 namespace bookmark_html_writer {
 
 void WriteBookmarks(Profile* profile,
-                    const FilePath& path,
+                    const base::FilePath& path,
                     BookmarksExportObserver* observer) {
   // BookmarkModel isn't thread safe (nor would we want to lock it down
   // for the duration of the write), as such we make a copy of the

@@ -5,7 +5,7 @@
 #ifndef CONTENT_PLUGIN_PLUGIN_THREAD_H_
 #define CONTENT_PLUGIN_PLUGIN_THREAD_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/native_library.h"
 #include "build/build_config.h"
 #include "content/common/child_thread.h"
@@ -15,6 +15,8 @@
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
+
+namespace content {
 
 // The PluginThread class represents a background thread where plugin instances
 // live.  Communication occurs between WebPluginDelegateProxy in the renderer
@@ -44,5 +46,7 @@ class PluginThread : public ChildThread {
 
   DISALLOW_COPY_AND_ASSIGN(PluginThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PLUGIN_PLUGIN_THREAD_H_

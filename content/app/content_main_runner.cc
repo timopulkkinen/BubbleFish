@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/debug/trace_event.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -20,9 +20,9 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/profiler/alternate_timer.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
 #include "content/browser/browser_main.h"
 #include "content/common/set_process_title.h"
 #include "content/common/url_schemes.h"
@@ -35,15 +35,12 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
-#include "content/public/plugin/content_plugin_client.h"
-#include "content/public/renderer/content_renderer_client.h"
-#include "content/public/utility/content_utility_client.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media.h"
 #include "sandbox/win/src/sandbox_types.h"
-#include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/win/dpi.h"
 #include "webkit/user_agent/user_agent.h"
 
@@ -55,11 +52,17 @@
 #endif
 #endif
 
+#if !defined(OS_IOS)
+#include "content/public/plugin/content_plugin_client.h"
+#include "content/public/renderer/content_renderer_client.h"
+#include "content/public/utility/content_utility_client.h"
+#endif
+
 #if defined(OS_WIN)
-#include <cstring>
 #include <atlbase.h>
 #include <atlapp.h>
 #include <malloc.h>
+#include <cstring>
 #elif defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #if !defined(OS_IOS)
@@ -73,7 +76,7 @@
 #if defined(OS_POSIX)
 #include <signal.h>
 
-#include "base/global_descriptors_posix.h"
+#include "base/posix/global_descriptors.h"
 #include "content/public/common/content_descriptors.h"
 
 #if !defined(OS_MACOSX)
@@ -88,19 +91,21 @@ int tc_set_new_mode(int mode);
 }
 #endif
 
-extern int GpuMain(const content::MainFunctionParams&);
-extern int PluginMain(const content::MainFunctionParams&);
-extern int PpapiPluginMain(const content::MainFunctionParams&);
-extern int PpapiBrokerMain(const content::MainFunctionParams&);
-extern int RendererMain(const content::MainFunctionParams&);
-extern int WorkerMain(const content::MainFunctionParams&);
-extern int UtilityMain(const content::MainFunctionParams&);
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 namespace content {
+extern int GpuMain(const content::MainFunctionParams&);
+#if defined(ENABLE_PLUGINS)
+extern int PluginMain(const content::MainFunctionParams&);
+extern int PpapiPluginMain(const MainFunctionParams&);
+extern int PpapiBrokerMain(const MainFunctionParams&);
+#endif
+extern int RendererMain(const content::MainFunctionParams&);
+extern int UtilityMain(const MainFunctionParams&);
+extern int WorkerMain(const MainFunctionParams&);
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 extern int ZygoteMain(const MainFunctionParams&,
                       ZygoteForkDelegate* forkdelegate);
-}  // namespace content
 #endif
+}  // namespace content
 
 namespace {
 #if defined(OS_WIN)
@@ -158,12 +163,14 @@ namespace content {
 
 base::LazyInstance<ContentBrowserClient>
     g_empty_content_browser_client = LAZY_INSTANCE_INITIALIZER;
+#if !defined(OS_IOS)
 base::LazyInstance<ContentPluginClient>
     g_empty_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ContentRendererClient>
     g_empty_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ContentUtilityClient>
     g_empty_content_utility_client = LAZY_INSTANCE_INITIALIZER;
+#endif  // !OS_IOS
 
 #if defined(OS_WIN)
 
@@ -196,7 +203,7 @@ void SendTaskPortToParentProcess() {
 
 #endif  // defined(OS_WIN)
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_IOS)
 
 // Setup signal-handling state: resanitize most signals, ignore SIGPIPE.
 void SetupSignalHandlers() {
@@ -220,7 +227,7 @@ void SetupSignalHandlers() {
   CHECK(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
 }
 
-#endif  // OS_POSIX
+#endif  // OS_POSIX && !OS_IOS
 
 void CommonSubprocessInit(const std::string& process_type) {
 #if defined(OS_WIN)
@@ -308,6 +315,7 @@ class ContentClientInitializer {
         content_client->browser_ = &g_empty_content_browser_client.Get();
     }
 
+#if !defined(OS_IOS)
     if (process_type == switches::kPluginProcess ||
         process_type == switches::kPpapiPluginProcess) {
       if (delegate)
@@ -327,6 +335,7 @@ class ContentClientInitializer {
       if (!content_client->utility_)
         content_client->utility_ = &g_empty_content_utility_client.Get();
     }
+#endif  // !OS_IOS
   }
 };
 
@@ -347,7 +356,9 @@ int RunZygote(const MainFunctionParams& main_function_params,
   static const MainFunction kMainFunctions[] = {
     { switches::kRendererProcess,    RendererMain },
     { switches::kWorkerProcess,      WorkerMain },
+#if defined(ENABLE_PLUGINS)
     { switches::kPpapiPluginProcess, PpapiPluginMain },
+#endif
     { switches::kUtilityProcess,     UtilityMain },
   };
 
@@ -357,7 +368,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
     // Each Renderer we spawn will re-attempt initialization of the media
     // libraries, at which point failure will be detected and handled, so
     // we do not need to cope with initialization failures here.
-    FilePath media_path;
+    base::FilePath media_path;
     if (PathService::Get(DIR_MEDIA_LIBS, &media_path))
       media::InitializeMediaLibrary(media_path);
   }
@@ -414,10 +425,12 @@ int RunNamedProcessTypeMain(
   static const MainFunction kMainFunctions[] = {
     { "",                            BrowserMain },
     { switches::kRendererProcess,    RendererMain },
+#if defined(ENABLE_PLUGINS)
     { switches::kPluginProcess,      PluginMain },
     { switches::kWorkerProcess,      WorkerMain },
     { switches::kPpapiPluginProcess, PpapiPluginMain },
     { switches::kPpapiBrokerProcess, PpapiBrokerMain },
+#endif
     { switches::kUtilityProcess,     UtilityMain },
     { switches::kGpuProcess,         GpuMain },
   };
@@ -470,25 +483,35 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif
   }
 
-  ~ContentMainRunnerImpl() {
+  virtual ~ContentMainRunnerImpl() {
     if (is_initialized_ && !is_shutdown_)
       Shutdown();
   }
 
 #if defined(USE_TCMALLOC)
-static bool GetPropertyThunk(const char* name, size_t* value) {
-  return MallocExtension::instance()->GetNumericProperty(name, value);
-}
+  static bool GetAllocatorWasteSizeThunk(size_t* size) {
+    size_t heap_size, allocated_bytes, unmapped_bytes;
+    MallocExtension* ext = MallocExtension::instance();
+    if (ext->GetNumericProperty("generic.heap_size", &heap_size) &&
+        ext->GetNumericProperty("generic.current_allocated_bytes",
+                                &allocated_bytes) &&
+        ext->GetNumericProperty("tcmalloc.pageheap_unmapped_bytes",
+                                &unmapped_bytes)) {
+      *size = heap_size - allocated_bytes - unmapped_bytes;
+      return true;
+    }
+    DCHECK(false);
+    return false;
+  }
 
-static void GetStatsThunk(char* buffer, int buffer_length) {
-  MallocExtension::instance()->GetStats(buffer, buffer_length);
-}
+  static void GetStatsThunk(char* buffer, int buffer_length) {
+    MallocExtension::instance()->GetStats(buffer, buffer_length);
+  }
 
-static void ReleaseFreeMemoryThunk() {
-  MallocExtension::instance()->ReleaseFreeMemory();
-}
+  static void ReleaseFreeMemoryThunk() {
+    MallocExtension::instance()->ReleaseFreeMemory();
+  }
 #endif
-
 
 #if defined(OS_WIN)
   virtual int Initialize(HINSTANCE instance,
@@ -525,7 +548,8 @@ static void ReleaseFreeMemoryThunk() {
     tc_set_new_mode(1);
 
     // On windows, we've already set these thunks up in _heap_init()
-    base::allocator::SetGetPropertyFunction(GetPropertyThunk);
+    base::allocator::SetGetAllocatorWasteSizeFunction(
+        GetAllocatorWasteSizeThunk);
     base::allocator::SetGetStatsFunction(GetStatsThunk);
     base::allocator::SetReleaseFreeMemoryFunction(ReleaseFreeMemoryThunk);
 
@@ -616,7 +640,8 @@ static void ReleaseFreeMemoryThunk() {
     // ignored.
     if (command_line.HasSwitch(switches::kTraceStartup)) {
       base::debug::TraceLog::GetInstance()->SetEnabled(
-          command_line.GetSwitchValueASCII(switches::kTraceStartup));
+          command_line.GetSwitchValueASCII(switches::kTraceStartup),
+          base::debug::TraceLog::RECORD_UNTIL_FULL);
     }
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -640,7 +665,7 @@ static void ReleaseFreeMemoryThunk() {
     }
 #elif defined(OS_WIN)
     // This must be done early enough since some helper functions like
-    // IsTouchEnanbled, needed to load resources, may call into the theme dll.
+    // IsTouchEnabled, needed to load resources, may call into the theme dll.
     EnableThemeSupportOnAllWindowStations();
 #if defined(ENABLE_HIDPI)
     ui::EnableHighDPISupport();

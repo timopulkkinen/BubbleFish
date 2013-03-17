@@ -12,12 +12,10 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "ui/base/touch/touch_device.h"
 #include "ui/base/ui_base_switches.h"
-
-#if defined(USE_AURA) && !defined(OS_WIN)
-#include "ui/aura/root_window.h"
-#include "ui/compositor/compositor.h"
-#endif  // defined(USE_AURA) && !defined(OS_WIN)
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "base/mac/mac_util.h"
@@ -28,9 +26,19 @@
 #include <Windows.h>
 #endif  // defined(OS_WIN)
 
+#if defined(OS_CHROMEOS)
+#include "ui/base/resource/resource_bundle.h"
+#endif
+
+namespace ui {
+
 namespace {
 
-#if defined(OS_WIN) || defined(USE_ASH)
+bool ScaleFactorComparator(const ScaleFactor& lhs, const ScaleFactor& rhs){
+  return GetScaleFactorScale(lhs) < GetScaleFactorScale(rhs);
+}
+
+#if defined(OS_WIN)
 // Helper function that determines whether we want to optimize the UI for touch.
 bool UseTouchOptimizedUI() {
   // If --touch-optimized-ui is specified and not set to "auto", then override
@@ -52,63 +60,89 @@ bool UseTouchOptimizedUI() {
     }
   }
 
-#if defined(OS_WIN)
-  // On Windows, we use the touch layout only when we are running in
-  // Metro mode.
-  return base::win::IsMetroProcess() && base::win::IsTouchEnabled();
-#else
-  return false;
-#endif
+  // We use the touch layout only when we are running in Metro mode.
+  return base::win::IsMetroProcess() && ui::IsTouchDevicePresent();
 }
-#endif  // defined(OS_WIN) || defined(USE_ASH)
+#endif  // defined(OS_WIN)
 
-const float kScaleFactorScales[] = {1.0f, 1.4f, 1.8f, 2.0f};
-COMPILE_ASSERT(ui::NUM_SCALE_FACTORS == arraysize(kScaleFactorScales),
+const float kScaleFactorScales[] = {1.0f, 1.0f, 1.33f, 1.4f, 1.5f, 1.8f, 2.0f};
+COMPILE_ASSERT(NUM_SCALE_FACTORS == arraysize(kScaleFactorScales),
                kScaleFactorScales_incorrect_size);
 const size_t kScaleFactorScalesLength = arraysize(kScaleFactorScales);
 
-std::vector<ui::ScaleFactor>& GetSupportedScaleFactorsInternal() {
-  static std::vector<ui::ScaleFactor>* supported_scale_factors =
-      new std::vector<ui::ScaleFactor>();
+namespace {
+
+// Returns the scale factor closest to |scale| from the full list of factors.
+// Note that it does NOT rely on the list of supported scale factors.
+// Finding the closest match is inefficient and shouldn't be done frequently.
+ScaleFactor FindClosestScaleFactorUnsafe(float scale) {
+  float smallest_diff =  std::numeric_limits<float>::max();
+  ScaleFactor closest_match = SCALE_FACTOR_100P;
+  for (int i = SCALE_FACTOR_100P; i < NUM_SCALE_FACTORS; ++i) {
+    const ScaleFactor scale_factor = static_cast<ScaleFactor>(i);
+    float diff = std::abs(kScaleFactorScales[scale_factor] - scale);
+    if (diff < smallest_diff) {
+      closest_match = scale_factor;
+      smallest_diff = diff;
+    }
+  }
+  return closest_match;
+}
+
+}  // namespace
+
+std::vector<ScaleFactor>& GetSupportedScaleFactorsInternal() {
+  static std::vector<ScaleFactor>* supported_scale_factors =
+      new std::vector<ScaleFactor>();
   if (supported_scale_factors->empty()) {
-      supported_scale_factors->push_back(ui::SCALE_FACTOR_100P);
-// TODO(rohitrao): Set the appropriate scale factors for iOS.  Ideally set
-// either 100P or 200P but not both, since a given device will only ever use one
-// scale factor.
-#if defined(OS_MACOSX) && !defined(OS_IOS) && defined(ENABLE_HIDPI)
-      if (base::mac::IsOSLionOrLater())
-        supported_scale_factors->push_back(ui::SCALE_FACTOR_200P);
-#elif defined(OS_WIN) && defined(ENABLE_HIDPI)
-      if (base::win::IsMetroProcess() && base::win::IsTouchEnabled()) {
-        supported_scale_factors->push_back(ui::SCALE_FACTOR_140P);
-        supported_scale_factors->push_back(ui::SCALE_FACTOR_180P);
-      }
-#elif defined(USE_ASH)
-      supported_scale_factors->push_back(ui::SCALE_FACTOR_200P);
+#if !defined(OS_IOS)
+    // On platforms other than iOS, 100P is always a supported scale factor.
+    supported_scale_factors->push_back(SCALE_FACTOR_100P);
 #endif
+
+#if defined(OS_ANDROID)
+    const gfx::Display display =
+        gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+    const float display_density = display.device_scale_factor();
+    const ScaleFactor closest = FindClosestScaleFactorUnsafe(display_density);
+    if (closest != SCALE_FACTOR_100P)
+      supported_scale_factors->push_back(closest);
+#elif defined(OS_IOS)
+    gfx::Display display = gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+    if (display.device_scale_factor() > 1.0) {
+      DCHECK_EQ(2.0, display.device_scale_factor());
+      supported_scale_factors->push_back(SCALE_FACTOR_200P);
+    } else {
+      supported_scale_factors->push_back(SCALE_FACTOR_100P);
+    }
+#elif defined(OS_MACOSX)
+    if (base::mac::IsOSLionOrLater())
+      supported_scale_factors->push_back(SCALE_FACTOR_200P);
+#elif defined(OS_WIN)
+    // Have high-DPI resources for 140% and 180% scaling on Windows based on
+    // default scaling for Metro mode.  Round to nearest supported scale in
+    // all cases.
+    supported_scale_factors->push_back(SCALE_FACTOR_140P);
+    supported_scale_factors->push_back(SCALE_FACTOR_180P);
+#elif defined(OS_CHROMEOS)
+    // TODO(oshima): Include 200P only if the device support 200P
+    supported_scale_factors->push_back(SCALE_FACTOR_200P);
+#endif
+    std::sort(supported_scale_factors->begin(),
+              supported_scale_factors->end(),
+              ScaleFactorComparator);
   }
   return *supported_scale_factors;
 }
 
 }  // namespace
 
-namespace ui {
-
-// Note that this function should be extended to select
-// LAYOUT_TOUCH when appropriate on more platforms than just
-// Windows and Ash.
 DisplayLayout GetDisplayLayout() {
-#if defined(USE_ASH)
+#if defined(OS_WIN)
   if (UseTouchOptimizedUI())
     return LAYOUT_TOUCH;
-  return LAYOUT_ASH;
-#elif defined(OS_WIN)
-  if (UseTouchOptimizedUI())
-    return LAYOUT_TOUCH;
-  return LAYOUT_DESKTOP;
-#else
-  return LAYOUT_DESKTOP;
 #endif
+  return LAYOUT_DESKTOP;
 }
 
 ScaleFactor GetScaleFactorFromScale(float scale) {
@@ -124,11 +158,20 @@ ScaleFactor GetScaleFactorFromScale(float scale) {
       smallest_diff = diff;
     }
   }
+  DCHECK_NE(closest_match, SCALE_FACTOR_NONE);
   return closest_match;
 }
 
 float GetScaleFactorScale(ScaleFactor scale_factor) {
   return kScaleFactorScales[scale_factor];
+}
+
+ScaleFactor GetMaxScaleFactor() {
+#if defined(OS_CHROMEOS)
+  return ResourceBundle::GetSharedInstance().max_scale_factor();
+#else
+  return GetSupportedScaleFactorsInternal().back();
+#endif
 }
 
 std::vector<ScaleFactor> GetSupportedScaleFactors() {
@@ -149,22 +192,31 @@ void SetSupportedScaleFactors(
   std::vector<ui::ScaleFactor>& supported_scale_factors =
       GetSupportedScaleFactorsInternal();
   supported_scale_factors = scale_factors;
+  std::sort(supported_scale_factors.begin(),
+            supported_scale_factors.end(),
+            ScaleFactorComparator);
+}
+
+ScopedSetSupportedScaleFactors::ScopedSetSupportedScaleFactors(
+    const std::vector<ui::ScaleFactor>& new_scale_factors)
+    : original_scale_factors_(GetSupportedScaleFactors()) {
+  SetSupportedScaleFactors(new_scale_factors);
+}
+
+ScopedSetSupportedScaleFactors::~ScopedSetSupportedScaleFactors() {
+  SetSupportedScaleFactors(original_scale_factors_);
 }
 
 }  // namespace test
 
 #if !defined(OS_MACOSX)
 ScaleFactor GetScaleFactorForNativeView(gfx::NativeView view) {
-#if defined(USE_AURA) && !defined(OS_WIN)
-  aura::RootWindow* root_window = view->GetRootWindow();
-  if (!root_window)
-    return SCALE_FACTOR_NONE;
-  return GetScaleFactorFromScale(
-      root_window->compositor()->device_scale_factor());
-#else
-  NOTIMPLEMENTED();
-  return SCALE_FACTOR_NONE;
-#endif
+  gfx::Screen* screen = gfx::Screen::GetScreenFor(view);
+  if (screen->IsDIPEnabled()) {
+    gfx::Display display = screen->GetDisplayNearestWindow(view);
+    return GetScaleFactorFromScale(display.device_scale_factor());
+  }
+  return ui::SCALE_FACTOR_100P;
 }
 #endif  // !defined(OS_MACOSX)
 

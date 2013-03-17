@@ -26,6 +26,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_cert_request_info.h"
@@ -45,6 +46,7 @@
 #include "net/http/http_response_info.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/http_status_code.h"
+#include "net/http/http_stream_base.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/url_security_manager.h"
@@ -152,7 +154,7 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
         stream_->Close(true /* not reusable */);
       } else {
         // Otherwise, we try to drain the response body.
-        HttpStream* stream = stream_.release();
+        HttpStreamBase* stream = stream_.release();
         stream->Drain(session_);
       }
     }
@@ -287,7 +289,8 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
       // We should call connection_->set_idle_time(), but this doesn't occur
       // often enough to be worth the trouble.
       stream_->SetConnectionReused();
-      new_stream = stream_->RenewStreamForAuth();
+      new_stream =
+          static_cast<HttpStream*>(stream_.get())->RenewStreamForAuth();
     }
 
     if (!new_stream) {
@@ -378,12 +381,13 @@ UploadProgress HttpNetworkTransaction::GetUploadProgress() const {
   if (!stream_.get())
     return UploadProgress();
 
-  return stream_->GetUploadProgress();
+  // TODO(bashi): This cast is temporary. Remove later.
+  return static_cast<HttpStream*>(stream_.get())->GetUploadProgress();
 }
 
 void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
                                            const ProxyInfo& used_proxy_info,
-                                           HttpStream* stream) {
+                                           HttpStreamBase* stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK(stream_request_.get());
 
@@ -466,7 +470,7 @@ void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
     const HttpResponseInfo& response_info,
     const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
-    HttpStream* stream) {
+    HttpStreamBase* stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
 
   headers_valid_ = true;
@@ -476,6 +480,20 @@ void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
   stream_.reset(stream);
   stream_request_.reset();  // we're done with the stream request
   OnIOComplete(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
+}
+
+bool HttpNetworkTransaction::GetLoadTimingInfo(
+    LoadTimingInfo* load_timing_info) const {
+  if (!stream_ || !stream_->GetLoadTimingInfo(load_timing_info))
+    return false;
+
+  load_timing_info->proxy_resolve_start =
+      proxy_info_.proxy_resolve_start_time();
+  load_timing_info->proxy_resolve_end = proxy_info_.proxy_resolve_end_time();
+  load_timing_info->send_start = send_start_time_;
+  load_timing_info->send_end = send_end_time_;
+  load_timing_info->receive_headers_end = receive_headers_end_;
+  return true;
 }
 
 bool HttpNetworkTransaction::is_https_request() const {
@@ -713,14 +731,14 @@ void HttpNetworkTransaction::BuildRequestHeaders(bool using_proxy) {
   }
 
   // Add a content length header?
-  if (request_body_.get()) {
-    if (request_body_->is_chunked()) {
+  if (request_->upload_data_stream) {
+    if (request_->upload_data_stream->is_chunked()) {
       request_headers_.SetHeader(
           HttpRequestHeaders::kTransferEncoding, "chunked");
     } else {
       request_headers_.SetHeader(
           HttpRequestHeaders::kContentLength,
-          base::Uint64ToString(request_body_->size()));
+          base::Uint64ToString(request_->upload_data_stream->size()));
     }
   } else if (request_->method == "POST" || request_->method == "PUT" ||
              request_->method == "HEAD") {
@@ -751,20 +769,15 @@ void HttpNetworkTransaction::BuildRequestHeaders(bool using_proxy) {
 
 int HttpNetworkTransaction::DoInitRequestBody() {
   next_state_ = STATE_INIT_REQUEST_BODY_COMPLETE;
-  request_body_.reset(NULL);
   int rv = OK;
-  if (request_->upload_data) {
-    request_body_.reset(new UploadDataStream(request_->upload_data));
-    rv = request_body_->Init(io_callback_);
-  }
+  if (request_->upload_data_stream)
+    rv = request_->upload_data_stream->Init(io_callback_);
   return rv;
 }
 
 int HttpNetworkTransaction::DoInitRequestBodyComplete(int result) {
   if (result == OK)
     next_state_ = STATE_BUILD_REQUEST;
-  else
-    request_body_.reset(NULL);
   return result;
 }
 
@@ -790,13 +803,14 @@ int HttpNetworkTransaction::DoBuildRequestComplete(int result) {
 }
 
 int HttpNetworkTransaction::DoSendRequest() {
+  send_start_time_ = base::TimeTicks::Now();
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
 
-  return stream_->SendRequest(
-      request_headers_, request_body_.Pass(), &response_, io_callback_);
+  return stream_->SendRequest(request_headers_, &response_, io_callback_);
 }
 
 int HttpNetworkTransaction::DoSendRequestComplete(int result) {
+  send_end_time_ = base::TimeTicks::Now();
   if (result < 0)
     return HandleIOError(result);
   next_state_ = STATE_READ_HEADERS;
@@ -819,6 +833,8 @@ int HttpNetworkTransaction::HandleConnectionClosedBeforeEndOfHeaders() {
 }
 
 int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
+  receive_headers_end_ = base::TimeTicks::Now();
+
   // We can get a certificate error or ERR_SSL_CLIENT_AUTH_CERT_NEEDED here
   // due to SSL renegotiation.
   if (IsCertificateError(result)) {
@@ -861,6 +877,23 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
       return rv;
   }
   DCHECK(response_.headers);
+
+  // Server-induced fallback is supported only if this is a PAC configured
+  // proxy. See: http://crbug.com/143712
+  if (response_.was_fetched_via_proxy && proxy_info_.did_use_pac_script()) {
+    if (response_.headers != NULL &&
+        response_.headers->HasHeaderValue("connection", "proxy-bypass")) {
+      ProxyService* proxy_service = session_->proxy_service();
+      if (proxy_service->MarkProxyAsBad(proxy_info_, net_log_)) {
+        // Only retry in the case of GETs. We don't want to resubmit a POST
+        // if the proxy took some action.
+        if (request_->method == "GET") {
+          ResetConnectionAndRequestForResend();
+          return OK;
+        }
+      }
+    }
+  }
 
   // Like Net.HttpResponseCode, but only for MAIN_FRAME loads.
   if (request_->load_flags & LOAD_MAIN_FRAME) {
@@ -948,7 +981,8 @@ int HttpNetworkTransaction::DoReadBodyComplete(int result) {
   // Clean up connection if we are done.
   if (done) {
     LogTransactionMetrics();
-    stream_->LogNumRttVsBytesMetrics();
+    // TODO(bashi): This cast is temporary. Remove later.
+    static_cast<HttpStream*>(stream_.get())->LogNumRttVsBytesMetrics();
     stream_->Close(!keep_alive);
     // Note: we don't reset the stream here.  We've closed it, but we still
     // need it around so that callers can call methods such as
@@ -1021,17 +1055,6 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
         100);
-
-  static const bool use_conn_impact_histogram =
-      base::FieldTrialList::TrialExists("ConnCountImpact");
-  if (use_conn_impact_histogram) {
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        base::FieldTrial::MakeName("Net.Transaction_Connected_New_b",
-            "ConnCountImpact"),
-        total_duration,
-        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
-        100);
-    }
   }
 
   static const bool use_spdy_histogram =
@@ -1151,16 +1174,11 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
   // is likely to accept, based on the criteria supplied in the
   // CertificateRequest message.
   if (client_cert) {
-    const std::vector<scoped_refptr<X509Certificate> >& client_certs =
-        response_.cert_request_info->client_certs;
-    bool cert_still_valid = false;
-    for (size_t i = 0; i < client_certs.size(); ++i) {
-      if (client_cert->Equals(client_certs[i])) {
-        cert_still_valid = true;
-        break;
-      }
-    }
+    const std::vector<std::string>& cert_authorities =
+        response_.cert_request_info->cert_authorities;
 
+    bool cert_still_valid = cert_authorities.empty() ||
+        client_cert->IsIssuedByEncoded(cert_authorities);
     if (!cert_still_valid)
       return error;
   }
@@ -1302,6 +1320,10 @@ void HttpNetworkTransaction::ResetStateForRestart() {
 }
 
 void HttpNetworkTransaction::ResetStateForAuthRestart() {
+  send_start_time_ = base::TimeTicks();
+  send_end_time_ = base::TimeTicks();
+  receive_headers_end_ = base::TimeTicks();
+
   pending_auth_target_ = HttpAuth::AUTH_NONE;
   read_buf_ = NULL;
   read_buf_len_ = 0;

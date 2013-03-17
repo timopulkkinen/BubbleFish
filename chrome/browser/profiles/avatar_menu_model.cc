@@ -5,8 +5,9 @@
 #include "chrome/browser/profiles/avatar_menu_model.h"
 
 #include "base/bind.h"
+#include "base/metrics/field_trial.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu_model_observer.h"
@@ -19,18 +20,26 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
+#endif
 
 using content::BrowserThread;
 
 namespace {
 
 void OnProfileCreated(bool always_create,
+                      chrome::HostDesktopType desktop_type,
                       Profile* profile,
                       Profile::CreateStatus status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -40,9 +49,14 @@ void OnProfileCreated(bool always_create,
         profile,
         chrome::startup::IS_NOT_PROCESS_STARTUP,
         chrome::startup::IS_NOT_FIRST_RUN,
+        desktop_type,
         always_create);
   }
 }
+
+// Constants for the show profile switcher experiment
+const char kShowProfileSwitcherFieldTrialName[] = "ShowProfileSwitcher";
+const char kAlwaysShowSwitcherGroupName[] = "AlwaysShow";
 
 }  // namespace
 
@@ -81,10 +95,21 @@ void AvatarMenuModel::SwitchToProfile(size_t index, bool always_create) {
   DCHECK(ProfileManager::IsMultipleProfilesEnabled() ||
          index == GetActiveProfileIndex());
   const Item& item = GetItemAt(index);
-  FilePath path = profile_info_->GetPathOfProfileAtIndex(item.model_index);
+  base::FilePath path =
+      profile_info_->GetPathOfProfileAtIndex(item.model_index);
+
+  chrome::HostDesktopType desktop_type = chrome::GetActiveDesktop();
+  if (browser_)
+    desktop_type = browser_->host_desktop_type();
+
   g_browser_process->profile_manager()->CreateProfileAsync(
-      path, base::Bind(&OnProfileCreated, always_create), string16(),
-      string16());
+      path,
+      base::Bind(&OnProfileCreated,
+                 always_create,
+                 desktop_type),
+      string16(),
+      string16(),
+      false);
 
   ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::SWITCH_PROFILE_ICON);
 }
@@ -94,7 +119,8 @@ void AvatarMenuModel::EditProfile(size_t index) {
   if (!browser) {
     Profile* profile = g_browser_process->profile_manager()->GetProfileByPath(
         profile_info_->GetPathOfProfileAtIndex(GetItemAt(index).model_index));
-    browser = new Browser(Browser::CreateParams(profile));
+    browser = new Browser(Browser::CreateParams(profile,
+                                                chrome::GetActiveDesktop()));
   }
   std::string page = chrome::kManageProfileSubPage;
   page += "#";
@@ -102,10 +128,15 @@ void AvatarMenuModel::EditProfile(size_t index) {
   chrome::ShowSettingsSubPage(browser, page);
 }
 
-void AvatarMenuModel::AddNewProfile() {
-  ProfileManager::CreateMultiProfileAsync(
-      string16(), string16(), ProfileManager::CreateCallback());
-  ProfileMetrics::LogProfileAddNewUser(ProfileMetrics::ADD_NEW_USER_ICON);
+void AvatarMenuModel::AddNewProfile(ProfileMetrics::ProfileAdd type) {
+  Browser* browser = browser_;
+  if (!browser) {
+    const Browser::CreateParams params(ProfileManager::GetLastUsedProfile(),
+                                       chrome::GetActiveDesktop());
+    browser = new Browser(params);
+  }
+  chrome::ShowSettingsSubPage(browser, chrome::kCreateProfileSubPage);
+  ProfileMetrics::LogProfileAddNewUser(type);
 }
 
 size_t AvatarMenuModel::GetNumberOfItems() {
@@ -136,6 +167,20 @@ const AvatarMenuModel::Item& AvatarMenuModel::GetItemAt(size_t index) {
   return *items_[index];
 }
 
+bool AvatarMenuModel::ShouldShowAddNewProfileLink() const {
+#if defined(ENABLE_MANAGED_USERS)
+  Profile* active_profile = NULL;
+  if (!browser_)
+    active_profile = ProfileManager::GetLastUsedProfile();
+  else
+    active_profile = browser_->profile();
+  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
+      active_profile);
+  return !service->ProfileIsManaged();
+#endif
+  return true;
+}
+
 void AvatarMenuModel::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
@@ -147,6 +192,12 @@ void AvatarMenuModel::Observe(int type,
 
 // static
 bool AvatarMenuModel::ShouldShowAvatarMenu() {
+  if (base::FieldTrialList::FindFullName(kShowProfileSwitcherFieldTrialName) ==
+      kAlwaysShowSwitcherGroupName) {
+    // We should only be in this group when multi-profiles is enabled.
+    DCHECK(ProfileManager::IsMultipleProfilesEnabled());
+    return true;
+  }
   return ProfileManager::IsMultipleProfilesEnabled() &&
       g_browser_process->profile_manager()->GetNumberOfProfiles() > 1;
 }
@@ -171,7 +222,7 @@ void AvatarMenuModel::RebuildMenu() {
           IDS_PROFILES_LOCAL_PROFILE_STATE);
     }
     if (browser_) {
-      FilePath path = profile_info_->GetPathOfProfileAtIndex(i);
+      base::FilePath path = profile_info_->GetPathOfProfileAtIndex(i);
       item->active = browser_->profile()->GetPath() == path;
     }
     items_.push_back(item);
@@ -179,6 +230,5 @@ void AvatarMenuModel::RebuildMenu() {
 }
 
 void AvatarMenuModel::ClearMenu() {
-  STLDeleteContainerPointers(items_.begin(), items_.end());
-  items_.clear();
+  STLDeleteElements(&items_);
 }

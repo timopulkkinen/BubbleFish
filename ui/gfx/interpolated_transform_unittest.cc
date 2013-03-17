@@ -10,8 +10,8 @@
 
 namespace {
 
-void CheckApproximatelyEqual(const ui::Transform& lhs,
-                             const ui::Transform& rhs) {
+void CheckApproximatelyEqual(const gfx::Transform& lhs,
+                             const gfx::Transform& rhs) {
   for (int i = 0; i < 4; ++i) {
     for (int j = 0; j < 4; ++j) {
       EXPECT_FLOAT_EQ(lhs.matrix().get(i, j), rhs.matrix().get(i, j));
@@ -37,9 +37,9 @@ TEST(InterpolatedTransformTest, InterpolatedRotation) {
       0, 100, 100, 200);
 
   for (int i = 0; i <= 100; ++i) {
-    ui::Transform rotation;
-    rotation.SetRotate(i);
-    ui::Transform interpolated = interpolated_rotation.Interpolate(i / 100.0f);
+    gfx::Transform rotation;
+    rotation.Rotate(i);
+    gfx::Transform interpolated = interpolated_rotation.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(rotation, interpolated);
     interpolated = interpolated_rotation_diff_start_end.Interpolate(i + 100);
     CheckApproximatelyEqual(rotation, interpolated);
@@ -47,15 +47,15 @@ TEST(InterpolatedTransformTest, InterpolatedRotation) {
 }
 
 TEST(InterpolatedTransformTest, InterpolatedScale) {
-  ui::InterpolatedScale interpolated_scale(gfx::Point3f(0, 0, 0),
-                                           gfx::Point3f(100, 100, 100));
+  ui::InterpolatedScale interpolated_scale(gfx::Point3F(0, 0, 0),
+                                           gfx::Point3F(100, 100, 100));
   ui::InterpolatedScale interpolated_scale_diff_start_end(
-      gfx::Point3f(0, 0, 0), gfx::Point3f(100, 100, 100), 100, 200);
+      gfx::Point3F(0, 0, 0), gfx::Point3F(100, 100, 100), 100, 200);
 
   for (int i = 0; i <= 100; ++i) {
-    ui::Transform scale;
-    scale.SetScale(i, i);
-    ui::Transform interpolated = interpolated_scale.Interpolate(i / 100.0f);
+    gfx::Transform scale;
+    scale.Scale(i, i);
+    gfx::Transform interpolated = interpolated_scale.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(scale, interpolated);
     interpolated = interpolated_scale_diff_start_end.Interpolate(i + 100);
     CheckApproximatelyEqual(scale, interpolated);
@@ -70,9 +70,9 @@ TEST(InterpolatedTransformTest, InterpolatedTranslate) {
       gfx::Point(0, 0), gfx::Point(100, 100), 100, 200);
 
   for (int i = 0; i <= 100; ++i) {
-    ui::Transform xform;
-    xform.SetTranslate(i, i);
-    ui::Transform interpolated = interpolated_xform.Interpolate(i / 100.0f);
+    gfx::Transform xform;
+    xform.Translate(i, i);
+    gfx::Transform interpolated = interpolated_xform.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(xform, interpolated);
     interpolated = interpolated_xform_diff_start_end.Interpolate(i + 100);
     CheckApproximatelyEqual(xform, interpolated);
@@ -86,8 +86,8 @@ TEST(InterpolatedTransformTest, InterpolatedRotationAboutPivot) {
   ui::InterpolatedTransformAboutPivot interpolated_xform(
       pivot,
       new ui::InterpolatedRotation(0, 90));
-  ui::Transform result = interpolated_xform.Interpolate(0.0f);
-  CheckApproximatelyEqual(ui::Transform(), result);
+  gfx::Transform result = interpolated_xform.Interpolate(0.0f);
+  CheckApproximatelyEqual(gfx::Transform(), result);
   result = interpolated_xform.Interpolate(1.0f);
   gfx::Point expected_result = pivot;
   result.TransformPoint(pivot);
@@ -102,9 +102,9 @@ TEST(InterpolatedTransformTest, InterpolatedScaleAboutPivot) {
   gfx::Point above_pivot(100, 200);
   ui::InterpolatedTransformAboutPivot interpolated_xform(
       pivot,
-      new ui::InterpolatedScale(gfx::Point3f(1, 1, 1), gfx::Point3f(2, 2, 2)));
-  ui::Transform result = interpolated_xform.Interpolate(0.0f);
-  CheckApproximatelyEqual(ui::Transform(), result);
+      new ui::InterpolatedScale(gfx::Point3F(1, 1, 1), gfx::Point3F(2, 2, 2)));
+  gfx::Transform result = interpolated_xform.Interpolate(0.0f);
+  CheckApproximatelyEqual(gfx::Transform(), result);
   result = interpolated_xform.Interpolate(1.0f);
   gfx::Point expected_result = pivot;
   result.TransformPoint(pivot);
@@ -112,31 +112,6 @@ TEST(InterpolatedTransformTest, InterpolatedScaleAboutPivot) {
   expected_result = gfx::Point(100, 300);
   result.TransformPoint(above_pivot);
   EXPECT_EQ(expected_result, above_pivot);
-}
-
-TEST(InterpolatedTransformTest, FactorTRS) {
-  for (int degrees = 0; degrees < 360; ++degrees) {
-    // build a transformation matrix.
-    ui::Transform transform;
-    transform.SetScale(degrees + 1, 2 * degrees + 1);
-    transform.ConcatRotate(degrees);
-    transform.ConcatTranslate(degrees * 2, -degrees * 3);
-
-    // factor the matrix
-    gfx::Point translation;
-    float rotation;
-    gfx::Point3f scale;
-    bool success = ui::InterpolatedTransform::FactorTRS(transform,
-                                                        &translation,
-                                                        &rotation,
-                                                        &scale);
-    EXPECT_TRUE(success);
-    EXPECT_FLOAT_EQ(translation.x(), degrees * 2);
-    EXPECT_FLOAT_EQ(translation.y(), -degrees * 3);
-    EXPECT_FLOAT_EQ(NormalizeAngle(rotation), degrees);
-    EXPECT_FLOAT_EQ(scale.x(), degrees + 1);
-    EXPECT_FLOAT_EQ(scale.y(), 2 * degrees + 1);
-  }
 }
 
 ui::InterpolatedTransform* GetScreenRotation(int degrees, bool reversed) {
@@ -179,7 +154,7 @@ ui::InterpolatedTransform* GetScreenRotation(int degrees, bool reversed) {
       new ui::InterpolatedScale(1.0f, 1.0f / scale_factor, 0.5f, 1.0f));
 
   scoped_ptr<ui::InterpolatedTransform> to_return(
-      new ui::InterpolatedConstantTransform(ui::Transform()));
+      new ui::InterpolatedConstantTransform(gfx::Transform()));
 
   scale_up->SetChild(scale_down.release());
   translation->SetChild(scale_up.release());
@@ -196,7 +171,7 @@ TEST(InterpolatedTransformTest, ScreenRotationEndsCleanly) {
       const bool reversed = i == 1;
       scoped_ptr<ui::InterpolatedTransform> screen_rotation(
           GetScreenRotation(degrees, reversed));
-      ui::Transform interpolated = screen_rotation->Interpolate(1.0f);
+      gfx::Transform interpolated = screen_rotation->Interpolate(1.0f);
       SkMatrix44& m = interpolated.matrix();
       // Upper-left 3x3 matrix should all be 0, 1 or -1.
       for (int row = 0; row < 3; ++row) {
@@ -219,8 +194,8 @@ ui::InterpolatedTransform* GetMaximize() {
       target_bounds.width()) / initial_bounds.height();
 
   scoped_ptr<ui::InterpolatedTransform> scale(
-      new ui::InterpolatedScale(gfx::Point3f(1, 1, 1),
-                                gfx::Point3f(scale_x, scale_y, 1)));
+      new ui::InterpolatedScale(gfx::Point3F(1, 1, 1),
+                                gfx::Point3F(scale_x, scale_y, 1)));
 
   scoped_ptr<ui::InterpolatedTransform> translation(
       new ui::InterpolatedTranslation(
@@ -247,7 +222,7 @@ ui::InterpolatedTransform* GetMaximize() {
 
 TEST(InterpolatedTransformTest, MaximizeEndsCleanly) {
   scoped_ptr<ui::InterpolatedTransform> maximize(GetMaximize());
-  ui::Transform interpolated = maximize->Interpolate(1.0f);
+  gfx::Transform interpolated = maximize->Interpolate(1.0f);
   SkMatrix44& m = interpolated.matrix();
   // Upper-left 3x3 matrix should all be 0, 1 or -1.
   for (int row = 0; row < 3; ++row) {
@@ -257,4 +232,3 @@ TEST(InterpolatedTransformTest, MaximizeEndsCleanly) {
     }
   }
 }
-

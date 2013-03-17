@@ -15,26 +15,26 @@
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/lock.h"
-#include "content/browser/download/download_item_factory.h"
 #include "content/browser/download/download_item_impl_delegate.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/download_url_parameters.h"
 
-class DownloadFileManager;
+namespace net {
+class BoundNetLog;
+}
+
+namespace content {
+class DownloadFileFactory;
+class DownloadItemFactory;
 class DownloadItemImpl;
 
-class CONTENT_EXPORT DownloadManagerImpl
-    : public content::DownloadManager,
-      private DownloadItemImplDelegate {
+class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
+                                           private DownloadItemImplDelegate {
  public:
-  // Caller guarantees that |file_manager| and |net_log| will remain valid
+  // Caller guarantees that |net_log| will remain valid
   // for the lifetime of DownloadManagerImpl (until Shutdown() is called).
-  // |factory| may be a default constructed (null) scoped_ptr; if so,
-  // the DownloadManagerImpl creates and takes ownership of the
-  // default DownloadItemFactory.
-  DownloadManagerImpl(DownloadFileManager* file_manager,
-                      scoped_ptr<content::DownloadItemFactory> factory,
-                      net::NetLog* net_log);
+  DownloadManagerImpl(net::NetLog* net_log);
 
   // Implementation functions (not part of the DownloadManager interface).
 
@@ -42,51 +42,58 @@ class CONTENT_EXPORT DownloadManagerImpl
   // Must be called on the UI thread.  Note that the DownloadManager
   // retains ownership.
   virtual DownloadItemImpl* CreateSavePackageDownloadItem(
-      const FilePath& main_file_path,
+      const base::FilePath& main_file_path,
       const GURL& page_url,
       const std::string& mime_type,
-      content::DownloadItem::Observer* observer);
+      DownloadItem::Observer* observer);
 
-  // content::DownloadManager functions.
-  virtual void SetDelegate(content::DownloadManagerDelegate* delegate) OVERRIDE;
-  virtual content::DownloadManagerDelegate* GetDelegate() const OVERRIDE;
+  // Notifies DownloadManager about a successful completion of |download_item|.
+  void OnSavePackageSuccessfullyFinished(DownloadItem* download_item);
+
+  // DownloadManager functions.
+  virtual void SetDelegate(DownloadManagerDelegate* delegate) OVERRIDE;
+  virtual DownloadManagerDelegate* GetDelegate() const OVERRIDE;
   virtual void Shutdown() OVERRIDE;
   virtual void GetAllDownloads(DownloadVector* result) OVERRIDE;
-  virtual bool Init(content::BrowserContext* browser_context) OVERRIDE;
-  virtual content::DownloadId StartDownload(
+  virtual bool Init(BrowserContext* browser_context) OVERRIDE;
+  virtual DownloadItem* StartDownload(
       scoped_ptr<DownloadCreateInfo> info,
-      scoped_ptr<content::ByteStreamReader> stream) OVERRIDE;
-  virtual void UpdateDownload(int32 download_id,
-                              int64 bytes_so_far,
-                              int64 bytes_per_sec,
-                              const std::string& hash_state) OVERRIDE;
-  virtual void OnResponseCompleted(int32 download_id, int64 size,
-                                   const std::string& hash) OVERRIDE;
+      scoped_ptr<ByteStreamReader> stream) OVERRIDE;
   virtual void CancelDownload(int32 download_id) OVERRIDE;
-  virtual void OnDownloadInterrupted(
-      int32 download_id,
-      content::DownloadInterruptReason reason) OVERRIDE;
   virtual int RemoveDownloadsBetween(base::Time remove_begin,
                                      base::Time remove_end) OVERRIDE;
   virtual int RemoveDownloads(base::Time remove_begin) OVERRIDE;
   virtual int RemoveAllDownloads() OVERRIDE;
-  virtual void DownloadUrl(
-      scoped_ptr<content::DownloadUrlParameters> params) OVERRIDE;
+  virtual void DownloadUrl(scoped_ptr<DownloadUrlParameters> params) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual void OnPersistentStoreQueryComplete(
-      std::vector<content::DownloadPersistentStoreInfo>* entries) OVERRIDE;
-  virtual void OnItemAddedToPersistentStore(int32 download_id,
-                                            int64 db_handle) OVERRIDE;
+  virtual content::DownloadItem* CreateDownloadItem(
+      const base::FilePath& current_path,
+      const base::FilePath& target_path,
+      const std::vector<GURL>& url_chain,
+      const GURL& referrer_url,
+      const base::Time& start_time,
+      const base::Time& end_time,
+      int64 received_bytes,
+      int64 total_bytes,
+      content::DownloadItem::DownloadState state,
+      DownloadDangerType danger_type,
+      DownloadInterruptReason interrupt_reason,
+      bool opened) OVERRIDE;
   virtual int InProgressCount() const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
+  virtual BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual void CheckForHistoryFilesRemoval() OVERRIDE;
-  virtual content::DownloadItem* GetDownload(int id) OVERRIDE;
-  virtual void SavePageDownloadFinished(
-      content::DownloadItem* download) OVERRIDE;
+  virtual DownloadItem* GetDownload(int id) OVERRIDE;
+
+  // For testing; specifically, accessed from TestFileErrorInjector.
+  void SetDownloadItemFactoryForTesting(
+      scoped_ptr<DownloadItemFactory> item_factory);
+  void SetDownloadFileFactoryForTesting(
+      scoped_ptr<DownloadFileFactory> file_factory);
+  virtual DownloadFileFactory* GetDownloadFileFactoryForTesting();
 
  private:
-  typedef std::set<content::DownloadItem*> DownloadSet;
+  typedef std::set<DownloadItem*> DownloadSet;
   typedef base::hash_map<int32, DownloadItemImpl*> DownloadMap;
   typedef std::vector<DownloadItemImpl*> DownloadItemImplVector;
 
@@ -98,115 +105,54 @@ class CONTENT_EXPORT DownloadManagerImpl
 
   virtual ~DownloadManagerImpl();
 
-  // Creates the download item.  Must be called on the UI thread.
-  // Returns the |BoundNetLog| used by the |DownloadItem|.
-  virtual net::BoundNetLog CreateDownloadItem(DownloadCreateInfo* info);
-
-  // Does nothing if |download_id| is not an active download.
-  void MaybeCompleteDownloadById(int download_id);
-
-  // Determine if the download is ready for completion, i.e. has had
-  // all data saved, and completed the filename determination and
-  // history insertion.
-  bool IsDownloadReadyForCompletion(DownloadItemImpl* download);
-
-  // Show the download in the browser.
-  void ShowDownloadInBrowser(DownloadItemImpl* download);
+  // Retrieves the download item corresponding to the passed
+  // DownloadCreateInfo (generated on the IO thread).  This will create
+  // the download item if this is a new download (common case) or retrieve an
+  // existing download item if this is a resuming download.
+  virtual DownloadItemImpl* GetOrCreateDownloadItem(DownloadCreateInfo* info);
 
   // Get next download id.
-  content::DownloadId GetNextId();
+  DownloadId GetNextId();
 
-  // Called on the FILE thread to check the existence of a downloaded file.
-  void CheckForFileRemovalOnFileThread(int32 download_id, const FilePath& path);
-
-  // Called on the UI thread if the FILE thread detects the removal of
-  // the downloaded file. The UI thread updates the state of the file
-  // and then notifies this update to the file's observer.
-  void OnFileRemovalDetected(int32 download_id);
-
-  // Removes |download| from the active and in progress maps.
-  // Called when the download is cancelled or has an error.
-  // Does nothing if the download is not in the history DB.
-  void RemoveFromActiveList(DownloadItemImpl* download);
-
-  // Inform observers that the model has changed.
-  void NotifyModelChanged();
-
-  // Debugging routine to confirm relationship between below
-  // containers; no-op if NDEBUG.
-  void AssertContainersConsistent() const;
-
-  // Add a DownloadItem to history_downloads_.
-  void AddDownloadItemToHistory(DownloadItemImpl* item, int64 db_handle);
+  // Called with the result of DownloadManagerDelegate::CheckForFileExistence.
+  // Updates the state of the file and then notifies this update to the file's
+  // observer.
+  void OnFileExistenceChecked(int32 download_id, bool result);
 
   // Remove from internal maps.
   int RemoveDownloadItems(const DownloadItemImplVector& pending_deletes);
 
-  // Called in response to our request to the DownloadFileManager to
-  // create a DownloadFile.  A |reason| of
-  // content::DOWNLOAD_INTERRUPT_REASON_NONE indicates success.
-  void OnDownloadFileCreated(
-      int32 download_id, content::DownloadInterruptReason reason);
-
-  // Called when the delegate has completed determining the download target.
-  // Arguments following |download_id| are as per
-  // content::DownloadTargetCallback.
-  void OnDownloadTargetDetermined(
-      int32 download_id,
-      const FilePath& target_path,
-      content::DownloadItem::TargetDisposition disposition,
-      content::DownloadDangerType danger_type,
-      const FilePath& intermediate_path);
-
-  // Called when a download entry is committed to the persistent store.
-  void OnDownloadItemAddedToPersistentStore(DownloadItemImpl* item);
-
-  // Called when Save Page As entry is committed to the persistent store.
-  void OnSavePageItemAddedToPersistentStore(DownloadItemImpl* item);
-
   // Overridden from DownloadItemImplDelegate
   // (Note that |GetBrowserContext| are present in both interfaces.)
-  virtual DownloadFileManager* GetDownloadFileManager() OVERRIDE;
-  virtual bool ShouldOpenDownload(DownloadItemImpl* item) OVERRIDE;
-  virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
+  virtual void DetermineDownloadTarget(
+      DownloadItemImpl* item, const DownloadTargetCallback& callback) OVERRIDE;
+  virtual bool ShouldCompleteDownload(
+      DownloadItemImpl* item, const base::Closure& complete_callback) OVERRIDE;
+  virtual bool ShouldOpenFileBasedOnExtension(
+      const base::FilePath& path) OVERRIDE;
+  virtual bool ShouldOpenDownload(
+      DownloadItemImpl* item,
+      const ShouldOpenDownloadCallback& callback) OVERRIDE;
   virtual void CheckForFileRemoval(DownloadItemImpl* download_item) OVERRIDE;
-  virtual void MaybeCompleteDownload(DownloadItemImpl* download) OVERRIDE;
-  virtual void DownloadStopped(DownloadItemImpl* download) OVERRIDE;
-  virtual void DownloadCompleted(DownloadItemImpl* download) OVERRIDE;
-  virtual void DownloadOpened(DownloadItemImpl* download) OVERRIDE;
+  virtual void ResumeInterruptedDownload(
+      scoped_ptr<content::DownloadUrlParameters> params,
+      content::DownloadId id) OVERRIDE;
+  virtual void OpenDownload(DownloadItemImpl* download) OVERRIDE;
+  virtual void ShowDownloadInShell(DownloadItemImpl* download) OVERRIDE;
   virtual void DownloadRemoved(DownloadItemImpl* download) OVERRIDE;
-  virtual void DownloadRenamedToIntermediateName(
-      DownloadItemImpl* download) OVERRIDE;
-  virtual void DownloadRenamedToFinalName(DownloadItemImpl* download) OVERRIDE;
-  virtual void AssertStateConsistent(DownloadItemImpl* download) const OVERRIDE;
+  virtual void ShowDownloadInBrowser(DownloadItemImpl* download) OVERRIDE;
 
   // Factory for creation of downloads items.
-  scoped_ptr<content::DownloadItemFactory> factory_;
+  scoped_ptr<DownloadItemFactory> item_factory_;
+
+  // Factory for the creation of download files.
+  scoped_ptr<DownloadFileFactory> file_factory_;
 
   // |downloads_| is the owning set for all downloads known to the
   // DownloadManager.  This includes downloads started by the user in
   // this session, downloads initialized from the history system, and
-  // "save page as" downloads.  All other DownloadItem containers in
-  // the DownloadManager are maps; they do not own the DownloadItems.
-  // Note that this is the only place (with any functional implications;
-  // see save_page_downloads_ below) that "save page as" downloads are
-  // kept, as the DownloadManager's only job is to hold onto those
-  // until destruction.
-  //
-  // |active_downloads_| is a map of all downloads that are currently being
-  // processed. The key is the ID assigned by the DownloadFileManager,
-  // which is unique for the current session.
-  //
-  // When a download is created through a user action, the corresponding
-  // DownloadItem* is placed in |active_downloads_| and remains there until the
-  // download is in a terminal state (COMPLETE or CANCELLED).  Once it has a
-  // valid handle, the DownloadItem* is placed in the |history_downloads_| map.
-  // Downloads from past sessions read from a persisted state from the history
-  // system are placed directly into |history_downloads_| since they have valid
-  // handles in the history system.
-
+  // "save page as" downloads.
   DownloadMap downloads_;
-  DownloadMap active_downloads_;
 
   int history_size_;
 
@@ -217,17 +163,16 @@ class CONTENT_EXPORT DownloadManagerImpl
   ObserverList<Observer> observers_;
 
   // The current active browser context.
-  content::BrowserContext* browser_context_;
-
-  // Non-owning pointer for handling file writing on the download_thread_.
-  DownloadFileManager* file_manager_;
+  BrowserContext* browser_context_;
 
   // Allows an embedder to control behavior. Guaranteed to outlive this object.
-  content::DownloadManagerDelegate* delegate_;
+  DownloadManagerDelegate* delegate_;
 
   net::NetLog* net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadManagerImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_IMPL_H_

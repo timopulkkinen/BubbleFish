@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "webkit/blob/shareable_file_reference.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
@@ -20,7 +19,7 @@ using base::PlatformFileInfo;
 
 namespace fileapi {
 
-typedef IsolatedContext::FileInfo FileInfo;
+typedef IsolatedContext::MountPointInfo FileInfo;
 
 namespace {
 
@@ -35,10 +34,10 @@ class SetFileEnumerator : public FileSystemFileUtil::AbstractFileEnumerator {
   virtual ~SetFileEnumerator() {}
 
   // AbstractFileEnumerator overrides.
-  virtual FilePath Next() OVERRIDE {
+  virtual base::FilePath Next() OVERRIDE {
     if (file_iter_ == files_.end())
-      return FilePath();
-    FilePath platform_file = (file_iter_++)->path;
+      return base::FilePath();
+    base::FilePath platform_file = (file_iter_++)->path;
     NativeFileUtil::GetFileInfo(platform_file, &file_info_);
     return platform_file;
   }
@@ -66,7 +65,7 @@ class RecursiveSetFileEnumerator
   virtual ~RecursiveSetFileEnumerator() {}
 
   // AbstractFileEnumerator overrides.
-  virtual FilePath Next() OVERRIDE;
+  virtual base::FilePath Next() OVERRIDE;
   virtual int64 Size() OVERRIDE {
     DCHECK(current_enumerator_.get());
     return current_enumerator_->Size();
@@ -86,22 +85,21 @@ class RecursiveSetFileEnumerator
   scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> current_enumerator_;
 };
 
-FilePath RecursiveSetFileEnumerator::Next() {
+base::FilePath RecursiveSetFileEnumerator::Next() {
   if (current_enumerator_.get()) {
-    FilePath path = current_enumerator_->Next();
+    base::FilePath path = current_enumerator_->Next();
     if (!path.empty())
       return path;
   }
 
   // We reached the end.
   if (file_iter_ == files_.end())
-    return FilePath();
+    return base::FilePath();
 
   // Enumerates subdirectories of the next path.
   FileInfo& next_file = *file_iter_++;
-  current_enumerator_.reset(
-        NativeFileUtil::CreateFileEnumerator(
-            next_file.path, true /* recursive */));
+  current_enumerator_ = NativeFileUtil::CreateFileEnumerator(
+      next_file.path, true /* recursive */);
   DCHECK(current_enumerator_.get());
   return current_enumerator_->Next();
 }
@@ -115,7 +113,7 @@ IsolatedFileUtil::IsolatedFileUtil() {}
 PlatformFileError IsolatedFileUtil::GetLocalFilePath(
     FileSystemOperationContext* context,
     const FileSystemURL& url,
-    FilePath* local_file_path) {
+    base::FilePath* local_file_path) {
   DCHECK(local_file_path);
   DCHECK(url.is_valid());
   if (url.path().empty()) {
@@ -134,7 +132,7 @@ PlatformFileError DraggedFileUtil::GetFileInfo(
     FileSystemOperationContext* context,
     const FileSystemURL& url,
     PlatformFileInfo* file_info,
-    FilePath* platform_path) {
+    base::FilePath* platform_path) {
   DCHECK(file_info);
   std::string filesystem_id;
   DCHECK(url.is_valid());
@@ -151,7 +149,7 @@ PlatformFileError DraggedFileUtil::GetFileInfo(
   }
   base::PlatformFileError error =
       NativeFileUtil::GetFileInfo(url.path(), file_info);
-  if (file_util::IsLink(url.path()) && !FilePath().IsParent(url.path())) {
+  if (file_util::IsLink(url.path()) && !base::FilePath().IsParent(url.path())) {
     // Don't follow symlinks unless it's the one that are selected by the user.
     return base::PLATFORM_FILE_ERROR_NOT_FOUND;
   }
@@ -160,11 +158,11 @@ PlatformFileError DraggedFileUtil::GetFileInfo(
   return error;
 }
 
-FileSystemFileUtil::AbstractFileEnumerator*
-DraggedFileUtil::CreateFileEnumerator(
-    FileSystemOperationContext* context,
-    const FileSystemURL& root,
-    bool recursive) {
+scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator>
+    DraggedFileUtil::CreateFileEnumerator(
+        FileSystemOperationContext* context,
+        const FileSystemURL& root,
+        bool recursive) {
   DCHECK(root.is_valid());
   if (!root.path().empty())
     return NativeFileUtil::CreateFileEnumerator(root.path(), recursive);
@@ -173,24 +171,12 @@ DraggedFileUtil::CreateFileEnumerator(
   std::vector<FileInfo> toplevels;
   IsolatedContext::GetInstance()->GetDraggedFileInfo(
       root.filesystem_id(), &toplevels);
-  if (!recursive)
-    return new SetFileEnumerator(toplevels);
-  return new RecursiveSetFileEnumerator(toplevels);
-}
-
-bool DraggedFileUtil::IsDirectoryEmpty(
-    FileSystemOperationContext* context,
-    const FileSystemURL& url) {
-  DCHECK(url.is_valid());
-  if (url.path().empty()) {
-    // The root directory case.
-    std::vector<FileInfo> toplevels;
-    bool success = IsolatedContext::GetInstance()->GetDraggedFileInfo(
-        url.filesystem_id(), &toplevels);
-    DCHECK(success);
-    return toplevels.empty();
+  if (!recursive) {
+    return make_scoped_ptr(new SetFileEnumerator(toplevels))
+        .PassAs<FileSystemFileUtil::AbstractFileEnumerator>();
   }
-  return NativeFileUtil::IsDirectoryEmpty(url.path());
+  return make_scoped_ptr(new RecursiveSetFileEnumerator(toplevels))
+      .PassAs<FileSystemFileUtil::AbstractFileEnumerator>();
 }
 
-}  // namespace
+}  // namespace fileapi

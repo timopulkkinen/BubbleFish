@@ -12,11 +12,10 @@
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "ipc/ipc_message.h"
 
-// static
 // The android implementation does not do anything "foreign session" specific.
 // We use it to restore tabs from "recently closed" too.
+// static
 void SessionRestore::RestoreForeignSessionTab(
     content::WebContents* web_contents,
     const SessionTab& session_tab,
@@ -30,17 +29,19 @@ void SessionRestore::RestoreForeignSessionTab(
       TabNavigation::CreateNavigationEntriesFromTabNavigations(
           session_tab.navigations, profile);
   content::WebContents* new_web_contents = content::WebContents::Create(
-        context, NULL, MSG_ROUTING_NONE, NULL);
+      content::WebContents::CreateParams(context));
   int selected_index = session_tab.normalized_navigation_index();
-  new_web_contents->GetController().Restore(selected_index,
-                                            true, /* from_last_session */
-                                            &entries);
+  new_web_contents->GetController().Restore(
+      selected_index,
+      content::NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY,
+      &entries);
   tab_model->CreateTab(new_web_contents);
 }
 
 // static
 void SessionRestore::RestoreForeignSessionWindows(
     Profile* profile,
+    chrome::HostDesktopType host_desktop_type,
     std::vector<const SessionWindow*>::const_iterator begin,
     std::vector<const SessionWindow*>::const_iterator end) {
   NOTREACHED();

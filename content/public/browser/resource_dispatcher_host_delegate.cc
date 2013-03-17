@@ -35,6 +35,7 @@ void ResourceDispatcherHostDelegate::DownloadStarting(
     int route_id,
     int request_id,
     bool is_content_initiated,
+    bool must_download,
     ScopedVector<ResourceThrottle>* throttles) {
 }
 
@@ -57,10 +58,10 @@ ResourceDispatcherHostLoginDelegate*
   return NULL;
 }
 
-void ResourceDispatcherHostDelegate::HandleExternalProtocol(const GURL& url,
+bool ResourceDispatcherHostDelegate::HandleExternalProtocol(const GURL& url,
                                                             int child_id,
                                                             int route_id) {
-
+  return true;
 }
 
 bool ResourceDispatcherHostDelegate::ShouldForceDownloadResource(

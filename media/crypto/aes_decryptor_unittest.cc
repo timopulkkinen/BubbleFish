@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/sys_byteorder.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/mock_filters.h"
@@ -21,6 +20,7 @@ using ::testing::Gt;
 using ::testing::IsNull;
 using ::testing::NotNull;
 using ::testing::SaveArg;
+using ::testing::StrEq;
 using ::testing::StrNe;
 
 namespace media {
@@ -60,8 +60,7 @@ const WebmEncryptedData kWebmEncryptedFrames[] = {
       0xff, 0xf0, 0xd1, 0x12, 0xd5, 0x24, 0x81, 0x96,
       0x55, 0x1b, 0x68, 0x9f, 0x38, 0x91, 0x85
       }, 23
-  },
-  {
+  }, {
     // plaintext
     "Changed Original data.", 22,
     // key_id
@@ -79,8 +78,7 @@ const WebmEncryptedData kWebmEncryptedFrames[] = {
       0x79, 0x1c, 0x8e, 0x25, 0xd7, 0x17, 0xe7, 0x5e,
       0x16, 0xe3, 0x40, 0x08, 0x27, 0x11, 0xe9
       }, 31
-  },
-  {
+  }, {
     // plaintext
     "Original data.", 14,
     // key_id
@@ -92,12 +90,11 @@ const WebmEncryptedData kWebmEncryptedFrames[] = {
       0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40
       }, 16,
     // encrypted_data
-    { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x01, 0x9c, 0x71, 0x26, 0x57, 0x3e, 0x25, 0x37,
+    { 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x9c, 0x71, 0x26, 0x57, 0x3e, 0x25, 0x37,
       0xf7, 0x31, 0x81, 0x19, 0x64, 0xce, 0xbc
       }, 23
-  },
-  {
+  }, {
     // plaintext
     "Changed Original data.", 22,
     // key_id
@@ -115,8 +112,6 @@ const WebmEncryptedData kWebmEncryptedFrames[] = {
       }, 23
   }
 };
-
-
 
 static const uint8 kWebmWrongSizedKey[] = { 0x20, 0x20 };
 
@@ -161,16 +156,16 @@ static const SubsampleEntry kSubsampleEntries[] = {
   { 1, 0 }
 };
 
-// Returns a 16 byte CTR counter block. The CTR counter block format is a
-// CTR IV appended with a CTR block counter. |iv| is a CTR IV. |iv_size| is
-// the size of |iv| in bytes.
+// Generates a 16 byte CTR counter block. The CTR counter block format is a
+// CTR IV appended with a CTR block counter. |iv| is an 8 byte CTR IV.
+// |iv_size| is the size of |iv| in btyes. Returns a string of
+// kDecryptionKeySize bytes.
 static std::string GenerateCounterBlock(const uint8* iv, int iv_size) {
-  const int kDecryptionKeySize = 16;
   CHECK_GT(iv_size, 0);
-  CHECK_LE(iv_size, kDecryptionKeySize);
+  CHECK_LE(iv_size, DecryptConfig::kDecryptionKeySize);
 
   std::string counter_block(reinterpret_cast<const char*>(iv), iv_size);
-  counter_block.append(kDecryptionKeySize - iv_size, 0);
+  counter_block.append(DecryptConfig::kDecryptionKeySize - iv_size, 0);
   return counter_block;
 }
 
@@ -187,9 +182,10 @@ static scoped_refptr<DecoderBuffer> CreateWebMEncryptedBuffer(
   scoped_refptr<DecoderBuffer> encrypted_buffer = DecoderBuffer::CopyFrom(
       data, data_size);
   CHECK(encrypted_buffer);
+  DCHECK_EQ(kWebMSignalByteSize, 1);
 
   uint8 signal_byte = data[0];
-  int data_offset = sizeof(signal_byte);
+  int data_offset = kWebMSignalByteSize;
 
   // Setting the DecryptConfig object of the buffer while leaving the
   // initialization vector empty will tell the decryptor that the frame is
@@ -197,12 +193,8 @@ static scoped_refptr<DecoderBuffer> CreateWebMEncryptedBuffer(
   std::string counter_block_str;
 
   if (signal_byte & kWebMFlagEncryptedFrame) {
-    uint64 network_iv;
-    memcpy(&network_iv, data + data_offset, sizeof(network_iv));
-    const uint64 iv = base::NetToHost64(network_iv);
-    counter_block_str =
-        GenerateCounterBlock(reinterpret_cast<const uint8*>(&iv), sizeof(iv));
-    data_offset += sizeof(iv);
+    counter_block_str = GenerateCounterBlock(data + data_offset, kWebMIvSize);
+    data_offset += kWebMIvSize;
   }
 
   encrypted_buffer->SetDecryptConfig(
@@ -235,7 +227,11 @@ static scoped_refptr<DecoderBuffer> CreateSubsampleEncryptedBuffer(
 class AesDecryptorTest : public testing::Test {
  public:
   AesDecryptorTest()
-      : decryptor_(&client_),
+      : decryptor_(
+            base::Bind(&AesDecryptorTest::KeyAdded, base::Unretained(this)),
+            base::Bind(&AesDecryptorTest::KeyError, base::Unretained(this)),
+            base::Bind(&AesDecryptorTest::KeyMessage, base::Unretained(this)),
+            NeedKeyCB()),
         decrypt_cb_(base::Bind(&AesDecryptorTest::BufferDecrypted,
                                base::Unretained(this))),
         subsample_entries_(kSubsampleEntries,
@@ -244,24 +240,26 @@ class AesDecryptorTest : public testing::Test {
 
  protected:
   void GenerateKeyRequest(const uint8* key_id, int key_id_size) {
-    EXPECT_CALL(client_, KeyMessageMock(kClearKeySystem, StrNe(std::string()),
-                                        NotNull(), Gt(0), ""))
+    std::string key_id_string(reinterpret_cast<const char*>(key_id),
+                              key_id_size);
+    EXPECT_CALL(*this, KeyMessage(kClearKeySystem,
+                                  StrNe(""), StrEq(key_id_string), ""))
         .WillOnce(SaveArg<1>(&session_id_string_));
-    EXPECT_TRUE(decryptor_.GenerateKeyRequest(kClearKeySystem,
+    EXPECT_TRUE(decryptor_.GenerateKeyRequest(kClearKeySystem, "",
                                               key_id, key_id_size));
   }
 
   void AddKeyAndExpectToSucceed(const uint8* key_id, int key_id_size,
                                 const uint8* key, int key_size) {
-    EXPECT_CALL(client_, KeyAdded(kClearKeySystem, session_id_string_));
+    EXPECT_CALL(*this, KeyAdded(kClearKeySystem, session_id_string_));
     decryptor_.AddKey(kClearKeySystem, key, key_size, key_id, key_id_size,
                       session_id_string_);
   }
 
   void AddKeyAndExpectToFail(const uint8* key_id, int key_id_size,
                              const uint8* key, int key_size) {
-    EXPECT_CALL(client_, KeyError(kClearKeySystem, session_id_string_,
-                                  Decryptor::kUnknownError, 0));
+    EXPECT_CALL(*this, KeyError(kClearKeySystem, session_id_string_,
+                                Decryptor::kUnknownError, 0));
     decryptor_.AddKey(kClearKeySystem, key, key_size, key_id, key_id_size,
                       session_id_string_);
   }
@@ -275,7 +273,7 @@ class AesDecryptorTest : public testing::Test {
     EXPECT_CALL(*this, BufferDecrypted(AesDecryptor::kSuccess, NotNull()))
         .WillOnce(SaveArg<1>(&decrypted));
 
-    decryptor_.Decrypt(encrypted, decrypt_cb_);
+    decryptor_.Decrypt(Decryptor::kVideo, encrypted, decrypt_cb_);
     ASSERT_TRUE(decrypted);
     ASSERT_EQ(plain_text_size, decrypted->GetDataSize());
     EXPECT_EQ(0, memcmp(plain_text, decrypted->GetData(), plain_text_size));
@@ -288,7 +286,7 @@ class AesDecryptorTest : public testing::Test {
     EXPECT_CALL(*this, BufferDecrypted(AesDecryptor::kSuccess, NotNull()))
         .WillOnce(SaveArg<1>(&decrypted));
 
-    decryptor_.Decrypt(encrypted, decrypt_cb_);
+    decryptor_.Decrypt(Decryptor::kVideo, encrypted, decrypt_cb_);
     ASSERT_TRUE(decrypted);
     ASSERT_EQ(plain_text_size, decrypted->GetDataSize());
     EXPECT_NE(0, memcmp(plain_text, decrypted->GetData(), plain_text_size));
@@ -301,7 +299,7 @@ class AesDecryptorTest : public testing::Test {
     EXPECT_CALL(*this, BufferDecrypted(AesDecryptor::kSuccess, NotNull()))
         .WillOnce(SaveArg<1>(&decrypted));
 
-    decryptor_.Decrypt(encrypted, decrypt_cb_);
+    decryptor_.Decrypt(Decryptor::kVideo, encrypted, decrypt_cb_);
     ASSERT_TRUE(decrypted);
     EXPECT_NE(plain_text_size, decrypted->GetDataSize());
     EXPECT_NE(0, memcmp(plain_text, decrypted->GetData(), plain_text_size));
@@ -309,15 +307,27 @@ class AesDecryptorTest : public testing::Test {
 
   void DecryptAndExpectToFail(const scoped_refptr<DecoderBuffer>& encrypted) {
     EXPECT_CALL(*this, BufferDecrypted(AesDecryptor::kError, IsNull()));
-    decryptor_.Decrypt(encrypted, decrypt_cb_);
+    decryptor_.Decrypt(Decryptor::kVideo, encrypted, decrypt_cb_);
   }
 
-  MockDecryptorClient client_;
+  MOCK_METHOD2(KeyAdded, void(const std::string&, const std::string&));
+  MOCK_METHOD4(KeyError, void(const std::string&, const std::string&,
+                              Decryptor::KeyError, int));
+  MOCK_METHOD4(KeyMessage, void(const std::string& key_system,
+                                const std::string& session_id,
+                                const std::string& message,
+                                const std::string& default_url));
+
   AesDecryptor decryptor_;
   std::string session_id_string_;
   AesDecryptor::DecryptCB decrypt_cb_;
   std::vector<SubsampleEntry> subsample_entries_;
 };
+
+TEST_F(AesDecryptorTest, GenerateKeyRequestWithNullInitData) {
+  EXPECT_CALL(*this, KeyMessage(kClearKeySystem, StrNe(""), "", ""));
+  EXPECT_TRUE(decryptor_.GenerateKeyRequest(kClearKeySystem, "", NULL, 0));
+}
 
 TEST_F(AesDecryptorTest, NormalWebMDecryption) {
   const WebmEncryptedData& frame = kWebmEncryptedFrames[0];
@@ -374,7 +384,7 @@ TEST_F(AesDecryptorTest, NoKey) {
       CreateWebMEncryptedBuffer(frame.encrypted_data, frame.encrypted_data_size,
                                 frame.key_id, frame.key_id_size);
   EXPECT_CALL(*this, BufferDecrypted(AesDecryptor::kNoKey, IsNull()));
-  decryptor_.Decrypt(encrypted_data, decrypt_cb_);
+  decryptor_.Decrypt(Decryptor::kVideo, encrypted_data, decrypt_cb_);
 }
 
 TEST_F(AesDecryptorTest, KeyReplacement) {

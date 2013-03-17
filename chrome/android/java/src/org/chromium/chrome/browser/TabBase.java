@@ -7,13 +7,13 @@ package org.chromium.chrome.browser;
 import android.content.Context;
 import android.text.TextUtils;
 
-import org.chromium.chrome.browser.ChromeWebContentsDelegateAndroid;
-import org.chromium.chrome.browser.ContentViewUtil;
+import org.chromium.base.ObserverList;
 import org.chromium.content.browser.ContentView;
-import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.common.CleanupReference;
 import org.chromium.ui.gfx.NativeWindow;
+
+import java.util.List;
 
 /**
  * The basic Java representation of a tab.  Contains and manages a {@link ContentView}.
@@ -23,31 +23,29 @@ public class TabBase {
     private ContentView mContentView;
     private ChromeWebContentsDelegateAndroid mWebContentsDelegate;
     private int mNativeTabBaseAndroidImpl;
+    private ObserverList<TabObserver> mObservers = new ObserverList<TabObserver>();
 
     private CleanupReference mCleanupReference;
+
+    // Tab state
+    private boolean mIsLoading = false;
 
     /**
      * @param context  The Context the view is running in.
      * @param url      The URL to start this tab with.
      * @param window   The NativeWindow should represent this tab.
-     * @param delegate The {@link ChromeWebContentsDelegateAndroid} that should be notified of any
-     *                 WebContents changes.
      */
-    public TabBase(Context context, String url, NativeWindow window,
-            ChromeWebContentsDelegateAndroid delegate) {
-        this(context, 0, window, delegate);
+    public TabBase(Context context, String url, NativeWindow window) {
+        this(context, 0, window);
         loadUrlWithSanitization(url);
     }
 
     /**
-     * @param context           The Context the view is running in.
-     * @param nativeWebContents A native pointer to the WebContents this tab represents.
-     * @param window            The NativeWindow should represent this tab.
-     * @param delegate          The {@link ChromeWebContentsDelegateAndroid} that should be notified
-     *                          of any WebContents changes.
+     * @param context              The Context the view is running in.
+     * @param nativeWebContentsPtr A native pointer to the WebContents this tab represents.
+     * @param window               The NativeWindow should represent this tab.
      */
-    public TabBase(Context context, int nativeWebContentsPtr,
-            NativeWindow window, ChromeWebContentsDelegateAndroid delegate) {
+    public TabBase(Context context, int nativeWebContentsPtr, NativeWindow window) {
         mWindow = window;
 
         // Build the WebContents and the ContentView/ContentViewCore
@@ -56,10 +54,10 @@ public class TabBase {
         }
         mContentView = ContentView.newInstance(context, nativeWebContentsPtr, mWindow,
                 ContentView.PERSONALITY_CHROME);
-        mNativeTabBaseAndroidImpl = nativeInit(nativeWebContentsPtr);
+        mNativeTabBaseAndroidImpl = nativeInit(nativeWebContentsPtr, window.getNativePointer());
 
         // Build the WebContentsDelegate
-        mWebContentsDelegate = delegate == null ? new ChromeWebContentsDelegateAndroid() : delegate;
+        mWebContentsDelegate = new TabBaseChromeWebContentsDelegateAndroid();
         nativeInitWebContentsDelegate(mNativeTabBaseAndroidImpl, mWebContentsDelegate);
 
         // To be called after everything is initialized.
@@ -72,11 +70,35 @@ public class TabBase {
      * be used.
      */
     public void destroy() {
+        for (TabObserver observer : mObservers) {
+            observer.onCloseTab(TabBase.this);
+        }
         destroyContentView();
         if (mNativeTabBaseAndroidImpl != 0) {
             mCleanupReference.cleanupNow();
             mNativeTabBaseAndroidImpl = 0;
         }
+    }
+
+    /**
+     * @param observer The {@link TabObserver} that should be notified of changes.
+     */
+    public void addObserver(TabObserver observer) {
+        mObservers.addObserver(observer);
+    }
+
+    /**
+     * @param observer The {@link TabObserver} that should no longer be notified of changes.
+     */
+    public void removeObserver(TabObserver observer) {
+        mObservers.removeObserver(observer);
+    }
+
+    /**
+     * @return Whether or not the tab is currently loading.
+     */
+    public boolean isLoading() {
+        return mIsLoading;
     }
 
     /**
@@ -131,7 +153,34 @@ public class TabBase {
         }
     }
 
-    private native int nativeInit(int webContentsPtr);
+    private class TabBaseChromeWebContentsDelegateAndroid
+            extends ChromeWebContentsDelegateAndroid {
+        @Override
+        public void onLoadProgressChanged(int progress) {
+            for (TabObserver observer : mObservers) {
+                observer.onLoadProgressChanged(TabBase.this, progress);
+            }
+        }
+
+        @Override
+        public void onUpdateUrl(String url) {
+            for (TabObserver observer : mObservers) {
+                observer.onUpdateUrl(TabBase.this, url);
+            }
+        }
+
+        @Override
+        public void onLoadStarted() {
+            mIsLoading = true;
+        }
+
+        @Override
+        public void onLoadStopped() {
+            mIsLoading = false;
+        }
+    }
+
+    private native int nativeInit(int webContentsPtr, int windowAndroidPtr);
     private static native void nativeDestroy(int nativeTabBaseAndroidImpl);
     private native void nativeInitWebContentsDelegate(int nativeTabBaseAndroidImpl,
             ChromeWebContentsDelegateAndroid chromeWebContentsDelegateAndroid);

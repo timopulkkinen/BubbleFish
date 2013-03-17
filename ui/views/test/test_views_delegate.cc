@@ -7,10 +7,10 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "content/public/test/web_contents_tester.h"
-#include "ui/views/views_switches.h"
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
-#include "ui/views/widget/desktop_native_widget_aura.h"
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#include "ui/views/widget/native_widget_aura.h"
 #endif
 
 namespace views {
@@ -51,31 +51,15 @@ bool TestViewsDelegate::UseTransparentWindows() const {
   return use_transparent_windows_;
 }
 
-int TestViewsDelegate::GetDispositionForEvent(int event_flags) {
-  return 0;
-}
-
-#if defined(USE_AURA)
-views::NativeWidgetHelperAura* TestViewsDelegate::CreateNativeWidgetHelper(
-    views::NativeWidgetAura* native_widget) {
-  return NULL;
-}
-#endif
-
 content::WebContents* TestViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
   return NULL;
 }
 
-NativeWidget* TestViewsDelegate::CreateNativeWidget(
-    internal::NativeWidgetDelegate* delegate,
-    gfx::NativeView parent) {
-#if defined(USE_AURA) && !defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDesktopAura))
-    return new DesktopNativeWidgetAura(delegate);
-#endif
-  return NULL;
+void TestViewsDelegate::OnBeforeWidgetInit(
+    Widget::InitParams* params,
+    internal::NativeWidgetDelegate* delegate) {
 }
 
 }  // namespace views

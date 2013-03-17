@@ -64,7 +64,7 @@ namespace content {
 //      // Create a stream for sending bytes from IO->FILE threads.
 //      scoped_ptr<ByteStreamWriter> writer;
 //      scoped_ptr<ByteStreamReader> reader;
-//      content::CreateByteStream(
+//      CreateByteStream(
 //          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
 //          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
 //          kStreamBufferSize /* e.g. 10240.  */,
@@ -107,13 +107,13 @@ namespace content {
 //      scoped_refptr<net::IOBuffer> data;
 //      size_t length = 0;
 //
-//      while (content::ByteStreamReader::STREAM_HAS_DATA ==
+//      while (ByteStreamReader::STREAM_HAS_DATA ==
 //             (state = reader->Read(&data, &length))) {
 //        // Process |data|.
 //      }
 //
-//      if (content::ByteStreamReader::STREAM_COMPLETE == state) {
-//        content::DownloadInterruptReason status = reader->GetStatus();
+//      if (ByteStreamReader::STREAM_COMPLETE == state) {
+//        DownloadInterruptReason status = reader->GetStatus();
 //        // Process error or successful completion in |status|.
 //      }
 //
@@ -122,6 +122,10 @@ namespace content {
 //    }
 class CONTENT_EXPORT ByteStreamWriter {
 public:
+  // Inverse of the fraction of the stream buffer that must be full before
+  // a notification is sent to paired Reader that there's more data.
+  static const int kFractionBufferBeforeSending;
+
   virtual ~ByteStreamWriter() = 0;
 
   // Always adds the data passed into the ByteStream.  Returns true
@@ -150,6 +154,10 @@ public:
 
 class CONTENT_EXPORT ByteStreamReader {
  public:
+  // Inverse of the fraction of the stream buffer that must be empty before
+  // a notification is send to paired Writer that there's more room.
+  static const int kFractionReadBeforeWindowUpdate;
+
   enum StreamState { STREAM_EMPTY, STREAM_HAS_DATA, STREAM_COMPLETE };
 
   virtual ~ByteStreamReader() = 0;

@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/common/chrome_switches.h"
@@ -24,6 +24,7 @@ const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
       { switches::kAuthNegotiateDelegateWhitelist,
           prefs::kAuthNegotiateDelegateWhitelist },
       { switches::kGSSAPILibraryName, prefs::kGSSAPILibraryName },
+      { switches::kSpdyProxyAuthOrigin, prefs::kSpdyProxyAuthOrigin },
       { switches::kDiskCacheDir, prefs::kDiskCacheDir },
       { switches::kSSLVersionMin, prefs::kSSLVersionMin },
       { switches::kSSLVersionMax, prefs::kSSLVersionMax },
@@ -59,12 +60,16 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
       { switches::kEnablePrintPreview, prefs::kPrintPreviewDisabled, false },
 #endif
 #if defined(OS_CHROMEOS)
-      { switches::kDisableGData, prefs::kDisableGData, true },
+      { switches::kDisableDrive, prefs::kDisableDrive, true },
       { switches::kEnableTouchpadThreeFingerClick,
           prefs::kEnableTouchpadThreeFingerClick, true },
+      { switches::kEnableTouchpadThreeFingerSwipe,
+          prefs::kEnableTouchpadThreeFingerSwipe, true },
 #endif
-      { switches::kLoadCloudPolicyOnSignin, prefs::kLoadCloudPolicyOnSignin,
-        true },
+      { switches::kDisableCloudPolicyOnSignin,
+          prefs::kDisableCloudPolicyOnSignin, true },
+      { switches::kDisableAsyncDns, prefs::kBuiltInDnsClientEnabled, false },
+      { switches::kEnableAsyncDns, prefs::kBuiltInDnsClientEnabled, true },
 };
 
 const CommandLinePrefStore::IntegerSwitchToPreferenceMapEntry

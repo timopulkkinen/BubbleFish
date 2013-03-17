@@ -7,22 +7,27 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "chrome/test/base/interactive_test_utils.h"
+#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/ime/text_input_test_support.h"
 #include "ui/compositor/test/compositor_test_support.h"
-#include "ui/ui_controls/ui_controls.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
+#include "ash/test/test_shell_delegate.h"
 #endif
+
 #if defined(USE_AURA)
 #include "ui/aura/client/event_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/aura_test_helper.h"
 #endif
 
 namespace {
@@ -37,13 +42,13 @@ class TestView : public views::View {
     PreferredSizeChanged();
   }
 
-  gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     if (!preferred_size_.IsEmpty())
       return preferred_size_;
     return View::GetPreferredSize();
   }
 
-  virtual void Layout() {
+  virtual void Layout() OVERRIDE {
     View* child_view = child_at(0);
     child_view->SetBounds(0, 0, width(), height());
   }
@@ -83,16 +88,28 @@ void ViewEventTestBase::Done() {
 }
 
 void ViewEventTestBase::SetUp() {
-  ui::TextInputTestSupport::Initilaize();
+  ui::TextInputTestSupport::Initialize();
   ui::CompositorTestSupport::Initialize();
+  gfx::NativeView context = NULL;
 #if defined(USE_ASH)
-  ash::Shell::CreateInstance(NULL);
-  // The shell runs with a locked screen in tests, so we must clear the event
-  // client so it doesn't interfere with event propagation.
-  aura::client::SetEventClient(ash::Shell::GetPrimaryRootWindow(),
-                               NULL);
+#if defined(OS_WIN)
+  // http://crbug.com/154081 use ash::Shell code path below on win_ash bots when
+  // interactive_ui_tests is brought up on that platform.
+  gfx::Screen::SetScreenInstance(
+      gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
+#else
+  ash::Shell::CreateInstance(new ash::test::TestShellDelegate());
+  context = ash::Shell::GetPrimaryRootWindow();
 #endif
-  window_ = views::Widget::CreateWindow(this);
+#elif defined(USE_AURA)
+  // Instead of using the ash shell, use an AuraTestHelper to create and manage
+  // the test screen.
+  aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
+  aura_test_helper_->SetUp();
+  context = aura_test_helper_->root_window();
+#endif
+
+  window_ = views::Widget::CreateWindowWithContext(this, context);
 }
 
 void ViewEventTestBase::TearDown() {
@@ -106,10 +123,13 @@ void ViewEventTestBase::TearDown() {
     window_ = NULL;
   }
 #if defined(USE_ASH)
+#if defined(OS_WIN)
+#else
   ash::Shell::DeleteInstance();
-#endif
-#if defined(USE_AURA)
   aura::Env::DeleteInstance();
+#endif
+#elif defined(USE_AURA)
+  aura_test_helper_->TearDown();
 #endif
   ui::CompositorTestSupport::Terminate();
   ui::TextInputTestSupport::Shutdown();
@@ -143,12 +163,8 @@ ViewEventTestBase::~ViewEventTestBase() {
 }
 
 void ViewEventTestBase::StartMessageLoopAndRunTest() {
-  window_->Show();
-  // Make sure the window is the foreground window, otherwise none of the
-  // mouse events are going to be targeted correctly.
-#if defined(OS_WIN) && !defined(USE_AURA)
-  SetForegroundWindow(window_->GetNativeWindow());
-#endif
+  ASSERT_TRUE(
+      ui_test_utils::ShowAndFocusNativeWindow(window_->GetNativeWindow()));
 
   // Flush any pending events to make sure we start with a clean slate.
   content::RunAllPendingInMessageLoop();

@@ -7,7 +7,7 @@
 #include "content/common/mime_registry_messages.h"
 #include "net/base/mime_util.h"
 
-using content::BrowserThread;
+namespace content {
 
 MimeRegistryMessageFilter::MimeRegistryMessageFilter() {
 }
@@ -38,16 +38,18 @@ bool MimeRegistryMessageFilter::OnMessageReceived(const IPC::Message& message,
 }
 
 void MimeRegistryMessageFilter::OnGetMimeTypeFromExtension(
-    const FilePath::StringType& ext, std::string* mime_type) {
+    const base::FilePath::StringType& ext, std::string* mime_type) {
   net::GetMimeTypeFromExtension(ext, mime_type);
 }
 
 void MimeRegistryMessageFilter::OnGetMimeTypeFromFile(
-    const FilePath& file_path, std::string* mime_type) {
+    const base::FilePath& file_path, std::string* mime_type) {
   net::GetMimeTypeFromFile(file_path, mime_type);
 }
 
 void MimeRegistryMessageFilter::OnGetPreferredExtensionForMimeType(
-    const std::string& mime_type, FilePath::StringType* extension) {
+    const std::string& mime_type, base::FilePath::StringType* extension) {
   net::GetPreferredExtensionForMimeType(mime_type, extension);
 }
+
+}  // namespace content

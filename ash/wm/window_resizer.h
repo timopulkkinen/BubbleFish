@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/rect.h"
 
 namespace aura {
@@ -61,8 +62,8 @@ class ASH_EXPORT WindowResizer {
     // The window we're resizing.
     aura::Window* window;
 
-    // Initial bounds of the window.
-    gfx::Rect initial_bounds;
+    // Initial bounds of the window in parent coordinates.
+    gfx::Rect initial_bounds_in_parent;
 
     // Restore bounds (in screen coordinates) of the window before the drag
     // started. Only set if the window is normal and is being dragged.
@@ -120,6 +121,13 @@ class ASH_EXPORT WindowResizer {
                               int min_height,
                               int* delta_y);
 };
+
+// Creates a WindowResizer for |window|. This can return a scoped_ptr
+// initialized with NULL if |window| should not be resized nor dragged.
+ASH_EXPORT scoped_ptr<WindowResizer> CreateWindowResizer(
+    aura::Window* window,
+    const gfx::Point& point_in_parent,
+    int window_component);
 
 }  // namespace aura
 

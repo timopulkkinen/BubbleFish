@@ -14,6 +14,8 @@
 #include "base/observer_list.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
+#include "content/common/gpu/gpu_memory_manager.h"
+#include "content/common/gpu/gpu_memory_manager_client.h"
 #include "googleurl/src/gurl.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
@@ -24,59 +26,25 @@
 #include "media/base/video_decoder_config.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
-#include "ui/gl/gl_context.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gpu_preference.h"
 #include "ui/surface/transport_dib.h"
 
-#if defined(OS_MACOSX)
-#include "ui/surface/accelerated_surface_mac.h"
-#endif
-
-class GpuChannel;
-struct GpuMemoryAllocation;
-class GpuVideoDecodeAccelerator;
-class GpuWatchdog;
-
 namespace gpu {
 namespace gles2 {
+class ImageManager;
 class MailboxManager;
 }
 }
 
-// This Base class is used to expose methods of GpuCommandBufferStub used for
-// testability.
-class CONTENT_EXPORT GpuCommandBufferStubBase {
- public:
-  struct CONTENT_EXPORT SurfaceState {
-    int32 surface_id;
-    bool visible;
-    base::TimeTicks last_used_time;
+namespace content {
 
-    SurfaceState(int32 surface_id,
-                 bool visible,
-                 base::TimeTicks last_used_time);
-  };
-
- public:
-  virtual ~GpuCommandBufferStubBase() {}
-
-  // Will not have surface state if this is an offscreen commandbuffer.
-  virtual bool client_has_memory_allocation_changed_callback() const = 0;
-  virtual bool has_surface_state() const = 0;
-  virtual const SurfaceState& surface_state() const = 0;
-
-  virtual gfx::Size GetSurfaceSize() const = 0;
-
-  virtual bool IsInSameContextShareGroup(
-      const GpuCommandBufferStubBase& other) const = 0;
-
-  virtual void SetMemoryAllocation(
-      const GpuMemoryAllocation& allocation) = 0;
-};
+class GpuChannel;
+class GpuVideoDecodeAccelerator;
+class GpuWatchdog;
 
 class GpuCommandBufferStub
-    : public GpuCommandBufferStubBase,
+    : public GpuMemoryManagerClient,
       public IPC::Listener,
       public IPC::Sender,
       public base::SupportsWeakPtr<GpuCommandBufferStub> {
@@ -95,6 +63,7 @@ class GpuCommandBufferStub
       GpuCommandBufferStub* share_group,
       const gfx::GLSurfaceHandle& handle,
       gpu::gles2::MailboxManager* mailbox_manager,
+      gpu::gles2::ImageManager* image_manager,
       const gfx::Size& size,
       const gpu::gles2::DisallowedFeatures& disallowed_features,
       const std::string& allowed_extensions,
@@ -114,31 +83,23 @@ class GpuCommandBufferStub
   // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  // GpuCommandBufferStubBase implementation:
-  virtual bool client_has_memory_allocation_changed_callback() const OVERRIDE;
-  virtual bool has_surface_state() const OVERRIDE;
-  virtual const GpuCommandBufferStubBase::SurfaceState& surface_state() const
-      OVERRIDE;
-
-  // Returns surface size.
+  // GpuMemoryManagerClient implementation:
   virtual gfx::Size GetSurfaceSize() const OVERRIDE;
-
-  // Returns true iff |other| is in the same context share group as this stub.
-  virtual bool IsInSameContextShareGroup(
-      const GpuCommandBufferStubBase& other) const OVERRIDE;
-
-  // Sets buffer usage depending on Memory Allocation
+  virtual gpu::gles2::MemoryTracker* GetMemoryTracker() const OVERRIDE;
   virtual void SetMemoryAllocation(
       const GpuMemoryAllocation& allocation) OVERRIDE;
+  virtual bool GetTotalGpuMemory(uint64* bytes) OVERRIDE;
 
   // Whether this command buffer can currently handle IPC messages.
   bool IsScheduled();
 
+  // If the command buffer is pre-empted and cannot process commands.
+  bool IsPreempted() const {
+    return scheduler_.get() && scheduler_->IsPreempted();
+  }
+
   // Whether there are commands in the buffer that haven't been processed.
   bool HasUnprocessedCommands();
-
-  // Delay an echo message until the command buffer has been rescheduled.
-  void DelayEcho(IPC::Message*);
 
   gpu::gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
   gpu::GpuScheduler* scheduler() const { return scheduler_.get(); }
@@ -146,7 +107,7 @@ class GpuCommandBufferStub
 
   // Identifies the target surface.
   int32 surface_id() const {
-    return (surface_state_.get()) ? surface_state_->surface_id : 0;
+    return surface_id_;
   }
 
   // Identifies the various GpuCommandBufferStubs in the GPU process belonging
@@ -167,9 +128,10 @@ class GpuCommandBufferStub
   // retire all sync points that haven't been previously retired.
   void AddSyncPoint(uint32 sync_point);
 
-  void SetPreemptByCounter(scoped_refptr<gpu::RefCountedCounter> counter);
+  void SetPreemptByFlag(scoped_refptr<gpu::PreemptionFlag> flag);
 
  private:
+  GpuMemoryManager* GetMemoryManager();
   bool MakeCurrent();
   void Destroy();
 
@@ -177,9 +139,9 @@ class GpuCommandBufferStub
   void OnInitializeFailed(IPC::Message* reply_message);
 
   // Message handlers:
-  void OnInitialize(IPC::Message* reply_message);
+  void OnInitialize(base::SharedMemoryHandle shared_state_shm,
+                    IPC::Message* reply_message);
   void OnSetGetBuffer(int32 shm_id, IPC::Message* reply_message);
-  void OnSetSharedStateBuffer(int32 shm_id, IPC::Message* reply_message);
   void OnSetParent(int32 parent_route_id,
                    uint32 parent_texture_id,
                    IPC::Message* reply_message);
@@ -188,14 +150,10 @@ class GpuCommandBufferStub
   void OnAsyncFlush(int32 put_offset, uint32 flush_count);
   void OnEcho(const IPC::Message& message);
   void OnRescheduled();
-  void OnCreateTransferBuffer(int32 size,
-                              int32 id_request,
-                              IPC::Message* reply_message);
-  void OnRegisterTransferBuffer(base::SharedMemoryHandle transfer_buffer,
-                                size_t size,
-                                int32 id_request,
-                                IPC::Message* reply_message);
-  void OnDestroyTransferBuffer(int32 id, IPC::Message* reply_message);
+  void OnRegisterTransferBuffer(int32 id,
+                                base::SharedMemoryHandle transfer_buffer,
+                                uint32 size);
+  void OnDestroyTransferBuffer(int32 id);
   void OnGetTransferBuffer(int32 id, IPC::Message* reply_message);
 
   void OnCreateVideoDecoder(
@@ -209,14 +167,13 @@ class GpuCommandBufferStub
   void OnEnsureBackbuffer();
 
   void OnRetireSyncPoint(uint32 sync_point);
-  void OnWaitSyncPoint(uint32 sync_point);
+  bool OnWaitSyncPoint(uint32 sync_point);
   void OnSyncPointRetired();
   void OnSignalSyncPoint(uint32 sync_point, uint32 id);
   void OnSignalSyncPointAck(uint32 id);
 
-  void OnSetClientHasMemoryAllocationChangedCallback(bool);
-
-  void OnReschedule();
+  void OnReceivedClientManagedMemoryStats(const GpuManagedMemoryStats& stats);
+  void OnSetClientHasMemoryAllocationChangedCallback(bool has_callback);
 
   void OnCommandProcessed();
   void OnParseError();
@@ -249,16 +206,20 @@ class GpuCommandBufferStub
   std::vector<int32> requested_attribs_;
   gfx::GpuPreference gpu_preference_;
   int32 route_id_;
+  int32 surface_id_;
   bool software_;
-  bool client_has_memory_allocation_changed_callback_;
   uint32 last_flush_count_;
-  scoped_ptr<GpuCommandBufferStubBase::SurfaceState> surface_state_;
 
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
   scoped_ptr<gpu::GpuScheduler> scheduler_;
-  scoped_refptr<gfx::GLContext> context_;
   scoped_refptr<gfx::GLSurface> surface_;
+
+  scoped_ptr<GpuMemoryManagerClientState> memory_manager_client_state_;
+  // The last memory allocation received from the GpuMemoryManager (used to
+  // elide redundant work).
+  bool last_memory_allocation_valid_;
+  GpuMemoryAllocation last_memory_allocation_;
 
   // SetParent may be called before Initialize, in which case we need to keep
   // around the parent stub, so that Initialize can set the parent correctly.
@@ -266,8 +227,6 @@ class GpuCommandBufferStub
   uint32 parent_texture_for_initialization_;
 
   GpuWatchdog* watchdog_;
-
-  std::deque<IPC::Message*> delayed_echos_;
 
   // Zero or more video decoders owned by this stub, keyed by their
   // decoder_route_id.
@@ -281,12 +240,16 @@ class GpuCommandBufferStub
 
   bool delayed_work_scheduled_;
 
-  scoped_refptr<gpu::RefCountedCounter> preempt_by_counter_;
+  scoped_refptr<gpu::PreemptionFlag> preemption_flag_;
 
   GURL active_url_;
   size_t active_url_hash_;
 
+  size_t total_gpu_memory_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_GPU_COMMAND_BUFFER_STUB_H_

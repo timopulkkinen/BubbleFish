@@ -21,7 +21,9 @@
 #include <string>
 #include <vector>
 
+namespace base {
 class FilePath;
+}
 
 namespace rlz_lib {
 
@@ -98,21 +100,20 @@ class ScopedRlzValueStoreLock {
   scoped_ptr<RlzValueStore> store_;
 #if defined(OS_WIN)
   LibMutex lock_;
-#else
+#elif defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool_;
 #endif
 };
 
-#if defined(OS_MACOSX)
+#if defined(OS_POSIX)
 namespace testing {
 // Prefix |directory| to the path where the RLZ data file lives, for tests.
-void SetRlzStoreDirectory(const FilePath& directory);
+void SetRlzStoreDirectory(const base::FilePath& directory);
 
-// Returns the path of the plist file used as data store.
-std::string RlzPlistFilenameStr();
+// Returns the path of the file used as data store.
+std::string RlzStoreFilenameStr();
 }  // namespace testing
-#endif  // defined(OS_MACOSX)
-
+#endif  // defined(OS_POSIX)
 
 }  // namespace rlz_lib
 

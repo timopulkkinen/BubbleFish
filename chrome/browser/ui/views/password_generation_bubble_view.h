@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_UI_VIEWS_PASSWORD_GENERATION_BUBBLE_VIEW_H_
 
 #include "base/basictypes.h"
+#include "chrome/common/password_generation_util.h"
+#include "content/public/common/password_form.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
-#include "webkit/forms/password_form.h"
 
 namespace autofill {
 class PasswordGenerator;
@@ -25,7 +27,6 @@ namespace views {
 class ImageButton;
 class Label;
 class TextButton;
-class Textfield;
 }
 
 class PasswordManager;
@@ -35,9 +36,10 @@ class PasswordManager;
 // If the generated password is accepted by the user, the renderer associated
 // with |render_view_host| and the |password_manager| are informed.
 class PasswordGenerationBubbleView : public views::BubbleDelegateView,
-                                     public views::ButtonListener {
+                                     public views::ButtonListener,
+                                     public views::TextfieldController {
  public:
-  PasswordGenerationBubbleView(const webkit::forms::PasswordForm& form,
+  PasswordGenerationBubbleView(const content::PasswordForm& form,
                                const gfx::Rect& anchor_rect,
                                views::View* anchor_view,
                                content::RenderViewHost* render_view_host,
@@ -55,10 +57,17 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
   // views::BubbleDelegateView
   virtual void Init() OVERRIDE;
   virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  virtual void WindowClosing() OVERRIDE;
 
   // views::ButtonListener
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
+
+  // views::TextfieldController
+  virtual void ContentsChanged(views::Textfield* sender,
+                               const string16& new_contents) OVERRIDE;
+  virtual bool HandleKeyEvent(views::Textfield* sender,
+                              const ui::KeyEvent& key_event) OVERRIDE;
 
   // views::WidgetDelegate
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
@@ -71,7 +80,7 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
   views::View* textfield_wrapper_;
 
   // The form associated with the password field(s) that we are generated.
-  webkit::forms::PasswordForm form_;
+  content::PasswordForm form_;
 
   // Location that the bubble points to
   gfx::Rect anchor_rect_;
@@ -91,6 +100,9 @@ class PasswordGenerationBubbleView : public views::BubbleDelegateView,
 
   // Theme provider used to draw the regenerate button.
   ui::ThemeProvider* theme_provider_;
+
+  // Store stats on the users actions for logging.
+  password_generation::PasswordGenerationActions actions_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordGenerationBubbleView);
 };

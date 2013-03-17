@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_MODEL_H_
 #define CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_MODEL_H_
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,13 +15,17 @@
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/common/media_stream_request.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 
 class ContentSettingBubbleModelDelegate;
 class Profile;
 class ProtocolHandlerRegistry;
-class TabContents;
+
+namespace content {
+class WebContents;
+}
 
 // This model provides data for ContentSettingBubble, and also controls
 // the action triggered when the allow / block radio buttons are triggered.
@@ -29,9 +34,9 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   typedef ContentSettingBubbleModelDelegate Delegate;
 
   struct PopupItem {
-    SkBitmap bitmap;
+    gfx::Image image;
     std::string title;
-    TabContents* tab_contents;
+    content::WebContents* web_contents;
   };
   typedef std::vector<PopupItem> PopupItems;
 
@@ -54,6 +59,13 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
     std::set<std::string> hosts;
   };
 
+  struct MediaMenu {
+    std::string label;
+    content::MediaStreamDevice default_device;
+    content::MediaStreamDevice selected_device;
+  };
+  typedef std::map<content::MediaStreamType, MediaMenu> MediaMenuMap;
+
   struct BubbleContent {
     BubbleContent();
     ~BubbleContent();
@@ -67,6 +79,7 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
     std::string custom_link;
     bool custom_link_enabled;
     std::string manage_link;
+    MediaMenuMap media_menus;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(BubbleContent);
@@ -74,7 +87,7 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
 
   static ContentSettingBubbleModel* CreateContentSettingBubbleModel(
       Delegate* delegate,
-      TabContents* tab_contents,
+      content::WebContents* web_contents,
       Profile* profile,
       ContentSettingsType content_type);
 
@@ -93,16 +106,20 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   virtual void OnPopupClicked(int index) {}
   virtual void OnCustomLinkClicked() {}
   virtual void OnManageLinkClicked() {}
+  virtual void OnMediaMenuClicked(content::MediaStreamType type,
+                                  const std::string& selected_device_id) {}
 
   // Called by the view code when the bubble is closed by the user using the
   // Done button.
   virtual void OnDoneClicked() {}
 
  protected:
-  ContentSettingBubbleModel(TabContents* tab_contents, Profile* profile,
+  ContentSettingBubbleModel(
+      content::WebContents* web_contents,
+      Profile* profile,
       ContentSettingsType content_type);
 
-  TabContents* tab_contents() const { return tab_contents_; }
+  content::WebContents* web_contents() const { return web_contents_; }
   Profile* profile() const { return profile_; }
 
   void set_title(const std::string& title) { bubble_content_.title = title; }
@@ -127,14 +144,20 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   void set_manage_link(const std::string& link) {
     bubble_content_.manage_link = link;
   }
+  void add_media_menu(content::MediaStreamType type, const MediaMenu& menu) {
+    bubble_content_.media_menus[type] = menu;
+  }
+  void set_selected_device(const content::MediaStreamDevice& device) {
+    bubble_content_.media_menus[device.type].selected_device = device;
+  }
   void AddBlockedResource(const std::string& resource_identifier);
 
  private:
-  TabContents* tab_contents_;
+  content::WebContents* web_contents_;
   Profile* profile_;
   ContentSettingsType content_type_;
   BubbleContent bubble_content_;
-  // A registrar for listening for TAB_CONTENTS_DESTROYED notifications.
+  // A registrar for listening for WEB_CONTENTS_DESTROYED notifications.
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingBubbleModel);
@@ -143,7 +166,7 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
 class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
  public:
   ContentSettingTitleAndLinkModel(Delegate* delegate,
-                                  TabContents* tab_contents,
+                                  content::WebContents* web_contents,
                                   Profile* profile,
                                   ContentSettingsType content_type);
   virtual ~ContentSettingTitleAndLinkModel() {}
@@ -161,7 +184,7 @@ class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
 class ContentSettingRPHBubbleModel : public ContentSettingTitleAndLinkModel {
  public:
   ContentSettingRPHBubbleModel(Delegate* delegate,
-                               TabContents* tab_contents,
+                               content::WebContents* web_contents,
                                Profile* profile,
                                ProtocolHandlerRegistry* registry,
                                ContentSettingsType content_type);

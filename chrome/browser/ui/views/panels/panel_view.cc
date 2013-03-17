@@ -6,15 +6,18 @@
 
 #include <map>
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_bounds_animation.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/ui/views/panels/panel_frame_view.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
@@ -23,14 +26,21 @@
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
-#include "ui/base/win/shell.h"
+#if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/ui/panels/taskbar_window_thumbnailer_win.h"
+#include "chrome/browser/ui/views/panels/taskbar_window_thumbnailer_win.h"
+#include "ui/base/win/shell.h"
+#include "ui/gfx/icon_util.h"
+#include "ui/views/win/hwnd_util.h"
 #endif
 
 namespace {
+
+// If the height of a stacked panel shrinks below this threshold during the
+// user resizing, it will be treated as minimized.
+const int kStackedPanelHeightShrinkThresholdToBecomeMinimized =
+    panel::kTitlebarHeight + 20;
 
 // Supported accelerators.
 // Note: We can't use the acclerator table defined in chrome/browser/ui/views
@@ -90,10 +100,13 @@ class NativePanelTestingWin : public NativePanelTesting {
   virtual void FinishDragTitlebar() OVERRIDE;
   virtual bool VerifyDrawingAttention() const OVERRIDE;
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
+  virtual bool VerifyAppIcon() const OVERRIDE;
+  virtual bool VerifySystemMinimizeState() const OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
+  virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
 
   PanelView* panel_view_;
 };
@@ -125,14 +138,59 @@ void NativePanelTestingWin::FinishDragTitlebar() {
 }
 
 bool NativePanelTestingWin::VerifyDrawingAttention() const {
-  return panel_view_->GetFrameView()->paint_state() ==
+  MessageLoop::current()->RunUntilIdle();
+  return panel_view_->GetFrameView()->GetPaintState() ==
          PanelFrameView::PAINT_FOR_ATTENTION;
 }
 
 bool NativePanelTestingWin::VerifyActiveState(bool is_active) {
-  return panel_view_->GetFrameView()->paint_state() ==
+  return panel_view_->GetFrameView()->GetPaintState() ==
          (is_active ? PanelFrameView::PAINT_AS_ACTIVE
                     : PanelFrameView::PAINT_AS_INACTIVE);
+}
+
+bool NativePanelTestingWin::VerifyAppIcon() const {
+#if defined(OS_WIN)
+  // We only care about Windows 7 and later.
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return true;
+
+  HWND native_window = views::HWNDForWidget(panel_view_->window());
+  HICON app_icon = reinterpret_cast<HICON>(
+      ::SendMessage(native_window, WM_GETICON, ICON_BIG, 0L));
+  if (!app_icon)
+    return false;
+  scoped_ptr<SkBitmap> bitmap(IconUtil::CreateSkBitmapFromHICON(app_icon));
+  return bitmap.get() &&
+         bitmap->width() == panel::kPanelAppIconSize &&
+         bitmap->height() == panel::kPanelAppIconSize;
+#else
+  return true;
+#endif
+}
+
+bool NativePanelTestingWin::VerifySystemMinimizeState() const {
+#if defined(OS_WIN)
+  HWND native_window = views::HWNDForWidget(panel_view_->window());
+  WINDOWPLACEMENT placement;
+  if (!::GetWindowPlacement(native_window, &placement))
+    return false;
+  if (placement.showCmd == SW_MINIMIZE || placement.showCmd == SW_SHOWMINIMIZED)
+    return true;
+
+  // If the panel window has owner window, as in stacked mode, check its owner
+  // window. Note that owner window, instead of parent window, is returned
+  // though GWL_HWNDPARENT contains 'parent'.
+  HWND owner_window =
+      reinterpret_cast<HWND>(::GetWindowLongPtr(native_window,
+                                                GWLP_HWNDPARENT));
+  if (!owner_window || !::GetWindowPlacement(owner_window, &placement))
+    return false;
+  return placement.showCmd == SW_MINIMIZE ||
+         placement.showCmd == SW_SHOWMINIMIZED;
+#else
+  return true;
+#endif
 }
 
 bool NativePanelTestingWin::IsWindowSizeKnown() const {
@@ -160,6 +218,10 @@ bool NativePanelTestingWin::IsButtonVisible(
   return false;
 }
 
+panel::CornerStyle NativePanelTestingWin::GetWindowCornerStyle() const {
+  return panel_view_->GetFrameView()->corner_style();
+}
+
 }  // namespace
 
 // static
@@ -178,16 +240,21 @@ PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
     : panel_(panel),
       bounds_(bounds),
       window_(NULL),
+      window_closed_(false),
       web_view_(NULL),
       always_on_top_(true),
       focused_(false),
+      user_resizing_(false),
+#if defined(OS_WIN)
+      user_resizing_interior_stacked_panel_edge_(false),
+#endif
       mouse_pressed_(false),
       mouse_dragging_state_(NO_DRAGGING),
       is_drawing_attention_(false),
       force_to_paint_as_inactive_(false),
       old_focused_view_(NULL) {
   window_ = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_PANEL);
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
   params.delegate = this;
   params.remove_standard_frame = true;
   params.keep_on_top = true;
@@ -213,16 +280,15 @@ PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
         iter->first, ui::AcceleratorManager::kNormalPriority, this);
   }
 
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN)
   ui::win::SetAppIdForWindow(
       ShellIntegration::GetAppModelIdForProfile(UTF8ToWide(panel->app_name()),
                                                 panel->profile()->GetPath()),
-      window_->GetNativeWindow());
+      views::HWNDForWidget(window_));
 #endif
 }
 
 PanelView::~PanelView() {
-  web_view_->SetWebContents(NULL);
 }
 
 void PanelView::ShowPanel() {
@@ -267,7 +333,7 @@ void PanelView::SetBoundsInternal(const gfx::Rect& new_bounds, bool animate) {
     // If no animation is in progress, apply bounds change instantly. Otherwise,
     // continue the animation with new target bounds.
     if (!IsAnimatingBounds())
-      GetWidget()->SetBounds(bounds_);
+      SetWidgetBounds(bounds_);
     return;
   }
 
@@ -278,6 +344,22 @@ void PanelView::SetBoundsInternal(const gfx::Rect& new_bounds, bool animate) {
   bounds_animator_->Start();
 }
 
+#if defined(OS_WIN)
+bool PanelView::FilterMessage(HWND hwnd,
+                              UINT message,
+                              WPARAM w_param,
+                              LPARAM l_param,
+                              LRESULT* l_result) {
+  switch (message) {
+    case WM_SIZING:
+      if (w_param == WMSZ_BOTTOM)
+        user_resizing_interior_stacked_panel_edge_ = true;
+      break;
+  }
+  return false;
+}
+#endif
+
 void PanelView::AnimationEnded(const ui::Animation* animation) {
   panel_->manager()->OnPanelAnimationEnded(panel_.get());
 }
@@ -285,12 +367,58 @@ void PanelView::AnimationEnded(const ui::Animation* animation) {
 void PanelView::AnimationProgressed(const ui::Animation* animation) {
   gfx::Rect new_bounds = bounds_animator_->CurrentValueBetween(
       animation_start_bounds_, bounds_);
+  SetWidgetBounds(new_bounds);
+}
+
+void PanelView::SetWidgetBounds(const gfx::Rect& new_bounds) {
+#if defined(OS_WIN)
+  // An overlapped window is a top-level window that has a titlebar, border,
+  // and client area. The Windows system will automatically put the shadow
+  // around the whole window. Also the system will enforce the minimum height
+  // (38 pixels based on observation) for the overlapped window such that it
+  // will always has the space for the titlebar.
+  //
+  // On contrast, a popup window is a bare minimum window without border and
+  // titlebar by default. It is often used for the popup menu and the window
+  // with short life. The Windows system does not add the shadow around the
+  // whole window though CS_DROPSHADOW class style could be passed to add the
+  // drop shadow which is only around the right and bottom edges.
+  //
+  // The height of the title-only or minimized panel is smaller than the minimum
+  // overlapped window height. If the panel still uses the overlapped window
+  // style, Windows system will automatically increase the window height. To
+  // work around this limitation, we temporarily change the window style to
+  // popup when the height to set is smaller than the minimum overlapped window
+  // height and then restore the window style to overlapped when the height
+  // grows.
+  static const int kMinimumOverlappedWindowHeight = 38;
+  gfx::Rect old_bounds = GetWidget()->GetRestoredBounds();
+  if (old_bounds.height() > kMinimumOverlappedWindowHeight &&
+      new_bounds.height() <= kMinimumOverlappedWindowHeight) {
+    // When the panel height shrinks below the minimum overlapped window height,
+    // change the window style to popup such that we can show the title-only
+    // and minimized panel without additional height being added by the system.
+    UpdateWindowAttribute(GWL_STYLE,
+                          WS_POPUP,
+                          WS_OVERLAPPED | WS_THICKFRAME | WS_SYSMENU,
+                          true);
+  } else if (old_bounds.height() <= kMinimumOverlappedWindowHeight &&
+             new_bounds.height() > kMinimumOverlappedWindowHeight) {
+    // Change the window style back to overlappped when the panel height grow
+    // taller than the minimum overlapped window height.
+    UpdateWindowAttribute(GWL_STYLE,
+                          WS_OVERLAPPED | WS_THICKFRAME | WS_SYSMENU,
+                          WS_POPUP,
+                          true);
+  }
+#endif
+
   GetWidget()->SetBounds(new_bounds);
 }
 
 void PanelView::ClosePanel() {
   // We're already closing. Do nothing.
-  if (!window_)
+  if (window_closed_)
     return;
 
   if (!panel_->ShouldCloseWindow())
@@ -308,8 +436,9 @@ void PanelView::ClosePanel() {
   }
 
   panel_->OnNativePanelClosed();
-  window_->Close();
-  window_ = NULL;
+  if (window_)
+    window_->Close();
+  window_closed_ = true;
 }
 
 void PanelView::ActivatePanel() {
@@ -317,6 +446,19 @@ void PanelView::ActivatePanel() {
 }
 
 void PanelView::DeactivatePanel() {
+  if (!focused_)
+    return;
+
+#if defined(OS_WIN)
+  // Need custom behavior for always-on-top panels to avoid
+  // the OS activating a minimized panel when this one is
+  // deactivated.
+  if (always_on_top_) {
+    ::SetForegroundWindow(::GetDesktopWindow());
+    return;
+  }
+#endif
+
   window_->Deactivate();
 }
 
@@ -325,17 +467,22 @@ bool PanelView::IsPanelActive() const {
 }
 
 void PanelView::PreventActivationByOS(bool prevent_activation) {
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
-  // Set the flags "NoActivate" and "AppWindow" to make sure
-  // the minimized panels do not get activated by the OS, but
-  // do appear in the taskbar and Alt-Tab menu.
-  UpdateWindowAttribute(GWL_EXSTYLE,
-                        WS_EX_NOACTIVATE | WS_EX_APPWINDOW,
-                        prevent_activation);
+#if defined(OS_WIN)
+  // Set the flags "NoActivate" to make sure the minimized panels do not get
+  // activated by the OS. In addition, set "AppWindow" to make sure the
+  // minimized panels do appear in the taskbar and Alt-Tab menu if it is not
+  // in a stack.
+  int value_to_change = WS_EX_NOACTIVATE;
+  if (!panel_->stack())
+    value_to_change |= WS_EX_APPWINDOW;
+  if (prevent_activation)
+    UpdateWindowAttribute(GWL_EXSTYLE, value_to_change, 0, false);
+  else
+    UpdateWindowAttribute(GWL_EXSTYLE, 0, value_to_change, false);
 #endif
 }
 
-gfx::NativeWindow PanelView::GetNativePanelHandle() {
+gfx::NativeWindow PanelView::GetNativePanelWindow() {
   return window_->GetNativeWindow();
 }
 
@@ -346,10 +493,6 @@ void PanelView::UpdatePanelTitleBar() {
 
 void PanelView::UpdatePanelLoadingAnimations(bool should_animate) {
   GetFrameView()->UpdateThrobber();
-}
-
-void PanelView::NotifyPanelOnUserChangedTheme() {
-  GetFrameView()->SchedulePaint();
 }
 
 void PanelView::PanelWebContentsFocused(content::WebContents* contents) {
@@ -432,9 +575,13 @@ void PanelView::UpdatePanelMinimizeRestoreButtonVisibility() {
   GetFrameView()->UpdateTitlebarMinimizeRestoreButtonVisibility();
 }
 
+void PanelView::SetWindowCornerStyle(panel::CornerStyle corner_style) {
+  GetFrameView()->SetWindowCornerStyle(corner_style);
+}
+
 void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
                                             Panel::ExpansionState new_state) {
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // Live preview is only available since Windows 7.
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
@@ -444,7 +591,7 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
   if (is_minimized == will_be_minimized)
     return;
 
-  HWND native_window = window_->GetNativeWindow();
+  HWND native_window = views::HWNDForWidget(window_);
 
   if (!thumbnailer_.get()) {
     DCHECK(native_window);
@@ -463,7 +610,8 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
                      RDW_NOCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW);
     }
 
-    thumbnailer_->Start();
+    std::vector<HWND> snapshot_hwnds;
+    thumbnailer_->Start(snapshot_hwnds);
   } else {
     force_to_paint_as_inactive_ = false;
     thumbnailer_->Stop();
@@ -488,6 +636,10 @@ gfx::Size PanelView::ContentSizeFromWindowSize(
 
 int PanelView::TitleOnlyHeight() const {
   return panel::kTitlebarHeight;
+}
+
+void PanelView::MinimizePanelBySystem() {
+  window_->Minimize();
 }
 
 void PanelView::AttachWebContents(content::WebContents* contents) {
@@ -550,15 +702,58 @@ gfx::ImageSkia PanelView::GetWindowIcon() {
   return icon.IsEmpty() ? gfx::ImageSkia() : *icon.ToImageSkia();
 }
 
+void PanelView::WindowClosing() {
+  // When closing a panel via window.close, API or the close button,
+  // ClosePanel() is called first, destroying the native |window_|
+  // which results in this method being called. ClosePanel() sets
+  // |window_closed_| to NULL.
+  // If we still have a |window_closed_| here, the close was triggered by the
+  // OS, (e.g. clicking on taskbar menu), which destroys the native |window_|
+  // without invoking ClosePanel() beforehand.
+  if (!window_closed_) {
+    panel_->OnWindowClosing();
+    ClosePanel();
+    DCHECK(window_closed_);
+  }
+}
+
 void PanelView::DeleteDelegate() {
   delete this;
 }
 
 void PanelView::OnWindowBeginUserBoundsChange() {
+  user_resizing_ = true;
   panel_->OnPanelStartUserResizing();
+
+#if defined(OS_WIN)
+  StackedPanelCollection* stack = panel_->stack();
+  if (stack) {
+    // Listen to WM_SIZING message in order to find out whether the interior
+    // edge is being resized such that the specific maximum size could be
+    // passed to the system.
+    if (panel_->stack()->GetPanelBelow(panel_.get())) {
+      ui::HWNDSubclass::AddFilterToTarget(views::HWNDForWidget(window_), this);
+      user_resizing_interior_stacked_panel_edge_ = false;
+    }
+
+    // Keep track of the original full size of the resizing panel such that it
+    // can be restored to this size once it is shrunk to minimized state.
+    original_full_size_of_resizing_panel_ = panel_->full_size();
+
+    // Keep track of the original full size of the panel below the resizing
+    // panel such that it can be restored to this size once it is shrunk to
+    // minimized state.
+    Panel* below_panel = stack->GetPanelBelow(panel_.get());
+    if (below_panel && !below_panel->IsMinimized()) {
+      original_full_size_of_panel_below_resizing_panel_ =
+          below_panel->full_size();
+    }
+  }
+#endif
 }
 
 void PanelView::OnWindowEndUserBoundsChange() {
+  user_resizing_ = false;
   panel_->OnPanelEndUserResizing();
 
   // No need to proceed with post-resizing update when there is no size change.
@@ -570,7 +765,38 @@ void PanelView::OnWindowEndUserBoundsChange() {
   panel_->IncreaseMaxSize(bounds_.size());
   panel_->set_full_size(bounds_.size());
 
-  panel_->panel_strip()->RefreshLayout();
+#if defined(OS_WIN)
+  StackedPanelCollection* stack = panel_->stack();
+  if (stack) {
+    // No need to listen to WM_SIZING message any more.
+    ui::HWNDSubclass::RemoveFilterFromAllTargets(this);
+
+    // If the height of resizing panel shrinks close to the titlebar height,
+    // treate it as minimized. This could occur when the user is dragging
+    // 1) the top edge of the top panel downward to shrink it; or
+    // 2) the bottom edge of any panel upward to shrink it.
+    if (panel_->GetBounds().height() <
+            kStackedPanelHeightShrinkThresholdToBecomeMinimized) {
+      stack->MinimizePanel(panel_.get());
+      panel_->set_full_size(original_full_size_of_resizing_panel_);
+    }
+
+    // If the height of panel below the resizing panel shrinks close to the
+    // titlebar height, treat it as minimized. This could occur when the user
+    // is dragging the bottom edge of non-bottom panel downward to expand it
+    // and also shrink the panel below.
+    Panel* below_panel = stack->GetPanelBelow(panel_.get());
+    if (below_panel && !below_panel->IsMinimized() &&
+        below_panel->GetBounds().height() <
+            kStackedPanelHeightShrinkThresholdToBecomeMinimized) {
+      stack->MinimizePanel(below_panel);
+      below_panel->set_full_size(
+          original_full_size_of_panel_below_resizing_panel_);
+    }
+  }
+#endif
+
+  panel_->collection()->RefreshLayout();
 }
 
 views::Widget* PanelView::GetWidget() {
@@ -603,10 +829,28 @@ void PanelView::Layout() {
 }
 
 gfx::Size PanelView::GetMinimumSize() {
-  return gfx::Size();
+  // If the panel is minimized, it can be rendered to very small size, like
+  // 4-pixel lines when it is docked. Otherwise, its height should not be less
+  // than its titlebar height.
+  return panel_->IsMinimized() ? gfx::Size() :
+      gfx::Size(panel_->min_size().width(), panel::kTitlebarHeight);
 }
 
 gfx::Size PanelView::GetMaximumSize() {
+  // If the user is resizing a stacked panel by its bottom edge, make sure its
+  // height cannot grow more than what the panel below it could offer. This is
+  // because growing a stacked panel by y amount will shrink the panel below it
+  // by same amount and we do not want the panel below it being shrunk to be
+  // smaller than the titlebar.
+#if defined(OS_WIN)
+  if (panel_->stack() && user_resizing_interior_stacked_panel_edge_) {
+    Panel* below_panel = panel_->stack()->GetPanelBelow(panel_.get());
+    if (below_panel && !below_panel->IsMinimized()) {
+      return gfx::Size(0, below_panel->GetBounds().bottom() -
+          panel_->GetBounds().y() - panel::kTitlebarHeight);
+    }
+  }
+#endif
   return gfx::Size();
 }
 
@@ -628,11 +872,16 @@ bool PanelView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return panel_->ExecuteCommandIfEnabled(iter->second);
 }
 
+void PanelView::OnWidgetDestroying(views::Widget* widget) {
+  window_ = NULL;
+}
+
 void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
-  bool focused = active && widget->GetNativeWindow() == ::GetForegroundWindow();
+  bool focused = active &&
+      views::HWNDForWidget(widget) == ::GetForegroundWindow();
 #else
   NOTIMPLEMENTED();
   bool focused = active;
@@ -651,12 +900,19 @@ void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
   // When the user clicks on the minimized panel, the panel expansion will be
   // done when we process the mouse button pressed message.
   if (focused_ && panel_->IsMinimized() &&
-      gfx::Screen::GetWindowAtCursorScreenPoint() !=
-          widget->GetNativeWindow()) {
+      panel_->collection()->type() == PanelCollection::DOCKED &&
+      gfx::Screen::GetScreenFor(widget->GetNativeWindow())->
+          GetWindowAtCursorScreenPoint() != widget->GetNativeWindow()) {
     panel_->Restore();
   }
 
   panel()->OnActiveStateChanged(focused);
+}
+
+void PanelView::OnWidgetBoundsChanged(views::Widget* widget,
+                                      const gfx::Rect& new_bounds) {
+  if (user_resizing_)
+    panel()->collection()->OnPanelResizedByMouse(panel(), new_bounds);
 }
 
 bool PanelView::OnTitlebarMousePressed(const gfx::Point& mouse_location) {
@@ -670,10 +926,8 @@ bool PanelView::OnTitlebarMouseDragged(const gfx::Point& mouse_location) {
   if (!mouse_pressed_)
     return false;
 
-  int delta_x = mouse_location.x() - last_mouse_location_.x();
-  int delta_y = mouse_location.y() - last_mouse_location_.y();
   if (mouse_dragging_state_ == NO_DRAGGING &&
-      ExceededDragThreshold(delta_x, delta_y)) {
+      ExceededDragThreshold(mouse_location - last_mouse_location_)) {
     // When a drag begins, we do not want to the client area to still receive
     // the focus. We do not need to do this for the unfocused minimized panel.
     if (!panel_->IsMinimized()) {
@@ -756,36 +1010,54 @@ bool PanelView::IsWithinResizingArea(const gfx::Point& mouse_location) const {
          mouse_location.y() >= bounds.bottom() - kResizeInsideBoundsSize;
 }
 
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN)
 void PanelView::UpdateWindowAttribute(int attribute_index,
-                                      int attribute_value,
-                                      bool to_set) {
-  gfx::NativeWindow native_window = window_->GetNativeWindow();
+                                      int attribute_value_to_set,
+                                      int attribute_value_to_reset,
+                                      bool update_frame) {
+  HWND native_window = views::HWNDForWidget(window_);
   int value = ::GetWindowLong(native_window, attribute_index);
-  int expected_value;
-  if (to_set)
-    expected_value = value |  attribute_value;
-  else
-    expected_value = value &  ~attribute_value;
+  int expected_value = value;
+  if (attribute_value_to_set)
+    expected_value |=  attribute_value_to_set;
+  if (attribute_value_to_reset)
+    expected_value &=  ~attribute_value_to_reset;
   if (value != expected_value)
     ::SetWindowLong(native_window, attribute_index, expected_value);
+
+  // Per MSDN, if any of the frame styles is changed, SetWindowPos with the
+  // SWP_FRAMECHANGED flag must be called in order for the cached window data
+  // to be updated properly.
+  // http://msdn.microsoft.com/en-us/library/windows/desktop/ms633591(v=vs.85).aspx
+  if (update_frame) {
+    ::SetWindowPos(native_window, NULL, 0, 0, 0, 0,
+                   SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                       SWP_NOZORDER | SWP_NOACTIVATE);
+  }
 }
 #endif
 
 void PanelView::OnViewWasResized() {
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN) && !defined(USE_AURA)
   content::WebContents* web_contents = panel_->GetWebContents();
   if (!web_view_ || !web_contents)
     return;
 
-  // Make part of the inner area be used for mouse resizing.
+  // When the panel is frameless or has thin frame, the mouse resizing should
+  // also be triggered from the part of client area that is close to the window
+  // frame.
   int width = web_view_->size().width();
   int height = web_view_->size().height();
+  // Compute the thickness of the client area that needs to be counted towards
+  // mouse resizing.
+  int thickness_for_mouse_resizing =
+      kResizeInsideBoundsSize - GetFrameView()->BorderThickness();
+  DCHECK(thickness_for_mouse_resizing > 0);
   SkRegion* region = new SkRegion;
-  region->op(0, 0, kResizeInsideBoundsSize, height, SkRegion::kUnion_Op);
-  region->op(width - kResizeInsideBoundsSize, 0, width, height,
+  region->op(0, 0, thickness_for_mouse_resizing, height, SkRegion::kUnion_Op);
+  region->op(width - thickness_for_mouse_resizing, 0, width, height,
       SkRegion::kUnion_Op);
-  region->op(0, height - kResizeInsideBoundsSize, width, height,
+  region->op(0, height - thickness_for_mouse_resizing, width, height,
       SkRegion::kUnion_Op);
   web_contents->GetRenderViewHost()->GetView()->SetClickthroughRegion(region);
 #endif

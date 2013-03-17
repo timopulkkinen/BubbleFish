@@ -15,13 +15,12 @@ using extensions::APIPermissionInfo;
 using extensions::APIPermissionMap;
 using extensions::APIPermissionSet;
 using extensions::Extension;
-using extensions::FileSystemPermission;
-using extensions::MediaGalleriesPermission;
+using extensions::Manifest;
 using extensions::PermissionSet;
-using extensions::SocketPermissionData;
+using extensions::URLPatternSet;
 
 ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params()
-    : location(Extension::INVALID),
+    : location(Manifest::INVALID_LOCATION),
       creation_flags(Extension::NO_FLAGS){}
 
 ExtensionMsg_Loaded_Params::~ExtensionMsg_Loaded_Params() {}
@@ -59,8 +58,8 @@ scoped_refptr<Extension>
 namespace IPC {
 
 template <>
-struct ParamTraits<Extension::Location> {
-  typedef Extension::Location param_type;
+struct ParamTraits<Manifest::Location> {
+  typedef Manifest::Location param_type;
   static void Write(Message* m, const param_type& p) {
     int val = static_cast<int>(p);
     WriteParam(m, val);
@@ -68,8 +67,8 @@ struct ParamTraits<Extension::Location> {
   static bool Read(const Message* m, PickleIterator* iter, param_type* p) {
     int val = 0;
     if (!ReadParam(m, iter, &val) ||
-        val < Extension::INVALID ||
-        val >= Extension::NUM_LOCATIONS)
+        val < Manifest::INVALID_LOCATION ||
+        val >= Manifest::NUM_LOCATIONS)
       return false;
     *p = static_cast<param_type>(val);
     return true;
@@ -187,67 +186,6 @@ bool ParamTraits<APIPermissionSet>::Read(
 void ParamTraits<APIPermissionSet>::Log(
     const param_type& p, std::string* l) {
   LogParam(p.map(), l);
-}
-
-void ParamTraits<SocketPermissionData>::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m, p.GetAsString());
-}
-
-bool ParamTraits<SocketPermissionData>::Read(
-    const Message* m, PickleIterator* iter, param_type* r) {
-  std::string spec;
-  if (!ReadParam(m, iter, &spec))
-    return false;
-
-  return r->Parse(spec);
-}
-
-void ParamTraits<SocketPermissionData>::Log(
-    const param_type& p, std::string* l) {
-  LogParam(std::string("<SocketPermissionData>"), l);
-}
-
-void ParamTraits<MediaGalleriesPermission::PermissionTypes>::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m,
-             std::string(MediaGalleriesPermission::PermissionTypeToString(p)));
-}
-
-bool ParamTraits<MediaGalleriesPermission::PermissionTypes>::Read(
-    const Message* m, PickleIterator* iter, param_type* r) {
-  std::string permission;
-  if (!ReadParam(m, iter, &permission))
-    return false;
-  *r = MediaGalleriesPermission::PermissionStringToType(permission);
-
-  return *r != MediaGalleriesPermission::kNone;
-}
-
-void ParamTraits<MediaGalleriesPermission::PermissionTypes>::Log(
-    const param_type& p, std::string* l) {
-  LogParam(std::string("<MediaGalleriesPermission::PermissionTypes>"), l);
-}
-
-void ParamTraits<FileSystemPermission::PermissionTypes>::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m,
-             std::string(FileSystemPermission::PermissionTypeToString(p)));
-}
-
-bool ParamTraits<FileSystemPermission::PermissionTypes>::Read(
-    const Message* m, PickleIterator* iter, param_type* r) {
-  std::string permission;
-  if (!ReadParam(m, iter, &permission))
-    return false;
-  *r = FileSystemPermission::PermissionStringToType(permission);
-
-  return *r != FileSystemPermission::kNone;
-}
-
-void ParamTraits<FileSystemPermission::PermissionTypes>::Log(
-    const param_type& p, std::string* l) {
-  LogParam(std::string("<FileSystemPermission::PermissionTypes>"), l);
 }
 
 void ParamTraits<ExtensionMsg_Loaded_Params>::Write(Message* m,

@@ -61,7 +61,8 @@ cr.define('ntp', function() {
             self.onLaunchTypeChanged_.bind(self));
       });
 
-      menu.appendChild(cr.ui.MenuItem.createSeparator());
+      this.launchTypeMenuSeparator_ = cr.ui.MenuItem.createSeparator();
+      menu.appendChild(this.launchTypeMenuSeparator_);
       this.options_ = this.appendMenuItem_('appoptions');
       this.details_ = this.appendMenuItem_('appdetails');
       this.disableNotifications_ =
@@ -76,8 +77,9 @@ cr.define('ntp', function() {
       this.uninstall_.addEventListener('activate',
                                        this.onUninstall_.bind(this));
 
-      if (!cr.isMac && !cr.isChromeOS) {
-        menu.appendChild(cr.ui.MenuItem.createSeparator());
+      if (!cr.isChromeOS) {
+        this.createShortcutSeparator_ =
+            menu.appendChild(cr.ui.MenuItem.createSeparator());
         this.createShortcut_ = this.appendMenuItem_('appcreateshortcut');
         this.createShortcut_.addEventListener(
             'activate', this.onCreateShortcut_.bind(this));
@@ -88,7 +90,7 @@ cr.define('ntp', function() {
 
     /**
      * Appends a menu item to |this.menu|.
-     * @param {?String} textId If non-null, the ID for the localized string
+     * @param {?string} textId If non-null, the ID for the localized string
      *     that acts as the item's label.
      */
     appendMenuItem_: function(textId) {
@@ -133,7 +135,10 @@ cr.define('ntp', function() {
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         launchTypeButton.disabled = false;
         launchTypeButton.checked = app.appData.launch_type == id;
+        launchTypeButton.hidden = app.appData.packagedApp;
       });
+
+      this.launchTypeMenuSeparator_.hidden = app.appData.packagedApp;
 
       this.options_.disabled = !app.appData.optionsUrl || !app.appData.enabled;
       this.details_.disabled = !app.appData.detailsUrl;
@@ -144,6 +149,13 @@ cr.define('ntp', function() {
       if (typeof notificationsDisabled != 'undefined') {
         this.disableNotifications_.hidden = false;
         this.disableNotifications_.checked = notificationsDisabled;
+      }
+      if (cr.isMac) {
+        // On Windows and Linux, these should always be visible. On ChromeOS,
+        // they are never created. On Mac, shortcuts can only be created for
+        // new-style packaged apps, so hide the menu item.
+        this.createShortcutSeparator_.hidden = this.createShortcut_.hidden =
+            !app.appData.packagedApp;
       }
     },
 
@@ -508,6 +520,11 @@ cr.define('ntp', function() {
      * @param {Event} e The mousedown event.
      */
     onMousedown_: function(e) {
+      // If the current platform uses middle click to autoscroll and this
+      // mousedown isn't handled, onClick_() will never fire. crbug.com/142939
+      if (e.button == 1)
+        e.preventDefault();
+
       if (e.button == 2 ||
           !findAncestorByClass(e.target, 'launch-click-target')) {
         this.appContents_.classList.add('suppress-active');
@@ -739,7 +756,7 @@ cr.define('ntp', function() {
         }
     },
 
-    /** @inheritDoc */
+    /** @override */
     doDragOver: function(e) {
       // Only animatedly re-arrange if the user is currently dragging an app.
       var tile = ntp.getCurrentlyDraggingTile();
@@ -751,7 +768,7 @@ cr.define('ntp', function() {
       }
     },
 
-    /** @inheritDoc */
+    /** @override */
     shouldAcceptDrag: function(e) {
       if (ntp.getCurrentlyDraggingTile())
         return true;
@@ -761,7 +778,7 @@ cr.define('ntp', function() {
                                           'text/uri-list') != -1;
     },
 
-    /** @inheritDoc */
+    /** @override */
     addDragData: function(dataTransfer, index) {
       var sourceId = -1;
       var currentlyDraggingTile = ntp.getCurrentlyDraggingTile();
@@ -838,7 +855,7 @@ cr.define('ntp', function() {
       chrome.send('generateAppForLink', [data.url, data.title, pageIndex]);
     },
 
-    /** @inheritDoc */
+    /** @override */
     tileMoved: function(draggedTile) {
       if (!(draggedTile.firstChild instanceof App))
         return;
@@ -856,7 +873,7 @@ cr.define('ntp', function() {
       chrome.send('reorderApps', [draggedTile.firstChild.appId, appIds]);
     },
 
-    /** @inheritDoc */
+    /** @override */
     setDropEffect: function(dataTransfer) {
       var tile = ntp.getCurrentlyDraggingTile();
       if (tile && tile.querySelector('.app'))
@@ -869,7 +886,7 @@ cr.define('ntp', function() {
   /**
    * Launches the specified app using the APP_LAUNCH_NTP_APP_RE_ENABLE
    * histogram. This should only be invoked from the AppLauncherHandler.
-   * @param {String} appID The ID of the app.
+   * @param {string} appID The ID of the app.
    */
   function launchAppAfterEnable(appId) {
     chrome.send('launchApp', [appId, APP_LAUNCH.NTP_APP_RE_ENABLE]);

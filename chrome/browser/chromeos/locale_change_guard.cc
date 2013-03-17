@@ -6,17 +6,19 @@
 
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "base/bind.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/notifications/notification_delegate.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -82,7 +84,8 @@ void LocaleChangeGuard::RevertLocaleChange() {
   profile_->ChangeAppLocale(
       from_locale_, Profile::APP_LOCALE_CHANGED_VIA_REVERT);
 
-  Browser* browser = browser::FindTabbedBrowser(profile_, false);
+  Browser* browser = chrome::FindTabbedBrowser(profile_, false,
+                                               chrome::HOST_DESKTOP_TYPE_ASH);
   if (browser)
     chrome::ExecuteCommand(browser, IDC_EXIT);
 }
@@ -169,8 +172,8 @@ void LocaleChangeGuard::Check() {
     PrepareChangingLocale(from_locale, to_locale);
   }
 
-  ash::Shell::GetInstance()->system_tray()->locale_observer()->
-      OnLocaleChanged(this, cur_locale, from_locale_, to_locale_);
+  ash::Shell::GetInstance()->system_tray_notifier()->NotifyLocaleChanged(
+      this, cur_locale, from_locale_, to_locale_);
 }
 
 void LocaleChangeGuard::AcceptLocaleChange() {

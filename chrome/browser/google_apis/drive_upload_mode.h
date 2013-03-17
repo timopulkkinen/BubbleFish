@@ -5,15 +5,14 @@
 #ifndef CHROME_BROWSER_GOOGLE_APIS_DRIVE_UPLOAD_MODE_H_
 #define CHROME_BROWSER_GOOGLE_APIS_DRIVE_UPLOAD_MODE_H_
 
-namespace gdata {
+namespace google_apis {
 
 // The mode for uploading.
 enum UploadMode {
   UPLOAD_NEW_FILE,
   UPLOAD_EXISTING_FILE,
-  UPLOAD_INVALID,  // Used as an invalid value.
 };
 
-}  // namespace gdata
+}  // namespace google_apis
 
 #endif  // CHROME_BROWSER_GOOGLE_APIS_DRIVE_UPLOAD_MODE_H_

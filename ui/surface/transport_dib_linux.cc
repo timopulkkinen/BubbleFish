@@ -22,6 +22,8 @@ TransportDIB::TransportDIB()
     : address_(kInvalidAddress),
       x_shm_(0),
       display_(NULL),
+      inflight_counter_(0),
+      detached_(false),
       size_(0) {
 }
 
@@ -92,10 +94,9 @@ bool TransportDIB::is_valid_id(Id id) {
 skia::PlatformCanvas* TransportDIB::GetPlatformCanvas(int w, int h) {
   if (address_ == kInvalidAddress && !Map())
     return NULL;
-  scoped_ptr<skia::PlatformCanvas> canvas(new skia::PlatformCanvas);
-  if (!canvas->initialize(w, h, true, reinterpret_cast<uint8_t*>(memory())))
-    return NULL;
-  return canvas.release();
+  return skia::CreatePlatformCanvas(w, h, true,
+                                    reinterpret_cast<uint8_t*>(memory()),
+                                    skia::RETURN_NULL_ON_FAILURE);
 }
 
 bool TransportDIB::Map() {
@@ -137,4 +138,18 @@ XID TransportDIB::MapToX(Display* display) {
   }
 
   return x_shm_;
+}
+
+void TransportDIB::DecreaseInFlightCounter() {
+  CHECK(inflight_counter_);
+  inflight_counter_--;
+  if (!inflight_counter_ && detached_)
+    delete this;
+}
+
+void TransportDIB::Detach() {
+  CHECK(!detached_);
+  detached_ = true;
+  if (!inflight_counter_)
+    delete this;
 }

@@ -17,6 +17,7 @@
       'test_files': [],
       'nacl_newlib_out_dir': '<(PRODUCT_DIR)/nacl_test_data/newlib',
       'nacl_glibc_out_dir': '<(PRODUCT_DIR)/nacl_test_data/glibc',
+      'nacl_pnacl_newlib_out_dir': '<(PRODUCT_DIR)/nacl_test_data/pnacl',
       'target_conditions': [
         ['nexe_target!=""', {
           # These variables are used for nexe building and for library building,
@@ -29,6 +30,8 @@
           'out_glibc64': '>(nacl_glibc_out_dir)/>(nexe_target)_glibc_x86_64.nexe',
           'out_glibc_arm': '>(nacl_glibc_out_dir)/>(nexe_target)_glibc_arm.nexe',
           'nmf_glibc': '>(nacl_glibc_out_dir)/>(nexe_target).nmf',
+          'out_pnacl_newlib': '>(nacl_pnacl_newlib_out_dir)/>(nexe_target)_newlib_pnacl.pexe',
+          'nmf_pnacl_newlib': '>(nacl_pnacl_newlib_out_dir)/>(nexe_target).nmf',
         }],
       ],
     },
@@ -58,6 +61,16 @@
           },
         ],
       }],
+      ['test_files!=[] and build_pnacl_newlib==1 and disable_pnacl==0', {
+        'copies': [
+          {
+            'destination': '>(nacl_pnacl_newlib_out_dir)',
+            'files': [
+              '>@(test_files)',
+            ],
+          },
+        ],
+      }],
       ['nexe_target!=""', {
         'variables': {
           # Patch over the fact that untrusted.gypi doesn't define these in all
@@ -71,7 +84,10 @@
           'link_flags': [
             '-lppapi_cpp',
             '-lppapi',
-            '-lpthread',
+            '-pthread',
+          ],
+          'extra_args': [
+            '--strip-all',
           ],
         },
         'target_conditions': [
@@ -91,7 +107,6 @@
                   '<(DEPTH)/native_client_sdk/src/tools/create_nmf.py',
                   '>@(_inputs)',
                   '--output=>(nmf_newlib)',
-                  '--toolchain=newlib',
                 ],
                 'target_conditions': [
                   ['enable_x86_64==1', {
@@ -131,7 +146,6 @@
                   '--output=>(nmf_glibc)',
                   '--path-prefix=>(nexe_target)_libs',
                   '--stage-dependencies=<(nacl_glibc_out_dir)',
-                  '--toolchain=glibc',
                 ],
                 'target_conditions': [
                   ['enable_x86_64==1', {
@@ -149,6 +163,21 @@
                     ],
                   }],
                   # TODO(ncbray) handle arm case.  We don't have ARM glibc yet.
+                ],
+              },
+            ],
+          }],
+          ['build_pnacl_newlib==1 and disable_pnacl==0', {
+            'actions': [
+              {
+                'action_name': 'Generate PNACL NEWLIB NMF',
+                'inputs': ['>(out_pnacl_newlib)'],
+                'outputs': ['>(nmf_pnacl_newlib)'],
+                'action': [
+                  'python',
+                  '<(DEPTH)/native_client_sdk/src/tools/create_nmf.py',
+                  '>@(_inputs)',
+                  '--output=>(nmf_pnacl_newlib)',
                 ],
               },
             ],

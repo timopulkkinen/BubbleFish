@@ -5,7 +5,7 @@
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -20,7 +20,7 @@
 
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(prerender::PrerenderTabHelper)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(prerender::PrerenderTabHelper);
 
 namespace prerender {
 
@@ -30,6 +30,7 @@ namespace prerender {
 class PrerenderTabHelper::PixelStats {
  public:
   explicit PixelStats(PrerenderTabHelper* tab_helper) :
+      bitmap_web_contents_(NULL),
       weak_factory_(this),
       tab_helper_(tab_helper) {
   }
@@ -55,27 +56,23 @@ class PrerenderTabHelper::PixelStats {
       return;
     }
 
-    skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
     web_contents->GetRenderViewHost()->CopyFromBackingStore(
         gfx::Rect(),
         gfx::Size(),
         base::Bind(&PrerenderTabHelper::PixelStats::HandleBitmapResult,
                    weak_factory_.GetWeakPtr(),
                    bitmap_type,
-                   web_contents,
-                   base::Owned(temp_canvas)),
-        temp_canvas);
+                   web_contents));
   }
 
  private:
   void HandleBitmapResult(BitmapType bitmap_type,
                           WebContents* web_contents,
-                          skia::PlatformCanvas* temp_canvas,
-                          bool succeeded) {
+                          bool succeeded,
+                          const SkBitmap& canvas_bitmap) {
     scoped_ptr<SkBitmap> bitmap;
     if (succeeded) {
-      const SkBitmap& canvas_bitmap =
-          skia::GetTopDevice(*temp_canvas)->accessBitmap(false);
+      // TODO(nick): This copy may now be unnecessary.
       bitmap.reset(new SkBitmap());
       canvas_bitmap.copyTo(bitmap.get(), SkBitmap::kARGB_8888_Config);
     }
@@ -90,8 +87,8 @@ class PrerenderTabHelper::PixelStats {
       PrerenderManager* prerender_manager =
           tab_helper_->MaybeGetPrerenderManager();
       if (prerender_manager) {
-        prerender_manager->histograms()->RecordFractionPixelsFinalAtSwapin(
-            CompareBitmaps(bitmap_.get(), bitmap.get()));
+        prerender_manager->RecordFractionPixelsFinalAtSwapin(
+            web_contents, CompareBitmaps(bitmap_.get(), bitmap.get()));
       }
       bitmap_.reset();
       bitmap_web_contents_ = NULL;
@@ -139,13 +136,12 @@ PrerenderTabHelper::~PrerenderTabHelper() {
 
 void PrerenderTabHelper::ProvisionalChangeToMainFrameUrl(
     const GURL& url,
-    const GURL& opener_url,
     content::RenderViewHost* render_view_host) {
   url_ = url;
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return;
-  if (prerender_manager->IsWebContentsPrerendering(web_contents()))
+  if (prerender_manager->IsWebContentsPrerendering(web_contents(), NULL))
     return;
   prerender_manager->MarkWebContentsAsNotPrerendered(web_contents());
 }
@@ -162,7 +158,7 @@ void PrerenderTabHelper::DidCommitProvisionalLoadForFrame(
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return;
-  if (prerender_manager->IsWebContentsPrerendering(web_contents()))
+  if (prerender_manager->IsWebContentsPrerendering(web_contents(), NULL))
     return;
   prerender_manager->RecordNavigation(validated_url);
 }
@@ -201,9 +197,11 @@ void PrerenderTabHelper::DidStopLoading(
 
 void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) {
   if (is_main_frame) {
     // Record the beginning of a new PPLT navigation.
@@ -221,14 +219,14 @@ bool PrerenderTabHelper::IsPrerendering() {
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return false;
-  return prerender_manager->IsWebContentsPrerendering(web_contents());
+  return prerender_manager->IsWebContentsPrerendering(web_contents(), NULL);
 }
 
 bool PrerenderTabHelper::IsPrerendered() {
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return false;
-  return prerender_manager->IsWebContentsPrerendered(web_contents());
+  return prerender_manager->IsWebContentsPrerendered(web_contents(), NULL);
 }
 
 void PrerenderTabHelper::PrerenderSwappedIn() {
@@ -240,7 +238,7 @@ void PrerenderTabHelper::PrerenderSwappedIn() {
                                                   web_contents(), url_);
     PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
     if (prerender_manager)
-      prerender_manager->histograms()->RecordFractionPixelsFinalAtSwapin(1.0);
+      prerender_manager->RecordFractionPixelsFinalAtSwapin(web_contents(), 1.0);
   } else {
     // If we have not finished loading yet, record the actual load start, and
     // rebase the start time to now.

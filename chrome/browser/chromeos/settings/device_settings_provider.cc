@@ -7,8 +7,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
@@ -23,6 +25,7 @@
 #include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/ui/options/options_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
 
 using google::protobuf::RepeatedPtrField;
@@ -40,6 +43,8 @@ const char* kKnownSettings[] = {
   kAccountsPrefEphemeralUsersEnabled,
   kAccountsPrefShowUserNamesOnSignIn,
   kAccountsPrefUsers,
+  kAccountsPrefDeviceLocalAccounts,
+  kAllowRedeemChromeOsRegistrationOffers,
   kAppPack,
   kDeviceOwner,
   kIdleLogoutTimeout,
@@ -62,11 +67,6 @@ const char* kKnownSettings[] = {
 
 // Legacy policy file location. Used to detect migration from pre v12 ChromeOS.
 const char kLegacyPolicyFile[] = "/var/lib/whitelist/preferences";
-
-bool IsControlledSetting(const std::string& pref_path) {
-  const char** end = kKnownSettings + arraysize(kKnownSettings);
-  return std::find(kKnownSettings, end, pref_path) != end;
-}
 
 bool HasOldMetricsFile() {
   // TODO(pastarmovj): Remove this once migration is not needed anymore.
@@ -99,6 +99,12 @@ DeviceSettingsProvider::~DeviceSettingsProvider() {
   device_settings_service_->RemoveObserver(this);
 }
 
+// static
+bool DeviceSettingsProvider::IsDeviceSetting(const std::string& name) {
+  const char** end = kKnownSettings + arraysize(kKnownSettings);
+  return std::find(kKnownSettings, end, name) != end;
+}
+
 void DeviceSettingsProvider::DoSet(const std::string& path,
                                    const base::Value& in_value) {
   // Make sure that either the current user is the device owner or the
@@ -112,7 +118,7 @@ void DeviceSettingsProvider::DoSet(const std::string& path,
     return;
   }
 
-  if (IsControlledSetting(path)) {
+  if (IsDeviceSetting(path)) {
     pending_changes_.push_back(PendingQueueElement(path, in_value.DeepCopy()));
     if (!store_callback_factory_.HasWeakPtrs())
       SetInPolicy();
@@ -167,7 +173,7 @@ void DeviceSettingsProvider::RetrieveCachedData() {
     VLOG(1) << "Can't retrieve temp store, possibly not created yet.";
   }
 
-  UpdateValuesCache(policy_data, device_settings_);
+  UpdateValuesCache(policy_data, device_settings_, trusted_status_);
 }
 
 void DeviceSettingsProvider::SetInPolicy() {
@@ -211,6 +217,22 @@ void DeviceSettingsProvider::SetInPolicy() {
       show->set_show_user_names(show_value);
     else
       NOTREACHED();
+  } else if (prop == kAccountsPrefDeviceLocalAccounts) {
+    em::DeviceLocalAccountsProto* device_local_accounts =
+        device_settings_.mutable_device_local_accounts();
+    base::ListValue* accounts_list;
+    if (value->GetAsList(&accounts_list)) {
+      for (base::ListValue::const_iterator entry(accounts_list->begin());
+           entry != accounts_list->end(); ++entry) {
+        std::string id;
+        if ((*entry)->GetAsString(&id))
+          device_local_accounts->add_account()->set_id(id);
+        else
+          NOTREACHED();
+      }
+    } else {
+      NOTREACHED();
+    }
   } else if (prop == kSignedDataRoamingEnabled) {
     em::DataRoamingEnabledProto* roam =
         device_settings_.mutable_data_roaming_enabled();
@@ -269,6 +291,16 @@ void DeviceSettingsProvider::SetInPolicy() {
     } else {
       NOTREACHED();
     }
+  } else if (prop == kAllowRedeemChromeOsRegistrationOffers) {
+    em::AllowRedeemChromeOsRegistrationOffersProto* allow_redeem_offers =
+        device_settings_.mutable_allow_redeem_offers();
+    bool allow_redeem_offers_value = true;
+    if (value->GetAsBoolean(&allow_redeem_offers_value)) {
+      allow_redeem_offers->set_allow_redeem_offers(
+          allow_redeem_offers_value);
+    } else {
+      NOTREACHED();
+    }
   } else {
     // The remaining settings don't support Set(), since they are not
     // intended to be customizable by the user:
@@ -294,14 +326,14 @@ void DeviceSettingsProvider::SetInPolicy() {
   CHECK(device_settings_.SerializeToString(data.mutable_policy_value()));
 
   // Set the cache to the updated value.
-  UpdateValuesCache(data, device_settings_);
-
-  if (!device_settings_cache::Store(data, g_browser_process->local_state()))
-    LOG(ERROR) << "Couldn't store to the temp storage.";
+  UpdateValuesCache(data, device_settings_, trusted_status_);
 
   if (ownership_status_ == DeviceSettingsService::OWNERSHIP_TAKEN) {
     StoreDeviceSettings();
   } else {
+    if (!device_settings_cache::Store(data, g_browser_process->local_state()))
+      LOG(ERROR) << "Couldn't store to the temp storage.";
+
     // OnStorePolicyCompleted won't get called in this case so proceed with any
     // pending operations immediately.
     if (!pending_changes_.empty())
@@ -358,9 +390,22 @@ void DeviceSettingsProvider::DecodeLoginPolicies(
       whitelist_proto.user_whitelist();
   for (RepeatedPtrField<std::string>::const_iterator it = whitelist.begin();
        it != whitelist.end(); ++it) {
-    list->Append(base::Value::CreateStringValue(*it));
+    list->Append(new base::StringValue(*it));
   }
   new_values_cache->SetValue(kAccountsPrefUsers, list);
+
+  base::ListValue* account_list = new base::ListValue();
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (!command_line->HasSwitch(switches::kDisableLocalAccounts)) {
+    const RepeatedPtrField<em::DeviceLocalAccountInfoProto>& accounts =
+        policy.device_local_accounts().account();
+    RepeatedPtrField<em::DeviceLocalAccountInfoProto>::const_iterator entry;
+    for (entry = accounts.begin(); entry != accounts.end(); ++entry) {
+      if (entry->has_id())
+        account_list->AppendString(entry->id());
+    }
+  }
+  new_values_cache->SetValue(kAccountsPrefDeviceLocalAccounts, account_list);
 }
 
 void DeviceSettingsProvider::DecodeKioskPolicies(
@@ -418,7 +463,7 @@ void DeviceSettingsProvider::DecodeKioskPolicies(
     const RepeatedPtrField<std::string>& urls = urls_proto.start_up_urls();
     for (RepeatedPtrField<std::string>::const_iterator it = urls.begin();
          it != urls.end(); ++it) {
-      list->Append(base::Value::CreateStringValue(*it));
+      list->Append(new base::StringValue(*it));
     }
     new_values_cache->SetValue(kStartUpUrls, list);
   }
@@ -502,11 +547,22 @@ void DeviceSettingsProvider::DecodeGenericPolicies(
           policy.system_timezone().timezone());
     }
   }
+
+  if (policy.has_allow_redeem_offers()) {
+    new_values_cache->SetBoolean(
+        kAllowRedeemChromeOsRegistrationOffers,
+        policy.allow_redeem_offers().allow_redeem_offers());
+  } else {
+    new_values_cache->SetBoolean(
+        kAllowRedeemChromeOsRegistrationOffers,
+        true);
+  }
 }
 
 void DeviceSettingsProvider::UpdateValuesCache(
     const em::PolicyData& policy_data,
-    const em::ChromeDeviceSettingsProto& settings) {
+    const em::ChromeDeviceSettingsProto& settings,
+    TrustedStatus trusted_status) {
   PrefValueMap new_values_cache;
 
   if (policy_data.has_username() && !policy_data.has_request_token())
@@ -538,6 +594,7 @@ void DeviceSettingsProvider::UpdateValuesCache(
   }
   // Swap and notify.
   values_cache_.Swap(&new_values_cache);
+  trusted_status_ = trusted_status;
   for (size_t i = 0; i < notifications.size(); ++i)
     NotifyObservers(notifications[i]);
 }
@@ -615,15 +672,14 @@ bool DeviceSettingsProvider::MitigateMissingPolicy() {
   device_settings_.mutable_allow_new_users()->set_allow_new_users(true);
   device_settings_.mutable_guest_mode_enabled()->set_guest_mode_enabled(true);
   em::PolicyData empty_policy_data;
-  UpdateValuesCache(empty_policy_data, device_settings_);
+  UpdateValuesCache(empty_policy_data, device_settings_, TRUSTED);
   values_cache_.SetBoolean(kPolicyMissingMitigationMode, true);
-  trusted_status_ = TRUSTED;
 
   return true;
 }
 
 const base::Value* DeviceSettingsProvider::Get(const std::string& path) const {
-  if (IsControlledSetting(path)) {
+  if (IsDeviceSetting(path)) {
     const base::Value* value;
     if (values_cache_.GetValue(path, &value))
       return value;
@@ -643,7 +699,7 @@ DeviceSettingsProvider::TrustedStatus
 }
 
 bool DeviceSettingsProvider::HandlesSetting(const std::string& path) const {
-  return IsControlledSetting(path);
+  return IsDeviceSetting(path);
 }
 
 DeviceSettingsProvider::TrustedStatus
@@ -671,9 +727,12 @@ bool DeviceSettingsProvider::UpdateFromService() {
       const em::ChromeDeviceSettingsProto* device_settings =
           device_settings_service_->device_settings();
       if (policy_data && device_settings) {
-        UpdateValuesCache(*policy_data, *device_settings);
+        if (!device_settings_cache::Store(*policy_data,
+                                          g_browser_process->local_state())) {
+          LOG(ERROR) << "Couldn't update the local state cache.";
+        }
+        UpdateValuesCache(*policy_data, *device_settings, TRUSTED);
         device_settings_ = *device_settings;
-        trusted_status_ = TRUSTED;
 
         // TODO(pastarmovj): Make those side effects responsibility of the
         // respective subsystems.

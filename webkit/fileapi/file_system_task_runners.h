@@ -7,7 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -16,8 +16,10 @@ class SingleThreadTaskRunner;
 
 namespace fileapi {
 
+WEBKIT_STORAGE_EXPORT extern const char kMediaTaskRunnerName[];
+
 // This class holds task runners used for filesystem related stuff.
-class FILEAPI_EXPORT FileSystemTaskRunners {
+class WEBKIT_STORAGE_EXPORT FileSystemTaskRunners {
  public:
   FileSystemTaskRunners(
       base::SingleThreadTaskRunner* io_task_runner,

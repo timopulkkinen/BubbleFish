@@ -6,12 +6,12 @@
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/storage/settings_frontend.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/settings/settings_frontend.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/extensions_helper.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/value_store/value_store.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
 using sync_datatype_helper::test;

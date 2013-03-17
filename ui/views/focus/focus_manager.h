@@ -176,10 +176,15 @@ class VIEWS_EXPORT FocusManager {
   // attached to the window hierarchy anymore.
   void ValidateFocusedView();
 
-  // Stores and restores the focused view. Used when the window becomes
-  // active/inactive.
-  void StoreFocusedView();
-  void RestoreFocusedView();
+  // Stores the focused view. Used when the widget loses activation.
+  // |clear_native_focus| indicates whether this should invoke ClearFocus().
+  // Typically |true| should be passed in.
+  void StoreFocusedView(bool clear_native_focus);
+
+  // Restore the view saved with a previous call to StoreFocusedView(). Used
+  // when the widget becomes active. Returns true when the previous view was
+  // successfully refocused - otherwise false.
+  bool RestoreFocusedView();
 
   // Clears the stored focused view.
   void ClearStoredFocusedView();
@@ -299,11 +304,6 @@ class VIEWS_EXPORT FocusManager {
 
   // The list of registered FocusChange listeners.
   ObserverList<FocusChangeListener, true> focus_change_listeners_;
-
-#if defined(USE_X11)
-  // Indicates if we should handle the upcoming Alt key release event.
-  bool should_handle_menu_key_release_;
-#endif
 
   // See description above getter.
   bool is_changing_focus_;

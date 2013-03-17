@@ -4,7 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_animation.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #import "base/mac/foundation_util.h"
 #include "base/native_library.h"
@@ -204,7 +204,7 @@ void UpdateWindowShowHideAnimationState(NSWindow* window, CGFloat value) {
   if ((self = [self initWithDuration:kAnimationDuration
                       animationCurve:NSAnimationEaseInOut])) {
     window_.reset([window retain]);
-    [self setAnimationBlockingMode:NSAnimationNonblocking];
+    [self setAnimationBlockingMode:NSAnimationBlocking];
     [self setWindowStateForStart];
   }
   return self;

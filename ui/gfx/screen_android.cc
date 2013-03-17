@@ -5,33 +5,75 @@
 #include "ui/gfx/screen.h"
 
 #include "base/logging.h"
+#include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/size_conversions.h"
 
 namespace gfx {
 
-// static
-bool Screen::IsDIPEnabled() {
-  return false;
-}
+class ScreenAndroid : public Screen {
+ public:
+  ScreenAndroid() {}
 
-// static
-gfx::Display Screen::GetPrimaryDisplay() {
-  NOTIMPLEMENTED() << "crbug.com/117839 tracks implementation";
-  return gfx::Display(0, gfx::Rect(0, 0, 1, 1));
-}
+  bool IsDIPEnabled() OVERRIDE {
+    return true;
+  }
 
-// static
-gfx::Display Screen::GetDisplayNearestWindow(gfx::NativeView view) {
-  return GetPrimaryDisplay();
-}
+  gfx::Point GetCursorScreenPoint() OVERRIDE {
+    return gfx::Point();
+  }
 
-// static
-gfx::Display Screen::GetDisplayNearestPoint(const gfx::Point& point) {
-  return GetPrimaryDisplay();
-}
+  gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE {
+    NOTIMPLEMENTED();
+    return NULL;
+  }
 
-int Screen::GetNumDisplays() {
-  return 1;
+  gfx::Display GetPrimaryDisplay() const OVERRIDE {
+    gfx::DeviceDisplayInfo device_info;
+    const float device_scale_factor = device_info.GetDIPScale();
+    const gfx::Rect bounds_in_pixels =
+        gfx::Rect(
+            device_info.GetDisplayWidth(),
+            device_info.GetDisplayHeight());
+    const gfx::Rect bounds_in_dip =
+        gfx::Rect(gfx::ToCeiledSize(gfx::ScaleSize(
+            bounds_in_pixels.size(), 1.0f / device_scale_factor)));
+    gfx::Display display(0, bounds_in_dip);
+    display.set_device_scale_factor(device_scale_factor);
+    return display;
+  }
+
+  gfx::Display GetDisplayNearestWindow(gfx::NativeView view) const OVERRIDE {
+    return GetPrimaryDisplay();
+  }
+
+  gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const OVERRIDE {
+    return GetPrimaryDisplay();
+  }
+
+  int GetNumDisplays() OVERRIDE {
+    return 1;
+  }
+
+  virtual gfx::Display GetDisplayMatching(
+      const gfx::Rect& match_rect) const OVERRIDE {
+    return GetPrimaryDisplay();
+  }
+
+  virtual void AddObserver(DisplayObserver* observer) OVERRIDE {
+    // no display change on Android.
+  }
+
+  virtual void RemoveObserver(DisplayObserver* observer) OVERRIDE {
+    // no display change on Android.
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScreenAndroid);
+};
+
+Screen* CreateNativeScreen() {
+  return new ScreenAndroid;
 }
 
 }  // namespace gfx

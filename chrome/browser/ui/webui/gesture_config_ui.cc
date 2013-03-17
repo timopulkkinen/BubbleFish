@@ -4,14 +4,14 @@
 
 #include "chrome/browser/ui/webui/gesture_config_ui.h"
 
-#include "base/values.h"
 #include "base/bind.h"
+#include "base/prefs/pref_service.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
@@ -22,8 +22,8 @@
 GestureConfigUI::GestureConfigUI(content::WebUI* web_ui)
     : content::WebUIController(web_ui) {
   // Set up the chrome://gesture-config source.
-  ChromeWebUIDataSource* html_source =
-      new ChromeWebUIDataSource(chrome::kChromeUIGestureConfigHost);
+  content::WebUIDataSource* html_source =
+      content::WebUIDataSource::Create(chrome::kChromeUIGestureConfigHost);
 
   // Register callback handlers.
   web_ui->RegisterMessageCallback(
@@ -31,17 +31,21 @@ GestureConfigUI::GestureConfigUI(content::WebUI* web_ui)
       base::Bind(&GestureConfigUI::GetPreferenceValue,
                  base::Unretained(this)));
   web_ui->RegisterMessageCallback(
+      "resetPreferenceValue",
+      base::Bind(&GestureConfigUI::ResetPreferenceValue,
+                 base::Unretained(this)));
+  web_ui->RegisterMessageCallback(
       "setPreferenceValue",
       base::Bind(&GestureConfigUI::SetPreferenceValue,
                  base::Unretained(this)));
 
   // Add required resources.
-  html_source->add_resource_path("gesture_config.css", IDR_GESTURE_CONFIG_CSS);
-  html_source->add_resource_path("gesture_config.js", IDR_GESTURE_CONFIG_JS);
-  html_source->set_default_resource(IDR_GESTURE_CONFIG_HTML);
+  html_source->AddResourcePath("gesture_config.css", IDR_GESTURE_CONFIG_CSS);
+  html_source->AddResourcePath("gesture_config.js", IDR_GESTURE_CONFIG_JS);
+  html_source->SetDefaultResource(IDR_GESTURE_CONFIG_HTML);
 
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::WebUIDataSource::Add(profile, html_source);
 }
 
 GestureConfigUI::~GestureConfigUI() {
@@ -55,13 +59,44 @@ void GestureConfigUI::GetPreferenceValue(const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
-  base::StringValue arg1(pref_name);
-  base::FundamentalValue arg2(prefs->GetDouble(pref_name.c_str()));
+  base::StringValue js_pref_name(pref_name);
+  base::FundamentalValue js_pref_value(prefs->GetDouble(pref_name.c_str()));
 
   web_ui()->CallJavascriptFunction(
       "gesture_config.getPreferenceValueResult",
-      arg1,
-      arg2);
+      js_pref_name,
+      js_pref_value);
+}
+
+void GestureConfigUI::ResetPreferenceValue(const base::ListValue* args) {
+  std::string pref_name;
+
+  if (!args->GetString(0, &pref_name)) return;
+
+  Profile* profile = Profile::FromWebUI(web_ui());
+  PrefService* prefs = profile->GetPrefs();
+
+  base::StringValue js_pref_name(pref_name);
+  double d;
+  if (prefs->GetDefaultPrefValue(pref_name.c_str())->GetAsDouble(&d)) {
+    base::FundamentalValue js_pref_value(d);
+    const PrefService::Preference* pref =
+        prefs->FindPreference(pref_name.c_str());
+    switch (pref->GetType()) {
+      case base::Value::TYPE_INTEGER:
+        prefs->SetInteger(pref_name.c_str(), static_cast<int>(d));
+        break;
+      case base::Value::TYPE_DOUBLE:
+        prefs->SetDouble(pref_name.c_str(), d);
+        break;
+      default:
+        NOTREACHED();
+    }
+    web_ui()->CallJavascriptFunction(
+        "gesture_config.getPreferenceValueResult",
+        js_pref_name,
+        js_pref_value);
+  }
 }
 
 void GestureConfigUI::SetPreferenceValue(const base::ListValue* args) {
@@ -73,6 +108,17 @@ void GestureConfigUI::SetPreferenceValue(const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
-  prefs->SetDouble(pref_name.c_str(), value);
+  const PrefService::Preference* pref =
+      prefs->FindPreference(pref_name.c_str());
+  switch (pref->GetType()) {
+    case base::Value::TYPE_INTEGER:
+      prefs->SetInteger(pref_name.c_str(), static_cast<int>(value));
+      break;
+    case base::Value::TYPE_DOUBLE:
+      prefs->SetDouble(pref_name.c_str(), value);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 

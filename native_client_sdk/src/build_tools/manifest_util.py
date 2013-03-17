@@ -5,7 +5,9 @@
 import copy
 import hashlib
 import json
+import string
 import sys
+import urllib2
 
 MANIFEST_VERSION = 2
 
@@ -57,8 +59,8 @@ def DictToJSON(pydict):
 
 
 def DownloadAndComputeHash(from_stream, to_stream=None, progress_func=None):
-  ''' Download the archive data from from-stream and generate sha1 and
-      size info.
+  '''Download the archive data from from-stream and generate sha1 and
+  size info.
 
   Args:
     from_stream:   An input stream that supports read.
@@ -118,11 +120,13 @@ class Archive(dict):
     for key, value in src.items():
       self[key] = value
 
-  def Validate(self):
+  def Validate(self, error_on_unknown_keys=False):
     """Validate the content of the archive object. Raise an Error if
        an invalid or missing field is found.
 
-    Returns: True if self is a valid bundle.
+    Args:
+      error_on_unknown_keys: If True, raise an Error when unknown keys are
+      found in the archive.
     """
     host_os = self.get('host_os', None)
     if host_os and host_os not in HOST_OS_LITERALS:
@@ -142,9 +146,25 @@ class Archive(dict):
     elif not len(checksum):
       raise Error('Archive "%s" has an empty checksum dict' % host_os)
     # Verify that all key names are valid.
-    for key in self:
-      if key not in VALID_ARCHIVE_KEYS:
-        raise Error('Archive "%s" has invalid attribute "%s"' % (host_os, key))
+    if error_on_unknown_keys:
+      for key in self:
+        if key not in VALID_ARCHIVE_KEYS:
+          raise Error('Archive "%s" has invalid attribute "%s"' % (
+              host_os, key))
+
+  def UpdateVitals(self, revision):
+    """Update the size and checksum information for this archive
+    based on the content currently at the URL.
+
+    This allows the template mandifest to be maintained without
+    the need to size and checksums to be present.
+    """
+    template = string.Template(self['url'])
+    self['url'] = template.substitute({'revision': revision})
+    from_stream = urllib2.urlopen(self['url'])
+    sha1_hash, size = DownloadAndComputeHash(from_stream)
+    self['size'] = size
+    self['checksum'] = { 'sha1': sha1_hash }
 
   def __getattr__(self, name):
     """Retrieve values from this dict using attributes.
@@ -155,7 +175,7 @@ class Archive(dict):
       name: the name of the key, 'bar' in the example above.
     Returns:
       The value associated with that key."""
-    if name not in VALID_ARCHIVE_KEYS:
+    if name not in self:
       raise AttributeError(name)
     # special case, self.checksum returns the sha1, not the checksum dict.
     if name == 'checksum':
@@ -170,8 +190,6 @@ class Archive(dict):
     Args:
       name: The name of the key, 'bar' in the example above.
       value: The value to associate with that key."""
-    if name not in VALID_ARCHIVE_KEYS:
-      raise AttributeError(name)
     # special case, self.checksum returns the sha1, not the checksum dict.
     if name == 'checksum':
       self.setdefault('checksum', {})['sha1'] = value
@@ -201,19 +219,22 @@ class Bundle(dict):
     duplicated: the values of the keys in |bundle| take precedence in the
     resulting dictionary.
 
-    Archives in |bundle| will be appended to archives in self. Archives in
-    |bundle| will override archives in self with the same host_os.
+    Archives in |bundle| will be appended to archives in self.
 
     Args:
       bundle: The other bundle.  Must be a dict.
     """
+    assert self is not bundle
+
     for k, v in bundle.iteritems():
       if k == ARCHIVES_KEY:
         for archive in v:
-          self.RemoveArchive(archive['host_os'])
           self.get(k, []).append(archive)
       else:
         self[k] = v
+
+  def __str__(self):
+    return self.GetDataAsString()
 
   def GetDataAsString(self):
     """Returns the JSON bundle object, pretty-printed"""
@@ -245,21 +266,26 @@ class Bundle(dict):
       else:
         self[key] = value
 
-  def Validate(self):
+  def Validate(self, add_missing_info=False, error_on_unknown_keys=False):
     """Validate the content of the bundle. Raise an Error if an invalid or
-       missing field is found. """
+       missing field is found.
+
+    Args:
+      error_on_unknown_keys: If True, raise an Error when unknown keys are
+      found in the bundle.
+    """
     # Check required fields.
-    if not self.get(NAME_KEY, None):
+    if not self.get(NAME_KEY):
       raise Error('Bundle has no name')
-    if self.get(REVISION_KEY, None) == None:
+    if self.get(REVISION_KEY) == None:
       raise Error('Bundle "%s" is missing a revision number' % self[NAME_KEY])
-    if self.get(VERSION_KEY, None) == None:
+    if self.get(VERSION_KEY) == None:
       raise Error('Bundle "%s" is missing a version number' % self[NAME_KEY])
-    if not self.get('description', None):
+    if not self.get('description'):
       raise Error('Bundle "%s" is missing a description' % self[NAME_KEY])
-    if not self.get('stability', None):
+    if not self.get('stability'):
       raise Error('Bundle "%s" is missing stability info' % self[NAME_KEY])
-    if self.get('recommended', None) == None:
+    if self.get('recommended') == None:
       raise Error('Bundle "%s" is missing the recommended field' %
                   self[NAME_KEY])
     # Check specific values
@@ -271,13 +297,16 @@ class Bundle(dict):
           'Bundle "%s" has invalid recommended field: "%s"' %
           (self[NAME_KEY], self['recommended']))
     # Verify that all key names are valid.
-    for key in self:
-      if key not in VALID_BUNDLES_KEYS:
-        raise Error('Bundle "%s" has invalid attribute "%s"' %
-                    (self[NAME_KEY], key))
+    if error_on_unknown_keys:
+      for key in self:
+        if key not in VALID_BUNDLES_KEYS:
+          raise Error('Bundle "%s" has invalid attribute "%s"' %
+                      (self[NAME_KEY], key))
     # Validate the archives
     for archive in self[ARCHIVES_KEY]:
-      archive.Validate()
+      if add_missing_info and 'size' not in archive:
+        archive.UpdateVitals(self[REVISION_KEY])
+      archive.Validate(error_on_unknown_keys)
 
   def GetArchive(self, host_os_name):
     """Retrieve the archive for the given host os.
@@ -295,16 +324,21 @@ class Bundle(dict):
     """Retrieve the archive for the current host os."""
     return self.GetArchive(GetHostOS())
 
+  def GetHostOSArchives(self):
+    """Retrieve all archives for the current host os, or marked all.
+    """
+    return [archive for archive in self.GetArchives()
+        if archive.host_os in (GetHostOS(), 'all')]
+
   def GetArchives(self):
     """Returns all the archives in this bundle"""
     return self[ARCHIVES_KEY]
 
   def AddArchive(self, archive):
     """Add an archive to this bundle."""
-    self.RemoveArchive(archive.host_os)
     self[ARCHIVES_KEY].append(archive)
 
-  def RemoveArchive(self, host_os_name):
+  def RemoveAllArchivesForHostOS(self, host_os_name):
     """Remove an archive from this Bundle."""
     if host_os_name == 'all':
       del self[ARCHIVES_KEY][:]
@@ -322,7 +356,7 @@ class Bundle(dict):
       name: the name of the key, 'bar' in the example above.
     Returns:
       The value associated with that key."""
-    if name not in VALID_BUNDLES_KEYS:
+    if name not in self:
       raise AttributeError(name)
     return self.__getitem__(name)
 
@@ -334,8 +368,6 @@ class Bundle(dict):
     Args:
       name: The name of the key, 'bar' in the example above.
       value: The value to associate with that key."""
-    if name not in VALID_BUNDLES_KEYS:
-      raise AttributeError(name)
     self.__setitem__(name, value)
 
   def __eq__(self, bundle):
@@ -387,7 +419,7 @@ class SDKManifest(object):
         "bundles": [],
         }
 
-  def Validate(self):
+  def Validate(self, add_missing_info=False):
     """Validate the Manifest file and raises an exception for problems"""
     # Validate the manifest top level
     if self._manifest_data["manifest_version"] > MANIFEST_VERSION:
@@ -399,7 +431,7 @@ class SDKManifest(object):
         raise Error('Manifest has invalid attribute "%s"' % key)
     # Validate each bundle
     for bundle in self._manifest_data[BUNDLES_KEY]:
-      bundle.Validate()
+      bundle.Validate(add_missing_info)
 
   def GetBundle(self, name):
     """Get a bundle from the array of bundles.
@@ -422,22 +454,41 @@ class SDKManifest(object):
     return self._manifest_data[BUNDLES_KEY]
 
   def SetBundle(self, new_bundle):
-    """Replace named bundle.  Add if absent.
+    """Add or replace a bundle in the manifest.
+
+    Note: If a bundle in the manifest already exists with this name, it will be
+    overwritten with a copy of this bundle, at the same index as the original.
 
     Args:
       bundle: The bundle.
     """
     name = new_bundle[NAME_KEY]
+    bundles = self.GetBundles()
+    new_bundle_copy = copy.deepcopy(new_bundle)
+    for i, bundle in enumerate(bundles):
+      if bundle[NAME_KEY] == name:
+        bundles[i] = new_bundle_copy
+        return
+    # Bundle not already in list, append it.
+    bundles.append(new_bundle_copy)
+
+  def RemoveBundle(self, name):
+    """Remove a bundle by name.
+
+    Args:
+      name: the name of the bundle to remove.
+    Return:
+      True if the bundle was removed, False if there is no bundle with that
+      name.
+    """
     if not BUNDLES_KEY in self._manifest_data:
-      self._manifest_data[BUNDLES_KEY] = []
+      return False
     bundles = self._manifest_data[BUNDLES_KEY]
-    # Delete any bundles from the list, then add the new one.  This has the
-    # effect of replacing the bundle if it already exists.  It also removes all
-    # duplicate bundles.
     for i, bundle in enumerate(bundles):
       if bundle[NAME_KEY] == name:
         del bundles[i]
-    bundles.append(copy.deepcopy(new_bundle))
+        return True
+    return False
 
   def BundleNeedsUpdate(self, bundle):
     """Decides if a bundle needs to be updated.
@@ -457,7 +508,7 @@ class SDKManifest(object):
            (local_bundle[VERSION_KEY], local_bundle[REVISION_KEY]) <
            (bundle[VERSION_KEY], bundle[REVISION_KEY]))
 
-  def MergeBundle(self, bundle, allow_existing = True):
+  def MergeBundle(self, bundle, allow_existing=True):
     """Merge a Bundle into this manifest.
 
     The new bundle is added if not present, or merged into the existing bundle.
@@ -483,7 +534,7 @@ class SDKManifest(object):
       manifest: The manifest to merge.
     '''
     for bundle in manifest.GetBundles():
-      self.MergeBundle(bundle, allow_existing = False)
+      self.MergeBundle(bundle, allow_existing=False)
 
   def FilterBundles(self, predicate):
     """Filter the list of bundles by |predicate|.
@@ -497,7 +548,7 @@ class SDKManifest(object):
     """
     self._manifest_data[BUNDLES_KEY] = filter(predicate, self.GetBundles())
 
-  def LoadDataFromString(self, json_string):
+  def LoadDataFromString(self, json_string, add_missing_info=False):
     """Load a JSON manifest string. Raises an exception if json_string
        is not well-formed JSON.
 
@@ -517,7 +568,31 @@ class SDKManifest(object):
         self._manifest_data[key] = bundles
       else:
         self._manifest_data[key] = value
-    self.Validate()
+    self.Validate(add_missing_info)
+
+  def __str__(self):
+    return self.GetDataAsString()
+
+  def __eq__(self, other):
+    # Access to protected member _manifest_data of a client class
+    # pylint: disable=W0212
+    if (self._manifest_data['manifest_version'] !=
+        other._manifest_data['manifest_version']):
+      return False
+
+    self_bundle_names = set(b.name for b in self.GetBundles())
+    other_bundle_names = set(b.name for b in other.GetBundles())
+    if self_bundle_names != other_bundle_names:
+      return False
+
+    for bundle_name in self_bundle_names:
+      if self.GetBundle(bundle_name) != other.GetBundle(bundle_name):
+        return False
+
+    return True
+
+  def __ne__(self, other):
+    return not (self == other)
 
   def GetDataAsString(self):
     """Returns the current JSON manifest object, pretty-printed"""

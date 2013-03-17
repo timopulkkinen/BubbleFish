@@ -7,17 +7,47 @@
 #include "base/logging.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/root_window_host.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/screen.h"
 
 namespace aura {
 
-TestScreen::TestScreen(aura::RootWindow* root_window)
-    : root_window_(root_window) {
+// static
+TestScreen* TestScreen::Create() {
+  return new TestScreen(gfx::Rect(1, 1, 800, 600));
+}
+
+// static
+TestScreen* TestScreen::CreateFullscreen() {
+  return new TestScreen(gfx::Rect(RootWindowHost::GetNativeScreenSize()));
 }
 
 TestScreen::~TestScreen() {
+}
+
+RootWindow* TestScreen::CreateRootWindowForPrimaryDisplay() {
+  DCHECK(!root_window_);
+  root_window_ = new RootWindow(RootWindow::CreateParams(display_.bounds()));
+  root_window_->AddObserver(this);
+  root_window_->Init();
+  return root_window_;
+}
+
+bool TestScreen::IsDIPEnabled() {
+  return true;
+}
+
+void TestScreen::OnWindowBoundsChanged(
+    Window* window, const gfx::Rect& old_bounds, const gfx::Rect& new_bounds) {
+  DCHECK_EQ(root_window_, window);
+  display_.SetSize(new_bounds.size());
+}
+
+void TestScreen::OnWindowDestroying(Window* window) {
+  if (root_window_ == window)
+    root_window_ = NULL;
 }
 
 gfx::Point TestScreen::GetCursorScreenPoint() {
@@ -25,7 +55,7 @@ gfx::Point TestScreen::GetCursorScreenPoint() {
 }
 
 gfx::NativeWindow TestScreen::GetWindowAtCursorScreenPoint() {
-  const gfx::Point point = gfx::Screen::GetCursorScreenPoint();
+  const gfx::Point point = GetCursorScreenPoint();
   return root_window_->GetTopWindowContainingPoint(point);
 }
 
@@ -35,23 +65,31 @@ int TestScreen::GetNumDisplays() {
 
 gfx::Display TestScreen::GetDisplayNearestWindow(
     gfx::NativeWindow window) const {
-  return GetMonitor();
+  return display_;
 }
 
 gfx::Display TestScreen::GetDisplayNearestPoint(const gfx::Point& point) const {
-  return GetMonitor();
+  return display_;
 }
 
 gfx::Display TestScreen::GetDisplayMatching(const gfx::Rect& match_rect) const {
-  return GetMonitor();
+  return display_;
 }
 
 gfx::Display TestScreen::GetPrimaryDisplay() const {
-  return GetMonitor();
+  return display_;
 }
 
-gfx::Display TestScreen::GetMonitor() const {
-  return gfx::Display(0, root_window_->bounds());
+void TestScreen::AddObserver(gfx::DisplayObserver* observer) {
+}
+
+void TestScreen::RemoveObserver(gfx::DisplayObserver* observer) {
+}
+
+TestScreen::TestScreen(const gfx::Rect& screen_bounds) : root_window_(NULL) {
+  static int64 synthesized_display_id = 2000;
+  display_.set_id(synthesized_display_id++);
+  display_.SetScaleAndBounds(1.0f, screen_bounds);
 }
 
 }  // namespace aura

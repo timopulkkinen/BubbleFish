@@ -59,7 +59,7 @@ class BookmarkContextMenuController : public BaseBookmarkModelObserver,
 
   void BuildMenu();
 
-  ui::SimpleMenuModel* menu_model() const { return menu_model_.get(); }
+  ui::SimpleMenuModel* menu_model() { return menu_model_.get(); }
 
   // ui::SimpleMenuModel::Delegate implementation:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -68,10 +68,6 @@ class BookmarkContextMenuController : public BaseBookmarkModelObserver,
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
-
-  // Accessors:
-  Profile* profile() const { return profile_; }
-  content::PageNavigator* navigator() const { return navigator_; }
 
  private:
   // Adds a IDC_* style command to the menu with a localized string.
@@ -84,9 +80,6 @@ class BookmarkContextMenuController : public BaseBookmarkModelObserver,
   // Overridden from BaseBookmarkModelObserver:
   // Any change to the model results in closing the menu.
   virtual void BookmarkModelChanged() OVERRIDE;
-
-  // Returns true if selection_ has at least one bookmark of type url.
-  bool HasURLs() const;
 
   gfx::NativeWindow parent_window_;
   BookmarkContextMenuControllerDelegate* delegate_;

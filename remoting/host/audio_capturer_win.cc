@@ -16,8 +16,8 @@
 
 namespace {
 const int kChannels = 2;
-const int kBitsPerSample = 16;
-const int kBitsPerByte = 8;
+const int kBytesPerSample = 2;
+const int kBitsPerSample = kBytesPerSample * 8;
 // Conversion factor from 100ns to 1ms.
 const int k100nsPerMillisecond = 10000;
 
@@ -38,7 +38,8 @@ const int kMaxExpectedTimerLag = 30;
 namespace remoting {
 
 AudioCapturerWin::AudioCapturerWin()
-    : sampling_rate_(AudioPacket::SAMPLING_RATE_INVALID) {
+    : sampling_rate_(AudioPacket::SAMPLING_RATE_INVALID),
+      silence_detector_(kSilenceThreshold){
       thread_checker_.DetachFromThread();
 }
 
@@ -58,7 +59,6 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
   capture_timer_.reset(new base::RepeatingTimer<AudioCapturerWin>());
 
   HRESULT hr = S_OK;
-  com_initializer_.reset(new base::win::ScopedCOMInitializer());
 
   base::win::ScopedComPtr<IMMDeviceEnumerator> mm_device_enumerator;
   hr = mm_device_enumerator.CreateInstance(__uuidof(MMDeviceEnumerator));
@@ -121,9 +121,9 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
       wave_format_ex_->wFormatTag = WAVE_FORMAT_PCM;
       wave_format_ex_->nChannels = kChannels;
       wave_format_ex_->wBitsPerSample = kBitsPerSample;
-      wave_format_ex_->nBlockAlign = kChannels * kBitsPerSample / kBitsPerByte;
+      wave_format_ex_->nBlockAlign = kChannels * kBytesPerSample;
       wave_format_ex_->nAvgBytesPerSec =
-          sampling_rate_ * kChannels * kBitsPerSample / kBitsPerByte;
+          sampling_rate_ * kChannels * kBytesPerSample;
       break;
     case WAVE_FORMAT_EXTENSIBLE: {
       PWAVEFORMATEXTENSIBLE wave_format_extensible =
@@ -146,9 +146,9 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
         wave_format_extensible->Format.nSamplesPerSec = sampling_rate_;
         wave_format_extensible->Format.wBitsPerSample = kBitsPerSample;
         wave_format_extensible->Format.nBlockAlign =
-            kChannels * kBitsPerSample / kBitsPerByte;
+            kChannels * kBytesPerSample;
         wave_format_extensible->Format.nAvgBytesPerSec =
-            sampling_rate_ * kChannels * kBitsPerSample / kBitsPerByte;
+            sampling_rate_ * kChannels * kBytesPerSample;
       } else {
         LOG(ERROR) << "Failed to force 16-bit samples";
         return false;
@@ -189,6 +189,8 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
     return false;
   }
 
+  silence_detector_.Reset(sampling_rate_, kChannels);
+
   // Start capturing.
   capture_timer_->Start(FROM_HERE,
                         audio_device_period_,
@@ -206,7 +208,6 @@ void AudioCapturerWin::Stop() {
   audio_client_.Release();
   audio_capture_client_.Release();
   wave_format_ex_.Reset(NULL);
-  com_initializer_.reset();
 
   thread_checker_.DetachFromThread();
 }
@@ -237,16 +238,14 @@ void AudioCapturerWin::DoCapture() {
     BYTE* data;
     UINT32 frames;
     DWORD flags;
-    hr = audio_capture_client_->GetBuffer(
-        &data, &frames, &flags, NULL, NULL);
+    hr = audio_capture_client_->GetBuffer(&data, &frames, &flags, NULL, NULL);
     if (FAILED(hr)) {
       LOG(ERROR) << "Failed to GetBuffer. Error " << hr;
       return;
     }
 
-    if (!IsPacketOfSilence(
-            reinterpret_cast<const int16*>(data),
-            frames * kChannels)) {
+    if (!silence_detector_.IsSilence(
+            reinterpret_cast<const int16*>(data), frames * kChannels)) {
       scoped_ptr<AudioPacket> packet =
           scoped_ptr<AudioPacket>(new AudioPacket());
       packet->add_data(data, frames * wave_format_ex_->nBlockAlign);
@@ -264,19 +263,6 @@ void AudioCapturerWin::DoCapture() {
       return;
     }
   }
-}
-
-// Detects whether there is audio playing in a packet of samples.
-// Windows can give nonzero samples, even when there is no audio playing, so
-// extremely low amplitude samples are counted as silence.
-// static
-bool AudioCapturerWin::IsPacketOfSilence(
-    const int16* samples, int number_of_samples) {
-  for (int i = 0; i < number_of_samples; i++) {
-    if (abs(samples[i]) > kSilenceThreshold)
-      return false;
-  }
-  return true;
 }
 
 bool AudioCapturer::IsSupported() {

@@ -7,7 +7,6 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_bubble.h"
-#include "ash/system/tray/tray_bubble_view.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
 #include "ui/compositor/layer.h"
@@ -22,9 +21,10 @@ namespace internal {
 TrayGestureHandler::TrayGestureHandler()
     : widget_(NULL),
       gesture_drag_amount_(0) {
-  SystemTray* tray = Shell::GetInstance()->system_tray();
+  // TODO(oshima): Support multiple display case.
+  SystemTray* tray = Shell::GetInstance()->GetPrimarySystemTray();
   tray->ShowDefaultView(BUBBLE_CREATE_NEW);
-  SystemTrayBubble* bubble = tray->bubble_.get();
+  SystemTrayBubble* bubble = tray->GetSystemBubble();
   if (!bubble)
     return;
   bubble->bubble_view()->set_gesture_dragging(true);
@@ -94,13 +94,13 @@ void TrayGestureHandler::CompleteGestureDrag(const ui::GestureEvent& event) {
     widget_->Close();
   } else {
     SystemTrayBubble* bubble =
-        Shell::GetInstance()->system_tray()->bubble_.get();
+        Shell::GetInstance()->GetPrimarySystemTray()->GetSystemBubble();
     if (bubble)
       bubble->bubble_view()->set_gesture_dragging(false);
   }
 }
 
-void TrayGestureHandler::OnWidgetClosing(views::Widget* widget) {
+void TrayGestureHandler::OnWidgetDestroying(views::Widget* widget) {
   CHECK_EQ(widget_, widget);
   widget_ = NULL;
 }

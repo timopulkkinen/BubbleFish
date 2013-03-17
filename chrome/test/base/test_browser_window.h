@@ -28,6 +28,7 @@ class TestBrowserWindow : public BrowserWindow {
   // BrowserWindow:
   virtual void Show() OVERRIDE {}
   virtual void ShowInactive() OVERRIDE {}
+  virtual void Hide() OVERRIDE {}
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE {}
   virtual void Close() OVERRIDE {}
   virtual void Activate() OVERRIDE {}
@@ -42,7 +43,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE {}
   virtual void UpdateDevTools() OVERRIDE {}
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE {}
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE {}
   virtual void SetStarredState(bool is_starred) OVERRIDE {}
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE {}
@@ -59,6 +59,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE {}
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
 #if defined(OS_WIN)
   virtual void SetMetroSnapMode(bool enable) OVERRIDE {}
@@ -68,7 +69,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual LocationBar* GetLocationBar() const OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE {}
   virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE {}
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(content::WebContents* contents,
                              bool should_restore_state) OVERRIDE {}
   virtual void FocusToolbar() OVERRIDE {}
   virtual void FocusAppMenu() OVERRIDE {}
@@ -101,6 +102,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowChromeToMobileBubble() OVERRIDE {}
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
+      OneClickSigninBubbleType type,
       const StartSyncCallback& start_sync_callback) OVERRIDE {}
 #endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
@@ -109,12 +111,8 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UserChangedTheme() OVERRIDE {}
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE {}
-  virtual void ShowPageInfo(content::WebContents* web_contents,
-                            const GURL& url,
-                            const content::SSLStatus& ssl,
-                            bool show_history) OVERRIDE {}
   virtual void ShowWebsiteSettings(Profile* profile,
-                                   TabContents* tab_contents,
+                                   content::WebContents* web_contents,
                                    const GURL& url,
                                    const content::SSLStatus& ssl,
                                    bool show_history) OVERRIDE {}
@@ -123,25 +121,23 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Paste() OVERRIDE {}
 #if defined(OS_MACOSX)
   virtual void OpenTabpose() OVERRIDE {}
-  virtual void EnterPresentationMode(
-      const GURL& url,
-      FullscreenExitBubbleType bubble_type) OVERRIDE {}
-  virtual void ExitPresentationMode() OVERRIDE {}
-  virtual bool InPresentationMode() OVERRIDE;
+  virtual void EnterFullscreenWithChrome() OVERRIDE {}
+  virtual bool IsFullscreenWithChrome() OVERRIDE;
+  virtual bool IsFullscreenWithoutChrome() OVERRIDE;
 #endif
 
-  virtual void ShowInstant(TabContents* preview_contents,
-                           int height,
-                           InstantSizeUnits units) OVERRIDE {}
-  virtual void HideInstant() OVERRIDE {}
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
-  virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual bool GetConstrainedWindowTopY(int* top_y) OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE {}
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE {}
+  virtual void ShowPasswordGenerationBubble(
+      const gfx::Rect& rect,
+      const content::PasswordForm& form,
+      autofill::PasswordGenerator* generator) OVERRIDE {}
 
  protected:
   virtual void DestroyBrowser() OVERRIDE {}
@@ -155,8 +151,7 @@ class TestBrowserWindow : public BrowserWindow {
 
 namespace chrome {
 
-// Helpers that handle the lifetime of TestBrowserWindow instances.
-Browser* CreateBrowserWithTestWindowForProfile(Profile* profile);
+// Helper that handle the lifetime of TestBrowserWindow instances.
 Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params);
 
 }  // namespace chrome

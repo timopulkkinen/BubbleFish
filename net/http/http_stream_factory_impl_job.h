@@ -17,6 +17,7 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 
@@ -27,6 +28,7 @@ class HttpAuthController;
 class HttpNetworkSession;
 class HttpStream;
 class SpdySessionPool;
+class QuicHttpStream;
 
 // An HttpStreamRequestImpl exists for each stream which is in progress of being
 // created for the StreamFactory.
@@ -53,8 +55,10 @@ class HttpStreamFactoryImpl::Job {
 
   // Marks this Job as the "alternate" job, from Alternate-Protocol. Tracks the
   // original url so we can mark the Alternate-Protocol as broken if
-  // we fail to connect.
-  void MarkAsAlternate(const GURL& original_url);
+  // we fail to connect.  |alternate| specifies the alternate protocol to use
+  // and alternate port to connect to.
+  void MarkAsAlternate(const GURL& original_url,
+                       PortAlternateProtocolPair alternate);
 
   // Tells |this| to wait for |job| to resume it.
   void WaitFor(Job* job);
@@ -160,13 +164,11 @@ class HttpStreamFactoryImpl::Job {
 
   bool IsHttpsProxyAndHttpUrl() const;
 
-// Sets several fields of ssl_config for the given origin_server based on the
-// proxy info and other factors.
+  // Sets several fields of ssl_config for the given origin_server based on the
+  // proxy info and other factors.
   void InitSSLConfig(const HostPortPair& origin_server,
-                     SSLConfig* ssl_config) const;
-
-  // AlternateProtocol API
-  void MarkBrokenAlternateProtocolAndFallback();
+                     SSLConfig* ssl_config,
+                     bool is_proxy) const;
 
   // Retrieve SSLInfo from our SSL Socket.
   // This must only be called when we are using an SSLSocket.
@@ -202,6 +204,9 @@ class HttpStreamFactoryImpl::Job {
 
   // Should we force SPDY to run without SSL for this stream request.
   bool ShouldForceSpdyWithoutSSL() const;
+
+  // Should we force QUIC for this stream request.
+  bool ShouldForceQuic() const;
 
   bool IsRequestEligibleForPipelining();
 
@@ -259,11 +264,18 @@ class HttpStreamFactoryImpl::Job {
   // True if this network transaction is using SPDY instead of HTTP.
   bool using_spdy_;
 
+  // True if this network transaction is using QUIC instead of HTTP.
+  bool using_quic_;
+  QuicStreamRequest quic_request_;
+
   // Force spdy for all connections.
   bool force_spdy_always_;
 
   // Force spdy only for SSL connections.
   bool force_spdy_over_ssl_;
+
+  // Force quic for a specific port.
+  int force_quic_port_;
 
   // The certificate error while using SPDY over SSL for insecure URLs.
   int spdy_certificate_error_;

@@ -9,7 +9,6 @@
 #include "chrome/test/base/v8_unit_test.h"
 #include "grit/renderer_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 static const char kJsonSchema[] = "json_schema.js";
@@ -26,7 +25,7 @@ class JsonSchemaTest : public V8UnitTest {
 
     // Add the json schema code to the context.
     std::string code = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_JSON_SCHEMA_JS, ui::SCALE_FACTOR_NONE).as_string();
+        IDR_JSON_SCHEMA_JS).as_string();
 
     // json_schema.js expects to have requireNative() defined.
     ExecuteScriptInContext(
@@ -39,7 +38,7 @@ class JsonSchemaTest : public V8UnitTest {
     ExecuteScriptInContext(code, kJsonSchema);
 
     // Add the test functions to the context.
-    FilePath test_js_file_path;
+    base::FilePath test_js_file_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_js_file_path));
     test_js_file_path = test_js_file_path.AppendASCII("extensions");
     test_js_file_path = test_js_file_path.AppendASCII(kJsonSchemaTest);

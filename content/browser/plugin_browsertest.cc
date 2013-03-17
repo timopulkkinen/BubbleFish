@@ -21,21 +21,20 @@
 #include "base/win/registry.h"
 #endif
 
+namespace content {
 namespace {
 
-void SetUrlRequestMock(const FilePath& path) {
+void SetUrlRequestMock(const base::FilePath& path) {
   URLRequestMockHTTPJob::AddUrlHandler(path);
 }
 
 }
 
-namespace content {
-
 class PluginTest : public ContentBrowserTest {
  protected:
   PluginTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     // Some NPAPI tests schedule garbage collection to force object tear-down.
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose_gc");
 
@@ -60,7 +59,7 @@ class PluginTest : public ContentBrowserTest {
                                       "security_tests.dll");
     }
 #elif defined(OS_MACOSX)
-    FilePath plugin_dir;
+    base::FilePath plugin_dir;
     PathService::Get(base::DIR_MODULE, &plugin_dir);
     plugin_dir = plugin_dir.AppendASCII("plugins");
     // The plugins directory isn't read by default on the Mac, so it needs to be
@@ -70,7 +69,7 @@ class PluginTest : public ContentBrowserTest {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    FilePath path = GetTestFilePath("", "");
+    base::FilePath path = GetTestFilePath("", "");
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE, base::Bind(&SetUrlRequestMock, path));
   }
@@ -106,7 +105,7 @@ class PluginTest : public ContentBrowserTest {
   }
 
   void TestPlugin(const char* filename) {
-    FilePath path = GetTestFilePath("plugin", filename);
+    base::FilePath path = GetTestFilePath("plugin", filename);
     if (!file_util::PathExists(path)) {
       const testing::TestInfo* const test_info =
           testing::UnitTest::GetInstance()->current_test_info();
@@ -166,7 +165,8 @@ IN_PROC_BROWSER_TEST_F(PluginTest,
   string16 expected_title(ASCIIToUTF16("OK"));
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
-  SimulateMouseClick(shell()->web_contents());
+  SimulateMouseClick(shell()->web_contents(), 0,
+      WebKit::WebMouseEvent::ButtonLeft);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 #endif
@@ -174,8 +174,8 @@ IN_PROC_BROWSER_TEST_F(PluginTest,
 // Flaky, http://crbug.com/60071.
 IN_PROC_BROWSER_TEST_F(PluginTest, GetURLRequest404Response) {
   GURL url(URLRequestMockHTTPJob::GetMockUrl(
-      FilePath().AppendASCII("npapi").
-                 AppendASCII("plugin_url_request_404.html")));
+      base::FilePath().AppendASCII("npapi").
+                       AppendASCII("plugin_url_request_404.html")));
   LoadAndWait(url);
 }
 
@@ -224,7 +224,7 @@ IN_PROC_BROWSER_TEST_F(PluginTest, GetJavaScriptURL2) {
 }
 
 // Test is flaky on linux/cros/win builders.  http://crbug.com/71904
-IN_PROC_BROWSER_TEST_F(PluginTest, GetURLRedirectNotification) {
+IN_PROC_BROWSER_TEST_F(PluginTest, DISABLED_GetURLRedirectNotification) {
   LoadAndWait(GetURL("geturl_redirect_notify.html"));
 }
 
@@ -282,12 +282,7 @@ IN_PROC_BROWSER_TEST_F(PluginTest, CreateInstanceInPaint) {
 }
 
 // Tests that putting up an alert in response to a paint doesn't deadlock.
-#if defined(OS_WIN)
-#define MAYBE_AlertInWindowMessage DISABLED_AlertInWindowMessage
-#else
-#define MAYBE_AlertInWindowMessage AlertInWindowMessage
-#endif
-IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE_AlertInWindowMessage) {
+IN_PROC_BROWSER_TEST_F(PluginTest, DISABLED_AlertInWindowMessage) {
   NavigateToURL(shell(), GetURL("alert_in_window_message.html"));
 
   WaitForAppModalDialog(shell());
@@ -354,8 +349,8 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MultipleInstancesSyncCalls) {
 
 IN_PROC_BROWSER_TEST_F(PluginTest, GetURLRequestFailWrite) {
   GURL url(URLRequestMockHTTPJob::GetMockUrl(
-      FilePath().AppendASCII("npapi").
-                 AppendASCII("plugin_url_request_fail_write.html")));
+      base::FilePath().AppendASCII("npapi").
+                       AppendASCII("plugin_url_request_fail_write.html")));
   LoadAndWait(url);
 }
 
@@ -377,8 +372,8 @@ IN_PROC_BROWSER_TEST_F(PluginTest, NoHangIfInitCrashes) {
 // If this flakes on Mac, use http://crbug.com/111508
 IN_PROC_BROWSER_TEST_F(PluginTest, PluginReferrerTest) {
   GURL url(URLRequestMockHTTPJob::GetMockUrl(
-      FilePath().AppendASCII("npapi").
-                 AppendASCII("plugin_url_request_referrer_test.html")));
+      base::FilePath().AppendASCII("npapi").
+                       AppendASCII("plugin_url_request_referrer_test.html")));
   LoadAndWait(url);
 }
 

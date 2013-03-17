@@ -11,20 +11,18 @@
 #include "content/common/sandbox_mac_unittest_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
-
-using sandboxtest::MacSandboxTest;
+namespace content {
 
 //--------------------- Clipboard Sandboxing ----------------------
 // Test case for checking sandboxing of clipboard access.
-class MacSandboxedClipboardTestCase : public sandboxtest::MacSandboxTestCase {
+class MacSandboxedClipboardTestCase : public MacSandboxTestCase {
  public:
   MacSandboxedClipboardTestCase();
   virtual ~MacSandboxedClipboardTestCase();
 
-  virtual bool SandboxedTest();
+  virtual bool SandboxedTest() OVERRIDE;
 
-  virtual void SetTestData(const char* test_data);
+  virtual void SetTestData(const char* test_data) OVERRIDE;
  private:
   NSString* clipboard_name_;
 };
@@ -79,9 +77,9 @@ TEST_F(MacSandboxTest, ClipboardAccess) {
 
 //--------------------- File Access Sandboxing ----------------------
 // Test case for checking sandboxing of filesystem apis.
-class MacSandboxedFileAccessTestCase : public sandboxtest::MacSandboxTestCase {
+class MacSandboxedFileAccessTestCase : public MacSandboxTestCase {
  public:
-  virtual bool SandboxedTest();
+  virtual bool SandboxedTest() OVERRIDE;
 };
 
 REGISTER_SANDBOX_TEST_CASE(MacSandboxedFileAccessTestCase);
@@ -98,9 +96,9 @@ TEST_F(MacSandboxTest, FileAccess) {
 
 //--------------------- /dev/urandom Sandboxing ----------------------
 // /dev/urandom is available to ppapi sandbox only.
-class MacSandboxedUrandomTestCase : public sandboxtest::MacSandboxTestCase {
+class MacSandboxedUrandomTestCase : public MacSandboxTestCase {
  public:
-  virtual bool SandboxedTest();
+  virtual bool SandboxedTest() OVERRIDE;
 };
 
 REGISTER_SANDBOX_TEST_CASE(MacSandboxedUrandomTestCase);
@@ -126,9 +124,9 @@ TEST_F(MacSandboxTest, UrandomAccess) {
   // Similar to RunTestInAllSandboxTypes(), except changing
   // |test_data| for the ppapi case.  Passing "" in the non-ppapi case
   // to overwrite the test data (NULL means not to change it).
-  for (content::SandboxType i = content::SANDBOX_TYPE_FIRST_TYPE;
-       i < content::SANDBOX_TYPE_AFTER_LAST_TYPE; ++i) {
-    if (i == content::SANDBOX_TYPE_PPAPI) {
+  for (SandboxType i = SANDBOX_TYPE_FIRST_TYPE;
+       i < SANDBOX_TYPE_AFTER_LAST_TYPE; ++i) {
+    if (i == SANDBOX_TYPE_PPAPI) {
       EXPECT_TRUE(RunTestInSandbox(i, "MacSandboxedUrandomTestCase", "ppapi"));
     } else {
       EXPECT_TRUE(RunTestInSandbox(i, "MacSandboxedUrandomTestCase", ""))
@@ -137,4 +135,4 @@ TEST_F(MacSandboxTest, UrandomAccess) {
   }
 }
 
-}  // namespace
+}  // namespace content

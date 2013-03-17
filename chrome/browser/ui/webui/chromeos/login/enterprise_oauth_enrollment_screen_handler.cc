@@ -4,19 +4,18 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/enterprise_oauth_enrollment_screen_handler.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
-#include "base/metrics/histogram.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
-#include "chrome/browser/policy/auto_enrollment_client.h"
-#include "chrome/browser/policy/enterprise_metrics.h"
+#include "chrome/browser/policy/message_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -43,15 +42,23 @@ const char kEnrollmentStepWorking[] = "working";
 const char kEnrollmentStepError[] = "error";
 const char kEnrollmentStepSuccess[] = "success";
 
-// A helper class that takes care of asynchronously revoking a given token. It
-// will delete itself once done.
-class TokenRevoker : public GaiaOAuthConsumer {
+}  // namespace
+
+namespace chromeos {
+
+// EnterpriseOAuthEnrollmentScreenHandler::TokenRevoker ------------------------
+
+// A helper class that takes care of asynchronously revoking a given token.
+class EnterpriseOAuthEnrollmentScreenHandler::TokenRevoker
+    : public GaiaOAuthConsumer {
  public:
   TokenRevoker(const std::string& token,
                const std::string& secret,
-               Profile* profile)
+               Profile* profile,
+               EnterpriseOAuthEnrollmentScreenHandler* owner)
       : oauth_fetcher_(this, profile->GetRequestContext(),
-                       kServiceScopeChromeOSDeviceManagement) {
+                       kServiceScopeChromeOSDeviceManagement),
+        owner_(owner) {
     if (secret.empty())
       oauth_fetcher_.StartOAuthRevokeWrapToken(token);
     else
@@ -62,31 +69,21 @@ class TokenRevoker : public GaiaOAuthConsumer {
 
   virtual void OnOAuthRevokeTokenSuccess() OVERRIDE {
     LOG(INFO) << "Successfully revoked OAuth token.";
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    owner_->OnTokenRevokerDone(this);
   }
 
   virtual void OnOAuthRevokeTokenFailure(
       const GoogleServiceAuthError& error) OVERRIDE {
     LOG(ERROR) << "Failed to revoke OAuth token!";
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    owner_->OnTokenRevokerDone(this);
   }
 
  private:
   GaiaOAuthFetcher oauth_fetcher_;
-  std::string token_;
+  EnterpriseOAuthEnrollmentScreenHandler* owner_;
 
   DISALLOW_COPY_AND_ASSIGN(TokenRevoker);
 };
-
-void UMA(int sample) {
-  UMA_HISTOGRAM_ENUMERATION(policy::kMetricEnrollment,
-                            sample,
-                            policy::kMetricEnrollmentSize);
-}
-
-}  // namespace
-
-namespace chromeos {
 
 // EnterpriseOAuthEnrollmentScreenHandler, public ------------------------------
 
@@ -94,7 +91,6 @@ EnterpriseOAuthEnrollmentScreenHandler::EnterpriseOAuthEnrollmentScreenHandler()
     : controller_(NULL),
       show_on_init_(false),
       is_auto_enrollment_(false),
-      enrollment_failed_once_(false),
       browsing_data_remover_(NULL) {
 }
 
@@ -124,39 +120,67 @@ void EnterpriseOAuthEnrollmentScreenHandler::RegisterMessages() {
 // EnterpriseOAuthEnrollmentScreenHandler
 //      EnterpriseEnrollmentScreenActor implementation -------------------------
 
-void EnterpriseOAuthEnrollmentScreenHandler::SetController(
-    Controller* controller) {
+void EnterpriseOAuthEnrollmentScreenHandler::SetParameters(
+    Controller* controller,
+    bool is_auto_enrollment,
+    const std::string& user) {
   controller_ = controller;
+  is_auto_enrollment_ = is_auto_enrollment;
+  if (is_auto_enrollment_)
+    user_ = user;
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::PrepareToShow() {
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!page_is_ready())
     show_on_init_ = true;
-    return;
-  }
-
-  std::string user;
-  is_auto_enrollment_ = controller_ && controller_->IsAutoEnrollment(&user);
-  if (is_auto_enrollment_)
-    user_ = gaia::SanitizeEmail(user);
-  enrollment_failed_once_ = false;
-
-  DoShow();
+  else
+    DoShow();
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::Hide() {
 }
 
-void EnterpriseOAuthEnrollmentScreenHandler::ShowConfirmationScreen() {
-  UMA(is_auto_enrollment_ ? policy::kMetricEnrollmentAutoOK :
-                            policy::kMetricEnrollmentOK);
-  ShowStep(kEnrollmentStepSuccess);
-  if (!is_auto_enrollment_ || enrollment_failed_once_)
-    ResetAuth();
-  NotifyObservers(true);
+void EnterpriseOAuthEnrollmentScreenHandler::FetchOAuthToken() {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  oauth_fetcher_.reset(
+      new GaiaOAuthFetcher(this,
+                           profile->GetRequestContext(),
+                           GaiaConstants::kDeviceManagementServiceOAuth));
+  oauth_fetcher_->SetAutoFetchLimit(
+      GaiaOAuthFetcher::OAUTH2_SERVICE_ACCESS_TOKEN);
+  oauth_fetcher_->StartGetOAuthTokenRequest();
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::ResetAuth(
+    const base::Closure& callback) {
+  oauth_fetcher_.reset();
+
+  auth_reset_callbacks_.push_back(callback);
+  if (browsing_data_remover_)
+    return;
+
+  Profile* profile = Profile::FromBrowserContext(
+      web_ui()->GetWebContents()->GetBrowserContext());
+  browsing_data_remover_ =
+      BrowsingDataRemover::CreateForUnboundedRange(profile);
+  browsing_data_remover_->AddObserver(this);
+  browsing_data_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
+                                 BrowsingDataHelper::UNPROTECTED_WEB);
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::ShowSigninScreen() {
+  ShowStep(kEnrollmentStepSignin);
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::ShowEnrollmentSpinnerScreen() {
+  ShowWorking(IDS_ENTERPRISE_ENROLLMENT_WORKING);
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::ShowLoginSpinnerScreen() {
+  ShowWorking(IDS_ENTERPRISE_ENROLLMENT_RESUMING_LOGIN);
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::ShowAuthError(
@@ -168,83 +192,97 @@ void EnterpriseOAuthEnrollmentScreenHandler::ShowAuthError(
     case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::REQUEST_CANCELED:
-      LOG(ERROR) << "Auth error " << error.state();
-      ShowEnrollmentError(FATAL_AUTH_ERROR);
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_AUTH_FATAL_ERROR, false);
       return;
     case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
     case GoogleServiceAuthError::ACCOUNT_DELETED:
     case GoogleServiceAuthError::ACCOUNT_DISABLED:
-      LOG(ERROR) << "Account error " << error.state();
-      ShowEnrollmentError(ACCOUNT_ERROR);
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_AUTH_ACCOUNT_ERROR, true);
       return;
     case GoogleServiceAuthError::CONNECTION_FAILED:
     case GoogleServiceAuthError::SERVICE_UNAVAILABLE:
-      LOG(WARNING) << "Network error " << error.state();
-      ShowEnrollmentError(NETWORK_ERROR);
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_AUTH_NETWORK_ERROR, true);
       return;
     case GoogleServiceAuthError::NUM_STATES:
       break;
   }
-  UMAFailure(policy::kMetricEnrollmentOtherFailed);
   NOTREACHED();
 }
 
-void EnterpriseOAuthEnrollmentScreenHandler::ShowEnrollmentError(
-    EnrollmentError error_code) {
-  switch (error_code) {
-    case ACCOUNT_ERROR:
-      UMAFailure(policy::kMetricEnrollmentNotSupported);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_ACCOUNT_ERROR, true);
-      break;
-    case SERIAL_NUMBER_ERROR:
-      UMAFailure(policy::kMetricEnrollmentInvalidSerialNumber);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_SERIAL_NUMBER_ERROR, true);
-      break;
-    case ENROLLMENT_MODE_ERROR:
-      UMAFailure(policy::kMetricEnrollmentInvalidEnrollmentMode);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_MODE_ERROR, false);
-      break;
-    case FATAL_AUTH_ERROR:
-      UMAFailure(policy::kMetricEnrollmentLoginFailed);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_FATAL_AUTH_ERROR, false);
-      break;
-    case AUTO_ENROLLMENT_ERROR: {
-      UMAFailure(policy::kMetricEnrollmentAutoEnrollmentNotSupported);
-      // The reason for showing this error is that we have been trying to
-      // auto-enroll and this failed, so we have to verify whether
-      // auto-enrollment is on, and if so switch it off, update the UI
-      // accordingly and show the error message.
-      std::string user;
-      is_auto_enrollment_ = controller_ && controller_->IsAutoEnrollment(&user);
-      base::FundamentalValue value(is_auto_enrollment_);
-      web_ui()->CallJavascriptFunction(
-          "oobe.OAuthEnrollmentScreen.setIsAutoEnrollment", value);
-
-      ShowError(IDS_ENTERPRISE_AUTO_ENROLLMENT_ERROR, false);
-      break;
-    }
-    case NETWORK_ERROR:
-      UMAFailure(policy::kMetricEnrollmentNetworkFailed);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_NETWORK_ENROLLMENT_ERROR, true);
-      break;
-    case LOCKBOX_TIMEOUT_ERROR:
-      UMAFailure(policy::kMetricLockboxTimeoutError);
-      ShowError(IDS_ENTERPRISE_LOCKBOX_TIMEOUT_ERROR, true);
-      break;
-    case DOMAIN_MISMATCH_ERROR:
-      UMAFailure(policy::kMetricEnrollmentWrongUserError);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_DOMAIN_MISMATCH_ERROR, true);
-      break;
-    case MISSING_LICENSES_ERROR:
-      UMAFailure(policy::kMetricMissingLicensesError);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_MISSING_LICENSES_ERROR, true);
-      break;
-    case FATAL_ERROR:
-    default:
-      UMAFailure(policy::kMetricEnrollmentOtherFailed);
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_FATAL_ENROLLMENT_ERROR, false);
+void EnterpriseOAuthEnrollmentScreenHandler::ShowUIError(UIError error) {
+  switch (error) {
+    case UI_ERROR_DOMAIN_MISMATCH:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_USER, true);
+      return;
+    case UI_ERROR_AUTO_ENROLLMENT_BAD_MODE:
+      ShowError(IDS_ENTERPRISE_AUTO_ENROLLMENT_BAD_MODE, true);
+      return;
+    case UI_ERROR_FATAL:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_FATAL_ENROLLMENT_ERROR, true);
+      return;
   }
-  NotifyObservers(false);
+  NOTREACHED();
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::ShowEnrollmentStatus(
+    policy::EnrollmentStatus status) {
+  switch (status.status()) {
+    case policy::EnrollmentStatus::STATUS_SUCCESS:
+      ShowStep(kEnrollmentStepSuccess);
+      return;
+    case policy::EnrollmentStatus::STATUS_REGISTRATION_FAILED:
+      // Some special cases for generating a nicer message that's more helpful.
+      switch (status.client_status()) {
+        case policy::DM_STATUS_SERVICE_MISSING_LICENSES:
+          ShowError(IDS_ENTERPRISE_ENROLLMENT_MISSING_LICENSES_ERROR, true);
+          break;
+        case policy::DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED:
+          ShowError(IDS_ENTERPRISE_ENROLLMENT_ACCOUNT_ERROR, true);
+          break;
+        default:
+          ShowErrorMessage(
+              l10n_util::GetStringFUTF8(
+                  IDS_ENTERPRISE_ENROLLMENT_STATUS_REGISTRATION_FAILED,
+                  policy::FormatDeviceManagementStatus(status.client_status())),
+              true);
+      }
+      return;
+    case policy::EnrollmentStatus::STATUS_REGISTRATION_BAD_MODE:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_REGISTRATION_BAD_MODE, false);
+      return;
+    case policy::EnrollmentStatus::STATUS_POLICY_FETCH_FAILED:
+      ShowErrorMessage(
+          l10n_util::GetStringFUTF8(
+              IDS_ENTERPRISE_ENROLLMENT_STATUS_POLICY_FETCH_FAILED,
+              policy::FormatDeviceManagementStatus(status.client_status())),
+          true);
+      return;
+    case policy::EnrollmentStatus::STATUS_VALIDATION_FAILED:
+      ShowErrorMessage(
+          l10n_util::GetStringFUTF8(
+              IDS_ENTERPRISE_ENROLLMENT_STATUS_VALIDATION_FAILED,
+              policy::FormatValidationStatus(status.validation_status())),
+          true);
+      return;
+    case policy::EnrollmentStatus::STATUS_LOCK_ERROR:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_ERROR, false);
+      return;
+    case policy::EnrollmentStatus::STATUS_LOCK_TIMEOUT:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_TIMEOUT, false);
+      return;
+    case policy::EnrollmentStatus::STATUS_LOCK_WRONG_USER:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_USER, true);
+      return;
+    case policy::EnrollmentStatus::STATUS_STORE_ERROR:
+      ShowErrorMessage(
+          l10n_util::GetStringFUTF8(
+              IDS_ENTERPRISE_ENROLLMENT_STATUS_STORE_ERROR,
+              policy::FormatStoreStatus(status.store_status(),
+                                        status.validation_status())),
+          true);
+      return;
+  }
+  NOTREACHED();
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::SubmitTestCredentials(
@@ -303,7 +341,8 @@ void EnterpriseOAuthEnrollmentScreenHandler::GetLocalizedStrings(
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnGetOAuthTokenFailure(
     const GoogleServiceAuthError& error) {
-  ShowEnrollmentError(FATAL_AUTH_ERROR);
+  if (controller_)
+    controller_->OnAuthError(error);
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthGetAccessTokenSuccess(
@@ -315,7 +354,8 @@ void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthGetAccessTokenSuccess(
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthGetAccessTokenFailure(
     const GoogleServiceAuthError& error) {
-  ShowAuthError(error);
+  if (controller_)
+    controller_->OnAuthError(error);
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthWrapBridgeSuccess(
@@ -326,18 +366,19 @@ void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthWrapBridgeSuccess(
 
   wrap_token_ = token;
 
-  if (!controller_ || user_.empty()) {
+  if (!controller_) {
     NOTREACHED();
     return;
   }
 
-  controller_->OnOAuthTokenAvailable(user_, token);
+  controller_->OnOAuthTokenAvailable(token);
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnOAuthWrapBridgeFailure(
     const std::string& service_scope,
     const GoogleServiceAuthError& error) {
-  ShowAuthError(error);
+  if (controller_)
+    controller_->OnAuthError(error);
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::OnUserInfoSuccess(
@@ -354,9 +395,11 @@ void EnterpriseOAuthEnrollmentScreenHandler::OnBrowsingDataRemoverDone() {
   browsing_data_remover_->RemoveObserver(this);
   browsing_data_remover_ = NULL;
 
-  if (!action_on_browsing_data_removed_.is_null()) {
-    action_on_browsing_data_removed_.Run();
-    action_on_browsing_data_removed_.Reset();
+  std::vector<base::Closure> callbacks_to_run;
+  callbacks_to_run.swap(auth_reset_callbacks_);
+  for (std::vector<base::Closure>::iterator callback(callbacks_to_run.begin());
+       callback != callbacks_to_run.end(); ++callback) {
+    callback->Run();
   }
 }
 
@@ -364,50 +407,23 @@ void EnterpriseOAuthEnrollmentScreenHandler::OnBrowsingDataRemoverDone() {
 
 void EnterpriseOAuthEnrollmentScreenHandler::HandleClose(
     const base::ListValue* value) {
-  bool back_to_signin = true;
-
   std::string reason;
   CHECK_EQ(1U, value->GetSize());
   CHECK(value->GetString(0, &reason));
 
-  if (reason == "cancel") {
-    DCHECK(!is_auto_enrollment_);
-    UMA(policy::kMetricEnrollmentCancelled);
-  } else if (reason == "autocancel") {
-    // Store the user's decision so that the sign-in screen doesn't go
-    // automatically to the enrollment screen again.
-    policy::AutoEnrollmentClient::CancelAutoEnrollment();
-    UMA(policy::kMetricEnrollmentAutoCancelled);
-  } else if (reason == "done") {
-    // If the user account used for enrollment is not whitelisted, send the user
-    // back to the login screen. In that case, clear the profile data too.
-    bool is_whitelisted = !user_.empty() && LoginUtils::IsWhitelisted(user_);
-
-    // If enrollment failed at least once, the profile was cleared and the user
-    // had to retry with another account, or even cancelled the whole thing.
-    // In that case, go back to the sign-in screen; otherwise, if this was an
-    // auto-enrollment, resume the pending signin.
-    back_to_signin = !is_auto_enrollment_ ||
-                     enrollment_failed_once_ ||
-                     !is_whitelisted;
-  } else {
+  if (!controller_) {
     NOTREACHED();
+    return;
   }
+
+  if (reason == "cancel" || reason == "autocancel")
+    controller_->OnCancel();
+  else if (reason == "done")
+    controller_->OnConfirmationClosed();
+  else
+    NOTREACHED();
 
   RevokeTokens();
-
-  if (back_to_signin) {
-    // Clean the profile before going back to signin.
-    action_on_browsing_data_removed_ =
-        base::Bind(&EnterpriseOAuthEnrollmentScreenHandler::DoClose,
-                   base::Unretained(this),
-                   true);
-    ResetAuth();
-  } else {
-    // Not going back to sign-in, letting the initial sign-in resume instead.
-    // In that case, keep the profile data.
-    DoClose(false);
-  }
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::HandleCompleteLogin(
@@ -423,42 +439,20 @@ void EnterpriseOAuthEnrollmentScreenHandler::HandleCompleteLogin(
     return;
   }
 
-  user_ = gaia::SanitizeEmail(user);
-  EnrollAfterLogin();
+  controller_->OnLoginDone(gaia::SanitizeEmail(user));
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::HandleRetry(
     const base::ListValue* value) {
-  // Trigger browsing data removal to make sure we start from a clean slate.
-  action_on_browsing_data_removed_ =
-      base::Bind(&EnterpriseOAuthEnrollmentScreenHandler::DoShow,
-                 base::Unretained(this));
-  ResetAuth();
-}
-
-void EnterpriseOAuthEnrollmentScreenHandler::EnrollAfterLogin() {
-  DCHECK(!user_.empty());
-  if (is_auto_enrollment_) {
-    UMA(enrollment_failed_once_ ? policy::kMetricEnrollmentAutoRetried :
-                                  policy::kMetricEnrollmentAutoStarted);
-  } else {
-    UMA(policy::kMetricEnrollmentStarted);
+  if (!controller_) {
+    NOTREACHED();
+    return;
   }
-  Profile* profile = Profile::FromWebUI(web_ui());
-  oauth_fetcher_.reset(
-      new GaiaOAuthFetcher(this,
-                           profile->GetRequestContext(),
-                           GaiaConstants::kDeviceManagementServiceOAuth));
-  oauth_fetcher_->SetAutoFetchLimit(
-      GaiaOAuthFetcher::OAUTH2_SERVICE_ACCESS_TOKEN);
-  oauth_fetcher_->StartGetOAuthTokenRequest();
 
-  ShowWorking(IDS_ENTERPRISE_ENROLLMENT_WORKING);
+  controller_->OnRetry();
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::ShowStep(const char* step) {
-  RevokeTokens();
-
   base::StringValue step_value(step);
   web_ui()->CallJavascriptFunction("oobe.OAuthEnrollmentScreen.showStep",
                                    step_value);
@@ -466,10 +460,14 @@ void EnterpriseOAuthEnrollmentScreenHandler::ShowStep(const char* step) {
 
 void EnterpriseOAuthEnrollmentScreenHandler::ShowError(int message_id,
                                                        bool retry) {
-  RevokeTokens();
-  enrollment_failed_once_ = true;
+  ShowErrorMessage(l10n_util::GetStringUTF8(message_id), retry);
+}
 
-  const std::string message(l10n_util::GetStringUTF8(message_id));
+void EnterpriseOAuthEnrollmentScreenHandler::ShowErrorMessage(
+    const std::string& message,
+    bool retry) {
+  RevokeTokens();
+
   base::StringValue message_value(message);
   base::FundamentalValue retry_value(retry);
   web_ui()->CallJavascriptFunction("oobe.OAuthEnrollmentScreen.showError",
@@ -484,34 +482,30 @@ void EnterpriseOAuthEnrollmentScreenHandler::ShowWorking(int message_id) {
                                    message_value);
 }
 
-void EnterpriseOAuthEnrollmentScreenHandler::ResetAuth() {
-  oauth_fetcher_.reset();
-
-  if (browsing_data_remover_)
-    return;
-
-  Profile* profile = Profile::FromBrowserContext(
-      web_ui()->GetWebContents()->GetBrowserContext());
-  browsing_data_remover_ =
-      BrowsingDataRemover::CreateForUnboundedRange(profile);
-  browsing_data_remover_->AddObserver(this);
-  browsing_data_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
-      BrowsingDataHelper::UNPROTECTED_WEB);
-}
-
 void EnterpriseOAuthEnrollmentScreenHandler::RevokeTokens() {
   Profile* profile = Profile::FromBrowserContext(
       web_ui()->GetWebContents()->GetBrowserContext());
 
   if (!access_token_.empty()) {
-    new TokenRevoker(access_token_, access_token_secret_, profile);
+    token_revokers_.push_back(
+        new TokenRevoker(access_token_, access_token_secret_, profile, this));
     access_token_.clear();
   }
 
   if (!wrap_token_.empty()) {
-    new TokenRevoker(wrap_token_, "", profile);
+    token_revokers_.push_back(new TokenRevoker(wrap_token_, "", profile, this));
     wrap_token_.clear();
   }
+}
+
+void EnterpriseOAuthEnrollmentScreenHandler::OnTokenRevokerDone(
+    TokenRevoker* revoker) {
+  ScopedVector<TokenRevoker>::iterator it =
+      std::find(token_revokers_.begin(), token_revokers_.end(), revoker);
+  if (it != token_revokers_.end())
+    token_revokers_.erase(it);
+  else
+    NOTREACHED();
 }
 
 void EnterpriseOAuthEnrollmentScreenHandler::DoShow() {
@@ -530,29 +524,7 @@ void EnterpriseOAuthEnrollmentScreenHandler::DoShow() {
     screen_data.SetString("test_password", test_password_);
   }
 
-  ShowScreen("oauth-enrollment", &screen_data);
-
-  if (is_auto_enrollment_ && !enrollment_failed_once_)
-    EnrollAfterLogin();
-}
-
-void EnterpriseOAuthEnrollmentScreenHandler::DoClose(bool back_to_signin) {
-  if (!controller_) {
-    NOTREACHED();
-    return;
-  }
-
-  if (!back_to_signin) {
-    // Show a progress spinner while profile creation is resuming.
-    ShowWorking(IDS_ENTERPRISE_ENROLLMENT_RESUMING_LOGIN);
-  }
-  controller_->OnConfirmationClosed(back_to_signin);
-}
-
-void EnterpriseOAuthEnrollmentScreenHandler::UMAFailure(int sample) {
-  if (is_auto_enrollment_)
-    sample = policy::kMetricEnrollmentAutoFailed;
-  UMA(sample);
+  ShowScreen(OobeUI::kScreenOobeEnrollment, &screen_data);
 }
 
 }  // namespace chromeos

@@ -11,6 +11,8 @@ FILE_SYSTEM_CACHE_LISTING = 'CompiledFileSystemListing'
 FILE_SYSTEM_READ          = 'Read'
 FILE_SYSTEM_STAT          = 'Stat'
 GITHUB_STAT               = 'GithubStat'
+KNOWN_ISSUES              = 'KnownIssues'
+REFERENCE_RESOLVER        = 'ReferenceResolver'
 
 class _SingleGetFuture(object):
   def __init__(self, multi_get, key):

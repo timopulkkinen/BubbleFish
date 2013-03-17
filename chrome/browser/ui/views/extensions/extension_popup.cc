@@ -6,8 +6,9 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -17,16 +18,14 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
-#endif
-
-#if defined(USE_ASH)
-#include "ash/wm/window_animations.h"
+#include "ui/views/corewm/window_animations.h"
 #endif
 
 using content::RenderViewHost;
@@ -180,18 +179,18 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
     views::BubbleBorder::ArrowLocation arrow_location,
     ShowAction show_action) {
   ExtensionProcessManager* manager =
-      browser->profile()->GetExtensionProcessManager();
+      extensions::ExtensionSystem::Get(browser->profile())->process_manager();
   extensions::ExtensionHost* host = manager->CreatePopupHost(url, browser);
   ExtensionPopup* popup = new ExtensionPopup(browser, host, anchor_view,
       arrow_location, show_action);
   views::BubbleDelegateView::CreateBubble(popup);
 
-#if defined(USE_ASH)
+#if defined(USE_AURA)
   gfx::NativeView native_view = popup->GetWidget()->GetNativeView();
-  ash::SetWindowVisibilityAnimationType(
+  views::corewm::SetWindowVisibilityAnimationType(
       native_view,
-      ash::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
-  ash::SetWindowVisibilityAnimationVerticalPosition(
+      views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
+  views::corewm::SetWindowVisibilityAnimationVerticalPosition(
       native_view,
       -3.0f);
 #endif
@@ -207,8 +206,12 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
 void ExtensionPopup::ShowBubble() {
   Show();
 
+  // Request focus for the View. Without this, the FocusManager gets confused.
+  host()->view()->SetVisible(true);
+  host()->view()->RequestFocus();
+
   // Focus on the host contents when the bubble is first shown.
-  host()->host_contents()->Focus();
+  host()->host_contents()->GetView()->Focus();
 
   // Listen for widget focus changes after showing (used for non-aura win).
   views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);

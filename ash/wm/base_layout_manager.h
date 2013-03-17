@@ -11,10 +11,12 @@
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/root_window_observer.h"
-#include "ui/base/ui_base_types.h"
 #include "ui/aura/window_observer.h"
+#include "ui/base/events/event_handler.h"
+#include "ui/base/ui_base_types.h"
 
 namespace aura {
 class RootWindow;
@@ -29,10 +31,12 @@ namespace internal {
 // window appropriately.  Subclasses should be sure to invoke the base class
 // for adding and removing windows, otherwise show state will not be tracked
 // properly.
-class ASH_EXPORT BaseLayoutManager : public aura::LayoutManager,
-                                     public aura::RootWindowObserver,
-                                     public ash::ShellObserver,
-                                     public aura::WindowObserver {
+class ASH_EXPORT BaseLayoutManager
+    : public aura::LayoutManager,
+      public aura::RootWindowObserver,
+      public ash::ShellObserver,
+      public aura::WindowObserver,
+      public aura::client::ActivationChangeObserver {
  public:
   typedef std::set<aura::Window*> WindowSet;
 
@@ -70,6 +74,10 @@ class ASH_EXPORT BaseLayoutManager : public aura::LayoutManager,
                                        intptr_t old) OVERRIDE;
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
 
+  // aura::client::ActivationChangeObserver overrides:
+  virtual void OnWindowActivated(aura::Window* gained_active,
+                                 aura::Window* lost_active) OVERRIDE;
+
  protected:
   // Invoked from OnWindowPropertyChanged() if |kShowStateKey| changes.
   virtual void ShowStateChanged(aura::Window* window,
@@ -77,12 +85,7 @@ class ASH_EXPORT BaseLayoutManager : public aura::LayoutManager,
 
  private:
   // Update window bounds based on a change in show state.
-  void UpdateBoundsFromShowState(aura::Window* window, bool animate);
-
-  // Updates window bounds and animates when requested and possible.
-  void MaybeAnimateToBounds(aura::Window* window,
-                            bool animate,
-                            const gfx::Rect& new_bounds);
+  void UpdateBoundsFromShowState(aura::Window* window);
 
   // Adjusts the window sizes when the screen changes its size or its
   // work area insets.

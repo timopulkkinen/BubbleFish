@@ -10,11 +10,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
+#include "ui/webui/web_ui_util.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/sessions/session_restore.h"
@@ -57,6 +59,9 @@ void RecentlyClosedTabsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("reopenTab",
       base::Bind(&RecentlyClosedTabsHandler::HandleReopenTab,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("clearRecentlyClosed",
+      base::Bind(&RecentlyClosedTabsHandler::HandleClearRecentlyClosed,
+                 base::Unretained(this)));
 }
 
 RecentlyClosedTabsHandler::~RecentlyClosedTabsHandler() {
@@ -67,13 +72,6 @@ RecentlyClosedTabsHandler::~RecentlyClosedTabsHandler() {
 void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
   if (!tab_restore_service_)
     return;
-
-  double index = -1.0;
-  CHECK(args->GetDouble(1, &index));
-
-  // There are actually less than 20 restore tab items displayed in the UI.
-  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SessionRestore",
-                            static_cast<int>(index), 20);
 
   double session_to_restore = 0.0;
   CHECK(args->GetDouble(0, &session_to_restore));
@@ -95,38 +93,41 @@ void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
   SessionRestore::RestoreForeignSessionTab(web_ui()->GetWebContents(),
                                            session_tab, NEW_FOREGROUND_TAB);
 #else
+  double index = -1.0;
+  CHECK(args->GetDouble(1, &index));
+
+  // There are actually less than 20 restore tab items displayed in the UI.
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SessionRestore",
+                            static_cast<int>(index), 20);
+
   TabRestoreServiceDelegate* delegate =
       TabRestoreServiceDelegate::FindDelegateForWebContents(
           web_ui()->GetWebContents());
   if (!delegate)
     return;
-  WindowOpenDisposition disposition =
-      web_ui_util::GetDispositionFromClick(args, 2);
+  chrome::HostDesktopType host_desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(
+          web_ui()->GetWebContents()->GetView()->GetNativeView());
+  WindowOpenDisposition disposition = webui::GetDispositionFromClick(args, 2);
   tab_restore_service_->RestoreEntryById(delegate,
                                          static_cast<int>(session_to_restore),
+                                         host_desktop_type,
                                          disposition);
   // The current tab has been nuked at this point; don't touch any member
   // variables.
 #endif
 }
 
+void RecentlyClosedTabsHandler::HandleClearRecentlyClosed(
+    const ListValue* args) {
+  EnsureTabRestoreService();
+  if (tab_restore_service_)
+    tab_restore_service_->ClearEntries();
+}
+
 void RecentlyClosedTabsHandler::HandleGetRecentlyClosedTabs(
     const ListValue* args) {
-  if (!tab_restore_service_) {
-    tab_restore_service_ =
-        TabRestoreServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
-
-    // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
-    // Off the Record mode)
-    if (tab_restore_service_) {
-      // This does nothing if the tabs have already been loaded or they
-      // shouldn't be loaded.
-      tab_restore_service_->LoadTabsFromLastSession();
-
-      tab_restore_service_->AddObserver(this);
-    }
-  }
-
+  EnsureTabRestoreService();
   if (tab_restore_service_)
     TabRestoreServiceChanged(tab_restore_service_);
 }
@@ -169,5 +170,22 @@ void RecentlyClosedTabsHandler::CreateRecentlyClosedValues(
     entry_dict->SetInteger("sessionId", entry->id);
     entry_list_value->Append(entry_dict.release());
     added_count++;
+  }
+}
+
+void RecentlyClosedTabsHandler::EnsureTabRestoreService() {
+  if (tab_restore_service_)
+    return;
+
+  tab_restore_service_ =
+      TabRestoreServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
+
+  // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
+  // Off the Record mode)
+  if (tab_restore_service_) {
+    // This does nothing if the tabs have already been loaded or they
+    // shouldn't be loaded.
+    tab_restore_service_->LoadTabsFromLastSession();
+    tab_restore_service_->AddObserver(this);
   }
 }

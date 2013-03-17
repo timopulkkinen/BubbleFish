@@ -188,39 +188,6 @@ class WebserverTest(ChromeDriverTest):
     server.Kill()
 
 
-class NativeInputTest(ChromeDriverTest):
-  """Native input ChromeDriver tests."""
-
-  _CAPABILITIES = {'chrome.nativeEvents': True }
-
-  def testCanStartWithNativeEvents(self):
-    driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
-    self.assertTrue(driver.capabilities['chrome.nativeEvents'])
-
-  # Flaky on windows. See crbug.com/80295.
-  def DISABLED_testSendKeysNative(self):
-    driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
-    driver.get(self.GetTestDataUrl() + '/test_page.html')
-    # Find the text input.
-    q = driver.find_element_by_name('key_input_test')
-    # Send some keys.
-    q.send_keys('tokyo')
-    self.assertEqual(q.text, 'tokyo')
-
-
-  # Needs to run on a machine with an IME installed.
-  def DISABLED_testSendKeysNativeProcessedByIME(self):
-    driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
-    driver.get(self.GetTestDataUrl() + '/test_page.html')
-    q = driver.find_element_by_name('key_input_test')
-    # Send key combination to turn IME on.
-    q.send_keys(Keys.F7)
-    q.send_keys('toukyou')
-    # Now turning it off.
-    q.send_keys(Keys.F7)
-    self.assertEqual(q.get_attribute('value'), "\xe6\x9d\xb1\xe4\xba\xac")
-
-
 class DesiredCapabilitiesTest(ChromeDriverTest):
   """Tests for webdriver desired capabilities."""
 
@@ -301,6 +268,19 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     driver.get(self.GetTestDataUrl() + '/empty.html')
     driver.execute_script('window.open("about:blank")')
     self.assertEquals(2, len(driver.window_handles))
+
+  def testLoadAsync(self):
+    """Test that chromedriver can load pages asynchronously."""
+    driver = self.GetNewDriver({'chrome.loadAsync': True})
+
+    # Check that navigate doesn't wait for the page to load.
+    driver.get(self.GetTestDataUrl() + '/hang')
+
+    # Check that the navigation actually starts.
+    def IsEmptyPage(driver):
+      return driver.current_url.endswith('empty.html')
+    driver.get(self.GetTestDataUrl() + '/empty.html')
+    WebDriverWait(driver, 10).until(IsEmptyPage)
 
 
 class DetachProcessTest(ChromeDriverTest):
@@ -725,6 +705,40 @@ class TypingTest(ChromeDriverTest):
     area_elem.send_keys(Keys.LEFT * 9)
     area_elem.send_keys('much ')
     self.assertEquals('much more text', area_elem.get_attribute('value'))
+
+  def testWithWebWidgets(self):
+    def SetHTML(html):
+      """Sets the page HTML.
+
+      The given HTML should not contain single quotes.
+      """
+      assert '\'' not in html
+      self._driver.execute_script('document.body.innerHTML = \'%s\'' % html)
+    SetHTML('<input type="checkbox">check</input>')
+    elem = self._driver.find_element_by_tag_name('input')
+    elem.send_keys(' ')
+    self.assertTrue(elem.is_selected())
+    elem.send_keys(' ')
+    self.assertFalse(elem.is_selected())
+
+    SetHTML('<input type="radio" name="g" checked>1</input>' +
+            '<input type="radio" name="g">2</input>')
+    elem1, elem2 = self._driver.find_elements_by_tag_name('input')
+    elem1.send_keys(Keys.RIGHT)
+    self.assertTrue(elem2.is_selected())
+    elem2.send_keys(Keys.LEFT)
+    self.assertFalse(elem2.is_selected())
+
+    SetHTML('<select><option>a</option><option>b</option></select>')
+    elem = self._driver.find_element_by_tag_name('select')
+    elem.send_keys('b')
+    self.assertEquals('b', elem.get_attribute('value'))
+
+    handler = 'javascript:document.title=\\x27success\\x27'
+    SetHTML('<input type="button" onclick="%s"></input>' % handler)
+    elem = self._driver.find_element_by_tag_name('input')
+    elem.send_keys(' ')
+    self.assertEquals('success', self._driver.title)
 
 
 class UrlBaseTest(ChromeDriverTest):

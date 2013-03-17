@@ -6,12 +6,11 @@
   'variables': {
     'chromium_code': 1,
     'variables': {
-      # Set force_rlz_use_chrome_net to 1 to use chrome's network stack instead
-      # of win inet.
-      'force_rlz_use_chrome_net%': 0,
+      # Force rlz to use chrome's networking stack.
+      'force_rlz_use_chrome_net%': 1,
     },
     'conditions': [
-      ['force_rlz_use_chrome_net or OS=="mac"', {
+      ['force_rlz_use_chrome_net or OS!="win"', {
         'rlz_use_chrome_net%': 1,
       }, {
         'rlz_use_chrome_net%': 0,
@@ -32,6 +31,9 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
       ],
       'sources': [
+        'chromeos/lib/machine_id_chromeos.cc',
+        'chromeos/lib/rlz_value_store_chromeos.cc',
+        'chromeos/lib/rlz_value_store_chromeos.h',
         'lib/assert.cc',
         'lib/assert.h',
         'lib/crc32.h',
@@ -43,6 +45,8 @@
         'lib/lib_values.cc',
         'lib/machine_id.cc',
         'lib/machine_id.h',
+        'lib/recursive_cross_process_lock_posix.cc',
+        'lib/recursive_cross_process_lock_posix.h',
         'lib/rlz_enums.h',
         'lib/rlz_lib.cc',
         'lib/rlz_lib.h',
@@ -67,7 +71,6 @@
         'win/lib/rlz_lib_win.cc',
         'win/lib/rlz_value_store_registry.cc',
         'win/lib/rlz_value_store_registry.h',
-        'win/lib/vista_winnt.h',
       ],
       'conditions': [
         ['rlz_use_chrome_net==1', {
@@ -94,6 +97,8 @@
           },
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'rlz_unittests',
@@ -101,6 +106,7 @@
       'dependencies': [
         ':rlz_lib',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_prefs',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/zlib/zlib.gyp:zlib',
@@ -123,8 +129,10 @@
           'dependencies': [
             '../net/net.gyp:net_test_support',
           ],
-        }]
+        }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'rlz_id',

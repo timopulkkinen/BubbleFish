@@ -12,9 +12,8 @@ TestWebContentsView::TestWebContentsView() {
 TestWebContentsView::~TestWebContentsView() {
 }
 
-void TestWebContentsView::ShowContextMenu(
-    const ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+void TestWebContentsView::ShowContextMenu(const ContextMenuParams& params,
+                                          ContextMenuSourceType type) {
 }
 
 void TestWebContentsView::ShowPopupMenu(const gfx::Rect& bounds,
@@ -30,7 +29,8 @@ void TestWebContentsView::StartDragging(
     const WebDropData& drop_data,
     WebKit::WebDragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
-    const gfx::Point& image_offset) {
+    const gfx::Vector2d& image_offset,
+    const DragEventSourceInfo& event_info) {
 }
 
 void TestWebContentsView::UpdateDragCursor(WebKit::WebDragOperation operation) {
@@ -40,14 +40,6 @@ void TestWebContentsView::GotFocus() {
 }
 
 void TestWebContentsView::TakeFocus(bool reverse) {
-}
-
-void TestWebContentsView::CreateView(const gfx::Size& initial_size) {
-}
-
-RenderWidgetHostView* TestWebContentsView::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
-  return NULL;
 }
 
 gfx::NativeView TestWebContentsView::GetNativeView() const {
@@ -65,17 +57,11 @@ gfx::NativeWindow TestWebContentsView::GetTopLevelNativeWindow() const {
 void TestWebContentsView::GetContainerBounds(gfx::Rect *out) const {
 }
 
-void TestWebContentsView::SetPageTitle(const string16& title) {
-}
-
 void TestWebContentsView::OnTabCrashed(base::TerminationStatus status,
                                        int error_code) {
 }
 
 void TestWebContentsView::SizeContents(const gfx::Size& size) {
-}
-
-void TestWebContentsView::RenderViewCreated(RenderViewHost* host) {
 }
 
 void TestWebContentsView::Focus() {
@@ -94,15 +80,45 @@ WebDropData* TestWebContentsView::GetDropData() const {
   return NULL;
 }
 
+gfx::Rect TestWebContentsView::GetViewBounds() const {
+  return gfx::Rect();
+}
+
+#if defined(OS_MACOSX)
+void TestWebContentsView::SetAllowOverlappingViews(bool overlapping) {
+}
+#endif
+
+void TestWebContentsView::CreateView(const gfx::Size& initial_size,
+                                     gfx::NativeView context) {
+}
+
+RenderWidgetHostView* TestWebContentsView::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
+  return NULL;
+}
+
+RenderWidgetHostView* TestWebContentsView::CreateViewForPopupWidget(
+    RenderWidgetHost* render_widget_host) {
+  return NULL;
+}
+
+void TestWebContentsView::SetPageTitle(const string16& title) {
+}
+
+void TestWebContentsView::RenderViewCreated(RenderViewHost* host) {
+}
+
+void TestWebContentsView::RenderViewSwappedIn(RenderViewHost* host) {
+}
+
+#if defined(OS_MACOSX)
 bool TestWebContentsView::IsEventTracking() const {
   return false;
 }
 
 void TestWebContentsView::CloseTabAfterEventTracking() {
 }
-
-gfx::Rect TestWebContentsView::GetViewBounds() const {
-  return gfx::Rect();
-}
+#endif
 
 }  // namespace content

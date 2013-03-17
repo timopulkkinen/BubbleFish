@@ -11,6 +11,7 @@
 #include "content/public/browser/render_process_host_factory.h"
 #include "ipc/ipc_test_sink.h"
 
+class StoragePartition;
 class TransportDIB;
 
 namespace content {
@@ -36,7 +37,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual bool Init() OVERRIDE;
   virtual int GetNextRoutingID() OVERRIDE;
   virtual void CancelResourceRequests(int render_widget_id) OVERRIDE;
-  virtual void CrossSiteSwapOutACK(
+  virtual void SimulateSwapOutACK(
       const ViewMsg_SwapOut_Params& params) OVERRIDE;
   virtual bool WaitForBackingStoreMsg(int render_widget_id,
                                       const base::TimeDelta& max_delay,
@@ -46,11 +47,12 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual void WidgetHidden() OVERRIDE;
   virtual int VisibleWidgetCount() const OVERRIDE;
   virtual bool IsGuest() const OVERRIDE;
+  virtual StoragePartition* GetStoragePartition() const OVERRIDE;
   virtual void AddWord(const string16& word);
   virtual bool FastShutdownIfPossible() OVERRIDE;
   virtual bool FastShutdownStarted() const OVERRIDE;
   virtual void DumpHandles() OVERRIDE;
-  virtual base::ProcessHandle GetHandle() OVERRIDE;
+  virtual base::ProcessHandle GetHandle() const OVERRIDE;
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id) OVERRIDE;
   virtual int GetID() const OVERRIDE;
   virtual bool HasConnection() const OVERRIDE;

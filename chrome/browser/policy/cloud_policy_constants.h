@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_POLICY_CLOUD_POLICY_CONSTANTS_H_
 #define CHROME_BROWSER_POLICY_CLOUD_POLICY_CONSTANTS_H_
 
+#include <string>
+#include <utility>
+
 namespace policy {
 
 // Constants related to the device management protocol.
@@ -33,6 +36,8 @@ extern const char kValueUserAffiliationNone[];
 // Policy type strings for the policy_type field in PolicyFetchRequest.
 extern const char kChromeDevicePolicyType[];
 extern const char kChromeUserPolicyType[];
+extern const char kChromePublicAccountPolicyType[];
+extern const char kChromeExtensionPolicyType[];
 
 // These codes are sent in the |error_code| field of PolicyFetchResponse.
 enum PolicyFetchStatus {
@@ -77,7 +82,7 @@ enum DeviceManagementStatus {
   // Service error: The device id used for registration is already taken.
   DM_STATUS_SERVICE_DEVICE_ID_CONFLICT,
   // Service error: The licenses have expired or have been exhausted.
-  DM_STATUS_MISSING_LICENSES,
+  DM_STATUS_SERVICE_MISSING_LICENSES,
   // Service error: Policy not found. Error code defined by the DM folks.
   DM_STATUS_SERVICE_POLICY_NOT_FOUND = 902,
 };
@@ -90,6 +95,9 @@ enum DeviceMode {
   DEVICE_MODE_ENTERPRISE,  // The device is enrolled as an enterprise device.
   DEVICE_MODE_KIOSK,       // The device is enrolled as kiosk/retail device.
 };
+
+// A pair that combines a policy fetch type and entity ID.
+typedef std::pair<std::string, std::string> PolicyNamespaceKey;
 
 }  // namespace policy
 

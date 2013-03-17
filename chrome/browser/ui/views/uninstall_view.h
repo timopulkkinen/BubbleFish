@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/string16.h"
 #include "ui/base/models/combobox_model.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace views {
@@ -28,7 +29,8 @@ class UninstallView : public views::ButtonListener,
                       public ui::ComboboxModel {
  public:
   explicit UninstallView(int* user_selection,
-                         const base::Closure& quit_closure);
+                         const base::Closure& quit_closure,
+                         bool show_delete_profile);
   virtual ~UninstallView();
 
   // Overridden form views::ButtonListener.
@@ -42,7 +44,6 @@ class UninstallView : public views::ButtonListener,
 
   // Overridden from views::WidgetDelegate:
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
 
   // Overridden from ui::ComboboxModel:
   virtual int GetItemCount() const OVERRIDE;
@@ -55,6 +56,7 @@ class UninstallView : public views::ButtonListener,
   void SetupControls();
 
   views::Label* confirm_label_;
+  bool show_delete_profile_;
   views::Checkbox* delete_profile_;
   views::Checkbox* change_default_browser_;
   views::Combobox* browsers_combo_;

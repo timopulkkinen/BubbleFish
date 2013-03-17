@@ -17,8 +17,11 @@
 class InfoBar;
 class InfoBarDelegate;
 class InfoBarNotificationObserver;
-class TabContents;
 class TabStripModel;
+
+namespace content {
+class WebContents;
+}
 
 // Protocol for basic container methods, as needed by an InfoBarController.
 // This protocol exists to make mocking easier in unittests.
@@ -51,8 +54,8 @@ const CGFloat kTipHeight = 12.0;
   // Needed to send resize messages when infobars are added or removed.
   id<ViewResizer> resizeDelegate_;  // weak
 
-  // The TabContents we are currently showing infobars for.
-  TabContents* currentTabContents_;  // weak
+  // The WebContents we are currently showing infobars for.
+  content::WebContents* currentWebContents_;  // weak
 
   // Holds the InfoBarControllers currently owned by this container.
   scoped_nsobject<NSMutableArray> infobarControllers_;
@@ -85,12 +88,12 @@ const CGFloat kTipHeight = 12.0;
 // infobars, removes them first and deregisters for any
 // notifications.  |contents| can be NULL, in which case no infobars
 // are shown and no notifications are registered for.
-- (void)changeTabContents:(TabContents*)contents;
+- (void)changeWebContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabDetachedWithContents.
 // Forwarded by BWC. Removes all infobars and deregisters for any notifications
 // if |contents| is the current tab contents.
-- (void)tabDetachedWithContents:(TabContents*)contents;
+- (void)tabDetachedWithContents:(content::WebContents*)contents;
 
 // Returns the number of active infobars. This is
 // |infobarControllers_ - closingInfoBars_|.
@@ -124,10 +127,10 @@ const CGFloat kTipHeight = 12.0;
 @interface InfoBarContainerController (JustForTesting)
 
 // Removes all infobar views.  Infobars which were already closing will be
-// completely closed (i.e. InfobarDelegate::InfoBarClosed() will be called and
-// we'll get a callback to removeController).  Other infobars will simply stop
-// animating and disappear.  Callers must call positionInfoBarsAndRedraw()
-// after calling this method.
+// completely closed (i.e. the InfoBarDelegate will be deleted and we'll get a
+// callback to removeController).  Other infobars will simply stop animating and
+// disappear.  Callers must call positionInfoBarsAndRedraw() after calling this
+// method.
 - (void)removeAllInfoBars;
 
 @end

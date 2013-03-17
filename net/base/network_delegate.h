@@ -14,8 +14,11 @@
 #include "net/base/completion_callback.h"
 #include "net/cookies/canonical_cookie.h"
 
-class FilePath;
 class GURL;
+
+namespace base {
+class FilePath;
+}
 
 namespace net {
 
@@ -35,7 +38,7 @@ class HttpResponseHeaders;
 class SocketStream;
 class URLRequest;
 
-class NetworkDelegate : public base::NonThreadSafe {
+class NET_EXPORT NetworkDelegate : public base::NonThreadSafe {
  public:
   // AuthRequiredResponse indicates how a NetworkDelegate handles an
   // OnAuthRequired call. It's placed in this file to prevent url_request.h
@@ -73,7 +76,7 @@ class NetworkDelegate : public base::NonThreadSafe {
   int NotifyHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
-      HttpResponseHeaders* original_response_headers,
+      const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers);
   void NotifyBeforeRedirect(URLRequest* request,
                             const GURL& new_location);
@@ -92,7 +95,7 @@ class NetworkDelegate : public base::NonThreadSafe {
                     const std::string& cookie_line,
                     CookieOptions* options);
   bool CanAccessFile(const URLRequest& request,
-                     const FilePath& path) const;
+                     const base::FilePath& path) const;
   bool CanThrottleRequest(const URLRequest& request) const;
 
   int NotifyBeforeSocketStreamConnect(SocketStream* socket,
@@ -146,7 +149,7 @@ class NetworkDelegate : public base::NonThreadSafe {
   virtual int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
-      HttpResponseHeaders* original_response_headers,
+      const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers) = 0;
 
   // Called right after a redirect response code was received.
@@ -215,7 +218,7 @@ class NetworkDelegate : public base::NonThreadSafe {
   // allow or block access to the given file path.  Returns true if access is
   // allowed.
   virtual bool OnCanAccessFile(const URLRequest& request,
-                               const FilePath& path) const = 0;
+                               const base::FilePath& path) const = 0;
 
   // Returns true if the given request may be rejected when the
   // URLRequestThrottlerManager believes the server servicing the

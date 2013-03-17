@@ -19,7 +19,45 @@ cr.define('options', function() {
 
   KeyboardOverlay.prototype = {
     __proto__: options.SettingsDialog.prototype,
+
+    /**
+     * Initializes the page. This method is called in initialize.
+     */
+    initializePage: function() {
+      options.SettingsDialog.prototype.initializePage.call(this);
+
+      $('languages-and-input-settings').onclick = function(e) {
+        OptionsPage.navigateToPage('languages');
+      };
+    },
+
+    /**
+     * Show/hide the caps lock remapping section.
+     * @private
+     */
+    showCapsLockOptions_: function(show) {
+      $('caps-lock-remapping-section').hidden = !show;
+    },
+
+    /**
+     * Show/hide the diamond key remapping section.
+     * @private
+     */
+    showDiamondKeyOptions_: function(show) {
+      $('diamond-key-remapping-section').hidden = !show;
+    },
   };
+
+  // Forward public APIs to private implementations.
+  [
+    'showCapsLockOptions',
+    'showDiamondKeyOptions',
+  ].forEach(function(name) {
+    KeyboardOverlay[name] = function() {
+      var instance = KeyboardOverlay.getInstance();
+      return instance[name + '_'].apply(instance, arguments);
+    };
+  });
 
   // Export
   return {

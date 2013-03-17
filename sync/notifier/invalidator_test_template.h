@@ -36,9 +36,9 @@
 //       ...
 //     }
 //
-//     // Called after a call to SetStateDeprecated(), SetUniqueId(), or
-//     // UpdateCredentials() on the Invalidator implementation.  Should block
-//     // until the effects of the call are visible on the current thread.
+//     // Called after a call to SetUniqueId(), or UpdateCredentials() on the
+//     // Invalidator implementation.  Should block until the effects of the
+//     // call are visible on the current thread.
 //     void WaitForInvalidator() {
 //       ...
 //     }
@@ -56,15 +56,9 @@
 //     // Should cause OnIncomingInvalidation() to be called on all
 //     // observers of the Invalidator implementation with the given
 //     // parameters.
-//     void TriggerOnIncomingInvalidation(const ObjectIdStateMap& id_state_map,
-//                                        IncomingInvalidationSource source) {
+//     void TriggerOnIncomingInvalidation(
+//         const ObjectIdInvalidationMap& invalidation_map) {
 //       ...
-//     }
-//
-//     // Returns whether or not the notifier handles storing the old
-//     // (deprecated) notifier state.
-//     static bool InvalidatorHandlesDeprecatedState() {
-//       return false;
 //     }
 //   };
 //
@@ -90,8 +84,8 @@
 #include "sync/notifier/fake_invalidation_handler.h"
 #include "sync/notifier/fake_invalidation_state_tracker.h"
 #include "sync/notifier/invalidator.h"
-#include "sync/notifier/object_id_state_map.h"
-#include "sync/notifier/object_id_state_map_test_util.h"
+#include "sync/notifier/object_id_invalidation_map.h"
+#include "sync/notifier/object_id_invalidation_map_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -111,13 +105,6 @@ class InvalidatorTest : public testing::Test {
                                       this->fake_tracker_.AsWeakPtr());
     Invalidator* const invalidator = this->delegate_.GetInvalidator();
 
-    // TODO(tim): This call should be a no-op. Remove once bug 124140 and
-    // associated issues are fixed.
-    invalidator->SetStateDeprecated("fake_state");
-    this->delegate_.WaitForInvalidator();
-    // We don't expect |fake_tracker_|'s state to change, as we
-    // initialized with non-empty initial_invalidation_state above.
-    EXPECT_TRUE(this->fake_tracker_.GetInvalidationState().empty());
     invalidator->SetUniqueId("fake_id");
     this->delegate_.WaitForInvalidator();
     invalidator->UpdateCredentials("foo@bar.com", "fake_token");
@@ -148,13 +135,13 @@ TYPED_TEST_P(InvalidatorTest, Basic) {
 
   invalidator->RegisterHandler(&handler);
 
-  ObjectIdStateMap states;
+  ObjectIdInvalidationMap states;
   states[this->id1].payload = "1";
   states[this->id2].payload = "2";
   states[this->id3].payload = "3";
 
   // Should be ignored since no IDs are registered to |handler|.
-  this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+  this->delegate_.TriggerOnIncomingInvalidation(states);
   EXPECT_EQ(0, handler.GetInvalidationCount());
 
   ObjectIdSet ids;
@@ -165,16 +152,13 @@ TYPED_TEST_P(InvalidatorTest, Basic) {
   this->delegate_.TriggerOnInvalidatorStateChange(INVALIDATIONS_ENABLED);
   EXPECT_EQ(INVALIDATIONS_ENABLED, handler.GetInvalidatorState());
 
-  ObjectIdStateMap expected_states;
+  ObjectIdInvalidationMap expected_states;
   expected_states[this->id1].payload = "1";
   expected_states[this->id2].payload = "2";
 
-  this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+  this->delegate_.TriggerOnIncomingInvalidation(states);
   EXPECT_EQ(1, handler.GetInvalidationCount());
-  EXPECT_THAT(
-      expected_states,
-      Eq(handler.GetLastInvalidationIdStateMap()));
-  EXPECT_EQ(REMOTE_INVALIDATION, handler.GetLastInvalidationSource());
+  EXPECT_THAT(expected_states, Eq(handler.GetLastInvalidationMap()));
 
   ids.erase(this->id1);
   ids.insert(this->id3);
@@ -184,12 +168,9 @@ TYPED_TEST_P(InvalidatorTest, Basic) {
   expected_states[this->id3].payload = "3";
 
   // Removed object IDs should not be notified, newly-added ones should.
-  this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+  this->delegate_.TriggerOnIncomingInvalidation(states);
   EXPECT_EQ(2, handler.GetInvalidationCount());
-  EXPECT_THAT(
-      expected_states,
-      Eq(handler.GetLastInvalidationIdStateMap()));
-  EXPECT_EQ(REMOTE_INVALIDATION, handler.GetLastInvalidationSource());
+  EXPECT_THAT(expected_states, Eq(handler.GetLastInvalidationMap()));
 
   this->delegate_.TriggerOnInvalidatorStateChange(TRANSIENT_INVALIDATION_ERROR);
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR,
@@ -203,7 +184,7 @@ TYPED_TEST_P(InvalidatorTest, Basic) {
   invalidator->UnregisterHandler(&handler);
 
   // Should be ignored since |handler| isn't registered anymore.
-  this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+  this->delegate_.TriggerOnIncomingInvalidation(states);
   EXPECT_EQ(2, handler.GetInvalidationCount());
 }
 
@@ -255,31 +236,25 @@ TYPED_TEST_P(InvalidatorTest, MultipleHandlers) {
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler4.GetInvalidatorState());
 
   {
-    ObjectIdStateMap states;
+    ObjectIdInvalidationMap states;
     states[this->id1].payload = "1";
     states[this->id2].payload = "2";
     states[this->id3].payload = "3";
     states[this->id4].payload = "4";
-    this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+    this->delegate_.TriggerOnIncomingInvalidation(states);
 
-    ObjectIdStateMap expected_states;
+    ObjectIdInvalidationMap expected_states;
     expected_states[this->id1].payload = "1";
     expected_states[this->id2].payload = "2";
 
     EXPECT_EQ(1, handler1.GetInvalidationCount());
-    EXPECT_THAT(
-        expected_states,
-        Eq(handler1.GetLastInvalidationIdStateMap()));
-    EXPECT_EQ(REMOTE_INVALIDATION, handler1.GetLastInvalidationSource());
+    EXPECT_THAT(expected_states, Eq(handler1.GetLastInvalidationMap()));
 
     expected_states.clear();
     expected_states[this->id3].payload = "3";
 
     EXPECT_EQ(1, handler2.GetInvalidationCount());
-    EXPECT_THAT(
-        expected_states,
-        Eq(handler2.GetLastInvalidationIdStateMap()));
-    EXPECT_EQ(REMOTE_INVALIDATION, handler2.GetLastInvalidationSource());
+    EXPECT_THAT(expected_states, Eq(handler2.GetLastInvalidationMap()));
 
     EXPECT_EQ(0, handler3.GetInvalidationCount());
     EXPECT_EQ(0, handler4.GetInvalidationCount());
@@ -290,6 +265,10 @@ TYPED_TEST_P(InvalidatorTest, MultipleHandlers) {
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler2.GetInvalidatorState());
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler3.GetInvalidatorState());
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler4.GetInvalidatorState());
+
+  invalidator->UnregisterHandler(&handler3);
+  invalidator->UnregisterHandler(&handler2);
+  invalidator->UnregisterHandler(&handler1);
 }
 
 // Make sure that passing an empty set to UpdateRegisteredIds clears the
@@ -327,11 +306,11 @@ TYPED_TEST_P(InvalidatorTest, EmptySetUnregisters) {
   EXPECT_EQ(INVALIDATIONS_ENABLED, handler2.GetInvalidatorState());
 
   {
-    ObjectIdStateMap states;
+    ObjectIdInvalidationMap states;
     states[this->id1].payload = "1";
     states[this->id2].payload = "2";
     states[this->id3].payload = "3";
-    this->delegate_.TriggerOnIncomingInvalidation(states, REMOTE_INVALIDATION);
+    this->delegate_.TriggerOnIncomingInvalidation(states);
     EXPECT_EQ(0, handler1.GetInvalidationCount());
     EXPECT_EQ(1, handler2.GetInvalidationCount());
   }
@@ -339,6 +318,9 @@ TYPED_TEST_P(InvalidatorTest, EmptySetUnregisters) {
   this->delegate_.TriggerOnInvalidatorStateChange(TRANSIENT_INVALIDATION_ERROR);
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler1.GetInvalidatorState());
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler2.GetInvalidatorState());
+
+  invalidator->UnregisterHandler(&handler2);
+  invalidator->UnregisterHandler(&handler1);
 }
 
 namespace internal {
@@ -381,47 +363,13 @@ TYPED_TEST_P(InvalidatorTest, GetInvalidatorStateAlwaysCurrent) {
   this->delegate_.TriggerOnInvalidatorStateChange(TRANSIENT_INVALIDATION_ERROR);
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler.GetInvalidatorState());
   EXPECT_EQ(TRANSIENT_INVALIDATION_ERROR, handler.GetLastRetrievedState());
-}
 
-// Initialize the invalidator with an empty initial state.  Call the deprecated
-// state setter function a number of times, destroying and re-creating the
-// invalidator in between.  Only the first one should take effect (i.e., state
-// migration should only happen once).
-TYPED_TEST_P(InvalidatorTest, MigrateState) {
-  if (!this->delegate_.InvalidatorHandlesDeprecatedState()) {
-    DLOG(INFO) << "This Invalidator doesn't handle deprecated state; "
-               << "skipping";
-    return;
-  }
-
-  this->delegate_.CreateInvalidator(std::string(),
-                                    this->fake_tracker_.AsWeakPtr());
-  Invalidator* invalidator = this->delegate_.GetInvalidator();
-
-  invalidator->SetStateDeprecated("fake_state");
-  this->delegate_.WaitForInvalidator();
-  EXPECT_EQ("fake_state", this->fake_tracker_.GetInvalidationState());
-
-  // Should do nothing.
-  invalidator->SetStateDeprecated("spurious_fake_state");
-  this->delegate_.WaitForInvalidator();
-  EXPECT_EQ("fake_state", this->fake_tracker_.GetInvalidationState());
-
-  // Pretend that Chrome has shut down.
-  this->delegate_.DestroyInvalidator();
-  this->delegate_.CreateInvalidator("fake_state",
-                                    this->fake_tracker_.AsWeakPtr());
-  invalidator = this->delegate_.GetInvalidator();
-
-  // Should do nothing.
-  invalidator->SetStateDeprecated("more_spurious_fake_state");
-  this->delegate_.WaitForInvalidator();
-  EXPECT_EQ("fake_state", this->fake_tracker_.GetInvalidationState());
+  invalidator->UnregisterHandler(&handler);
 }
 
 REGISTER_TYPED_TEST_CASE_P(InvalidatorTest,
                            Basic, MultipleHandlers, EmptySetUnregisters,
-                           GetInvalidatorStateAlwaysCurrent, MigrateState);
+                           GetInvalidatorStateAlwaysCurrent);
 
 }  // namespace syncer
 

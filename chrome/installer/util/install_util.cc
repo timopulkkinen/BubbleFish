@@ -18,17 +18,19 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "base/win/metro.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/helper.h"
-#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/installation_state.h"
+#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
 
@@ -54,6 +56,7 @@ const wchar_t kStageUncompressing[] = L"uncompressing";
 const wchar_t kStageUnpacking[] = L"unpacking";
 const wchar_t kStageUpdatingChannels[] = L"updating_channels";
 const wchar_t kStageCreatingVisualManifest[] = L"creating_visual_manifest";
+const wchar_t kStageDeferringToHigherVersion[] = L"deferring_to_higher_version";
 
 const wchar_t* const kStages[] = {
   NULL,
@@ -74,6 +77,7 @@ const wchar_t* const kStages[] = {
   kStageFinishing,
   kStageConfiguringAutoLaunch,
   kStageCreatingVisualManifest,
+  kStageDeferringToHigherVersion,
 };
 
 COMPILE_ASSERT(installer::NUM_STAGES == arraysize(kStages),
@@ -117,8 +121,40 @@ HWND CreateUACForegroundWindow() {
 
 }  // namespace
 
+string16 InstallUtil::GetActiveSetupPath(BrowserDistribution* dist) {
+  static const wchar_t kInstalledComponentsPath[] =
+      L"Software\\Microsoft\\Active Setup\\Installed Components\\";
+  return kInstalledComponentsPath + dist->GetActiveSetupGuid();
+}
+
+void InstallUtil::TriggerActiveSetupCommand() {
+  string16 active_setup_reg(
+      GetActiveSetupPath(BrowserDistribution::GetDistribution()));
+  base::win::RegKey active_setup_key(
+      HKEY_LOCAL_MACHINE, active_setup_reg.c_str(), KEY_QUERY_VALUE);
+  string16 cmd_str;
+  LONG read_status = active_setup_key.ReadValue(L"StubPath", &cmd_str);
+  if (read_status != ERROR_SUCCESS) {
+    LOG(ERROR) << active_setup_reg << ", " << read_status;
+    // This should never fail if Chrome is registered at system-level, but if it
+    // does there is not much else to be done.
+    return;
+  }
+
+  CommandLine cmd(CommandLine::FromString(cmd_str));
+  // Force creation of shortcuts as the First Run beacon might land between now
+  // and the time setup.exe checks for it.
+  cmd.AppendSwitch(installer::switches::kForceConfigureUserSettings);
+
+  base::LaunchOptions launch_options;
+  if (base::win::IsMetroProcess())
+    launch_options.force_breakaway_from_job_ = true;
+  if (!base::LaunchProcess(cmd.GetCommandLineString(), launch_options, NULL))
+    PLOG(ERROR) << cmd.GetCommandLineString();
+}
+
 bool InstallUtil::ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code) {
-  FilePath::StringType program(cmd.GetProgram().value());
+  base::FilePath::StringType program(cmd.GetProgram().value());
   DCHECK(!program.empty());
   DCHECK_NE(program[0], L'\"');
 
@@ -325,14 +361,14 @@ bool CheckIsChromeSxSProcess() {
     return true;
 
   // Also return true if we are running from Chrome SxS installed path.
-  FilePath exe_dir;
+  base::FilePath exe_dir;
   PathService::Get(base::DIR_EXE, &exe_dir);
   string16 chrome_sxs_dir(installer::kGoogleChromeInstallSubDir2);
   chrome_sxs_dir.append(installer::kSxSSuffix);
-  return FilePath::CompareEqualIgnoreCase(exe_dir.BaseName().value(),
-                                          installer::kInstallBinaryDir) &&
-         FilePath::CompareEqualIgnoreCase(exe_dir.DirName().BaseName().value(),
-                                          chrome_sxs_dir);
+  return base::FilePath::CompareEqualIgnoreCase(
+          exe_dir.BaseName().value(), installer::kInstallBinaryDir) &&
+      base::FilePath::CompareEqualIgnoreCase(
+          exe_dir.DirName().BaseName().value(), chrome_sxs_dir);
 }
 
 bool InstallUtil::IsChromeSxSProcess() {
@@ -340,36 +376,32 @@ bool InstallUtil::IsChromeSxSProcess() {
   return sxs;
 }
 
-bool InstallUtil::HasDelegateExecuteHandler(BrowserDistribution* dist,
-                                            const string16& chrome_exe) {
-  bool found = false;
-  bool system_install = !IsPerUserInstall(chrome_exe.c_str());
-  Version version;
-  GetChromeVersion(dist, system_install, &version);
-  if (!version.IsValid()) {
-    LOG(ERROR) << __FUNCTION__ << " failed to determine version of "
-               << dist->GetAppShortCutName() << " installed at " << chrome_exe;
-  } else {
-    FilePath handler(
-        FilePath(chrome_exe).DirName()
-            .AppendASCII(version.GetString())
-            .Append(installer::kDelegateExecuteExe));
-    found = file_util::PathExists(handler);
-  }
-  return found;
-}
-
-bool InstallUtil::GetSentinelFilePath(const char* file,
+bool InstallUtil::GetSentinelFilePath(const base::FilePath::CharType* file,
                                       BrowserDistribution* dist,
-                                      FilePath* path) {
-  FilePath exe_path;
+                                      base::FilePath* path) {
+  base::FilePath exe_path;
   if (!PathService::Get(base::DIR_EXE, &exe_path))
     return false;
 
   if (IsPerUserInstall(exe_path.value().c_str())) {
-    *path = exe_path;
+    const base::FilePath maybe_product_dir(exe_path.DirName().DirName());
+    if (file_util::PathExists(exe_path.Append(installer::kChromeExe))) {
+      // DIR_EXE is most likely Chrome's directory in which case |exe_path| is
+      // the user-level sentinel path.
+      *path = exe_path;
+    } else if (file_util::PathExists(
+                   maybe_product_dir.Append(installer::kChromeExe))) {
+      // DIR_EXE can also be the Installer directory if this is called from a
+      // setup.exe running from Application\<version>\Installer (see
+      // InstallerState::GetInstallerDirectory) in which case Chrome's directory
+      // is two levels up.
+      *path = maybe_product_dir;
+    } else {
+      NOTREACHED();
+      return false;
+    }
   } else {
-    std::vector<FilePath> user_data_dir_paths;
+    std::vector<base::FilePath> user_data_dir_paths;
     installer::GetChromeUserDataPaths(dist, &user_data_dir_paths);
 
     if (!user_data_dir_paths.empty())
@@ -378,7 +410,7 @@ bool InstallUtil::GetSentinelFilePath(const char* file,
       return false;
   }
 
-  *path = path->AppendASCII(file);
+  *path = path->Append(file);
   return true;
 }
 
@@ -488,6 +520,7 @@ void InstallUtil::MakeUninstallCommand(const string16& program,
   *command_line = CommandLine::FromString(L"\"" + program + L"\" " + arguments);
 }
 
+// static
 string16 InstallUtil::GetCurrentDate() {
   static const wchar_t kDateFormat[] = L"yyyyMMdd";
   wchar_t date_str[arraysize(kDateFormat)] = {0};
@@ -505,7 +538,7 @@ string16 InstallUtil::GetCurrentDate() {
 // Open |path| with minimal access to obtain information about it, returning
 // true and populating |handle| on success.
 // static
-bool InstallUtil::ProgramCompare::OpenForInfo(const FilePath& path,
+bool InstallUtil::ProgramCompare::OpenForInfo(const base::FilePath& path,
                                               base::win::ScopedHandle* handle) {
   DCHECK(handle);
   handle->Set(base::CreatePlatformFile(path, base::PLATFORM_FILE_OPEN, NULL,
@@ -522,7 +555,7 @@ bool InstallUtil::ProgramCompare::GetInfo(const base::win::ScopedHandle& handle,
       const_cast<base::win::ScopedHandle&>(handle), info) != 0;
 }
 
-InstallUtil::ProgramCompare::ProgramCompare(const FilePath& path_to_match)
+InstallUtil::ProgramCompare::ProgramCompare(const base::FilePath& path_to_match)
     : path_to_match_(path_to_match),
       file_handle_(base::kInvalidPlatformFileValue),
       file_info_() {
@@ -545,15 +578,21 @@ bool InstallUtil::ProgramCompare::Evaluate(const string16& value) const {
   // Suss out the exe portion of the value, which is expected to be a command
   // line kinda (or exactly) like:
   // "c:\foo\bar\chrome.exe" -- "%1"
-  FilePath program(CommandLine::FromString(value).GetProgram());
+  base::FilePath program(CommandLine::FromString(value).GetProgram());
   if (program.empty()) {
     LOG(WARNING) << "Failed to parse an executable name from command line: \""
                  << value << "\"";
     return false;
   }
 
+  return EvaluatePath(program);
+}
+
+bool InstallUtil::ProgramCompare::EvaluatePath(
+    const base::FilePath& path) const {
   // Try the simple thing first: do the paths happen to match?
-  if (FilePath::CompareEqualIgnoreCase(path_to_match_.value(), program.value()))
+  if (base::FilePath::CompareEqualIgnoreCase(path_to_match_.value(),
+                                             path.value()))
     return true;
 
   // If the paths don't match and we couldn't open the expected file, we've done
@@ -565,7 +604,7 @@ bool InstallUtil::ProgramCompare::Evaluate(const string16& value) const {
   base::win::ScopedHandle handle;
   BY_HANDLE_FILE_INFORMATION info = {};
 
-  return (OpenForInfo(program, &handle) &&
+  return (OpenForInfo(path, &handle) &&
           GetInfo(handle, &info) &&
           info.dwVolumeSerialNumber == file_info_.dwVolumeSerialNumber &&
           info.nFileIndexHigh == file_info_.nFileIndexHigh &&

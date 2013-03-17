@@ -15,8 +15,14 @@ const char kAutoLaunchChrome[] = "auto-launch-chrome";
 // Currently this is only required when used in combination with kMultiInstall.
 const char kChrome[] = "chrome";
 
-// Install Chrome App Host.
-const char kChromeAppHost[] = "app-host";
+// Install Chrome App Host. This is now interpreted as kChromeAppLauncher.
+// TODO(huangs): Remove by M27.
+const char kChromeAppHostDeprecated[] = "app-host";
+
+// Install Chrome App Launcher, which subsumes Chrome App Host, i.e.,
+// App Launcher install converts App Host to App Launcher, and all subsequent
+// App Host updates/uninstalls become App Launcher updates/uninstalls.
+const char kChromeAppLauncher[] = "app-launcher";
 
 // Install Chrome Frame.
 const char kChromeFrame[] = "chrome-frame";
@@ -48,10 +54,6 @@ const char kChromeSxS[] = "chrome-sxs";
 // this option is not compatible with any other installer options.
 const char kConfigureUserSettings[] = "configure-user-settings";
 
-// Create Desktop and QuickLaunch shortcuts (also forces all other shortcuts
-// to be recreated if they were deleted).
-const char kCreateAllShortcuts[] = "create-all-shortcuts";
-
 // The version number of an update containing critical fixes, for which an
 // in-use Chrome should be restarted ASAP.
 const char kCriticalUpdateVersion[] = "critical-update-version";
@@ -81,6 +83,12 @@ const char kEnableLogging[] = "enable-logging";
 
 // Ensures that Google Update is present at the current level of installation.
 const char kEnsureGoogleUpdatePresent[] = "ensure-google-update-present";
+
+// Same as kConfigureUserSettings above; except the checks to know whether
+// first run already occured are bypassed and shortcuts are created either way
+// (kConfigureUserSettings also needs to be on the command-line for this to have
+// any effect).
+const char kForceConfigureUserSettings[] = "force-configure-user-settings";
 
 // If present, setup will uninstall chrome without asking for any
 // confirmation from user.
@@ -115,6 +123,10 @@ const char kNewSetupExe[] = "new-setup-exe";
 // Notify the installer that the OS has been upgraded.
 const char kOnOsUpgrade[] = "on-os-upgrade";
 
+// Determines whether or not EULA has been accepted at some point. Returns via
+// exit code: 0 if EULA not accepted, 1 if EULA accepted, and E_FAIL on error.
+const char kQueryEULAAcceptance[] = "query-eula-acceptance";
+
 // Register Chrome as a valid browser on the current sytem. This option
 // requires that setup.exe is running as admin. If this option is specified,
 // options kInstallArchive and kUninstall are ignored.
@@ -124,6 +136,12 @@ const char kRegisterChromeBrowser[] = "register-chrome-browser";
 // (un)installation in progress when launching an elevated setup.exe to finish
 // registration work.
 const char kRegisterChromeBrowserSuffix[] = "register-chrome-browser-suffix";
+
+// Specify the path to the dev build of chrome.exe the user wants to install
+// (register and install Start menu shortcut for) on the system. This will
+// always result in a user-level install and will make this install default
+// browser.
+const char kRegisterDevChrome[] = "register-dev-chrome";
 
 // Switch to allow an extra URL protocol to be registered. This option is used
 // in conjunction with kRegisterChromeBrowser to specify an extra protocol
@@ -140,6 +158,10 @@ const char kRemoveChromeRegistration[] = "remove-chrome-registration";
 // When we try to relaunch setup.exe as admin on Vista, we append this command
 // line flag so that we try the launch only once.
 const char kRunAsAdmin[] = "run-as-admin";
+
+// Combined with --uninstall, signals to setup.exe that this uninstall was
+// triggered by a self-destructing Chrome.
+const char kSelfDestruct[] = "self-destruct";
 
 // Install Chrome to system wise location. The default is per user install.
 const char kSystemLevel[] = "system-level";
@@ -161,9 +183,6 @@ const char kShowEula[] = "show-eula";
 // Show the embedded EULA dialog, relaunch metro Chrome on acceptance.
 const char kShowEulaForMetro[] = "show-eula-for-metro";
 
-// Use the alternate desktop shortcut name.
-const char kAltDesktopShortcut[] = "alt-desktop-shortcut";
-
 // Perform the inactive user toast experiment.
 const char kInactiveUserToast[] = "inactive-user-toast";
 
@@ -179,6 +198,16 @@ const char kToastResultsKey[] = "toast-results-key";
 
 }  // namespace switches
 
+// The Active Setup executable will be an identical copy of setup.exe; this is
+// necessary because Windows' installer detection heuristics (which include
+// things like process name being "setup.exe") will otherwise force elevation
+// for non-admin users when setup.exe is launched. This is mitigated by adding
+// requestedExecutionLevel="asInvoker" to setup.exe's manifest on Vista+, but
+// there is no such manifest entry on Windows XP (which results in
+// crbug.com/166473).
+// TODO(gab): Rename setup.exe itself altogether and use the same binary for
+// Active Setup.
+const wchar_t kActiveSetupExe[] = L"chrmstp.exe";
 const wchar_t kChromeAppHostExe[] = L"app_host.exe";
 const wchar_t kChromeDll[] = L"chrome.dll";
 const wchar_t kChromeExe[] = L"chrome.exe";
@@ -190,18 +219,21 @@ const wchar_t kChromeLauncherExe[] = L"chrome_launcher.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kCmdInstallApp[] = L"install-application";
+const wchar_t kCmdInstallExtension[] = L"install-extension";
 const wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
+const wchar_t kCmdQueryEULAAcceptance[] = L"query-eula-acceptance";
 const wchar_t kCmdQuickEnableApplicationHost[] =
     L"quick-enable-application-host";
 const wchar_t kCmdQuickEnableCf[] = L"quick-enable-cf";
 const wchar_t kDelegateExecuteExe[] = L"delegate_execute.exe";
-const char kEULASentinelFile[] = "EULA Accepted";
+const wchar_t kEULASentinelFile[] = L"EULA Accepted";
 const wchar_t kGoogleChromeInstallSubDir1[] = L"Google";
 const wchar_t kGoogleChromeInstallSubDir2[] = L"Chrome";
 const wchar_t kInstallBinaryDir[] = L"Application";
 const wchar_t kInstallerDir[] = L"Installer";
 const wchar_t kInstallTempDir[] = L"Temp";
 const wchar_t kInstallUserDataDir[] = L"User Data";
+const wchar_t kLnkExt[] = L".lnk";
 const wchar_t kNaClExe[] = L"nacl64.exe";
 const wchar_t kSetupExe[] = L"setup.exe";
 const wchar_t kSxSSuffix[] = L" SxS";
@@ -216,11 +248,6 @@ const wchar_t kInstallerResult[] = L"InstallerResult";
 const wchar_t kInstallerResultUIString[] = L"InstallerResultUIString";
 const wchar_t kInstallerSuccessLaunchCmdLine[] =
     L"InstallerSuccessLaunchCmdLine";
-
-// The presence of this environment variable with a value of 1 implies that
-// we should run as a system installation regardless of what is on the
-// command line.
-const char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
 
 const wchar_t kOptionMultiInstall[] = L"multi-install";
 const wchar_t kOptionReadyMode[] = L"ready-mode";

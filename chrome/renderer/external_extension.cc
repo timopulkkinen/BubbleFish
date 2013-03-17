@@ -42,7 +42,7 @@ class ExternalExtensionWrapper : public v8::Extension {
   // Allows v8's javascript code to call the native functions defined
   // in this class for window.external.
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name);
+      v8::Handle<v8::String> name) OVERRIDE;
 
   // Helper function to find the RenderView. May return NULL.
   static RenderView* GetRenderView();
@@ -77,7 +77,7 @@ v8::Handle<v8::FunctionTemplate> ExternalExtensionWrapper::GetNativeFunction(
 
 // static
 RenderView* ExternalExtensionWrapper::GetRenderView() {
-  WebFrame* webframe = WebFrame::frameForEnteredContext();
+  WebFrame* webframe = WebFrame::frameForCurrentContext();
   DCHECK(webframe) << "There should be an active frame since we just got "
       "a native function called.";
   if (!webframe) return NULL;
@@ -120,7 +120,7 @@ v8::Handle<v8::Value> ExternalExtensionWrapper::IsSearchProviderInstalled(
   RenderView* render_view = GetRenderView();
   if (!render_view) return v8::Undefined();
 
-  WebFrame* webframe = WebFrame::frameForEnteredContext();
+  WebFrame* webframe = WebFrame::frameForCurrentContext();
   if (!webframe) return v8::Undefined();
 
   search_provider::InstallState install = search_provider::DENIED;

@@ -11,7 +11,8 @@ using extensions::NativeHandler;
 
 class CounterNatives : public NativeHandler {
  public:
-  CounterNatives() : counter_(0) {
+  explicit CounterNatives(v8::Isolate* isolate)
+      : NativeHandler(isolate), counter_(0) {
     RouteFunction("Get", base::Bind(&CounterNatives::Get,
         base::Unretained(this)));
     RouteFunction("Increment", base::Bind(&CounterNatives::Increment,
@@ -30,6 +31,36 @@ class CounterNatives : public NativeHandler {
  private:
   int counter_;
 };
+
+class TestExceptionHandler : public ModuleSystem::ExceptionHandler {
+ public:
+  TestExceptionHandler()
+      : handled_exception_(false) {
+  }
+
+  virtual void HandleUncaughtException() OVERRIDE {
+    handled_exception_ = true;
+  }
+
+  bool handled_exception() const { return handled_exception_; }
+
+ private:
+  bool handled_exception_;
+};
+
+TEST_F(ModuleSystemTest, TestExceptionHandling) {
+  ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
+  TestExceptionHandler* handler = new TestExceptionHandler;
+  scoped_ptr<ModuleSystem::ExceptionHandler> scoped_handler(handler);
+  ASSERT_FALSE(handler->handled_exception());
+  module_system_->set_exception_handler(scoped_handler.Pass());
+
+  RegisterModule("test", "throw 'hi';");
+  module_system_->Require("test");
+  ASSERT_TRUE(handler->handled_exception());
+
+  ExpectNoAssertionsMade();
+}
 
 TEST_F(ModuleSystemTest, TestRequire) {
   ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
@@ -77,7 +108,7 @@ TEST_F(ModuleSystemTest, TestNativesAreDisabledOutsideANativesEnabledScope) {
       "try {"
       "  assert = requireNative('assert');"
       "} catch (e) {"
-      "  caught = true;"
+      "  var caught = true;"
       "}"
       "if (assert) {"
       "  assert.AssertTrue(true);"
@@ -142,7 +173,7 @@ TEST_F(ModuleSystemTest, TestLazyFieldIsOnlyEvaledOnce) {
   ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
   module_system_->RegisterNativeHandler(
       "counter",
-      scoped_ptr<NativeHandler>(new CounterNatives()));
+      scoped_ptr<NativeHandler>(new CounterNatives(v8::Isolate::GetCurrent())));
   RegisterModule("lazy",
       "requireNative('counter').Increment();"
       "exports.x = 5;");
@@ -196,7 +227,7 @@ TEST_F(ModuleSystemTest, TestModulesOnlyGetEvaledOnce) {
   ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
   module_system_->RegisterNativeHandler(
       "counter",
-      scoped_ptr<NativeHandler>(new CounterNatives()));
+      scoped_ptr<NativeHandler>(new CounterNatives(v8::Isolate::GetCurrent())));
 
   RegisterModule("incrementsWhenEvaled",
       "requireNative('counter').Increment();");

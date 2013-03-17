@@ -4,7 +4,6 @@
 
 #include "net/base/mapped_host_resolver.h"
 
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -12,8 +11,8 @@
 
 namespace net {
 
-MappedHostResolver::MappedHostResolver(HostResolver* impl)
-    : impl_(impl) {
+MappedHostResolver::MappedHostResolver(scoped_ptr<HostResolver> impl)
+    : impl_(impl.Pass()) {
 }
 
 MappedHostResolver::~MappedHostResolver() {

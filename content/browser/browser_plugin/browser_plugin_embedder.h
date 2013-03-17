@@ -22,28 +22,21 @@
 
 #include <map>
 
-#include "base/compiler_specific.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "ui/surface/transport_dib.h"
 
-class WebContentsImpl;
+struct BrowserPluginHostMsg_CreateGuest_Params;
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 
-namespace WebKit {
-class WebInputEvent;
-}
-
 namespace gfx {
-class Rect;
-class Size;
+class Point;
 }
 
 namespace content {
 
 class BrowserPluginGuest;
 class BrowserPluginHostFactory;
+class WebContentsImpl;
 
 // A browser plugin embedder provides functionality for WebContents to operate
 // in the 'embedder' role. It manages list of guests inside the embedder.
@@ -52,8 +45,7 @@ class BrowserPluginHostFactory;
 // created when a renderer asks WebContents to navigate (for the first time) to
 // some guest. It gets destroyed when either the WebContents goes away or there
 // is a RenderViewHost swap in WebContents.
-class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver,
-                                             public NotificationObserver {
+class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
  public:
   typedef std::map<int, WebContents*> ContainerInstanceMap;
 
@@ -62,48 +54,23 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver,
   static BrowserPluginEmbedder* Create(WebContentsImpl* web_contents,
                                        RenderViewHost* render_view_host);
 
-  // Creates a new guest.
-  void CreateGuest(RenderViewHost* render_view_host,
-                   int instance_id,
-                   std::string storage_partition_id,
-                   bool persist_storage);
+  // Creates a guest WebContents with the provided |instance_id| and |params|
+  // and adds it to this BrowserPluginEmbedder. If params.src is present, the
+  // new guest will also be navigated to the provided URL. Optionally, the new
+  // guest may be attached to a |guest_opener|, and may be attached to a pre-
+  // selected |routing_id|.
+  void CreateGuest(int instance_id,
+                   int routing_id,
+                   BrowserPluginGuest* guest_opener,
+                   const BrowserPluginHostMsg_CreateGuest_Params& params);
 
-  // Navigates in a guest (new or existing).
-  void NavigateGuest(
-      RenderViewHost* render_view_host,
-      int instance_id,
-      const std::string& src,
-      const BrowserPluginHostMsg_ResizeGuest_Params& resize_params);
+  // Returns a guest browser plugin delegate by its container ID specified
+  // in BrowserPlugin.
+  BrowserPluginGuest* GetGuestByInstanceID(int instance_id) const;
 
-  void ResizeGuest(RenderViewHost* render_view_host,
-                   int instance_id,
-                   const BrowserPluginHostMsg_ResizeGuest_Params& params);
-
-  void Go(int instance_id, int relative_index);
-  void Stop(int instance_id);
-  void Reload(int instance_id);
-
-  // WebContentsObserver implementation.
-  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
-
-  // NotificationObserver method override.
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
-
-  // Message handlers (direct/indirect via BrowserPluginEmbedderHelper).
-  // Routes update rect ack message to the appropriate guest.
-  void UpdateRectACK(int instance_id, int message_id, const gfx::Size& size);
-  void SetFocus(int instance_id, bool focused);
-  // Handles input events sent from the BrowserPlugin (embedder's renderer
-  // process) by passing them to appropriate guest's input handler.
-  void HandleInputEvent(int instance_id,
-                        RenderViewHost* render_view_host,
-                        const gfx::Rect& guest_rect,
-                        const WebKit::WebInputEvent& event,
-                        IPC::Message* reply_message);
-  void PluginDestroyed(int instance_id);
+  // Adds a new guest web_contents to the embedder (overridable in test).
+  virtual void AddGuest(int instance_id, WebContents* guest_web_contents);
+  void RemoveGuest(int instance_id);
 
   // Overrides factory for testing. Default (NULL) value indicates regular
   // (non-test) environment.
@@ -111,38 +78,58 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver,
     factory_ = factory;
   }
 
+  // Returns the RenderViewHost at a point (|x|, |y|) asynchronously via
+  // |callback|. We need a roundtrip to renderer process to get this
+  // information.
+  void GetRenderViewHostAtPosition(
+      int x,
+      int y,
+      const WebContents::GetRenderViewHostCallback& callback);
+
+  // WebContentsObserver implementation.
+  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+
  private:
   friend class TestBrowserPluginEmbedder;
 
   BrowserPluginEmbedder(WebContentsImpl* web_contents,
                         RenderViewHost* render_view_host);
 
-  // Returns a guest browser plugin delegate by its container ID specified
-  // in BrowserPlugin.
-  BrowserPluginGuest* GetGuestByInstanceID(int instance_id) const;
-  // Adds a new guest web_contents to the embedder (overridable in test).
-  virtual void AddGuest(int instance_id, WebContents* guest_web_contents);
-  void DestroyGuestByInstanceID(int instance_id);
-  void DestroyGuests();
+  void CleanUp();
 
-  // Returns the transport DIB associated with the dib in resize |params|.
-  TransportDIB* GetDamageBuffer(
-      RenderViewHost* render_view_host,
-      const BrowserPluginHostMsg_ResizeGuest_Params& params);
+  static bool ShouldForwardToBrowserPluginGuest(const IPC::Message& message);
 
-  // Called when visiblity of web_contents changes, so the embedder will
-  // show/hide its guest.
-  void WebContentsVisibilityChanged(bool visible);
+  // Message handlers.
+
+  void OnAllocateInstanceID(int request_id);
+  void OnCreateGuest(int instance_id,
+                     const BrowserPluginHostMsg_CreateGuest_Params& params);
+  void OnPluginAtPositionResponse(int instance_id,
+                                  int request_id,
+                                  const gfx::Point& position);
+  void OnUnhandledSwapBuffersACK(int instance_id,
+                                 int route_id,
+                                 int gpu_host_id,
+                                 const std::string& mailbox_name,
+                                 uint32 sync_point);
 
   // Static factory instance (always NULL for non-test).
   static BrowserPluginHostFactory* factory_;
 
-  // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
-
   // Contains guests' WebContents, mapping from their instance ids.
   ContainerInstanceMap guest_web_contents_by_instance_id_;
   RenderViewHost* render_view_host_;
+  // Map that contains outstanding queries to |GetBrowserPluginAt|.
+  // We need a roundtrip to renderer process to know the answer, therefore
+  // storing these callbacks is required.
+  typedef std::map<int, WebContents::GetRenderViewHostCallback>
+      GetRenderViewHostCallbackMap;
+  GetRenderViewHostCallbackMap pending_get_render_view_callbacks_;
+  // Next request id for BrowserPluginMsg_PluginAtPositionRequest query.
+  int next_get_render_view_request_id_;
+  int next_instance_id_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPluginEmbedder);
 };

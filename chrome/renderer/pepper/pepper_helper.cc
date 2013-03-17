@@ -5,7 +5,6 @@
 #include "chrome/renderer/pepper/pepper_helper.h"
 
 #include "chrome/renderer/pepper/chrome_renderer_pepper_host_factory.h"
-#include "chrome/renderer/pepper/pepper_flash_renderer_message_filter.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "ppapi/host/ppapi_host.h"
 
@@ -23,10 +22,7 @@ void PepperHelper::DidCreatePepperPlugin(content::RendererPpapiHost* host) {
   // kind of filter-like system to allow dynamic additions.
   host->GetPpapiHost()->AddHostFactoryFilter(
       scoped_ptr<ppapi::host::HostFactory>(
-          new ChromeRendererPepperHostFactory));
-  host->GetPpapiHost()->AddInstanceMessageFilter(
-      scoped_ptr<ppapi::host::InstanceMessageFilter>(
-          new PepperFlashRendererMessageFilter(host)));
+          new ChromeRendererPepperHostFactory(host)));
 }
 
 }  // namespace chrome

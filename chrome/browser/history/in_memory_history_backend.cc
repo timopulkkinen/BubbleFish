@@ -11,9 +11,9 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/common/url_database/url_database.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_database.h"
+#include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
@@ -27,7 +27,7 @@ InMemoryHistoryBackend::InMemoryHistoryBackend()
 
 InMemoryHistoryBackend::~InMemoryHistoryBackend() {}
 
-bool InMemoryHistoryBackend::Init(const FilePath& history_filename,
+bool InMemoryHistoryBackend::Init(const base::FilePath& history_filename,
                                   URLDatabase* db) {
   db_.reset(new InMemoryDatabase);
   return db_->InitFromDisk(history_filename);

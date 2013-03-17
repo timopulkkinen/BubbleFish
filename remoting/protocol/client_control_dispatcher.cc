@@ -41,16 +41,22 @@ void ClientControlDispatcher::InjectClipboardEvent(
   writer_.Write(SerializeAndFrameMessage(message), base::Closure());
 }
 
-void ClientControlDispatcher::NotifyClientDimensions(
-    const ClientDimensions& dimensions) {
+void ClientControlDispatcher::NotifyClientResolution(
+    const ClientResolution& resolution) {
   ControlMessage message;
-  message.mutable_client_dimensions()->CopyFrom(dimensions);
+  message.mutable_client_resolution()->CopyFrom(resolution);
   writer_.Write(SerializeAndFrameMessage(message), base::Closure());
 }
 
 void ClientControlDispatcher::ControlVideo(const VideoControl& video_control) {
   ControlMessage message;
   message.mutable_video_control()->CopyFrom(video_control);
+  writer_.Write(SerializeAndFrameMessage(message), base::Closure());
+}
+
+void ClientControlDispatcher::ControlAudio(const AudioControl& audio_control) {
+  ControlMessage message;
+  message.mutable_audio_control()->CopyFrom(audio_control);
   writer_.Write(SerializeAndFrameMessage(message), base::Closure());
 }
 

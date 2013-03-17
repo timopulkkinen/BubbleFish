@@ -15,7 +15,6 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/string_tokenizer.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
@@ -26,17 +25,19 @@
 #include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
-#include "content/public/common/compositor_util.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
+#include "gpu/command_buffer/client/gles2_trace_implementation.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/ipc/command_buffer_proxy.h"
-#include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
+#include "webkit/gpu/gl_bindings_skia_cmd_buffer.h"
 
+namespace content {
 static base::LazyInstance<base::Lock>::Leaky
     g_all_shared_contexts_lock = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<std::set<WebGraphicsContext3DCommandBufferImpl*> >
@@ -62,6 +63,12 @@ void ClearSharedContextsIfInShareSet(
       return;
     }
   }
+}
+
+size_t ClampUint64ToSizeT(uint64 value) {
+  value = std::min(value,
+                   static_cast<uint64>(std::numeric_limits<size_t>::max()));
+  return static_cast<size_t>(value);
 }
 
 const int32 kCommandBufferSize = 1024 * 1024;
@@ -129,7 +136,6 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl(
       surface_id_(surface_id),
       active_url_(active_url),
       swap_client_(swap_client),
-      memory_allocation_changed_callback_(0),
       context_lost_callback_(0),
       context_lost_reason_(GL_NO_ERROR),
       error_message_callback_(0),
@@ -146,19 +152,23 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl(
       gles2_helper_(NULL),
       transfer_buffer_(NULL),
       gl_(NULL),
+      real_gl_(NULL),
+      trace_gl_(NULL),
       frame_number_(0),
       bind_generates_resources_(false),
       use_echo_for_swap_ack_(true) {
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if (defined(OS_MACOSX) || defined(OS_WIN)) && !defined(USE_AURA)
   // Get ViewMsg_SwapBuffers_ACK from browser for single-threaded path.
-  use_echo_for_swap_ack_ = content::IsThreadedCompositingEnabled();
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  use_echo_for_swap_ack_ =
+      command_line.HasSwitch(switches::kEnableThreadedCompositing);
 #endif
 }
 
 WebGraphicsContext3DCommandBufferImpl::
     ~WebGraphicsContext3DCommandBufferImpl() {
-  if (gl_) {
-    gl_->SetErrorMessageCallback(NULL);
+  if (real_gl_) {
+    real_gl_->SetErrorMessageCallback(NULL);
   }
 
   {
@@ -169,7 +179,7 @@ WebGraphicsContext3DCommandBufferImpl::
 }
 
 void WebGraphicsContext3DCommandBufferImpl::InitializeWithCommandBuffer(
-    CommandBufferProxy* command_buffer,
+    CommandBufferProxyImpl* command_buffer,
     const WebGraphicsContext3D::Attributes& attributes,
     bool bind_generates_resources) {
   DCHECK(command_buffer);
@@ -181,7 +191,7 @@ void WebGraphicsContext3DCommandBufferImpl::InitializeWithCommandBuffer(
 bool WebGraphicsContext3DCommandBufferImpl::Initialize(
     const WebGraphicsContext3D::Attributes& attributes,
     bool bind_generates_resources,
-    content::CauseForGpuLaunch cause) {
+    CauseForGpuLaunch cause) {
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::initialize");
 
   attributes_ = attributes;
@@ -236,7 +246,7 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL(
 
   client_error_message_callback_.reset(
       new WebGraphicsContext3DErrorMessageCallback(this));
-  gl_->SetErrorMessageCallback(client_error_message_callback_.get());
+  real_gl_->SetErrorMessageCallback(client_error_message_callback_.get());
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   free_command_buffer_when_invisible_ =
@@ -277,7 +287,7 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
   // for our share group isn't deleted.
   // (There's also a lock in our destructor.)
   base::AutoLock lock(g_all_shared_contexts_lock.Get());
-  CommandBufferProxy* share_group = NULL;
+  CommandBufferProxyImpl* share_group = NULL;
   if (attributes_.shareResources) {
     WebGraphicsContext3DCommandBufferImpl* share_group_context =
         g_all_shared_contexts.Pointer()->empty() ?
@@ -343,6 +353,9 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(
   if (!gles2_helper_->Initialize(kCommandBufferSize))
     return false;
 
+  if (attributes_.noAutomaticFlushes)
+    gles2_helper_->SetAutomaticFlushes(false);
+
   // Create a transfer buffer used to copy resources between the renderer
   // process and the GPU process.
   transfer_buffer_ = new gpu::TransferBuffer(gles2_helper_);
@@ -352,19 +365,26 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(
           NULL : *g_all_shared_contexts.Pointer()->begin();
 
   // Create the object exposing the OpenGL API.
-  gl_ = new gpu::gles2::GLES2Implementation(
+  real_gl_ = new gpu::gles2::GLES2Implementation(
       gles2_helper_,
       share_group_context ?
           share_group_context->GetImplementation()->share_group() : NULL,
       transfer_buffer_,
       attributes_.shareResources,
       bind_generates_resources_);
+  gl_ = real_gl_;
 
-  if (!gl_->Initialize(
+  if (!real_gl_->Initialize(
       kStartTransferBufferSize,
       kMinTransferBufferSize,
       kMaxTransferBufferSize)) {
     return false;
+  }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableGpuClientTracing)) {
+    trace_gl_ = new gpu::gles2::GLES2TraceImplementation(gl_);
+    gl_ = trace_gl_;
   }
 
   return true;
@@ -400,14 +420,8 @@ bool WebGraphicsContext3DCommandBufferImpl::setParentContext(
 }
 
 unsigned int WebGraphicsContext3DCommandBufferImpl::insertSyncPoint() {
-  gl_->helper()->CommandBufferHelper::Flush();
+  real_gl_->helper()->CommandBufferHelper::Flush();
   return command_buffer_->InsertSyncPoint();
-}
-
-void WebGraphicsContext3DCommandBufferImpl::waitSyncPoint(
-    unsigned int sync_point) {
-  gl_->helper()->CommandBufferHelper::Flush();
-  command_buffer_->WaitSyncPoint(sync_point);
 }
 
 bool WebGraphicsContext3DCommandBufferImpl::SetParent(
@@ -424,11 +438,11 @@ bool WebGraphicsContext3DCommandBufferImpl::SetParent(
       int32 token = new_parent->gles2_helper_->InsertToken();
       new_parent->gles2_helper_->WaitForToken(token);
       new_parent_texture_id =
-        new_parent->gl_->MakeTextureId();
+        new_parent->real_gl_->MakeTextureId();
 
       if (!command_buffer_->SetParent(new_parent->command_buffer_,
                                       new_parent_texture_id)) {
-        new_parent->gl_->FreeTextureId(parent_texture_id_);
+        new_parent->real_gl_->FreeTextureId(parent_texture_id_);
         return false;
       }
     } else {
@@ -442,7 +456,7 @@ bool WebGraphicsContext3DCommandBufferImpl::SetParent(
     // Flush any remaining commands in the parent context to make sure the
     // texture id accounting stays consistent.
     gpu::gles2::GLES2Implementation* parent_gles2 =
-        parent_->gl_;
+        parent_->real_gl_;
     parent_gles2->helper()->CommandBufferHelper::Finish();
     parent_gles2->FreeTextureId(parent_texture_id_);
   }
@@ -468,9 +482,17 @@ void WebGraphicsContext3DCommandBufferImpl::Destroy() {
     // issued on this context might not be visible to other contexts in the
     // share group.
     gl_->Flush();
-
-    delete gl_;
     gl_ = NULL;
+  }
+
+  if (trace_gl_) {
+    delete trace_gl_;
+    trace_gl_ = NULL;
+  }
+
+  if (real_gl_) {
+    delete real_gl_;
+    real_gl_ = NULL;
   }
 
   if (transfer_buffer_) {
@@ -673,32 +695,46 @@ void WebGraphicsContext3DCommandBufferImpl::setVisibilityCHROMIUM(
   visible_ = visible;
   command_buffer_->SetSurfaceVisible(visible);
   if (!visible)
-    gl_->FreeEverything();
+    real_gl_->FreeEverything();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::discardFramebufferEXT(
     WGC3Denum target, WGC3Dsizei numAttachments, const WGC3Denum* attachments) {
+  gl_->DiscardFramebufferEXT(target, numAttachments, attachments);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::discardBackbufferCHROMIUM() {
   gl_->Flush();
   command_buffer_->DiscardBackbuffer();
 }
 
-void WebGraphicsContext3DCommandBufferImpl::ensureFramebufferCHROMIUM() {
+void WebGraphicsContext3DCommandBufferImpl::ensureBackbufferCHROMIUM() {
   gl_->Flush();
   command_buffer_->EnsureBackbuffer();
+}
+
+void WebGraphicsContext3DCommandBufferImpl::sendManagedMemoryStatsCHROMIUM(
+    const WebGraphicsManagedMemoryStats* stats)
+{
+  CHECK(command_buffer_);
+  command_buffer_->SendManagedMemoryStats(GpuManagedMemoryStats(
+      stats->bytesVisible,
+      stats->bytesVisibleAndNearby,
+      stats->bytesAllocated,
+      stats->backbufferRequested));
 }
 
 void WebGraphicsContext3DCommandBufferImpl::
     setMemoryAllocationChangedCallbackCHROMIUM(
         WebGraphicsMemoryAllocationChangedCallbackCHROMIUM* callback) {
-  memory_allocation_changed_callback_ = callback;
-
   if (!command_buffer_)
     return;
 
   if (callback)
     command_buffer_->SetMemoryAllocationChangedCallback(base::Bind(
         &WebGraphicsContext3DCommandBufferImpl::OnMemoryAllocationChanged,
-        weak_ptr_factory_.GetWeakPtr()));
+        weak_ptr_factory_.GetWeakPtr(),
+        callback));
   else
     command_buffer_->SetMemoryAllocationChangedCallback(
         base::Callback<void(const GpuMemoryAllocationForRenderer&)>());
@@ -742,6 +778,16 @@ void WebGraphicsContext3DCommandBufferImpl::
         WGC3Dsizei width, WGC3Dsizei height) {
   gl_->RenderbufferStorageMultisampleEXT(
       target, samples, internalformat, width, height);
+}
+
+WebGLId WebGraphicsContext3DCommandBufferImpl::createStreamTextureCHROMIUM(
+    WebGLId texture) {
+  return gl_->CreateStreamTextureCHROMIUM(texture);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::destroyStreamTextureCHROMIUM(
+    WebGLId texture) {
+  gl_->DestroyStreamTextureCHROMIUM(texture);
 }
 
 // Helper macros to reduce the amount of code.
@@ -924,13 +970,13 @@ DELEGATE_TO_GL_1(enableVertexAttribArray, EnableVertexAttribArray,
 void WebGraphicsContext3DCommandBufferImpl::finish() {
   gl_->Finish();
   if (!visible_ && free_command_buffer_when_invisible_)
-    gl_->FreeEverything();
+    real_gl_->FreeEverything();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::flush() {
   gl_->Flush();
   if (!visible_ && free_command_buffer_when_invisible_)
-    gl_->FreeEverything();
+    real_gl_->FreeEverything();
 }
 
 DELEGATE_TO_GL_4(framebufferRenderbuffer, FramebufferRenderbuffer,
@@ -1404,13 +1450,56 @@ void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete() {
     swapbuffers_complete_callback_->onSwapBuffersComplete();
 }
 
+WebGraphicsMemoryAllocation::PriorityCutoff
+    WebGraphicsContext3DCommandBufferImpl::WebkitPriorityCutoff(
+        GpuMemoryAllocationForRenderer::PriorityCutoff priorityCutoff) {
+  switch (priorityCutoff) {
+  case GpuMemoryAllocationForRenderer::kPriorityCutoffAllowNothing:
+    return WebGraphicsMemoryAllocation::PriorityCutoffAllowNothing;
+  case GpuMemoryAllocationForRenderer::kPriorityCutoffAllowOnlyRequired:
+    return WebGraphicsMemoryAllocation::PriorityCutoffAllowVisibleOnly;
+  case GpuMemoryAllocationForRenderer::kPriorityCutoffAllowNiceToHave:
+    return WebGraphicsMemoryAllocation::PriorityCutoffAllowVisibleAndNearby;
+  case GpuMemoryAllocationForRenderer::kPriorityCutoffAllowEverything:
+    return WebGraphicsMemoryAllocation::PriorityCutoffAllowEverything;
+  }
+  NOTREACHED();
+  return WebGraphicsMemoryAllocation::PriorityCutoffAllowEverything;
+}
+
 void WebGraphicsContext3DCommandBufferImpl::OnMemoryAllocationChanged(
+    WebGraphicsMemoryAllocationChangedCallbackCHROMIUM* callback,
     const GpuMemoryAllocationForRenderer& allocation) {
-  if (memory_allocation_changed_callback_)
-    memory_allocation_changed_callback_->onMemoryAllocationChanged(
-        WebKit::WebGraphicsMemoryAllocation(
-            allocation.gpu_resource_size_in_bytes,
-            allocation.suggest_have_backbuffer));
+
+  // Convert the gpu structure to the WebKit structure.
+  WebGraphicsMemoryAllocation web_allocation;
+  web_allocation.bytesLimitWhenVisible =
+      ClampUint64ToSizeT(allocation.bytes_limit_when_visible);
+  web_allocation.priorityCutoffWhenVisible =
+      WebkitPriorityCutoff(allocation.priority_cutoff_when_visible);
+  web_allocation.bytesLimitWhenNotVisible =
+      ClampUint64ToSizeT(allocation.bytes_limit_when_not_visible);
+  web_allocation.priorityCutoffWhenNotVisible =
+      WebkitPriorityCutoff(allocation.priority_cutoff_when_not_visible);
+  web_allocation.haveBackbufferWhenNotVisible =
+      allocation.have_backbuffer_when_not_visible;
+  web_allocation.enforceButDoNotKeepAsPolicy =
+      allocation.enforce_but_do_not_keep_as_policy;
+
+  // Populate deprecated WebKit fields. These may be removed when references to
+  // them in WebKit are removed.
+  web_allocation.gpuResourceSizeInBytes =
+      ClampUint64ToSizeT(allocation.bytes_limit_when_visible);
+  web_allocation.suggestHaveBackbuffer =
+      allocation.have_backbuffer_when_not_visible;
+
+  if (callback)
+    callback->onMemoryAllocationChanged(web_allocation);
+
+  // We may have allocated transfer buffers in order to free GL resources in a
+  // backgrounded tab. Re-free the transfer buffers.
+  if (!visible_)
+    real_gl_->FreeEverything();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::setErrorMessageCallback(
@@ -1450,7 +1539,7 @@ WebGraphicsContext3DCommandBufferImpl::CreateViewContext(
       const WebGraphicsContext3D::Attributes& attributes,
       bool bind_generates_resources,
       const GURL& active_url,
-      content::CauseForGpuLaunch cause) {
+      CauseForGpuLaunch cause) {
   WebGraphicsContext3DCommandBufferImpl* context =
       new WebGraphicsContext3DCommandBufferImpl(
           surface_id,
@@ -1477,8 +1566,8 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
       new WebGraphicsContext3DCommandBufferImpl(
           0, active_url, factory, null_client));
-  content::CauseForGpuLaunch cause =
-      content::CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
+  CauseForGpuLaunch cause =
+      CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
   if (context->Initialize(attributes, false, cause))
     return context.release();
   return NULL;
@@ -1522,7 +1611,17 @@ DELEGATE_TO_GL_3(bindUniformLocationCHROMIUM, BindUniformLocationCHROMIUM,
 
 DELEGATE_TO_GL(shallowFlushCHROMIUM,ShallowFlushCHROMIUM);
 
-DELEGATE_TO_GL_1(genMailboxCHROMIUM, GenMailboxCHROMIUM, WGC3Dbyte*)
+DELEGATE_TO_GL_1(waitSyncPoint, WaitSyncPointCHROMIUM, GLuint)
+
+void WebGraphicsContext3DCommandBufferImpl::genMailboxCHROMIUM(
+    WGC3Dbyte* name) {
+  std::vector<std::string> names(1);
+  if (command_buffer_->GenerateMailboxNames(1, &names))
+    memcpy(name, names[0].c_str(), GL_MAILBOX_SIZE_CHROMIUM);
+  else
+    synthesizeGLError(GL_OUT_OF_MEMORY);
+}
+
 DELEGATE_TO_GL_2(produceTextureCHROMIUM, ProduceTextureCHROMIUM,
                  WGC3Denum, const WGC3Dbyte*)
 DELEGATE_TO_GL_2(consumeTextureCHROMIUM, ConsumeTextureCHROMIUM,
@@ -1554,8 +1653,53 @@ void WebGraphicsContext3DCommandBufferImpl::deleteVertexArrayOES(
 DELEGATE_TO_GL_1R(isVertexArrayOES, IsVertexArrayOES, WebGLId, WGC3Dboolean)
 DELEGATE_TO_GL_1(bindVertexArrayOES, BindVertexArrayOES, WebGLId)
 
+DELEGATE_TO_GL_2(bindTexImage2DCHROMIUM, BindTexImage2DCHROMIUM,
+                 WGC3Denum, WGC3Dint)
+DELEGATE_TO_GL_2(releaseTexImage2DCHROMIUM, ReleaseTexImage2DCHROMIUM,
+                 WGC3Denum, WGC3Dint)
+
+void* WebGraphicsContext3DCommandBufferImpl::mapBufferCHROMIUM(
+    WGC3Denum target, WGC3Denum access) {
+  return gl_->MapBufferCHROMIUM(target, access);
+}
+
+WGC3Dboolean WebGraphicsContext3DCommandBufferImpl::unmapBufferCHROMIUM(
+    WGC3Denum target) {
+  return gl_->UnmapBufferCHROMIUM(target);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::asyncTexImage2DCHROMIUM(
+    WGC3Denum target,
+    WGC3Dint level,
+    WGC3Denum internalformat,
+    WGC3Dsizei width,
+    WGC3Dsizei height,
+    WGC3Dint border,
+    WGC3Denum format,
+    WGC3Denum type,
+    const void* pixels) {
+  return gl_->AsyncTexImage2DCHROMIUM(
+      target, level, internalformat,
+      width, height, border, format, type, pixels);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::asyncTexSubImage2DCHROMIUM(
+    WGC3Denum target,
+    WGC3Dint level,
+    WGC3Dint xoffset,
+    WGC3Dint yoffset,
+    WGC3Dsizei width,
+    WGC3Dsizei height,
+    WGC3Denum format,
+    WGC3Denum type,
+    const void *pixels) {
+  return gl_->AsyncTexSubImage2DCHROMIUM(
+      target, level, xoffset, yoffset,
+      width, height, format, type, pixels);
+}
+
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
-  return webkit_glue::CreateCommandBufferSkiaGLBinding();
+  return webkit::gpu::CreateCommandBufferSkiaGLBinding();
 }
 
 namespace {
@@ -1595,3 +1739,5 @@ void WebGraphicsContext3DCommandBufferImpl::OnErrorMessage(
     error_message_callback_->onErrorMessage(str, id);
   }
 }
+
+}  // namespace content

@@ -54,12 +54,23 @@ void ValueMatcher::DescribeNegationTo(::std::ostream* os) const {
   *os << "value does not equal " << expected_value_str;
 }
 
+
 ShillClientUnittestBase::MockClosure::MockClosure() {}
 
 ShillClientUnittestBase::MockClosure::~MockClosure() {}
 
 base::Closure ShillClientUnittestBase::MockClosure::GetCallback() {
   return base::Bind(&MockClosure::Run, base::Unretained(this));
+}
+
+
+ShillClientUnittestBase::MockListValueCallback::MockListValueCallback() {}
+
+ShillClientUnittestBase::MockListValueCallback::~MockListValueCallback() {}
+
+ShillClientHelper::ListValueCallback
+ShillClientUnittestBase::MockListValueCallback::GetCallback() {
+  return base::Bind(&MockListValueCallback::Run, base::Unretained(this));
 }
 
 
@@ -104,7 +115,7 @@ void ShillClientUnittestBase::SetUp() {
 
   // Set an expectation so mock_proxy's CallMethodAndBlock() will use
   // OnCallMethodAndBlock() to return responses.
-  EXPECT_CALL(*mock_proxy_, CallMethodAndBlock(_, _))
+  EXPECT_CALL(*mock_proxy_, MockCallMethodAndBlock(_, _))
       .WillRepeatedly(Invoke(
           this, &ShillClientUnittestBase::OnCallMethodAndBlock));
 
@@ -187,6 +198,16 @@ void ShillClientUnittestBase::ExpectStringArgument(
 }
 
 // static
+void ShillClientUnittestBase::ExpectArrayOfStringsArgument(
+    const std::vector<std::string>& expected_strings,
+    dbus::MessageReader* reader) {
+  std::vector<std::string> strs;
+  ASSERT_TRUE(reader->PopArrayOfStrings(&strs));
+  EXPECT_EQ(expected_strings, strs);
+  EXPECT_FALSE(reader->HasMoreData());
+}
+
+// static
 void ShillClientUnittestBase::ExpectValueArgument(
     const base::Value* expected_value,
     dbus::MessageReader* reader) {
@@ -229,6 +250,20 @@ void ShillClientUnittestBase::ExpectObjectPathResult(
 void ShillClientUnittestBase::ExpectObjectPathResultWithoutStatus(
     const dbus::ObjectPath& expected_result,
     const dbus::ObjectPath& result) {
+  EXPECT_EQ(expected_result, result);
+}
+
+// static
+void ShillClientUnittestBase::ExpectBoolResultWithoutStatus(
+    bool expected_result,
+    bool result) {
+  EXPECT_EQ(expected_result, result);
+}
+
+// static
+void ShillClientUnittestBase::ExpectStringResultWithoutStatus(
+    const std::string& expected_result,
+    const std::string& result) {
   EXPECT_EQ(expected_result, result);
 }
 
@@ -294,7 +329,7 @@ dbus::Response* ShillClientUnittestBase::OnCallMethodAndBlock(
   dbus::MessageReader reader(method_call);
   argument_checker_.Run(&reader);
   return dbus::Response::FromRawMessage(
-      dbus_message_copy(response_->raw_message()));
+      dbus_message_copy(response_->raw_message())).release();
 }
 
 }  // namespace chromeos

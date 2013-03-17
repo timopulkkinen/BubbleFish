@@ -5,12 +5,14 @@
 #include "net/http/infinite_cache.h"
 
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
+#include "base/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_transaction_unittest.h"
+#include "net/http/http_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -22,13 +24,21 @@ namespace {
 
 void StartRequest(const MockTransaction& http_transaction,
                   InfiniteCacheTransaction* transaction) {
+  std::string standard_headers(http_transaction.status);
+  standard_headers.push_back('\n');
+  standard_headers.append(http_transaction.response_headers);
+  std::string raw_headers =
+      net::HttpUtil::AssembleRawHeaders(standard_headers.c_str(),
+                                        standard_headers.size());
+
   scoped_refptr<net::HttpResponseHeaders> headers(
-      new net::HttpResponseHeaders(http_transaction.response_headers));
+      new net::HttpResponseHeaders(raw_headers));
   net::HttpResponseInfo response;
   response.headers = headers;
   response.request_time = http_transaction.request_time.is_null() ?
                           Time::Now() : http_transaction.request_time;
-  response.response_time = Time::Now();
+  response.response_time = http_transaction.response_time.is_null() ?
+                           Time::Now() : http_transaction.response_time;
 
   MockHttpRequest request(http_transaction);
   transaction->OnRequestStart(&request);
@@ -52,6 +62,7 @@ void ProcessRequestWithTime(const MockTransaction& http_transaction,
 
   MockTransaction timed_transaction = http_transaction;
   timed_transaction.request_time = time;
+  timed_transaction.response_time = time;
   StartRequest(timed_transaction, transaction.get());
   transaction->OnDataRead(http_transaction.data, strlen(http_transaction.data));
 }
@@ -60,7 +71,7 @@ void ProcessRequestWithTime(const MockTransaction& http_transaction,
 
 TEST(InfiniteCache, Basics) {
   InfiniteCache cache;
-  cache.Init(FilePath());
+  cache.Init(base::FilePath());
 
   scoped_ptr<InfiniteCacheTransaction> transaction
       (cache.CreateInfiniteCacheTransaction());
@@ -103,9 +114,9 @@ TEST(InfiniteCache, Basics) {
 }
 
 TEST(InfiniteCache, Save_Restore) {
-  ScopedTempDir dir;
+  base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
+  base::FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
 
   scoped_ptr<InfiniteCache> cache(new InfiniteCache);
   cache->Init(path);
@@ -130,7 +141,7 @@ TEST(InfiniteCache, Save_Restore) {
 
 TEST(InfiniteCache, DoomMethod) {
   InfiniteCache cache;
-  cache.Init(FilePath());
+  cache.Init(base::FilePath());
 
   ProcessRequest(kTypicalGET_Transaction, &cache);
   ProcessRequest(kSimpleGET_Transaction, &cache);
@@ -155,9 +166,9 @@ TEST(InfiniteCache, DoomMethod) {
 }
 
 TEST(InfiniteCache, Delete) {
-  ScopedTempDir dir;
+  base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
+  base::FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
 
   scoped_ptr<InfiniteCache> cache(new InfiniteCache);
   cache->Init(path);
@@ -181,9 +192,9 @@ TEST(InfiniteCache, Delete) {
 
 TEST(InfiniteCache, DeleteBetween) {
 #if !defined(OS_ANDROID)
-  ScopedTempDir dir;
+  base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
+  base::FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
 
   scoped_ptr<InfiniteCache> cache(new InfiniteCache);
   cache->Init(path);
@@ -202,7 +213,7 @@ TEST(InfiniteCache, DeleteBetween) {
   Time end = start + TimeDelta::FromSeconds(2);
 
   ProcessRequestWithTime(kETagGET_Transaction, cache.get(),
-                          end + TimeDelta::FromSeconds(2));
+                         end + TimeDelta::FromSeconds(2));
 
   EXPECT_EQ(3, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
   EXPECT_EQ(net::OK,
@@ -216,7 +227,8 @@ TEST(InfiniteCache, DeleteBetween) {
   cache->Init(path);
 
   EXPECT_EQ(2, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
-  ProcessRequest(kETagGET_Transaction, cache.get());
+  ProcessRequestWithTime(kETagGET_Transaction, cache.get(),
+                         end + TimeDelta::FromMinutes(5));
   EXPECT_EQ(2, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
 
   EXPECT_EQ(net::OK,
@@ -234,3 +246,31 @@ TEST(InfiniteCache, DeleteBetween) {
   EXPECT_EQ(1, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
 #endif  // OS_ANDROID
 }
+
+#if 0
+// This test is too slow for the bots.
+TEST(InfiniteCache, FillUp) {
+  base::ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  base::FilePath path = dir.path().Append(FILE_PATH_LITERAL("infinite"));
+
+  scoped_ptr<InfiniteCache> cache(new InfiniteCache);
+  cache->Init(path);
+  net::TestCompletionCallback cb;
+
+  const int kNumEntries = 25000;
+  for (int i = 0; i < kNumEntries; i++) {
+    std::string url = StringPrintf("http://foo.com/%d/foo.html", i);
+    MockTransaction transaction = kTypicalGET_Transaction;
+    transaction.url = url.c_str();
+    ProcessRequest(transaction, cache.get());
+  }
+
+  EXPECT_EQ(kNumEntries, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
+  EXPECT_EQ(net::OK, cb.GetResult(cache->FlushDataForTest(cb.callback())));
+
+  cache.reset(new InfiniteCache);
+  cache->Init(path);
+  EXPECT_EQ(kNumEntries, cb.GetResult(cache->QueryItemsForTest(cb.callback())));
+}
+#endif

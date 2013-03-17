@@ -25,6 +25,18 @@ name=Sophos LEAK
 ...
 sophos*.dll!*
 
+# Reports from Micorosft RDP ActiveX control (mstscax.dll)
+
+GDI USAGE ERROR
+name=crbug.com/177832: mstscax.dll causes "GDI USAGE ERROR" errors.
+...
+mstscax.dll!*
+
+UNADDRESSABLE ACCESS
+name=crbug.com/177832: mstscax.dll causes "UNADDRESSABLE ACCESS" errors.
+...
+mstscax.dll!*
+
 ############################
 # Suppress some false reports due to bugs in Dr.Memory like wrong analysis
 # assumptions or unhandled syscalls
@@ -61,10 +73,6 @@ UNADDRESSABLE ACCESS
 name=http://code.google.com/p/drmemory/issues/detail?id=68 (UNADDR 2)
 ...
 ntdll.dll!RtlValidateUnicodeString
-
-UNADDRESSABLE ACCESS
-name=http://crbug.com/131304
-avutil-51.dll!ff_vector_fmul_sse
 
 ############################
 # TODO(timurrrr): investigate these
@@ -241,12 +249,6 @@ name=prefetches in igdumd32.dll
 instruction=prefetch*
 igdumd32.dll!*
 
-# prefetch of unaddressable memory in ffmpeg
-WARNING
-name=http://crbug.com/134979 prefetches in ffmpeg
-instruction=prefetch*
-avcodec-*.dll!*
-
 UNADDRESSABLE ACCESS
 name=http://code.google.com/p/drmemory/issues/detail?id=582 bizarre cl-generated read-beyond-TOS
 instruction=mov    0xfffffffc(%esp) -> %eax
@@ -354,3 +356,67 @@ name=http://crbug.com/120157
 # "ReleaseDC called from different thread than GetDC"
 system call NtUserCallOneParam.RELEASEDC
 *!*FontCache::CacheElement::~CacheElement
+
+GDI USAGE ERROR
+name=http://crbug.com/158090
+# "DC created by one thread and used by another"
+...
+content.dll!content::*::FontCache::PreCacheFont
+content.dll!content::FontCacheDispatcher::OnPreCacheFont
+content.dll!DispatchToMethod<content::FontCacheDispatcher*
+
+GDI USAGE ERROR
+name=http://crbug.com/158090 c#4
+# ReleaseDC for DC called from different thread than the thread that called GetDC
+system call NtUserCallOneParam.RELEASEDC
+ui.dll!gfx::ReadColorProfile
+ui.dll!gfx::GetColorProfile
+content.dll!content::RenderMessageFilter::OnGetMonitorColorProfile
+content.dll!DispatchToMethod*
+
+INVALID HEAP ARGUMENT
+name=http://crbug.com/158350
+# allocated with operator new[], freed with operator delete
+*!*
+*!*
+*!*
+*!*
+*!*
+content.dll!*
+content.dll!*
+content.dll!*
+content.dll!*
+content.dll!*
+*!*
+*!*
+*!*
+*!*
+*!*
+KERNEL32.dll!*
+ntdll.dll!*
+ntdll.dll!*
+
+WARNING
+name=Security test (new oveflow)
+MSVCR100D.dll!operator new
+*!operator new
+*!operator new[]
+*!`anonymous namespace'::SecurityTest_NewOverflow_Test::TestBody
+*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+
+WARNING
+name=Security test (calloc overflow)
+*!`anonymous namespace'::CallocReturnsNull
+*!`anonymous namespace'::SecurityTest_CallocOverflow_Test::TestBody
+*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
+
+GDI USAGE ERROR
+name=crbug.com/175512
+...
+USER32.dll!UnregisterClassA
+USER32.dll!UnregisterClassA
+USER32.dll!UnregisterClassA
+USER32.dll!LoadBitmapW
+media.dll!media::*::ScreenCapturerWin::CaptureCursor
+media.dll!media::*::ScreenCapturerWin::CaptureFrame
+media.dll!media::ScreenCaptureDevice::Core::DoCapture

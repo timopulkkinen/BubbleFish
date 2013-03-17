@@ -18,7 +18,6 @@
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "content/public/browser/notification_observer.h"
@@ -41,8 +40,7 @@ class LoginDisplayHost;
 class ExistingUserController : public LoginDisplay::Delegate,
                                public content::NotificationObserver,
                                public LoginPerformer::Delegate,
-                               public LoginUtils::Delegate,
-                               public PasswordChangedView::Delegate {
+                               public LoginUtils::Delegate {
  public:
   // All UI initialization is deferred till Init() call.
   explicit ExistingUserController(LoginDisplayHost* host);
@@ -63,23 +61,33 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Tells the controller to resume a pending login.
   void ResumeLogin();
 
-  // Returns Getting Started Guide URL with parameters.
-  std::string GetGettingStartedGuideURL() const;
+  // Invoked when a kiosk app launch is started.
+  void OnKioskAppLaunchStarted();
+
+  // Invoked when a kiosk app launch is failed.
+  void OnKioskAppLaunchFailed();
 
   // LoginDisplay::Delegate: implementation
+  virtual void CancelPasswordChangedFlow() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
-  virtual string16 GetConnectedNetworkName() OVERRIDE;
-  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
+  virtual void CreateLocallyManagedUser(const string16& display_name,
+                                        const std::string& password) OVERRIDE;
   virtual void CompleteLogin(const std::string& username,
                              const std::string& password) OVERRIDE;
+  virtual string16 GetConnectedNetworkName() OVERRIDE;
   virtual void Login(const std::string& username,
                      const std::string& password) OVERRIDE;
-  virtual void Signout() OVERRIDE;
-  virtual void LoginAsDemoUser() OVERRIDE;
+  virtual void MigrateUserData(const std::string& old_password) OVERRIDE;
+  virtual void LoginAsRetailModeUser() OVERRIDE;
   virtual void LoginAsGuest() OVERRIDE;
+  virtual void LoginAsPublicAccount(const std::string& username) OVERRIDE;
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
   virtual void OnStartDeviceReset() OVERRIDE;
+  virtual void ResyncUserData() OVERRIDE;
+  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
+  virtual void ShowWrongHWIDScreen() OVERRIDE;
+  virtual void Signout() OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -124,10 +132,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
 
-  // PasswordChangedView::Delegate:
-  virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
-  virtual void ResyncEncryptedData() OVERRIDE;
-
   // Starts WizardController with the specified screen.
   void ActivateWizard(const std::string& screen_name);
 
@@ -163,16 +167,26 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Shows "reset device" screen.
   void ShowResetScreen();
 
+  // Shows "critical TPM error" screen and starts reboot timer.
+  void ShowTPMErrorAndScheduleReboot();
+
+  // Reboot timer handler.
+  void OnRebootTimeElapsed();
+
   // Invoked to complete login. Login might be suspended if auto-enrollment
   // has to be performed, and will resume once auto-enrollment completes.
-  void CompleteLoginInternal(std::string username, std::string password);
+  void CompleteLoginInternal(
+      const std::string& username,
+      const std::string& password,
+      DeviceSettingsService::OwnershipStatus ownership_status,
+      bool is_owner);
 
   // Creates |login_performer_| if necessary and calls login() on it.
-  void PerformLogin(const std::string& username,
-                    const std::string& password,
-                    LoginPerformer::AuthorizationMode auth_mode,
-                    DeviceSettingsService::OwnershipStatus ownership_status,
-                    bool is_owner);
+  // The string arguments aren't passed by const reference because this is
+  // posted as |resume_login_callback_| and resets it.
+  void PerformLogin(std::string username,
+                    std::string password,
+                    LoginPerformer::AuthorizationMode auth_mode);
 
   void set_login_performer_delegate(LoginPerformer::Delegate* d) {
     login_performer_delegate_.reset(d);
@@ -221,12 +235,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Factory of callbacks.
   base::WeakPtrFactory<ExistingUserController> weak_factory_;
 
-  // Whether everything is ready to launch the browser.
-  bool ready_for_browser_launch_;
-
-  // Whether it's first login to the device and this user will be owner.
-  bool is_owner_login_;
-
   // The displayed email for the next login attempt set by |SetDisplayEmail|.
   std::string display_email_;
 
@@ -256,6 +264,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Time when the signin screen was first displayed. Used to measure the time
   // from showing the screen until a successful login is performed.
   base::Time time_init_;
+
+  // Timer for the interval to wait for the reboot after TPM error UI was shown.
+  base::OneShotTimer<ExistingUserController> reboot_timer_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 

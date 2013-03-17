@@ -16,6 +16,8 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sha1.h"
 #include "base/string_piece.h"
+#include "base/synchronization/lock.h"
+#include "crypto/mac_security_services_lock.h"
 #include "crypto/nss_util.h"
 #include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
@@ -362,11 +364,9 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
   // chain building.
   ScopedCFTypeRef<CFArrayRef> cert_array(cert->CreateOSCertChainForCert());
 
-  // From here on, only one thread can be active at a time. We have had a number
-  // of sporadic crashes in the SecTrustEvaluate call below, way down inside
-  // Apple's cert code, which we suspect are caused by a thread-safety issue.
-  // So as a speculative fix allow only one thread to use SecTrust on this cert.
-  base::AutoLock lock(verification_lock_);
+  // Serialize all calls that may use the Keychain, to work around various
+  // issues in OS X 10.6+ with multi-threaded access to Security.framework.
+  base::AutoLock lock(crypto::GetMacSecurityServicesLock());
 
   SecTrustRef trust_ref = NULL;
   status = SecTrustCreateWithCertificates(cert_array, trust_policies,
@@ -541,6 +541,9 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
   // compatible with WinHTTP, which doesn't report this error (bug 3004).
   verify_result->cert_status &= ~CERT_STATUS_NO_REVOCATION_MECHANISM;
 
+  AppendPublicKeyHashes(completed_chain, &verify_result->public_key_hashes);
+  verify_result->is_issued_by_known_root = IsIssuedByKnownRoot(completed_chain);
+
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);
 
@@ -582,9 +585,6 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
       }
     }
   }
-
-  AppendPublicKeyHashes(completed_chain, &verify_result->public_key_hashes);
-  verify_result->is_issued_by_known_root = IsIssuedByKnownRoot(completed_chain);
 
   return OK;
 }

@@ -20,8 +20,8 @@
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/debugger/worker_devtools_manager.h"
-#include "content/browser/debugger/worker_devtools_message_filter.h"
+#include "content/browser/devtools/worker_devtools_manager.h"
+#include "content/browser/devtools/worker_devtools_message_filter.h"
 #include "content/browser/fileapi/fileapi_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
@@ -52,17 +52,7 @@
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/glue/resource_type.h"
 
-using content::BrowserThread;
-using content::ChildProcessData;
-using content::ChildProcessHost;
-using content::RenderViewHostImpl;
-using content::ResourceContext;
-using content::ResourceMessageFilter;
-using content::SocketStreamDispatcherHost;
-using content::UserMetricsAction;
-using content::WorkerDevToolsManager;
-using content::WorkerServiceImpl;
-
+namespace content {
 namespace {
 
 // Helper class that we pass to SocketStreamDispatcherHost so that it can find
@@ -79,7 +69,7 @@ class URLRequestContextSelector
   virtual ~URLRequestContextSelector() {}
 
   virtual net::URLRequestContext* GetRequestContext(
-      ResourceType::Type resource_type) {
+      ResourceType::Type resource_type) OVERRIDE {
     if (resource_type == ResourceType::MEDIA)
       return media_url_request_context_->GetURLRequestContext();
     return url_request_context_->GetURLRequestContext();
@@ -108,7 +98,7 @@ WorkerProcessHost::WorkerProcessHost(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(resource_context_);
   process_.reset(
-      new BrowserChildProcessHostImpl(content::PROCESS_TYPE_WORKER, this));
+      new BrowserChildProcessHostImpl(PROCESS_TYPE_WORKER, this));
 }
 
 WorkerProcessHost::~WorkerProcessHost() {
@@ -146,28 +136,28 @@ bool WorkerProcessHost::Init(int render_process_id) {
   int flags = ChildProcessHost::CHILD_NORMAL;
 #endif
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(flags);
+  base::FilePath exe_path = ChildProcessHost::GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
   CommandLine* cmd_line = new CommandLine(exe_path);
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kWorkerProcess);
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
-  std::string locale =
-      content::GetContentClient()->browser()->GetApplicationLocale();
+  std::string locale = GetContentClient()->browser()->GetApplicationLocale();
   cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
   static const char* const kSwitchNames[] = {
     switches::kDisableApplicationCache,
     switches::kDisableDatabases,
-    switches::kEnableLogging,
-    switches::kLoggingLevel,
-    switches::kDisableWebSockets,
 #if defined(OS_WIN)
     switches::kDisableDesktopNotifications,
 #endif
     switches::kDisableFileSystem,
     switches::kDisableSeccompFilterSandbox,
+    switches::kDisableWebSockets,
+#if defined(OS_MACOSX)
+    switches::kEnableSandboxLogging,
+#endif
   };
   cmd_line->CopySwitchesFrom(*CommandLine::ForCurrentProcess(), kSwitchNames,
                              arraysize(kSwitchNames));
@@ -201,7 +191,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
 
   process_->Launch(
 #if defined(OS_WIN)
-      FilePath(),
+      base::FilePath(),
 #elif defined(OS_POSIX)
       use_zygote,
       base::EnvironmentVector(),
@@ -210,46 +200,6 @@ bool WorkerProcessHost::Init(int render_process_id) {
 
   ChildProcessSecurityPolicyImpl::GetInstance()->AddWorker(
       process_->GetData().id, render_process_id);
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableFileSystem)) {
-    // Grant most file permissions to this worker.
-    // PLATFORM_FILE_TEMPORARY, PLATFORM_FILE_HIDDEN and
-    // PLATFORM_FILE_DELETE_ON_CLOSE are not granted, because no existing API
-    // requests them.
-    // This is for the filesystem sandbox.
-    ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-        process_->GetData().id,
-        partition_.filesystem_context()->sandbox_provider()->new_base_path(),
-        base::PLATFORM_FILE_OPEN |
-        base::PLATFORM_FILE_CREATE |
-        base::PLATFORM_FILE_OPEN_ALWAYS |
-        base::PLATFORM_FILE_CREATE_ALWAYS |
-        base::PLATFORM_FILE_OPEN_TRUNCATED |
-        base::PLATFORM_FILE_READ |
-        base::PLATFORM_FILE_WRITE |
-        base::PLATFORM_FILE_EXCLUSIVE_READ |
-        base::PLATFORM_FILE_EXCLUSIVE_WRITE |
-        base::PLATFORM_FILE_ASYNC |
-        base::PLATFORM_FILE_WRITE_ATTRIBUTES |
-        base::PLATFORM_FILE_ENUMERATE);
-    // This is so that we can read and move stuff out of the old filesystem
-    // sandbox.
-    ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-        process_->GetData().id,
-        partition_.filesystem_context()->sandbox_provider()->old_base_path(),
-        base::PLATFORM_FILE_READ | base::PLATFORM_FILE_WRITE |
-            base::PLATFORM_FILE_WRITE_ATTRIBUTES |
-            base::PLATFORM_FILE_ENUMERATE);
-    // This is so that we can rename the old sandbox out of the way so that
-    // we know we've taken care of it.
-    ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-        process_->GetData().id,
-        partition_.filesystem_context()->sandbox_provider()->
-            renamed_old_base_path(),
-        base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_CREATE_ALWAYS |
-            base::PLATFORM_FILE_WRITE);
-  }
-
   CreateMessageFilters(render_process_id);
 
   return true;
@@ -257,8 +207,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
 
 void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
   ChromeBlobStorageContext* blob_storage_context =
-      content::GetChromeBlobStorageContextForResourceContext(
-          resource_context_);
+      GetChromeBlobStorageContextForResourceContext(resource_context_);
 
   net::URLRequestContextGetter* url_request_context =
       partition_.url_request_context();
@@ -266,9 +215,10 @@ void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
       partition_.url_request_context();
 
   ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
-      process_->GetData().id, content::PROCESS_TYPE_WORKER, resource_context_,
+      process_->GetData().id, PROCESS_TYPE_WORKER, resource_context_,
       partition_.appcache_service(),
       blob_storage_context,
+      partition_.filesystem_context(),
       new URLRequestContextSelector(url_request_context,
                                     media_url_request_context));
   process_->GetHost()->AddFilter(resource_message_filter);
@@ -300,7 +250,7 @@ void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
           resource_context_);
   process_->GetHost()->AddFilter(socket_stream_dispatcher_host);
   process_->GetHost()->AddFilter(
-      new content::WorkerDevToolsMessageFilter(process_->GetData().id));
+      new WorkerDevToolsMessageFilter(process_->GetData().id));
   process_->GetHost()->AddFilter(new IndexedDBDispatcherHost(
       process_->GetData().id, partition_.indexed_db_context()));
 }
@@ -361,10 +311,9 @@ bool WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
 
   if (!msg_is_ok) {
     NOTREACHED();
-    content::RecordAction(UserMetricsAction("BadMessageTerminate_WPH"));
+    RecordAction(UserMetricsAction("BadMessageTerminate_WPH"));
     base::KillProcess(
-        process_->GetData().handle, content::RESULT_CODE_KILLED_BAD_MESSAGE,
-        false);
+        process_->GetData().handle, RESULT_CODE_KILLED_BAD_MESSAGE, false);
   }
 
   if (handled)
@@ -407,7 +356,7 @@ void WorkerProcessHost::OnAllowDatabase(int worker_route_id,
                                         const string16& display_name,
                                         unsigned long estimated_size,
                                         bool* result) {
-  *result = content::GetContentClient()->browser()->AllowWorkerDatabase(
+  *result = GetContentClient()->browser()->AllowWorkerDatabase(
       url, name, display_name, estimated_size, resource_context_,
       GetRenderViewIDsForWorker(worker_route_id));
 }
@@ -415,7 +364,7 @@ void WorkerProcessHost::OnAllowDatabase(int worker_route_id,
 void WorkerProcessHost::OnAllowFileSystem(int worker_route_id,
                                           const GURL& url,
                                           bool* result) {
-  *result = content::GetContentClient()->browser()->AllowWorkerFileSystem(
+  *result = GetContentClient()->browser()->AllowWorkerFileSystem(
       url, resource_context_, GetRenderViewIDsForWorker(worker_route_id));
 }
 
@@ -423,7 +372,7 @@ void WorkerProcessHost::OnAllowIndexedDB(int worker_route_id,
                                          const GURL& url,
                                          const string16& name,
                                          bool* result) {
-  *result = content::GetContentClient()->browser()->AllowWorkerIndexedDB(
+  *result = GetContentClient()->browser()->AllowWorkerIndexedDB(
       url, name, resource_context_, GetRenderViewIDsForWorker(worker_route_id));
 }
 
@@ -517,7 +466,7 @@ void WorkerProcessHost::UpdateTitle() {
   std::set<std::string> titles;
   for (Instances::iterator i = instances_.begin(); i != instances_.end(); ++i) {
     // Allow the embedder first crack at special casing the title.
-    std::string title = content::GetContentClient()->browser()->
+    std::string title = GetContentClient()->browser()->
         GetWorkerProcessTitle(i->url(), resource_context_);
 
     if (title.empty()) {
@@ -543,7 +492,7 @@ void WorkerProcessHost::UpdateTitle() {
     display_title += *i;
   }
 
-  process_->SetName(ASCIIToUTF16(display_title));
+  process_->SetName(UTF8ToUTF16(display_title));
 }
 
 void WorkerProcessHost::DocumentDetached(WorkerMessageFilter* filter,
@@ -594,7 +543,7 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
     int worker_route_id,
     int parent_process_id,
     int64 main_resource_appcache_id,
-    content::ResourceContext* resource_context,
+    ResourceContext* resource_context,
     const WorkerStoragePartition& partition)
     : url_(url),
       closed_(false),
@@ -612,7 +561,7 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
     const GURL& url,
     bool shared,
     const string16& name,
-    content::ResourceContext* resource_context,
+    ResourceContext* resource_context,
     const WorkerStoragePartition& partition)
     : url_(url),
       closed_(false),
@@ -638,7 +587,7 @@ bool WorkerProcessHost::WorkerInstance::Matches(
     const GURL& match_url,
     const string16& match_name,
     const WorkerStoragePartition& partition,
-    content::ResourceContext* resource_context) const {
+    ResourceContext* resource_context) const {
   // Only match open shared workers.
   if (closed_)
     return false;
@@ -723,3 +672,5 @@ WorkerProcessHost::WorkerInstance::GetFilter() const {
   DCHECK(NumFilters() == 1);
   return *filters_.begin();
 }
+
+}  // namespace content

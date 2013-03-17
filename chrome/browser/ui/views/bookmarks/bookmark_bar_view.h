@@ -14,12 +14,12 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_views.h"
 #include "chrome/browser/ui/views/detachable_toolbar_view.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
@@ -56,12 +56,12 @@ class BookmarkBarView : public DetachableToolbarView,
                         public BookmarkModelObserver,
                         public views::MenuButtonListener,
                         public views::ButtonListener,
-                        public content::NotificationObserver,
                         public views::ContextMenuController,
                         public views::DragController,
                         public ui::AnimationDelegate,
                         public BookmarkMenuController::Observer,
-                        public chrome::BookmarkBarInstructionsDelegate {
+                        public chrome::BookmarkBarInstructionsDelegate,
+                        public BookmarkBubbleViewObserver {
  public:
   // The internal view class name.
   static const char kViewClassName[];
@@ -142,14 +142,16 @@ class BookmarkBarView : public DetachableToolbarView,
   void StopThrobbing(bool immediate);
 
   // Returns the tooltip text for the specified url and title. The returned
-  // text is clipped to fit within the bounds of the monitor.
+  // text is clipped to fit within the bounds of the monitor. |context| is
+  // used to determine which gfx::Screen is used to retrieve bounds.
   //
   // Note that we adjust the direction of both the URL and the title based on
   // the locale so that pure LTR strings are displayed properly in RTL locales.
   static string16 CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
                                               const GURL& url,
                                               const string16& title,
-                                              Profile* profile);
+                                              Profile* profile,
+                                              gfx::NativeView context);
 
   // DetachableToolbarView methods:
   virtual bool IsDetached() const OVERRIDE;
@@ -192,6 +194,10 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // chrome::BookmarkBarInstructionsDelegate:
   virtual void ShowImportDialog() OVERRIDE;
+
+  // BookmarkBubbleViewObserver:
+  virtual void OnBookmarkBubbleShown(const GURL& url) OVERRIDE;
+  virtual void OnBookmarkBubbleHidden() OVERRIDE;
 
   // BookmarkModelObserver:
   virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
@@ -237,11 +243,6 @@ class BookmarkBarView : public DetachableToolbarView,
   virtual void ShowContextMenuForView(views::View* source,
                                       const gfx::Point& point) OVERRIDE;
 
-  // content::NotificationObserver::
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   class ButtonSeparatorView;
   struct DropInfo;
@@ -275,6 +276,9 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Returns the button at the specified index.
   views::TextButton* GetBookmarkButton(int index);
+
+  // Returns LAUNCH_DETACHED_BAR or LAUNCH_ATTACHED_BAR based on detached state.
+  bookmark_utils::BookmarkLaunchLocation GetBookmarkLaunchLocation() const;
 
   // Returns the index of the first hidden bookmark button. If all buttons are
   // visible, this returns GetBookmarkButtonCount().
@@ -350,8 +354,6 @@ class BookmarkBarView : public DetachableToolbarView,
   // but are not set. This mode is used by GetPreferredSize() to obtain the
   // desired bounds. If |compute_bounds_only| = FALSE, the bounds are set.
   gfx::Size LayoutItems(bool compute_bounds_only);
-
-  content::NotificationRegistrar registrar_;
 
   // Used for opening urls.
   content::PageNavigator* page_navigator_;

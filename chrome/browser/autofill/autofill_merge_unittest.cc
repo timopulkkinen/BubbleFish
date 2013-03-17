@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
@@ -13,15 +13,15 @@
 #include "chrome/browser/autofill/data_driven_test.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/common/form_data.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
-#include "webkit/forms/form_data.h"
 
 namespace {
 
-const FilePath::CharType kTestName[] = FILE_PATH_LITERAL("merge");
-const FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("*.in");
+const base::FilePath::CharType kTestName[] = FILE_PATH_LITERAL("merge");
+const base::FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("*.in");
 
 const char kFieldSeparator[] = ": ";
 const char kProfileSeparator[] = "---";
@@ -51,7 +51,7 @@ std::string SerializeProfiles(const std::vector<AutofillProfile*>& profiles) {
     for (size_t j = 0; j < arraysize(kProfileFieldTypes); ++j) {
       AutofillFieldType type = kProfileFieldTypes[j];
       std::vector<string16> values;
-      profiles[i]->GetMultiInfo(type, &values);
+      profiles[i]->GetRawMultiInfo(type, &values);
       for (size_t k = 0; k < values.size(); ++k) {
         result += AutofillType::FieldTypeToString(type);
         result += kFieldSeparator;
@@ -155,7 +155,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
   personal_data_.Reset();
 
   // Create a test form.
-  webkit::forms::FormData form;
+  FormData form;
   form.name = ASCIIToUTF16("MyTestForm");
   form.method = ASCIIToUTF16("POST");
   form.origin = GURL("https://www.example.com/origin.html");
@@ -175,11 +175,11 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
       string16 field_type = UTF8ToUTF16(line.substr(0, separator_pos));
       string16 value = UTF8ToUTF16(line.substr(separator_pos + kFieldOffset));
 
-      webkit::forms::FormField field;
+      FormFieldData field;
       field.label = field_type;
       field.name = field_type;
       field.value = value;
-      field.form_control_type = ASCIIToUTF16("text");
+      field.form_control_type = "text";
       form.fields.push_back(field);
     }
 
@@ -187,7 +187,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
     // followed by an explicit separator.
     if ((i > 0 && line == kProfileSeparator) || i == lines.size() - 1) {
       // Reached the end of a profile.  Try to import it.
-      FormStructure form_structure(form);
+      FormStructure form_structure(form, std::string());
       for (size_t i = 0; i < form_structure.field_count(); ++i) {
         // Set the heuristic type for each field, which is currently serialized
         // into the field's name.

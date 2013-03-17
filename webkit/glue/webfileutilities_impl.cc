@@ -4,14 +4,15 @@
 
 #include "webkit/glue/webfileutilities_impl.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileInfo.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebString;
@@ -26,8 +27,8 @@ WebFileUtilitiesImpl::~WebFileUtilitiesImpl() {
 }
 
 bool WebFileUtilitiesImpl::fileExists(const WebString& path) {
-  FilePath::StringType file_path = WebStringToFilePathString(path);
-  return file_util::PathExists(FilePath(file_path));
+  base::FilePath file_path = webkit_base::WebStringToFilePath(path);
+  return file_util::PathExists(file_path);
 }
 
 bool WebFileUtilitiesImpl::deleteFile(const WebString& path) {
@@ -47,7 +48,8 @@ bool WebFileUtilitiesImpl::getFileInfo(const WebString& path,
     return false;
   }
   base::PlatformFileInfo file_info;
-  if (!file_util::GetFileInfo(WebStringToFilePath(path), &file_info))
+  if (!file_util::GetFileInfo(webkit_base::WebStringToFilePath(path),
+                              &file_info))
     return false;
 
   webkit_glue::PlatformFileInfoToWebFileInfo(file_info, &web_file_info);
@@ -56,38 +58,38 @@ bool WebFileUtilitiesImpl::getFileInfo(const WebString& path,
 }
 
 WebString WebFileUtilitiesImpl::directoryName(const WebString& path) {
-  FilePath file_path(WebStringToFilePathString(path));
-  return FilePathToWebString(file_path.DirName());
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
+  return webkit_base::FilePathToWebString(file_path.DirName());
 }
 
 WebString WebFileUtilitiesImpl::pathByAppendingComponent(
     const WebString& webkit_path,
     const WebString& webkit_component) {
-  FilePath path(WebStringToFilePathString(webkit_path));
-  FilePath component(WebStringToFilePathString(webkit_component));
-  FilePath combined_path = path.Append(component);
-  return FilePathStringToWebString(combined_path.value());
+  base::FilePath path(webkit_base::WebStringToFilePath(webkit_path));
+  base::FilePath component(webkit_base::WebStringToFilePath(webkit_component));
+  base::FilePath combined_path = path.Append(component);
+  return webkit_base::FilePathStringToWebString(combined_path.value());
 }
 
 bool WebFileUtilitiesImpl::makeAllDirectories(const WebString& path) {
   DCHECK(!sandbox_enabled_);
-  FilePath::StringType file_path = WebStringToFilePathString(path);
-  return file_util::CreateDirectory(FilePath(file_path));
+  base::FilePath file_path = webkit_base::WebStringToFilePath(path);
+  return file_util::CreateDirectory(file_path);
 }
 
 WebString WebFileUtilitiesImpl::getAbsolutePath(const WebString& path) {
-  FilePath file_path(WebStringToFilePathString(path));
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
   file_util::AbsolutePath(&file_path);
-  return FilePathStringToWebString(file_path.value());
+  return webkit_base::FilePathStringToWebString(file_path.value());
 }
 
 bool WebFileUtilitiesImpl::isDirectory(const WebString& path) {
-  FilePath file_path(WebStringToFilePathString(path));
+  base::FilePath file_path(webkit_base::WebStringToFilePath(path));
   return file_util::DirectoryExists(file_path);
 }
 
 WebKit::WebURL WebFileUtilitiesImpl::filePathToURL(const WebString& path) {
-  return net::FilePathToFileURL(WebStringToFilePath(path));
+  return net::FilePathToFileURL(webkit_base::WebStringToFilePath(path));
 }
 
 base::PlatformFile WebFileUtilitiesImpl::openFile(const WebString& path,
@@ -97,7 +99,7 @@ base::PlatformFile WebFileUtilitiesImpl::openFile(const WebString& path,
     return base::kInvalidPlatformFileValue;
   }
   return base::CreatePlatformFile(
-      WebStringToFilePath(path),
+      webkit_base::WebStringToFilePath(path),
       (mode == 0) ? (base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ)
                   : (base::PLATFORM_FILE_CREATE_ALWAYS |
                      base::PLATFORM_FILE_WRITE),
@@ -116,16 +118,16 @@ long long WebFileUtilitiesImpl::seekFile(base::PlatformFile handle,
                                          int origin) {
   if (handle == base::kInvalidPlatformFileValue)
     return -1;
-  net::FileStream file_stream(handle, 0, NULL);
-  return file_stream.SeekSync(static_cast<net::Whence>(origin), offset);
+  return base::SeekPlatformFile(handle,
+                                static_cast<base::PlatformFileWhence>(origin),
+                                offset);
 }
 
 bool WebFileUtilitiesImpl::truncateFile(base::PlatformFile handle,
                                         long long offset) {
   if (handle == base::kInvalidPlatformFileValue || offset < 0)
     return false;
-  net::FileStream file_stream(handle, base::PLATFORM_FILE_WRITE, NULL);
-  return file_stream.Truncate(offset) >= 0;
+  return base::TruncatePlatformFile(handle, offset);
 }
 
 int WebFileUtilitiesImpl::readFromFile(base::PlatformFile handle,
@@ -133,10 +135,7 @@ int WebFileUtilitiesImpl::readFromFile(base::PlatformFile handle,
                                        int length) {
   if (handle == base::kInvalidPlatformFileValue || !data || length <= 0)
     return -1;
-  std::string buffer;
-  buffer.resize(length);
-  net::FileStream file_stream(handle, base::PLATFORM_FILE_READ, NULL);
-  return file_stream.ReadSync(data, length);
+  return base::ReadPlatformFileCurPosNoBestEffort(handle, data, length);
 }
 
 int WebFileUtilitiesImpl::writeToFile(base::PlatformFile handle,
@@ -144,8 +143,7 @@ int WebFileUtilitiesImpl::writeToFile(base::PlatformFile handle,
                                       int length) {
   if (handle == base::kInvalidPlatformFileValue || !data || length <= 0)
     return -1;
-  net::FileStream file_stream(handle, base::PLATFORM_FILE_WRITE, NULL);
-  return file_stream.WriteSync(data, length);
+  return base::WritePlatformFileCurPosNoBestEffort(handle, data, length);
 }
 
 }  // namespace webkit_glue

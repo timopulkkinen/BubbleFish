@@ -6,13 +6,15 @@
 
 #include "base/base_paths_win.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/win/scoped_propvariant.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/geoposition.h"
 
+namespace content {
 namespace {
 const double kKnotsToMetresPerSecondConversionFactor = 0.5144;
 
@@ -21,7 +23,7 @@ void ConvertKnotsToMetresPerSecond(double* knots) {
 }
 
 HINSTANCE LoadWin7Library(const string16& lib_name) {
-  FilePath sys_dir;
+  base::FilePath sys_dir;
   PathService::Get(base::DIR_SYSTEM, &sys_dir);
   return LoadLibrary(sys_dir.Append(lib_name).value().c_str());
 }
@@ -89,15 +91,15 @@ Win7LocationApi* Win7LocationApi::CreateForTesting(
   return result;
 }
 
-void Win7LocationApi::GetPosition(content::Geoposition* position) {
+void Win7LocationApi::GetPosition(Geoposition* position) {
   DCHECK(position);
-  position->error_code = content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+  position->error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
   if (!locator_)
     return;
   // Try to get a position fix
   if (!GetPositionIfFixed(position))
     return;
-  position->error_code = content::Geoposition::ERROR_CODE_NONE;
+  position->error_code = Geoposition::ERROR_CODE_NONE;
   if (!position->Validate()) {
     // GetPositionIfFixed returned true, yet we've not got a valid fix.
     // This shouldn't happen; something went wrong in the conversion.
@@ -105,20 +107,19 @@ void Win7LocationApi::GetPosition(content::Geoposition* position) {
                  << position->latitude << "," << position->longitude
                  << " accuracy " << position->accuracy << " time "
                  << position->timestamp.ToDoubleT();
-    position->error_code =
-        content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+    position->error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
     position->error_message = "Bad fix from Win7 provider";
   }
 }
 
-bool Win7LocationApi::GetPositionIfFixed(content::Geoposition* position) {
+bool Win7LocationApi::GetPositionIfFixed(Geoposition* position) {
   HRESULT result_type;
   CComPtr<ILocationReport> location_report;
   CComPtr<ILatLongReport> lat_long_report;
   result_type = locator_->GetReport(IID_ILatLongReport, &location_report);
   // Checks to see if location access is allowed.
   if (result_type == E_ACCESSDENIED)
-    position->error_code = content::Geoposition::ERROR_CODE_PERMISSION_DENIED;
+    position->error_code = Geoposition::ERROR_CODE_PERMISSION_DENIED;
   // Checks for any other errors while requesting a location report.
   if (!SUCCEEDED(result_type))
     return false;
@@ -141,18 +142,16 @@ bool Win7LocationApi::GetPositionIfFixed(content::Geoposition* position) {
   result_type = lat_long_report->GetAltitudeError(&temp_dbl);
   if (SUCCEEDED(result_type))
     position->altitude_accuracy = temp_dbl;
-  PROPVARIANT heading;
-  PropVariantInit(&heading);
+  base::win::ScopedPropVariant propvariant;
   result_type = lat_long_report->GetValue(
-      SENSOR_DATA_TYPE_TRUE_HEADING_DEGREES, &heading);
+      SENSOR_DATA_TYPE_TRUE_HEADING_DEGREES, propvariant.Receive());
   if (SUCCEEDED(result_type))
-    PropVariantToDouble_function_(heading, &position->heading);
-  PROPVARIANT speed;
-  PropVariantInit(&speed);
+    PropVariantToDouble_function_(propvariant.get(), &position->heading);
+  propvariant.Reset();
   result_type = lat_long_report->GetValue(
-      SENSOR_DATA_TYPE_SPEED_KNOTS, &speed);
+      SENSOR_DATA_TYPE_SPEED_KNOTS, propvariant.Receive());
   if (SUCCEEDED(result_type)) {
-    PropVariantToDouble_function_(speed, &position->speed);
+    PropVariantToDouble_function_(propvariant.get(), &position->speed);
     ConvertKnotsToMetresPerSecond(&position->speed);
   }
   position->timestamp = base::Time::Now();
@@ -166,3 +165,5 @@ bool Win7LocationApi::SetHighAccuracy(bool acc) {
             LOCATION_DESIRED_ACCURACY_DEFAULT);
   return SUCCEEDED(result_type);
 }
+
+}  // namespace content

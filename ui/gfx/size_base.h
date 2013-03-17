@@ -5,10 +5,6 @@
 #ifndef UI_GFX_SIZE_BASE_H_
 #define UI_GFX_SIZE_BASE_H_
 
-#include <string>
-
-#include "base/compiler_specific.h"
-#include "build/build_config.h"
 #include "ui/base/ui_export.h"
 
 namespace gfx {
@@ -32,41 +28,32 @@ class UI_EXPORT SizeBase {
     set_height(height_ + height);
   }
 
-  Class Scale(float scale) const WARN_UNUSED_RESULT {
-    return Scale(scale, scale);
+  void set_width(Type width) {
+    width_ = width < 0 ? 0 : width;
+  }
+  void set_height(Type height) {
+    height_ = height < 0 ? 0 : height;
   }
 
-  Class Scale(float x_scale, float y_scale) const WARN_UNUSED_RESULT {
-    return Class(static_cast<Type>(width_ * x_scale),
-                 static_cast<Type>(height_ * y_scale));
+  void ClampToMax(const Class& max) {
+    width_ = width_ <= max.width_ ? width_ : max.width_;
+    height_ = height_ <= max.height_ ? height_ : max.height_;
   }
 
-  void set_width(Type width) { width_ = width; }
-  void set_height(Type height) { height_ = height; }
-
-  bool operator==(const Class& s) const {
-    return width_ == s.width_ && height_ == s.height_;
-  }
-
-  bool operator!=(const Class& s) const {
-    return !(*this == s);
+  void ClampToMin(const Class& min) {
+    width_ = width_ >= min.width_ ? width_ : min.width_;
+    height_ = height_ >= min.height_ ? height_ : min.height_;
   }
 
   bool IsEmpty() const {
-    return (width_ <= 0) || (height_ <= 0);
-  }
-
-  void ClampToNonNegative() {
-    if (width_ < 0)
-      width_ = 0;
-    if (height_ < 0)
-      height_ = 0;
+    return (width_ == 0) || (height_ == 0);
   }
 
  protected:
   SizeBase(Type width, Type height)
-      : width_(width),
-        height_(height) {}
+      : width_(width < 0 ? 0 : width),
+      height_(height < 0 ? 0 : height) {
+  }
 
   // Destructor is intentionally made non virtual and protected.
   // Do not make this public.

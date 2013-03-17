@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 onload = function() {
+  // TODO(jochen): Remove once the reason for http://crbug.com/161897 is found.
+  debug = true;
+
   var URL_LOAD =
       "http://www.a.com:PORT/files/extensions/api_test/webnavigation/serverRedirect/a.html";
   var URL_REDIRECT = "http://www.b.com:PORT/server-redirect";
@@ -26,6 +29,7 @@ onload = function() {
             { label: "a-onBeforeNavigate",
               event: "onBeforeNavigate",
               details: { frameId: 0,
+                         parentFrameId: -1,
                          processId: 0,
                          tabId: 0,
                          timeStamp: 0,
@@ -56,6 +60,7 @@ onload = function() {
             { label: "b-onBeforeNavigate",
               event: "onBeforeNavigate",
               details: { frameId: 0,
+                         parentFrameId: -1,
                          processId: 0,
                          tabId: 0,
                          timeStamp: 0,

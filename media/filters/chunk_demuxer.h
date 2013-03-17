@@ -32,14 +32,18 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
     kReachedIdLimit,  // Reached ID limit. We can't handle any more IDs.
   };
 
-  typedef base::Callback<void(scoped_array<uint8> init_data,
+  typedef base::Callback<void(const std::string& type,
+                              scoped_array<uint8> init_data,
                               int init_data_size)> NeedKeyCB;
 
   // |open_cb| Run when Initialize() is called to signal that the demuxer
   //   is ready to receive media data via AppenData().
   // |need_key_cb| Run when the demuxer determines that an encryption key is
   //   needed to decrypt the content.
-  ChunkDemuxer(const base::Closure& open_cb, const NeedKeyCB& need_key_cb);
+  // |log_cb| Run when parsing error messages need to be logged to the error
+  //   console.
+  ChunkDemuxer(const base::Closure& open_cb, const NeedKeyCB& need_key_cb,
+               const LogCB& log_cb);
 
   // Demuxer implementation.
   virtual void Initialize(DemuxerHost* host,
@@ -80,9 +84,13 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // it can accept a new segment.
   void Abort(const std::string& id);
 
+  // Returns the current presentation duration.
+  double GetDuration();
+  double GetDuration_Locked();
+
   // Notifies the demuxer that the duration of the media has changed to
   // |duration|.
-  void SetDuration(base::TimeDelta duration);
+  void SetDuration(double duration);
 
   // Sets a time |offset| to be applied to subsequent buffers appended to the
   // source buffer assicated with |id|. Returns true if the offset is set
@@ -129,7 +137,9 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
                     const VideoDecoderConfig& video_config);
   bool OnAudioBuffers(const StreamParser::BufferQueue& buffers);
   bool OnVideoBuffers(const StreamParser::BufferQueue& buffers);
-  bool OnNeedKey(scoped_array<uint8> init_data, int init_data_size);
+  bool OnNeedKey(const std::string& type,
+                 scoped_array<uint8> init_data,
+                 int init_data_size);
   void OnNewMediaSegment(const std::string& source_id,
                          base::TimeDelta start_timestamp);
   void OnEndOfMediaSegment(const std::string& source_id);
@@ -156,7 +166,8 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // EndOfStream() is called.
   void DecreaseDurationIfNecessary();
 
-  // Sets |duration_| to |new_duration| and notifies |host_|.
+  // Sets |duration_| to |new_duration|, sets |user_specified_duration_| to -1
+  // and notifies |host_|.
   void UpdateDuration(base::TimeDelta new_duration);
 
   // Returns the ranges representing the buffered data in the demuxer.
@@ -168,6 +179,9 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   DemuxerHost* host_;
   base::Closure open_cb_;
   NeedKeyCB need_key_cb_;
+  // Callback used to report error strings that can help the web developer
+  // figure out what is wrong with the content.
+  LogCB log_cb_;
 
   PipelineStatusCB init_cb_;
   PipelineStatusCB seek_cb_;
@@ -176,6 +190,13 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   scoped_refptr<ChunkDemuxerStream> video_;
 
   base::TimeDelta duration_;
+
+  // The duration passed to the last SetDuration(). If
+  // SetDuration() is never called or an AppendData() call or
+  // a EndOfStream() call changes |duration_|, then this
+  // variable is set to < 0 to indicate that the |duration_| represents
+  // the actual duration instead of a user specified value.
+  double user_specified_duration_;
 
   typedef std::map<std::string, StreamParser*> StreamParserMap;
   StreamParserMap stream_parser_map_;

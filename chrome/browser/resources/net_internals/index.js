@@ -5,6 +5,7 @@
 <include src="util.js"/>
 <include src="table_printer.js"/>
 <include src="view.js"/>
+<include src="mouse_over_help.js"/>
 <include src="tab_switcher_view.js"/>
 <include src="import_view.js"/>
 <include src="capture_view.js"/>
@@ -36,6 +37,7 @@
 <include src="log_view_painter.js"/>
 <include src="log_grouper.js"/>
 <include src="proxy_view.js"/>
+<include src="quic_view.js"/>
 <include src="socket_pool_wrapper.js"/>
 <include src="sockets_view.js"/>
 <include src="spdy_view.js"/>
@@ -44,6 +46,7 @@
 <include src="prerender_view.js"/>
 <include src="chromeos_view.js"/>
 <include src="http_pipeline_view.js"/>
+<include src="bandwidth_view.js"/>
 
 document.addEventListener('DOMContentLoaded', function() {
   MainView.getInstance();  // from main.js

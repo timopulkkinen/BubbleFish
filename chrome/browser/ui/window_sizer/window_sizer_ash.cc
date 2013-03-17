@@ -12,12 +12,18 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/gfx/screen.h"
 
 namespace {
+
+// When a window gets opened in default mode and the screen is less then this
+// width, the window will get opened in maximized mode.
+const int kForceMaximizeWidthLimit = 640;
 
 // Check if the given browser is 'valid': It is a tabbed, non minimized
 // window, which intersects with the |bounds_in_screen| area of a given screen.
@@ -34,13 +40,16 @@ bool IsValidBrowser(Browser* browser, const gfx::Rect& bounds_in_screen) {
 // on the screen defined by |bounds_in_screen| and visible.
 bool IsValidToplevelWindow(aura::Window* window,
                            const gfx::Rect& bounds_in_screen) {
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
+  const BrowserList* ash_browser_list =
+      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+  for (BrowserList::const_iterator iter = ash_browser_list->begin();
+       iter != ash_browser_list->end();
        ++iter) {
     Browser* browser = *iter;
     if (browser && browser->window() &&
-        browser->window()->GetNativeWindow() == window)
+        browser->window()->GetNativeWindow() == window) {
       return IsValidBrowser(browser, bounds_in_screen);
+    }
   }
   // A window which has no browser associated with it is probably not a window
   // of which we want to copy the size from.
@@ -53,8 +62,9 @@ aura::Window* GetTopWindow(const gfx::Rect& bounds_in_screen) {
   // Get the active window.
   aura::Window* window = ash::wm::GetActiveWindow();
   if (window && window->type() == aura::client::WINDOW_TYPE_NORMAL &&
-      window->IsVisible() && IsValidToplevelWindow(window, bounds_in_screen))
+      window->IsVisible() && IsValidToplevelWindow(window, bounds_in_screen)) {
     return window;
+  }
 
   // Get a list of all windows.
   const std::vector<aura::Window*> windows =
@@ -78,8 +88,10 @@ aura::Window* GetTopWindow(const gfx::Rect& bounds_in_screen) {
     aura::Window* window = windows[i % windows.size()];
     if (window && window->type() == aura::client::WINDOW_TYPE_NORMAL &&
         bounds_in_screen.Intersects(window->GetBoundsInScreen()) &&
-        window->IsVisible() && IsValidToplevelWindow(window, bounds_in_screen))
+        window->IsVisible()
+        && IsValidToplevelWindow(window, bounds_in_screen)) {
       return window;
+    }
   }
   return NULL;
 }
@@ -88,8 +100,10 @@ aura::Window* GetTopWindow(const gfx::Rect& bounds_in_screen) {
 // the |bounds_in_screen| rectangle.
 int GetNumberOfValidTopLevelBrowserWindows(const gfx::Rect& bounds_in_screen) {
   int count = 0;
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end();
+  const BrowserList* ash_browser_list =
+      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+  for (BrowserList::const_iterator iter = ash_browser_list->begin();
+       iter != ash_browser_list->end();
        ++iter) {
     if (IsValidBrowser(*iter, bounds_in_screen))
       count++;
@@ -119,42 +133,70 @@ bool MoveRect(const gfx::Rect& work_area,
 
 }  // namespace
 
-bool WindowSizer::GetBoundsOverrideAsh(const gfx::Rect& specified_bounds,
-                                       gfx::Rect* bounds_in_screen) const {
-  *bounds_in_screen = specified_bounds;
-  DCHECK(bounds_in_screen->IsEmpty());
+// static
+int WindowSizer::GetForceMaximizedWidthLimit() {
+  return kForceMaximizeWidthLimit;
+}
 
-  if (!GetSavedWindowBounds(bounds_in_screen))
+bool WindowSizer::GetBoundsOverrideAsh(gfx::Rect* bounds_in_screen,
+                                       ui::WindowShowState* show_state) const {
+  DCHECK(show_state);
+  DCHECK(bounds_in_screen);
+
+  if (browser_ &&
+      browser_->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH) {
+    return false;
+  }
+  bounds_in_screen->SetRect(0, 0, 0, 0);
+
+  ui::WindowShowState passed_show_state = *show_state;
+  if (!GetSavedWindowBounds(bounds_in_screen, show_state))
     GetDefaultWindowBounds(bounds_in_screen);
 
   if (browser_ && browser_->is_type_tabbed()) {
+    aura::RootWindow* active = ash::Shell::GetActiveRootWindow();
+    // Always open new window in the active display.
+    gfx::Rect active_area = active->GetBoundsInScreen();
     gfx::Rect work_area =
-        monitor_info_provider_->GetMonitorWorkAreaMatching(*bounds_in_screen);
+        monitor_info_provider_->GetMonitorWorkAreaMatching(active_area);
+
     // This is a window / app. See if there is no window and try to place it.
     int count = GetNumberOfValidTopLevelBrowserWindows(work_area);
     aura::Window* top_window = GetTopWindow(work_area);
-
+    // Our window should not have any impact if we are already on top.
+    if (browser_->window() &&
+        top_window == browser_->window()->GetNativeWindow())
+      top_window = NULL;
     // If there is no valid other window we take the coordinates as is.
-    if (!count || !top_window || ash::wm::IsWindowMaximized(top_window))
+    if (!count || !top_window) {
+      // When using "small screens" we want to always open in full screen mode.
+      if (passed_show_state == ui::SHOW_STATE_DEFAULT &&
+          work_area.width() < kForceMaximizeWidthLimit &&
+          (!browser_->window() || !browser_->window()->IsFullscreen()) &&
+          (!browser_->fullscreen_controller() ||
+           !browser_->fullscreen_controller()->IsFullscreenForBrowser()))
+        *show_state = ui::SHOW_STATE_MAXIMIZED;
+      return true;
+    }
+    bool maximized = ash::wm::IsWindowMaximized(top_window);
+    // We ignore the saved show state, but look instead for the top level
+    // window's show state.
+    if (passed_show_state == ui::SHOW_STATE_DEFAULT) {
+      *show_state = maximized ? ui::SHOW_STATE_MAXIMIZED :
+                                ui::SHOW_STATE_DEFAULT;
+    }
+
+    if (maximized)
       return true;
 
-    gfx::Rect other_bounds_in_screen = top_window->GetBoundsInScreen();
-    bool move_right =
-        other_bounds_in_screen.CenterPoint().x() < work_area.CenterPoint().x();
-
-    // In case we have only one window, we move the other window fully to the
-    // "other side" - making room for this new window.
-    if (count == 1) {
-      gfx::Display display =
-            gfx::Screen::GetDisplayMatching(
-                top_window->GetRootWindow()->GetBoundsInScreen());
-      if (MoveRect(work_area, other_bounds_in_screen, !move_right))
-        top_window->SetBoundsInScreen(other_bounds_in_screen, display);
-    }
     // Use the size of the other window, and mirror the location to the
     // opposite side. Then make sure that it is inside our work area
     // (if possible).
-    *bounds_in_screen = other_bounds_in_screen;
+    *bounds_in_screen = top_window->GetBoundsInScreen();
+
+    bool move_right =
+        bounds_in_screen->CenterPoint().x() < work_area.CenterPoint().x();
+
     MoveRect(work_area, *bounds_in_screen, move_right);
     if (bounds_in_screen->bottom() > work_area.bottom())
       bounds_in_screen->set_y(std::max(work_area.y(),

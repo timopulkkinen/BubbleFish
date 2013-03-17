@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/system_menu_model_delegate.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/aura/client/aura_constants.h"
@@ -15,15 +14,13 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
-#include "ui/views/controls/menu/menu_model_adapter.h"
-#include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/view.h"
-#include "ui/views/views_switches.h"
 
 #if defined(USE_ASH)
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_util.h"
+#include "chrome/browser/ui/ash/ash_init.h"
 #endif
 
 #if !defined(OS_CHROMEOS)
@@ -110,39 +107,12 @@ BrowserFrameAura::BrowserFrameAura(BrowserFrame* browser_frame,
         GetNativeWindow(),
         ash::WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_NO);
   }
+  // Turn on auto window management if we don't need an explicit bounds.
+  // This way the requested bounds are honored.
+  if (!browser_view->browser()->bounds_overridden() &&
+      !browser_view->browser()->is_session_restore())
+    SetWindowAutoManaged();
 #endif
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// BrowserFrameAura, views::ContextMenuController overrides:
-void BrowserFrameAura::ShowContextMenuForView(views::View* source,
-                                              const gfx::Point& p) {
-  // Only show context menu if point is in unobscured parts of browser, i.e.
-  // if NonClientHitTest returns :
-  // - HTCAPTION: in title bar or unobscured part of tabstrip
-  // - HTNOWHERE: as the name implies.
-  views::NonClientView* non_client_view = browser_view()->frame()->
-      non_client_view();
-  gfx::Point point_in_view_coords(p);
-  views::View::ConvertPointFromScreen(non_client_view, &point_in_view_coords);
-  int hit_test = non_client_view->NonClientHitTest(point_in_view_coords);
-  if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
-    SystemMenuModelDelegate menu_delegate(browser_view(),
-                                          browser_view()->browser());
-    ui::SimpleMenuModel model(&menu_delegate);
-    model.AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
-    model.AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
-    model.AddSeparator(ui::NORMAL_SEPARATOR);
-    model.AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
-    views::MenuModelAdapter menu_adapter(&model);
-    menu_runner_.reset(new views::MenuRunner(menu_adapter.CreateMenu()));
-
-    if (menu_runner_->RunMenuAt(source->GetWidget(), NULL,
-          gfx::Rect(p, gfx::Size(0,0)), views::MenuItemView::TOPLEFT,
-          views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
-        views::MenuRunner::MENU_DELETED)
-      return;
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -161,8 +131,13 @@ void BrowserFrameAura::OnWindowTargetVisibilityChanged(bool visible) {
   // RestoreFocus() when we become visible, which results in the web contents
   // being asked to focus, which places focus either in the web contents or in
   // the location bar as appropriate.
-  if (visible)
+  if (visible) {
+    // Once the window has been shown we know the requested bounds
+    // (if provided) have been honored and we can switch on window management.
+    SetWindowAutoManaged();
+
     browser_view_->RestoreFocus();
+  }
   views::NativeWidgetAura::OnWindowTargetVisibilityChanged(visible);
 }
 
@@ -177,11 +152,8 @@ const views::NativeWidget* BrowserFrameAura::AsNativeWidget() const {
   return this;
 }
 
-void BrowserFrameAura::InitSystemContextMenu() {
-  views::NonClientView* non_client_view =
-      browser_view()->frame()->non_client_view();
-  DCHECK(non_client_view);
-  non_client_view->set_context_menu_controller(this);
+bool BrowserFrameAura::UsesNativeSystemMenu() const {
+  return false;
 }
 
 int BrowserFrameAura::GetMinimizeButtonOffset() const {
@@ -208,8 +180,12 @@ NativeBrowserFrame* NativeBrowserFrame::CreateNativeBrowserFrame(
     BrowserFrame* browser_frame,
     BrowserView* browser_view) {
 #if !defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-        views::switches::kDesktopAura))
+  if (
+#if defined(USE_ASH)
+      !chrome::ShouldOpenAshOnStartup() &&
+#endif
+      browser_view->browser()->
+          host_desktop_type() == chrome::HOST_DESKTOP_TYPE_NATIVE)
     return new DesktopBrowserFrameAura(browser_frame, browser_view);
 #endif
   return new BrowserFrameAura(browser_frame, browser_view);
@@ -219,4 +195,12 @@ NativeBrowserFrame* NativeBrowserFrame::CreateNativeBrowserFrame(
 // BrowserFrameAura, private:
 
 BrowserFrameAura::~BrowserFrameAura() {
+}
+
+void BrowserFrameAura::SetWindowAutoManaged() {
+#if defined(USE_ASH)
+  if (browser_view_->browser()->type() != Browser::TYPE_POPUP ||
+      browser_view_->browser()->is_app())
+    ash::wm::SetWindowPositionManaged(GetNativeWindow(), true);
+#endif
 }

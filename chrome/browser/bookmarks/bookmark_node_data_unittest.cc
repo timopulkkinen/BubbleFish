@@ -22,7 +22,8 @@ class BookmarkNodeDataTest : public testing::Test {
  public:
   BookmarkNodeDataTest()
       : ui_thread_(BrowserThread::UI, &loop_),
-        file_thread_(BrowserThread::FILE, &loop_) { }
+        file_thread_(BrowserThread::FILE, &loop_) {
+  }
 
  private:
   MessageLoop loop_;
@@ -57,7 +58,7 @@ TEST_F(BookmarkNodeDataTest, BogusRead) {
 // read it.
 TEST_F(BookmarkNodeDataTest, JustURL) {
   const GURL url("http://google.com");
-  const string16 title(ASCIIToUTF16("title"));
+  const string16 title(ASCIIToUTF16("google.com"));
 
   ui::OSExchangeData data;
   data.SetURL(url, title);
@@ -81,7 +82,7 @@ TEST_F(BookmarkNodeDataTest, URL) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(&profile);
   const BookmarkNode* root = model->bookmark_bar_node();
   GURL url(GURL("http://foo.com"));
-  const string16 title(ASCIIToUTF16("blah"));
+  const string16 title(ASCIIToUTF16("foo.com"));
   const BookmarkNode* node = model->AddURL(root, 0, title, url);
   BookmarkNodeData drag_data(node);
   EXPECT_TRUE(drag_data.is_valid());

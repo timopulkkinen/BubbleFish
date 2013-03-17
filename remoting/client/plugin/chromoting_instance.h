@@ -130,8 +130,9 @@ class ChromotingInstance :
   void RemapKey(uint32 in_usb_keycode, uint32 out_usb_keycode);
   void TrapKey(uint32 usb_keycode, bool trap);
   void SendClipboardItem(const std::string& mime_type, const std::string& item);
-  void NotifyClientDimensions(int width, int height);
+  void NotifyClientResolution(int width, int height, int x_dpi, int y_dpi);
   void PauseVideo(bool pause);
+  void PauseAudio(bool pause);
 
   // Return statistics record by ChromotingClient.
   // If no connection is currently active then NULL will be returned.
@@ -176,6 +177,9 @@ class ChromotingInstance :
 
   void ProcessLogToUI(const std::string& message);
 
+  // Returns true if the hosting content has the chrome-extension:// scheme.
+  bool IsCallerAppOrExtension();
+
   // Returns true if there is a ConnectionToHost and it is connected.
   bool IsConnected();
 
@@ -186,6 +190,7 @@ class ChromotingInstance :
   ClientContext context_;
   scoped_refptr<RectangleUpdateDecoder> rectangle_decoder_;
   scoped_ptr<PepperView> view_;
+  pp::View plugin_view_;
 
   scoped_ptr<protocol::ConnectionToHost> host_connection_;
   scoped_ptr<ChromotingClient> client_;

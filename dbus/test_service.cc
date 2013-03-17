@@ -13,6 +13,13 @@
 #include "dbus/object_path.h"
 #include "dbus/property.h"
 
+namespace {
+
+void EmptyCallback(bool /* success */) {
+}
+
+}  // namespace
+
 namespace dbus {
 
 // Echo, SlowEcho, AsyncEcho, BrokenMethod, GetAll, Get, Set.
@@ -26,7 +33,7 @@ TestService::Options::~Options() {
 
 TestService::TestService(const Options& options)
     : base::Thread("TestService"),
-      dbus_thread_message_loop_proxy_(options.dbus_thread_message_loop_proxy),
+      dbus_task_runner_(options.dbus_task_runner),
       on_all_methods_exported_(false, false),
       num_exported_methods_(0) {
 }
@@ -95,7 +102,8 @@ void TestService::SendTestSignalFromRootInternal(const std::string& message) {
 
   bus_->RequestOwnership("org.chromium.TestService",
                          base::Bind(&TestService::OnOwnership,
-                                    base::Unretained(this)));
+                                    base::Unretained(this),
+                                    base::Bind(&EmptyCallback)));
 
   // Use "/" just like dbus-send does.
   ExportedObject* root_object =
@@ -103,9 +111,28 @@ void TestService::SendTestSignalFromRootInternal(const std::string& message) {
   root_object->SendSignal(&signal);
 }
 
-void TestService::OnOwnership(const std::string& service_name,
+void TestService::RequestOwnership(base::Callback<void(bool)> callback) {
+  message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&TestService::RequestOwnershipInternal,
+                 base::Unretained(this),
+                 callback));
+}
+
+void TestService::RequestOwnershipInternal(
+    base::Callback<void(bool)> callback) {
+  bus_->RequestOwnership("org.chromium.TestService",
+                         base::Bind(&TestService::OnOwnership,
+                                    base::Unretained(this),
+                                    callback));
+}
+
+void TestService::OnOwnership(base::Callback<void(bool)> callback,
+                              const std::string& service_name,
                               bool success) {
+  has_ownership_ = success;
   LOG_IF(ERROR, !success) << "Failed to own: " << service_name;
+  callback.Run(success);
 }
 
 void TestService::OnExported(const std::string& interface_name,
@@ -128,12 +155,13 @@ void TestService::Run(MessageLoop* message_loop) {
   Bus::Options bus_options;
   bus_options.bus_type = Bus::SESSION;
   bus_options.connection_type = Bus::PRIVATE;
-  bus_options.dbus_thread_message_loop_proxy = dbus_thread_message_loop_proxy_;
+  bus_options.dbus_task_runner = dbus_task_runner_;
   bus_ = new Bus(bus_options);
 
   bus_->RequestOwnership("org.chromium.TestService",
                          base::Bind(&TestService::OnOwnership,
-                                    base::Unretained(this)));
+                                    base::Unretained(this),
+                                    base::Bind(&EmptyCallback)));
 
   exported_object_ = bus_->GetExportedObject(
       dbus::ObjectPath("/org/chromium/TestObject"));
@@ -215,14 +243,14 @@ void TestService::Echo(MethodCall* method_call,
   MessageReader reader(method_call);
   std::string text_message;
   if (!reader.PopString(&text_message)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
-  Response* response = Response::FromMethodCall(method_call);
-  MessageWriter writer(response);
+  scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+  MessageWriter writer(response.get());
   writer.AppendString(text_message);
-  response_sender.Run(response);
+  response_sender.Run(response.Pass());
 }
 
 void TestService::SlowEcho(
@@ -247,7 +275,7 @@ void TestService::AsyncEcho(
 void TestService::BrokenMethod(
     MethodCall* method_call,
     dbus::ExportedObject::ResponseSender response_sender) {
-  response_sender.Run(NULL);
+  response_sender.Run(scoped_ptr<dbus::Response>());
 }
 
 
@@ -257,7 +285,7 @@ void TestService::GetAllProperties(
   MessageReader reader(method_call);
   std::string interface;
   if (!reader.PopString(&interface)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
@@ -272,8 +300,8 @@ void TestService::GetAllProperties(
   //   "Objects": Variant<[objectpath:"/TestObjectPath"]>
   // ]
 
-  Response* response = Response::FromMethodCall(method_call);
-  MessageWriter writer(response);
+  scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+  MessageWriter writer(response.get());
 
   MessageWriter array_writer(NULL);
   MessageWriter dict_entry_writer(NULL);
@@ -315,7 +343,7 @@ void TestService::GetAllProperties(
 
   writer.CloseContainer(&array_writer);
 
-  response_sender.Run(response);
+  response_sender.Run(response.Pass());
 }
 
 void TestService::GetProperty(
@@ -324,39 +352,39 @@ void TestService::GetProperty(
   MessageReader reader(method_call);
   std::string interface;
   if (!reader.PopString(&interface)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   std::string name;
   if (!reader.PopString(&name)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   if (name == "Name") {
     // Return the previous value for the "Name" property:
     // Variant<"TestService">
-    Response* response = Response::FromMethodCall(method_call);
-    MessageWriter writer(response);
+    scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+    MessageWriter writer(response.get());
 
     writer.AppendVariantOfString("TestService");
 
-    response_sender.Run(response);
+    response_sender.Run(response.Pass());
   } else if (name == "Version") {
     // Return a new value for the "Version" property:
     // Variant<20>
-    Response* response = Response::FromMethodCall(method_call);
-    MessageWriter writer(response);
+    scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+    MessageWriter writer(response.get());
 
     writer.AppendVariantOfInt16(20);
 
-    response_sender.Run(response);
+    response_sender.Run(response.Pass());
   } else if (name == "Methods") {
     // Return the previous value for the "Methods" property:
     // Variant<["Echo", "SlowEcho", "AsyncEcho", "BrokenMethod"]>
-    Response* response = Response::FromMethodCall(method_call);
-    MessageWriter writer(response);
+    scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+    MessageWriter writer(response.get());
     MessageWriter variant_writer(NULL);
     MessageWriter variant_array_writer(NULL);
 
@@ -369,12 +397,12 @@ void TestService::GetProperty(
     variant_writer.CloseContainer(&variant_array_writer);
     writer.CloseContainer(&variant_writer);
 
-    response_sender.Run(response);
+    response_sender.Run(response.Pass());
   } else if (name == "Objects") {
     // Return the previous value for the "Objects" property:
     // Variant<[objectpath:"/TestObjectPath"]>
-    Response* response = Response::FromMethodCall(method_call);
-    MessageWriter writer(response);
+    scoped_ptr<Response> response = Response::FromMethodCall(method_call);
+    MessageWriter writer(response.get());
     MessageWriter variant_writer(NULL);
     MessageWriter variant_array_writer(NULL);
 
@@ -384,10 +412,10 @@ void TestService::GetProperty(
     variant_writer.CloseContainer(&variant_array_writer);
     writer.CloseContainer(&variant_writer);
 
-    response_sender.Run(response);
+    response_sender.Run(response.Pass());
   } else {
     // Return error.
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 }
@@ -398,31 +426,30 @@ void TestService::SetProperty(
   MessageReader reader(method_call);
   std::string interface;
   if (!reader.PopString(&interface)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   std::string name;
   if (!reader.PopString(&name)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   if (name != "Name") {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   std::string value;
   if (!reader.PopVariantOfString(&value)) {
-    response_sender.Run(NULL);
+    response_sender.Run(scoped_ptr<dbus::Response>());
     return;
   }
 
   SendPropertyChangedSignal(value);
 
-  Response* response = Response::FromMethodCall(method_call);
-  response_sender.Run(response);
+  response_sender.Run(Response::FromMethodCall(method_call));
 }
 
 void TestService::SendPropertyChangedSignal(const std::string& name) {

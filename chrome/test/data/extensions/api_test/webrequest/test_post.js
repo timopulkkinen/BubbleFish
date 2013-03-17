@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Common definitions for test_post?.js.
+
 var dirName = "requestBody/";
 
 function sendPost(formFile, parseableForm) {
@@ -86,8 +88,8 @@ function sendPost(formFile, parseableForm) {
           details: {
             method: "POST",
             type: "main_frame",
-            url: getURL("requestBody/nonExistingTarget.html"),
-            frameUrl: getURL("requestBody/nonExistingTarget.html"),
+            url: getURL("simpleLoad/a.html"),
+            frameUrl: getURL("simpleLoad/a.html"),
             requestBody: parseableForm ? {
               formData: formData
             } : {
@@ -95,36 +97,36 @@ function sendPost(formFile, parseableForm) {
             }
           }
         },
-        { label: "b-onErrorOccurred",
-          event: "onErrorOccurred",
+        { label: "b-onResponseStarted",
+          event: "onResponseStarted",
           details: {
-            error: "net::ERR_FILE_NOT_FOUND",
             fromCache: false,
             method: "POST",
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             type: "main_frame",
-            url: getURL("requestBody/nonExistingTarget.html")
+            url: getURL("simpleLoad/a.html")
+          }
+        },
+        { label: "b-onCompleted",
+          event: "onCompleted",
+          details: {
+            fromCache: false,
+            method: "POST",
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
+            type: "main_frame",
+            url: getURL("simpleLoad/a.html")
           }
         }
       ],
       [  // event order
         ["a-onBeforeRequest", "a-onResponseStarted", "a-onCompleted",
-        "s-onBeforeRequest", "s-onResponseStarted", "s-onCompleted",
-        "b-onBeforeRequest", "b-onErrorOccurred"]
+         "s-onBeforeRequest", "s-onResponseStarted", "s-onCompleted",
+         "b-onBeforeRequest", "b-onResponseStarted", "b-onCompleted"]
       ],
       {urls: ["<all_urls>"]},  // filter
       ["requestBody"]);
-    navigateAndWait(getURL(dirName + formFile), function() {close();});
-    close();
+    navigateAndWait(getURL(dirName + formFile));
   }
 }
-
-runTests([
-  // Navigates to a page with a form and submits it, generating a POST request.
-  // First two result in url-encoded form.
-  sendPost('no-enctype.html', true),
-  sendPost('urlencoded.html', true),
-  // Third results in multipart-encoded form.
-  sendPost('multipart.html', true),
-  // Fourth results in unparseable form, and thus raw data string.
-  sendPost('plaintext.html', false),
-]);

@@ -6,23 +6,19 @@
 
 #include <algorithm>
 #include <list>
-#include <string>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
-#include "base/values.h"
-#include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/load_flags.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
+#include "net/base/upload_data_stream.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_info.h"
-#include "net/http/http_util.h"
 #include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_session.h"
@@ -34,14 +30,15 @@ SpdyHttpStream::SpdyHttpStream(SpdySession* spdy_session,
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       stream_(NULL),
       spdy_session_(spdy_session),
+      request_info_(NULL),
+      has_upload_data_(false),
       response_info_(NULL),
       download_finished_(false),
       response_headers_received_(false),
       user_buffer_len_(0),
       buffered_read_callback_pending_(false),
       more_read_data_pending_(false),
-      direct_(direct),
-      waiting_for_chunk_(false) { }
+      direct_(direct) { }
 
 void SpdyHttpStream::InitializeWithExistingStream(SpdyStream* spdy_stream) {
   stream_ = spdy_stream;
@@ -50,8 +47,6 @@ void SpdyHttpStream::InitializeWithExistingStream(SpdyStream* spdy_stream) {
 }
 
 SpdyHttpStream::~SpdyHttpStream() {
-  if (request_body_stream_ != NULL)
-    request_body_stream_->set_chunk_callback(NULL);
   if (stream_)
     stream_->DetachDelegate();
 }
@@ -74,9 +69,16 @@ int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
   if (stream_.get())
     return OK;
 
-  return spdy_session_->CreateStream(request_info_->url,
-                                     request_info_->priority, &stream_,
-                                     stream_net_log, callback);
+  int rv = stream_request_.StartRequest(
+      spdy_session_, request_info_->url, request_info_->priority,
+      stream_net_log,
+      base::Bind(&SpdyHttpStream::OnStreamCreated,
+                 weak_factory_.GetWeakPtr(), callback));
+
+  if (rv == OK)
+    stream_ = stream_request_.ReleaseStream();
+
+  return rv;
 }
 
 const HttpResponseInfo* SpdyHttpStream::GetResponseInfo() const {
@@ -84,11 +86,11 @@ const HttpResponseInfo* SpdyHttpStream::GetResponseInfo() const {
 }
 
 UploadProgress SpdyHttpStream::GetUploadProgress() const {
-  if (!request_body_stream_.get())
+  if (!request_info_ || !request_info_->upload_data_stream)
     return UploadProgress();
 
-  return UploadProgress(request_body_stream_->position(),
-                        request_body_stream_->size());
+  return UploadProgress(request_info_->upload_data_stream->position(),
+                        request_info_->upload_data_stream->size());
 }
 
 int SpdyHttpStream::ReadResponseHeaders(const CompletionCallback& callback) {
@@ -190,8 +192,18 @@ bool SpdyHttpStream::IsConnectionReusable() const {
   return false;
 }
 
+bool SpdyHttpStream::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
+  // If |stream_| has yet to be created, or does not yet have an ID, fail.
+  // The reused flag can only be correctly set once a stream has an ID.  Streams
+  // get their IDs once the request has been successfully sent, so this does not
+  // behave that differently from other stream types.
+  if (!spdy_session_ || !stream_ || stream_->stream_id() == 0)
+    return false;
+  return spdy_session_->GetLoadTimingInfo(stream_->stream_id(),
+                                          load_timing_info);
+}
+
 int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
-                                scoped_ptr<UploadDataStream> request_body,
                                 HttpResponseInfo* response,
                                 const CompletionCallback& callback) {
   base::Time request_time = base::Time::Now();
@@ -215,17 +227,16 @@ int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
   if (response_info_)
     response_info_->request_time = request_time;
 
-  CHECK(!request_body_stream_.get());
-  if (request_body != NULL) {
-    if (request_body->size() || request_body->is_chunked()) {
-      request_body_stream_.reset(request_body.release());
-      request_body_stream_->set_chunk_callback(this);
-      // Use kMaxSpdyFrameChunkSize as the buffer size, since the request
-      // body data is written with this size at a time.
-      raw_request_body_buf_ = new IOBufferWithSize(kMaxSpdyFrameChunkSize);
-      // The request body buffer is empty at first.
-      request_body_buf_ = new DrainableIOBuffer(raw_request_body_buf_, 0);
-    }
+  CHECK(!has_upload_data_);
+  has_upload_data_ = request_info_->upload_data_stream &&
+      (request_info_->upload_data_stream->size() ||
+       request_info_->upload_data_stream->is_chunked());
+  if (has_upload_data_) {
+    // Use kMaxSpdyFrameChunkSize as the buffer size, since the request
+    // body data is written with this size at a time.
+    raw_request_body_buf_ = new IOBufferWithSize(kMaxSpdyFrameChunkSize);
+    // The request body buffer is empty at first.
+    request_body_buf_ = new DrainableIOBuffer(raw_request_body_buf_, 0);
   }
 
   CHECK(!callback.is_null());
@@ -261,8 +272,7 @@ int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
     return result;
   response_info_->socket_address = HostPortPair::FromIPEndPoint(address);
 
-  bool has_upload_data = request_body_stream_.get() != NULL;
-  result = stream_->SendRequest(has_upload_data);
+  result = stream_->SendRequest(has_upload_data_);
   if (result == ERR_IO_PENDING) {
     CHECK(callback_.is_null());
     callback_ = callback;
@@ -271,51 +281,46 @@ int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
 }
 
 void SpdyHttpStream::Cancel() {
-  if (spdy_session_)
-    spdy_session_->CancelPendingCreateStreams(&stream_);
   callback_.Reset();
   if (stream_)
     stream_->Cancel();
 }
 
+void SpdyHttpStream::OnStreamCreated(
+    const CompletionCallback& callback,
+    int rv) {
+  if (rv == OK)
+    stream_ = stream_request_.ReleaseStream();
+  callback.Run(rv);
+}
+
 int SpdyHttpStream::SendData() {
-  CHECK(request_body_stream_.get());
+  CHECK(request_info_ && request_info_->upload_data_stream);
   CHECK_EQ(0, request_body_buf_->BytesRemaining());
 
   // Read the data from the request body stream.
-  const int bytes_read = request_body_stream_->Read(
-      raw_request_body_buf_, raw_request_body_buf_->size());
-  DCHECK(!waiting_for_chunk_ || bytes_read != ERR_IO_PENDING);
+  const int bytes_read = request_info_->upload_data_stream->Read(
+      raw_request_body_buf_, raw_request_body_buf_->size(),
+      base::Bind(
+          base::IgnoreResult(&SpdyHttpStream::OnRequestBodyReadCompleted),
+          weak_factory_.GetWeakPtr()));
 
-  if (request_body_stream_->is_chunked() && bytes_read == ERR_IO_PENDING) {
-    waiting_for_chunk_ = true;
+  if (bytes_read == ERR_IO_PENDING)
     return ERR_IO_PENDING;
-  }
-
-  waiting_for_chunk_ = false;
-
-  // ERR_IO_PENDING with chunked encoding is the only possible error.
+  // ERR_IO_PENDING is the only possible error.
   DCHECK_GE(bytes_read, 0);
-
-  request_body_buf_ = new DrainableIOBuffer(raw_request_body_buf_,
-                                            bytes_read);
-
-  const bool eof = request_body_stream_->IsEOF();
-  return stream_->WriteStreamData(
-      request_body_buf_,
-      request_body_buf_->BytesRemaining(),
-      eof ? DATA_FLAG_FIN : DATA_FLAG_NONE);
+  return OnRequestBodyReadCompleted(bytes_read);
 }
 
 bool SpdyHttpStream::OnSendHeadersComplete(int status) {
   if (!callback_.is_null())
     DoCallback(status);
-  return request_body_stream_.get() == NULL;
+  return !has_upload_data_;
 }
 
 int SpdyHttpStream::OnSendBody() {
-  CHECK(request_body_stream_.get());
-  const bool eof = request_body_stream_->IsEOF();
+  CHECK(request_info_ && request_info_->upload_data_stream);
+  const bool eof = request_info_->upload_data_stream->IsEOF();
   if (request_body_buf_->BytesRemaining() > 0) {
     return stream_->WriteStreamData(
         request_body_buf_,
@@ -332,7 +337,7 @@ int SpdyHttpStream::OnSendBody() {
 
 int SpdyHttpStream::OnSendBodyComplete(int status, bool* eof) {
   // |status| is the number of bytes written to the SPDY stream.
-  CHECK(request_body_stream_.get());
+  CHECK(request_info_ && request_info_->upload_data_stream);
   *eof = false;
 
   if (status > 0) {
@@ -344,7 +349,7 @@ int SpdyHttpStream::OnSendBodyComplete(int status, bool* eof) {
   }
 
   // Check if the entire body data has been sent.
-  *eof = (request_body_stream_->IsEOF() &&
+  *eof = (request_info_->upload_data_stream->IsEOF() &&
           !request_body_buf_->BytesRemaining());
   return OK;
 }
@@ -435,21 +440,12 @@ void SpdyHttpStream::OnDataSent(int length) {
 
 void SpdyHttpStream::OnClose(int status) {
   bool invoked_callback = false;
-  if (request_body_stream_ != NULL)
-    request_body_stream_->set_chunk_callback(NULL);
   if (status == net::OK) {
     // We need to complete any pending buffered read now.
     invoked_callback = DoBufferedReadCallback();
   }
   if (!invoked_callback && !callback_.is_null())
     DoCallback(status);
-}
-
-void SpdyHttpStream::OnChunkAvailable() {
-  if (!waiting_for_chunk_)
-    return;
-  DCHECK(request_body_stream_->is_chunked());
-  SendData();
 }
 
 void SpdyHttpStream::ScheduleBufferedReadCallback() {
@@ -524,6 +520,17 @@ void SpdyHttpStream::DoCallback(int rv) {
   CompletionCallback c = callback_;
   callback_.Reset();
   c.Run(rv);
+}
+
+int SpdyHttpStream::OnRequestBodyReadCompleted(int status) {
+  DCHECK_GE(status, 0);
+
+  request_body_buf_ = new DrainableIOBuffer(raw_request_body_buf_, status);
+
+  const bool eof = request_info_->upload_data_stream->IsEOF();
+  return stream_->WriteStreamData(request_body_buf_,
+                                  request_body_buf_->BytesRemaining(),
+                                  eof ? DATA_FLAG_FIN : DATA_FLAG_NONE);
 }
 
 void SpdyHttpStream::GetSSLInfo(SSLInfo* ssl_info) {

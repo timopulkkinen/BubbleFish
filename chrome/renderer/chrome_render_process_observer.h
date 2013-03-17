@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/content_settings.h"
 #include "content/public/renderer/render_process_observer.h"
@@ -36,6 +36,10 @@ class ChromeRenderProcessObserver : public content::RenderProcessObserver {
 
   static bool is_incognito_process() { return is_incognito_process_; }
 
+  static bool extension_activity_log_enabled() {
+    return extension_activity_log_enabled_;
+  }
+
   // Needs to be called by RenderViews in case of navigations to execute
   // any 'clear cache' commands that were delayed until the next navigation.
   void ExecutePendingClearCache();
@@ -49,6 +53,7 @@ class ChromeRenderProcessObserver : public content::RenderProcessObserver {
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnSetIsIncognitoProcess(bool is_incognito_process);
+  void OnSetExtensionActivityLogEnabled(bool extension_activity_log_enabled);
   void OnSetContentSettingsForCurrentURL(
       const GURL& url, const ContentSettings& content_settings);
   void OnSetContentSettingRules(const RendererContentSettingRules& rules);
@@ -61,13 +66,12 @@ class ChromeRenderProcessObserver : public content::RenderProcessObserver {
   void OnGetCacheResourceStats();
   void OnSetFieldTrialGroup(const std::string& fiel_trial_name,
                             const std::string& group_name);
-  void OnSetTcmallocHeapProfiling(bool profiling, const std::string& prefix);
-  void OnWriteTcmallocHeapProfile(const FilePath::StringType& filename);
   void OnGetV8HeapStats();
   void OnPurgeMemory();
   void OnToggleWebKitSharedTimer(bool suspend);
 
   static bool is_incognito_process_;
+  static bool extension_activity_log_enabled_;
   scoped_ptr<content::ResourceDispatcherDelegate> resource_delegate_;
   chrome::ChromeContentRendererClient* client_;
   // If true, the web cache shall be cleared before the next navigation event.

@@ -4,18 +4,37 @@
 
 #include "content/shell/shell_devtools_delegate.h"
 
+#include "base/bind.h"
 #include "content/public/browser/devtools_http_handler.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
+#include "content/shell/shell.h"
 #include "grit/shell_resources.h"
 #include "net/base/tcp_listen_socket.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_ANDROID)
+#include "content/public/browser/android/devtools_auth.h"
+#include "net/base/unix_domain_socket_posix.h"
+
+namespace {
+const char kSocketName[] = "content_shell_devtools_remote";
+}
+#endif
 
 namespace content {
 
-ShellDevToolsDelegate::ShellDevToolsDelegate(int port) {
+ShellDevToolsDelegate::ShellDevToolsDelegate(BrowserContext* browser_context,
+                                             int port)
+    : browser_context_(browser_context) {
   devtools_http_handler_ = DevToolsHttpHandler::Start(
+#if defined(OS_ANDROID)
+      new net::UnixDomainSocketWithAbstractNamespaceFactory(
+          kSocketName,
+          base::Bind(&CanUserConnectToDevTools)),
+#else
       new net::TCPListenSocketFactory("127.0.0.1", port),
+#endif
       "",
       this);
 }
@@ -30,20 +49,33 @@ void ShellDevToolsDelegate::Stop() {
 
 std::string ShellDevToolsDelegate::GetDiscoveryPageHTML() {
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_CONTENT_SHELL_DEVTOOLS_DISCOVERY_PAGE,
-      ui::SCALE_FACTOR_NONE).as_string();
+      IDR_CONTENT_SHELL_DEVTOOLS_DISCOVERY_PAGE).as_string();
 }
 
 bool ShellDevToolsDelegate::BundlesFrontendResources() {
   return true;
 }
 
-FilePath ShellDevToolsDelegate::GetDebugFrontendDir() {
-  return FilePath();
+base::FilePath ShellDevToolsDelegate::GetDebugFrontendDir() {
+  return base::FilePath();
 }
 
 std::string ShellDevToolsDelegate::GetPageThumbnailData(const GURL& url) {
   return "";
+}
+
+RenderViewHost* ShellDevToolsDelegate::CreateNewTarget() {
+  Shell* shell = Shell::CreateNewWindow(browser_context_,
+                                        GURL(chrome::kAboutBlankURL),
+                                        NULL,
+                                        MSG_ROUTING_NONE,
+                                        gfx::Size());
+  return shell->web_contents()->GetRenderViewHost();
+}
+
+DevToolsHttpHandlerDelegate::TargetType
+ShellDevToolsDelegate::GetTargetType(RenderViewHost*) {
+  return kTargetTypeTab;
 }
 
 }  // namespace content

@@ -74,8 +74,12 @@ class MigrationTest : public SyncTest {
   enum TriggerMethod { MODIFY_PREF, MODIFY_BOOKMARK, TRIGGER_NOTIFICATION };
 
   syncer::ModelTypeSet GetPreferredDataTypes() {
-    const syncer::ModelTypeSet preferred_data_types =
+    // ProfileSyncService must already have been created before we can call
+    // GetPreferredDataTypes().
+    DCHECK(GetClient(0)->IsSyncAlreadySetup());
+    syncer::ModelTypeSet preferred_data_types =
         GetClient(0)->service()->GetPreferredDataTypes();
+    preferred_data_types.RemoveAll(syncer::ProxyTypes());
     // Make sure all clients have the same preferred data types.
     for (int i = 1; i < num_clients(); ++i) {
       const syncer::ModelTypeSet other_preferred_data_types =
@@ -361,7 +365,12 @@ IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
 
 // Migrate every datatype in sequence; the catch being that the server
 // will only tell the client about the migrations one at a time.
-IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigrationHellWithoutNigori) {
+// TODO(rsimha): This test takes longer than 60 seconds, and will cause tree
+// redness due to sharding.
+// Re-enable this test after syncer::kInitialBackoffShortRetrySeconds is reduced
+// to zero.
+IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
+                       DISABLED_MigrationHellWithoutNigori) {
   ASSERT_TRUE(SetupClients());
   MigrationList migration_list = GetPreferredDataTypesList();
   // Let the first nudge be a datatype that's neither prefs nor

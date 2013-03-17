@@ -9,10 +9,10 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/widget/widget_observer.h"
@@ -33,7 +33,6 @@ class PageActionImageView : public views::ImageView,
                             public ExtensionContextMenuModel::PopupDelegate,
                             public views::WidgetObserver,
                             public views::ContextMenuController,
-                            public content::NotificationObserver,
                             public ExtensionActionIconFactory::Observer,
                             public ExtensionAction::IconAnimation::Observer {
  public:
@@ -60,16 +59,11 @@ class PageActionImageView : public views::ImageView,
   virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   // Overridden from views::ContextMenuController.
   virtual void ShowContextMenuForView(View* source,
                                       const gfx::Point& point) OVERRIDE;
-
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overriden from ExtensionActionIconFactory::Observer.
   virtual void OnIconUpdated() OVERRIDE;
@@ -89,6 +83,9 @@ class PageActionImageView : public views::ImageView,
  private:
   // Overridden from ExtensionAction::IconAnimation::Observer:
   virtual void OnIconChanged() OVERRIDE;
+
+  // Overridden from View.
+  virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
 
   // Shows the popup, with the given URL.
   void ShowPopupWithURL(const GURL& popup_url,
@@ -128,8 +125,6 @@ class PageActionImageView : public views::ImageView,
 
   // The current popup and the button it came from.  NULL if no popup.
   ExtensionPopup* popup_;
-
-  content::NotificationRegistrar registrar_;
 
   // The extension command accelerator this page action is listening for (to
   // show the popup).

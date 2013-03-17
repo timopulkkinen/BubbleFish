@@ -4,11 +4,13 @@
 
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "extensions/common/error_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace errors = extension_manifest_errors;
+
+using extensions::ErrorUtils;
 
 TEST_F(ExtensionManifestTest, RequirementsInvalid) {
   Testcase testcases[] = {
@@ -16,25 +18,25 @@ TEST_F(ExtensionManifestTest, RequirementsInvalid) {
              errors::kInvalidRequirements),
     Testcase("requirements_invalid_keys.json", errors::kInvalidRequirements),
     Testcase("requirements_invalid_3d.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "3D")),
     Testcase("requirements_invalid_3d_features.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "3D")),
     Testcase("requirements_invalid_3d_features_value.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "3D")),
     Testcase("requirements_invalid_3d_no_features.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "3D")),
     Testcase("requirements_invalid_plugins.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "plugins")),
     Testcase("requirements_invalid_plugins_key.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "plugins")),
     Testcase("requirements_invalid_plugins_value.json",
-             ExtensionErrorUtils::FormatErrorMessage(
+             ErrorUtils::FormatErrorMessage(
                  errors::kInvalidRequirement, "plugins"))
   };
 
@@ -66,15 +68,24 @@ TEST_F(ExtensionManifestTest, RequirementsNpapiDefault) {
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(extension->requirements().webgl, false);
   EXPECT_EQ(extension->requirements().css3d, false);
-#if defined(OS_CHROMEOS)
-  EXPECT_EQ(extension->requirements().npapi, false);
-#else
   EXPECT_EQ(extension->requirements().npapi, true);
-#endif  // defined(OS_CHROMEOS)
+
+  extension = LoadAndExpectSuccess(
+      "requirements_npapi_empty_plugins_empty.json");
+  ASSERT_TRUE(extension.get());
+  EXPECT_EQ(extension->requirements().webgl, false);
+  EXPECT_EQ(extension->requirements().css3d, false);
+  EXPECT_EQ(extension->requirements().npapi, false);
 
   extension = LoadAndExpectSuccess("requirements_npapi.json");
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(extension->requirements().webgl, false);
   EXPECT_EQ(extension->requirements().css3d, false);
   EXPECT_EQ(extension->requirements().npapi, false);
+
+  extension = LoadAndExpectSuccess("requirements_npapi_plugins_empty.json");
+  ASSERT_TRUE(extension.get());
+  EXPECT_EQ(extension->requirements().webgl, false);
+  EXPECT_EQ(extension->requirements().css3d, false);
+  EXPECT_EQ(extension->requirements().npapi, true);
 }

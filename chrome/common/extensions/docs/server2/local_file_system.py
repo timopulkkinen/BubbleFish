@@ -19,11 +19,12 @@ class LocalFileSystem(file_system.FileSystem):
 
   def _ReadFile(self, filename, binary):
     try:
-      with open(os.path.join(self._base_path, filename), 'r') as f:
+      mode = 'rb' if binary else 'r'
+      with open(os.path.join(self._base_path, filename), mode) as f:
         contents = f.read()
         if binary:
           return contents
-        return file_system._ProcessFileData(contents, filename)
+        return file_system._ToUnicode(contents)
     except IOError:
       raise file_system.FileNotFoundError(filename)
 

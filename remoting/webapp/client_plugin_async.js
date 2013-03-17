@@ -347,6 +347,20 @@ remoting.ClientPluginAsync.prototype.remapKey =
 };
 
 /**
+ * Enable/disable redirection of the specified key to the web-app.
+ *
+ * @param {number} keycode The USB-style code of the key.
+ * @param {Boolean} trap True to enable trapping, False to disable.
+ */
+remoting.ClientPluginAsync.prototype.trapKey = function(keycode, trap) {
+  this.plugin.postMessage(JSON.stringify(
+      { method: 'trapKey', data: {
+          'keycode': keycode,
+          'trap': trap}
+      }));
+};
+
+/**
  * Returns an associative array with a set of stats for this connecton.
  *
  * @return {remoting.ClientSession.PerfStats} The connection statistics.
@@ -371,18 +385,27 @@ remoting.ClientPluginAsync.prototype.sendClipboardItem =
 };
 
 /**
- * Notifies the host that the client has the specified dimensions.
+ * Notifies the host that the client has the specified size and pixel density.
  *
- * @param {number} width The available client width.
- * @param {number} height The available client height.
+ * @param {number} width The available client width in DIPs.
+ * @param {number} height The available client height in DIPs.
+ * @param {number} device_scale The number of device pixels per DIP.
  */
-remoting.ClientPluginAsync.prototype.notifyClientDimensions =
-    function(width, height) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.NOTIFY_CLIENT_DIMENSIONS))
-    return;
-  this.plugin.postMessage(JSON.stringify(
-      { method: 'notifyClientDimensions',
-        data: { width: width, height: height }}));
+remoting.ClientPluginAsync.prototype.notifyClientResolution =
+    function(width, height, device_scale) {
+  if (this.hasFeature(remoting.ClientPlugin.Feature.NOTIFY_CLIENT_RESOLUTION)) {
+    var dpi = device_scale * 96;
+    this.plugin.postMessage(JSON.stringify(
+        { method: 'notifyClientResolution',
+          data: { width: width * device_scale,
+                  height: height * device_scale,
+                  x_dpi: dpi, y_dpi: dpi }}));
+  } else if (this.hasFeature(
+                 remoting.ClientPlugin.Feature.NOTIFY_CLIENT_DIMENSIONS)) {
+    this.plugin.postMessage(JSON.stringify(
+        { method: 'notifyClientDimensions',
+          data: { width: width, height: height }}));
+  }
 };
 
 /**
@@ -396,6 +419,19 @@ remoting.ClientPluginAsync.prototype.pauseVideo =
     return;
   this.plugin.postMessage(JSON.stringify(
       { method: 'pauseVideo', data: { pause: pause }}));
+};
+
+/**
+ * Requests that the host pause or resume sending audio updates.
+ *
+ * @param {boolean} pause True to suspend audio updates, false otherwise.
+ */
+remoting.ClientPluginAsync.prototype.pauseAudio =
+    function(pause) {
+  if (!this.hasFeature(remoting.ClientPlugin.Feature.PAUSE_AUDIO))
+    return;
+  this.plugin.postMessage(JSON.stringify(
+      { method: 'pauseAudio', data: { pause: pause }}));
 };
 
 /**

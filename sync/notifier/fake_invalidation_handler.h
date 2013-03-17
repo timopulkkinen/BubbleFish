@@ -19,20 +19,17 @@ class FakeInvalidationHandler : public InvalidationHandler {
   virtual ~FakeInvalidationHandler();
 
   InvalidatorState GetInvalidatorState() const;
-  const ObjectIdStateMap& GetLastInvalidationIdStateMap() const;
-  IncomingInvalidationSource GetLastInvalidationSource() const;
+  const ObjectIdInvalidationMap& GetLastInvalidationMap() const;
   int GetInvalidationCount() const;
 
   // InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const ObjectIdStateMap& id_state_map,
-      IncomingInvalidationSource source) OVERRIDE;
+      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
  private:
   InvalidatorState state_;
-  ObjectIdStateMap last_id_state_map_;
-  IncomingInvalidationSource last_source_;
+  ObjectIdInvalidationMap last_invalidation_map_;
   int invalidation_count_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeInvalidationHandler);

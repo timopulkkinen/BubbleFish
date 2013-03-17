@@ -7,9 +7,9 @@
 #include <set>
 
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_store_change.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -18,7 +18,7 @@
 #include "content/public/browser/notification_service.h"
 
 using content::BrowserThread;
-using webkit::forms::PasswordForm;
+using content::PasswordForm;
 
 PasswordStoreDefault::PasswordStoreDefault(LoginDatabase* login_db,
                                            Profile* profile)
@@ -94,9 +94,11 @@ void PasswordStoreDefault::RemoveLoginsCreatedBetweenImpl(
 }
 
 void PasswordStoreDefault::GetLoginsImpl(
-    GetLoginsRequest* request, const webkit::forms::PasswordForm& form) {
-  login_db_->GetLogins(form, &request->value);
-  ForwardLoginsResult(request);
+    const content::PasswordForm& form,
+    const ConsumerCallbackRunner& callback_runner) {
+  std::vector<PasswordForm*> matched_forms;
+  login_db_->GetLogins(form, &matched_forms);
+  callback_runner.Run(matched_forms);
 }
 
 void PasswordStoreDefault::GetAutofillableLoginsImpl(

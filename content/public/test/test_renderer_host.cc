@@ -9,17 +9,23 @@
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
-#include "content/browser/web_contents/test_web_contents.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/test/test_render_view_host_factory.h"
+#include "content/test/test_web_contents.h"
+
+#if defined(OS_WIN)
+#include "ui/base/win/scoped_ole_initializer.h"
+#endif
 
 #if defined(USE_AURA)
 #include "ui/aura/test/aura_test_helper.h"
 #endif
 
 namespace content {
+
+// RenderViewHostTester -------------------------------------------------------
 
 // static
 RenderViewHostTester* RenderViewHostTester::For(RenderViewHost* host) {
@@ -51,6 +57,9 @@ bool RenderViewHostTester::HasTouchEventHandler(RenderViewHost* rvh) {
   return host_impl->has_touch_handler();
 }
 
+
+// RenderViewHostTestEnabler --------------------------------------------------
+
 RenderViewHostTestEnabler::RenderViewHostTestEnabler()
     : rph_factory_(new MockRenderProcessHostFactory()),
       rvh_factory_(new TestRenderViewHostFactory(rph_factory_.get())) {
@@ -59,8 +68,10 @@ RenderViewHostTestEnabler::RenderViewHostTestEnabler()
 RenderViewHostTestEnabler::~RenderViewHostTestEnabler() {
 }
 
-RenderViewHostTestHarness::RenderViewHostTestHarness()
-    : contents_(NULL) {
+
+// RenderViewHostTestHarness --------------------------------------------------
+
+RenderViewHostTestHarness::RenderViewHostTestHarness() : contents_(NULL) {
 }
 
 RenderViewHostTestHarness::~RenderViewHostTestHarness() {
@@ -104,9 +115,17 @@ void RenderViewHostTestHarness::SetContents(WebContents* contents) {
 }
 
 WebContents* RenderViewHostTestHarness::CreateTestWebContents() {
+  // Make sure we ran SetUp() already.
+#if defined(OS_WIN)
+  DCHECK(ole_initializer_ != NULL);
+#endif
+#if defined(USE_AURA)
+  DCHECK(aura_test_helper_ != NULL);
+#endif
+
   // See comment above browser_context_ decl for why we check for NULL here.
   if (!browser_context_.get())
-    browser_context_.reset(new content::TestBrowserContext());
+    browser_context_.reset(new TestBrowserContext());
 
   // This will be deleted when the WebContentsImpl goes away.
   SiteInstance* instance = SiteInstance::Create(browser_context_.get());
@@ -127,6 +146,9 @@ void RenderViewHostTestHarness::Reload() {
 }
 
 void RenderViewHostTestHarness::SetUp() {
+#if defined(OS_WIN)
+  ole_initializer_.reset(new ui::ScopedOleInitializer());
+#endif
 #if defined(USE_AURA)
   aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
   aura_test_helper_->SetUp();
@@ -141,7 +163,7 @@ void RenderViewHostTestHarness::TearDown() {
 #endif
   // Make sure that we flush any messages related to WebContentsImpl destruction
   // before we destroy the browser context.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Delete any RenderProcessHosts before the BrowserContext goes away.
   if (rvh_test_enabler_.rph_factory_.get())
@@ -149,7 +171,11 @@ void RenderViewHostTestHarness::TearDown() {
 
   // Release the browser context on the UI thread.
   message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
+
+#if defined(OS_WIN)
+  ole_initializer_.reset();
+#endif
 }
 
 void RenderViewHostTestHarness::SetRenderProcessHostFactory(

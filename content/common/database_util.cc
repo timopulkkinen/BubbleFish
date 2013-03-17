@@ -7,13 +7,15 @@
 #include "content/common/child_thread.h"
 #include "content/common/database_messages.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/sqlite/sqlite3.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
-using WebKit::WebKitPlatformSupport;
+using WebKit::Platform;
 using WebKit::WebString;
 
-WebKitPlatformSupport::FileHandle DatabaseUtil::DatabaseOpenFile(
+namespace content {
+
+Platform::FileHandle DatabaseUtil::DatabaseOpenFile(
     const WebString& vfs_file_name, int desired_flags) {
   IPC::PlatformFileForTransit file_handle =
       IPC::InvalidPlatformFileForTransit();
@@ -60,3 +62,5 @@ long long DatabaseUtil::DatabaseGetSpaceAvailable(
   filter->Send(new DatabaseHostMsg_GetSpaceAvailable(origin_identifier, &rv));
   return rv;
 }
+
+}  // namespace content

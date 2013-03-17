@@ -13,20 +13,15 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
-
-using content::RenderViewHostImpl;
-using content::WebContents;
-using content::WebUIController;
-using content::WebUIMessageHandler;
 
 namespace content {
 
@@ -49,14 +44,12 @@ string16 WebUI::GetJavascriptCall(
       char16('(') + parameters + char16(')') + char16(';');
 }
 
-}
-
 WebUIImpl::WebUIImpl(WebContents* contents)
     : hide_favicon_(false),
       focus_location_bar_by_default_(false),
       should_hide_url_(false),
-      link_transition_type_(content::PAGE_TRANSITION_LINK),
-      bindings_(content::BINDINGS_POLICY_WEB_UI),
+      link_transition_type_(PAGE_TRANSITION_LINK),
+      bindings_(BINDINGS_POLICY_WEB_UI),
       web_contents_(contents) {
   DCHECK(contents);
 }
@@ -82,15 +75,12 @@ bool WebUIImpl::OnMessageReceived(const IPC::Message& message) {
 void WebUIImpl::OnWebUISend(const GURL& source_url,
                             const std::string& message,
                             const ListValue& args) {
-  content::WebContentsDelegate* delegate = web_contents_->GetDelegate();
+  WebContentsDelegate* delegate = web_contents_->GetDelegate();
   bool data_urls_allowed = delegate && delegate->CanLoadDataURLsInWebUI();
-  content::WebUIControllerFactory* factory =
-      content::GetContentClient()->browser()->GetWebUIControllerFactory();
   if (!ChildProcessSecurityPolicyImpl::GetInstance()->
           HasWebUIBindings(web_contents_->GetRenderProcessHost()->GetID()) ||
-      !factory->IsURLAcceptableForWebUI(web_contents_->GetBrowserContext(),
-                                        source_url,
-                                        data_urls_allowed)) {
+      !WebUIControllerFactoryRegistry::GetInstance()->IsURLAcceptableForWebUI(
+          web_contents_->GetBrowserContext(), source_url, data_urls_allowed)) {
     NOTREACHED() << "Blocked unauthorized use of WebUIBindings.";
     return;
   }
@@ -98,12 +88,12 @@ void WebUIImpl::OnWebUISend(const GURL& source_url,
   ProcessWebUIMessage(source_url, message, args);
 }
 
-void WebUIImpl::RenderViewCreated(content::RenderViewHost* render_view_host) {
+void WebUIImpl::RenderViewCreated(RenderViewHost* render_view_host) {
   controller_->RenderViewCreated(render_view_host);
 
   // Do not attempt to set the toolkit property if WebUI is not enabled, e.g.,
   // the bookmarks manager page.
-  if (!(bindings_ & content::BINDINGS_POLICY_WEB_UI))
+  if (!(bindings_ & BINDINGS_POLICY_WEB_UI))
     return;
 
 #if defined(TOOLKIT_VIEWS)
@@ -117,8 +107,8 @@ WebContents* WebUIImpl::GetWebContents() const {
   return web_contents_;
 }
 
-float WebUIImpl::GetDeviceScale() const {
-  return GetDIPScaleFactor(web_contents_->GetRenderWidgetHostView());
+ui::ScaleFactor WebUIImpl::GetDeviceScaleFactor() const {
+  return GetScaleFactorForView(web_contents_->GetRenderWidgetHostView());
 }
 
 bool WebUIImpl::ShouldHideFavicon() const {
@@ -153,11 +143,11 @@ void WebUIImpl::OverrideTitle(const string16& title) {
   overridden_title_ = title;
 }
 
-content::PageTransition WebUIImpl::GetLinkTransitionType() const {
+PageTransition WebUIImpl::GetLinkTransitionType() const {
   return link_transition_type_;
 }
 
-void WebUIImpl::SetLinkTransitionType(content::PageTransition type) {
+void WebUIImpl::SetLinkTransitionType(PageTransition type) {
   link_transition_type_ = type;
 }
 
@@ -272,3 +262,5 @@ void WebUIImpl::ExecuteJavascript(const string16& javascript) {
       web_contents_->GetRenderViewHost())->ExecuteJavascriptInWebFrame(
       ASCIIToUTF16(frame_xpath_), javascript);
 }
+
+}  // namespace content

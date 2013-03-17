@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Rect;
 import android.os.Build;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
@@ -18,11 +19,15 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
-import android.webkit.DownloadListener;
 import android.widget.FrameLayout;
 
-import org.chromium.content.browser.ContentViewCore;
+import com.google.common.annotations.VisibleForTesting;
+
+import org.chromium.content.common.ProcessInitException;
+import org.chromium.content.common.TraceEvent;
 import org.chromium.ui.gfx.NativeWindow;
+
+import java.util.ArrayList;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -32,81 +37,10 @@ import org.chromium.ui.gfx.NativeWindow;
  *             compatibility.
  */
 public class ContentView extends FrameLayout implements ContentViewCore.InternalAccessDelegate {
-
-    // The following constants match the ones in chrome/common/page_transition_types.h.
-    // Add more if you need them.
-    public static final int PAGE_TRANSITION_LINK = 0;
-    public static final int PAGE_TRANSITION_TYPED = 1;
-    public static final int PAGE_TRANSITION_AUTO_BOOKMARK = 2;
-    public static final int PAGE_TRANSITION_START_PAGE = 6;
-
     // Used when ContentView implements a standalone View.
     public static final int PERSONALITY_VIEW = ContentViewCore.PERSONALITY_VIEW;
     // Used for Chrome.
     public static final int PERSONALITY_CHROME = ContentViewCore.PERSONALITY_CHROME;
-
-    /**
-     * Automatically decide the number of renderer processes to use based on device memory class.
-     * */
-    public static final int MAX_RENDERERS_AUTOMATIC = AndroidBrowserProcess.MAX_RENDERERS_AUTOMATIC;
-    /**
-     * Use single-process mode that runs the renderer on a separate thread in the main application.
-     */
-    public static final int MAX_RENDERERS_SINGLE_PROCESS =
-            AndroidBrowserProcess.MAX_RENDERERS_SINGLE_PROCESS;
-    /**
-     * Cap on the maximum number of renderer processes that can be requested.
-     */
-    public static final int MAX_RENDERERS_LIMIT = AndroidBrowserProcess.MAX_RENDERERS_LIMIT;
-
-    /**
-     * Allow a callback to be notified when the SurfaceTexture of the TextureView has been
-     * updated.
-     *
-     * TODO(nileshagrawal): Remove this interface.
-     */
-    public static interface SurfaceTextureUpdatedListener {
-        /**
-         * Called when the {@link SurfaceTexture} of the {@link TextureView} held in this
-         * ContentView has been updated.
-         *
-         * @param view The ContentView that was updated.
-         */
-        public void onSurfaceTextureUpdated(ContentView view);
-    }
-
-    /**
-     * Enable multi-process ContentView. This should be called by the application before
-     * constructing any ContentView instances. If enabled, ContentView will run renderers in
-     * separate processes up to the number of processes specified by maxRenderProcesses. If this is
-     * not called then the default is to run the renderer in the main application on a separate
-     * thread.
-     *
-     * @param context Context used to obtain the application context.
-     * @param maxRendererProcesses Limit on the number of renderers to use. Each tab runs in its own
-     * process until the maximum number of processes is reached. The special value of
-     * MAX_RENDERERS_SINGLE_PROCESS requests single-process mode where the renderer will run in the
-     * application process in a separate thread. If the special value MAX_RENDERERS_AUTOMATIC is
-     * used then the number of renderers will be determined based on the device memory class. The
-     * maximum number of allowed renderers is capped by MAX_RENDERERS_LIMIT.
-     * @return Whether the process actually needed to be initialized (false if already running).
-     */
-    public static boolean enableMultiProcess(Context context, int maxRendererProcesses) {
-        return ContentViewCore.enableMultiProcess(context, maxRendererProcesses);
-    }
-
-    /**
-     * Initialize the process as the platform browser. This must be called before accessing
-     * ContentView in order to treat this as a Chromium browser process.
-     *
-     * @param context Context used to obtain the application context.
-     * @param maxRendererProcesses Same as ContentView.enableMultiProcess()
-     * @return Whether the process actually needed to be initialized (false if already running).
-     * @hide Only used by the platform browser.
-     */
-    public static boolean initChromiumBrowserProcess(Context context, int maxRendererProcesses) {
-        return ContentViewCore.initChromiumBrowserProcess(context, maxRendererProcesses);
-    }
 
     private ContentViewCore mContentViewCore;
 
@@ -186,6 +120,13 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     /**
+     * @return The cache of scales and positions used to convert coordinates from/to CSS.
+     */
+    public RenderCoordinates getRenderCoordinates() {
+        return mContentViewCore.getRenderCoordinates();
+    }
+
+    /**
      * Returns true if the given Activity has hardware acceleration enabled
      * in its manifest, or in its foreground window.
      *
@@ -234,7 +175,8 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.setContentViewClient(client);
     }
 
-    ContentViewClient getContentViewClient() {
+    @VisibleForTesting
+    public ContentViewClient getContentViewClient() {
         return mContentViewCore.getContentViewClient();
     }
 
@@ -287,11 +229,7 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     public Bitmap getBitmap(int width, int height) {
-        return getBitmap(width, height, Bitmap.Config.ARGB_8888);
-    }
-
-    public Bitmap getBitmap(int width, int height, Bitmap.Config config) {
-        return mContentViewCore.getBitmap(width, height, config);
+        return mContentViewCore.getBitmap(width, height);
     }
 
     /**
@@ -363,20 +301,56 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.clearHistory();
     }
 
+    String getSelectedText() {
+        return mContentViewCore.getSelectedText();
+    }
+
+    /**
+     * Start profiling the update speed. You must call {@link #stopFpsProfiling}
+     * to stop profiling.
+     */
+    @VisibleForTesting
+    public void startFpsProfiling() {
+        // TODO(nileshagrawal): Implement this.
+    }
+
+    /**
+     * Stop profiling the update speed.
+     */
+    @VisibleForTesting
+    public float stopFpsProfiling() {
+        // TODO(nileshagrawal): Implement this.
+        return 0.0f;
+    }
+
+    /**
+     * Fling the ContentView from the current position.
+     * @param x Fling touch starting position
+     * @param y Fling touch starting position
+     * @param velocityX Initial velocity of the fling (X) measured in pixels per second.
+     * @param velocityY Initial velocity of the fling (Y) measured in pixels per second.
+     */
+    @VisibleForTesting
+    public void fling(long timeMs, int x, int y, int velocityX, int velocityY) {
+        mContentViewCore.getContentViewGestureHandler().fling(timeMs, x, y, velocityX, velocityY);
+    }
+
+    void endFling(long timeMs) {
+        mContentViewCore.getContentViewGestureHandler().endFling(timeMs);
+    }
+
     /**
      * Start pinch zoom. You must call {@link #pinchEnd} to stop.
-     *
-     * @VisibleForTesting
      */
+    @VisibleForTesting
     public void pinchBegin(long timeMs, int x, int y) {
         mContentViewCore.getContentViewGestureHandler().pinchBegin(timeMs, x, y);
     }
 
     /**
      * Stop pinch zoom.
-     *
-     * @VisibleForTesting
      */
+    @VisibleForTesting
     public void pinchEnd(long timeMs) {
         mContentViewCore.getContentViewGestureHandler().pinchEnd(timeMs);
     }
@@ -396,26 +370,19 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      *            coordinate.
      * @param anchorY The magnification anchor (Y) in the current view
      *            coordinate.
-     *
-     * @VisibleForTesting
      */
+    @VisibleForTesting
     public void pinchBy(long timeMs, int anchorX, int anchorY, float delta) {
         mContentViewCore.getContentViewGestureHandler().pinchBy(timeMs, anchorX, anchorY, delta);
     }
 
     /**
      * Injects the passed JavaScript code in the current page and evaluates it.
-     * Once evaluated, an asynchronous call to
-     * ContentViewClient.onJavaScriptEvaluationResult is made. Used in automation
-     * tests.
      *
-     * @return an id that is passed along in the asynchronous onJavaScriptEvaluationResult callback
      * @throws IllegalStateException If the ContentView has been destroyed.
-     *
-     * TODO(nileshagrawal): Remove this method from the public interface.
      */
-    public int evaluateJavaScript(String script) throws IllegalStateException {
-        return mContentViewCore.evaluateJavaScript(script);
+    public void evaluateJavaScript(String script) throws IllegalStateException {
+        mContentViewCore.evaluateJavaScript(script, null);
     }
 
     /**
@@ -482,6 +449,14 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int ow, int oh) {
+        TraceEvent.begin();
+        super.onSizeChanged(w, h, ow, oh);
+        mContentViewCore.onSizeChanged(w, h, ow, oh);
+        TraceEvent.end();
+    }
+
+    @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         return mContentViewCore.onCreateInputConnection(outAttrs);
     }
@@ -492,13 +467,99 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     @Override
+    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+        TraceEvent.begin();
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+        mContentViewCore.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+        TraceEvent.end();
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        return mContentViewCore.onKeyUp(keyCode, event);
+    }
+
+    @Override
+    public boolean dispatchKeyEventPreIme(KeyEvent event) {
+        return mContentViewCore.dispatchKeyEventPreIme(event);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return mContentViewCore.dispatchKeyEvent(event);
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         return mContentViewCore.onTouchEvent(event);
+    }
+
+    /**
+     * Mouse move events are sent on hover enter, hover move and hover exit.
+     * They are sent on hover exit because sometimes it acts as both a hover
+     * move and hover exit.
+     */
+    @Override
+    public boolean onHoverEvent(MotionEvent event) {
+        return mContentViewCore.onHoverEvent(event);
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        return mContentViewCore.onGenericMotionEvent(event);
     }
 
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
         mContentViewCore.onConfigurationChanged(newConfig);
+    }
+
+    /**
+     * Currently the ContentView scrolling happens in the native side. In
+     * the Java view system, it is always pinned at (0, 0). scrollBy() and scrollTo()
+     * are overridden, so that View's mScrollX and mScrollY will be unchanged at
+     * (0, 0). This is critical for drawing ContentView correctly.
+     */
+    @Override
+    public void scrollBy(int x, int y) {
+        mContentViewCore.scrollBy(x, y);
+    }
+
+    @Override
+    public void scrollTo(int x, int y) {
+        mContentViewCore.scrollTo(x, y);
+    }
+
+    @Override
+    protected int computeHorizontalScrollExtent() {
+        // TODO (dtrainor): Need to expose scroll events properly to public. Either make getScroll*
+        // work or expose computeHorizontalScrollOffset()/computeVerticalScrollOffset as public.
+        return mContentViewCore.computeHorizontalScrollExtent();
+    }
+
+    @Override
+    protected int computeHorizontalScrollOffset() {
+        return mContentViewCore.computeHorizontalScrollOffset();
+    }
+
+    @Override
+    protected int computeHorizontalScrollRange() {
+        return mContentViewCore.computeHorizontalScrollRange();
+    }
+
+    @Override
+    protected int computeVerticalScrollExtent() {
+        return mContentViewCore.computeVerticalScrollExtent();
+    }
+
+    @Override
+    protected int computeVerticalScrollOffset() {
+        return mContentViewCore.computeVerticalScrollOffset();
+    }
+
+    @Override
+    protected int computeVerticalScrollRange() {
+        return mContentViewCore.computeVerticalScrollRange();
     }
 
     // End FrameLayout overrides.
@@ -527,6 +588,10 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.onInitializeAccessibilityNodeInfo(info);
     }
 
+    /**
+     * Fills in scrolling values for AccessibilityEvents.
+     * @param event Event being fired.
+     */
     @Override
     public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
         super.onInitializeAccessibilityEvent(event);
@@ -545,6 +610,12 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.onDetachedFromWindow();
     }
 
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        mContentViewCore.onVisibilityChanged(changedView, visibility);
+    }
+
     void updateMultiTouchZoomSupport() {
         mContentViewCore.updateMultiTouchZoomSupport();
     }
@@ -554,30 +625,10 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     /**
-     * Register the listener to be used when content can not be handled by the
-     * rendering engine, and should be downloaded instead. This will replace the
-     * current listener.
-     * @param listener An implementation of DownloadListener.
-     */
-    // TODO(nileshagrawal): decide if setDownloadDelegate will be public API. If so,
-    // this method should be deprecated and the javadoc should make reference to the
-    // fact that a ContentViewDownloadDelegate will be used in preference to a
-    // DownloadListener.
-    public void setDownloadListener(DownloadListener listener) {
-        mContentViewCore.setDownloadListener(listener);
-    }
-
-    // Called by DownloadController.
-    DownloadListener downloadListener() {
-        return mContentViewCore.downloadListener();
-    }
-
-    /**
      * Register the delegate to be used when content can not be handled by
      * the rendering engine, and should be downloaded instead. This will replace
-     * the current delegate or existing DownloadListner.
-     * Embedders should prefer this over the legacy DownloadListener.
-     * @param listener An implementation of ContentViewDownloadDelegate.
+     * the current delegate.
+     * @param delegate An implementation of ContentViewDownloadDelegate.
      */
     public void setDownloadDelegate(ContentViewDownloadDelegate delegate) {
         mContentViewCore.setDownloadDelegate(delegate);
@@ -606,20 +657,6 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      */
     public boolean isCrashed() {
         return mContentViewCore.isCrashed();
-    }
-
-    /**
-     * In order to make sure we don't show white when we have a bitmap containing the previously
-     * drawn frame of this ContentView before it was hidden, we want to show the bitmap while we
-     * render the content and then swap them out, so the user perceived latency is shorter.  In
-     * software rendering mode we can just prime the backing store at the native level.  However
-     * for hardware rendering mode we have to show an ImageView in front of the TextureView, but
-     * behind the NTP Toolbar View.
-     *
-     * @param bitmap The bitmap to show while this ContentView is rendering content.
-     */
-    public void usePrimeBitmap(Bitmap bitmap) {
-        // TODO(nileshagrawal): Implement this.
     }
 
     /**
@@ -698,6 +735,14 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     /**
+     * Return the current scale of the WebView
+     * @return The current scale.
+     */
+    public float getScale() {
+        return mContentViewCore.getScale();
+    }
+
+    /**
      * If the view is ready to draw contents to the screen. In hardware mode,
      * the initialization of the surface texture may not occur until after the
      * view has been added to the layout. This method will return {@code true}
@@ -733,6 +778,13 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      */
     public void stopCurrentAccessibilityNotifications() {
         mContentViewCore.stopCurrentAccessibilityNotifications();
+    }
+
+    /**
+     * Inform WebKit that Fullscreen mode has been exited by the user.
+     */
+    public void exitFullscreen() {
+        mContentViewCore.exitFullscreen();
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

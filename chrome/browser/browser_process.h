@@ -13,26 +13,35 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/ui/host_desktop.h"
 
 class AutomationProviderList;
 class BackgroundModeManager;
+class BookmarkPromptController;
 class ChromeNetLog;
+class CommandLine;
 class CRLSetFetcher;
 class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
+class GLStringManager;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
 class MetricsService;
 class NotificationUIManager;
+class PrefRegistrySimple;
 class PrefService;
 class Profile;
 class ProfileManager;
+class RenderWidgetSnapshotTaker;
 class SafeBrowsingService;
 class StatusTray;
-class ThumbnailGenerator;
 class WatchDogThread;
+
+namespace chrome {
+class MediaFileSystemRegistry;
+}
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -47,6 +56,12 @@ class VariationsService;
 namespace extensions {
 class EventRouterForwarder;
 }
+
+#if defined(ENABLE_MESSAGE_CENTER)
+namespace message_center {
+class MessageCenter;
+}
+#endif
 
 namespace net {
 class URLRequestContextGetter;
@@ -64,7 +79,7 @@ class PrerenderTracker;
 namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
-class PrintPreviewTabController;
+class PrintPreviewDialogController;
 }
 
 namespace safe_browsing {
@@ -105,6 +120,11 @@ class BrowserProcess {
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
 
+#if defined(ENABLE_MESSAGE_CENTER)
+  // MessageCenter is a global list of currently displayed notifications.
+  virtual message_center::MessageCenter* message_center() = 0;
+#endif
+
   // Returns the state object for the thread that we perform I/O
   // coordination on (network requests, communication with renderers,
   // etc.
@@ -127,12 +147,15 @@ class BrowserProcess {
 
   virtual IconManager* icon_manager() = 0;
 
-  virtual ThumbnailGenerator* GetThumbnailGenerator() = 0;
+  virtual GLStringManager* gl_string_manager() = 0;
+
+  virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() = 0;
 
   virtual AutomationProviderList* GetAutomationProviderList() = 0;
 
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
+      chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;
@@ -143,8 +166,8 @@ class BrowserProcess {
   virtual bool IsShuttingDown() = 0;
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
-  virtual printing::PrintPreviewTabController*
-      print_preview_tab_controller() = 0;
+  virtual printing::PrintPreviewDialogController*
+      print_preview_dialog_controller() = 0;
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 
@@ -173,10 +196,6 @@ class BrowserProcess {
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() = 0;
 
-  // Returns the state of the disable plugin finder policy. Callable only on
-  // the IO thread.
-  virtual bool plugin_finder_disabled() const = 0;
-
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
@@ -195,6 +214,13 @@ class BrowserProcess {
   virtual ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
+
+  virtual BookmarkPromptController* bookmark_prompt_controller() = 0;
+
+  virtual chrome::MediaFileSystemRegistry* media_file_system_registry() = 0;
+
+  virtual void PlatformSpecificCommandLineProcessing(
+      const CommandLine& command_line) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

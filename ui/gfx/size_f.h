@@ -7,8 +7,8 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "ui/base/ui_export.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/size_base.h"
 
 namespace gfx {
@@ -16,14 +16,34 @@ namespace gfx {
 // A floating version of gfx::Size.
 class UI_EXPORT SizeF : public SizeBase<SizeF, float> {
  public:
-  SizeF();
-  SizeF(float width, float height);
-  ~SizeF();
+  SizeF() : SizeBase<SizeF, float>(0, 0) {}
+  SizeF(float width, float height) : SizeBase<SizeF, float>(width, height) {}
+  ~SizeF() {}
 
-  Size ToSize() const;
+  void Scale(float scale) {
+    Scale(scale, scale);
+  }
+
+  void Scale(float x_scale, float y_scale) {
+    SetSize(width() * x_scale, height() * y_scale);
+  }
 
   std::string ToString() const;
 };
+
+inline bool operator==(const SizeF& lhs, const SizeF& rhs) {
+  return lhs.width() == rhs.width() && lhs.height() == rhs.height();
+}
+
+inline bool operator!=(const SizeF& lhs, const SizeF& rhs) {
+  return !(lhs == rhs);
+}
+
+UI_EXPORT SizeF ScaleSize(const SizeF& p, float x_scale, float y_scale);
+
+inline SizeF ScaleSize(const SizeF& p, float scale) {
+  return ScaleSize(p, scale, scale);
+}
 
 #if !defined(COMPILER_MSVC)
 extern template class SizeBase<SizeF, float>;

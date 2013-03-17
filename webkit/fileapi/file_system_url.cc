@@ -4,20 +4,24 @@
 
 #include "webkit/fileapi/file_system_url.h"
 
+#include <sstream>
+
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "net/base/escape.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/isolated_context.h"
 
 namespace fileapi {
+
 namespace {
-bool CrackFileSystemURL(
-    const GURL& url,
-    GURL* origin_url,
-    FileSystemType* type,
-    FilePath* file_path) {
+
+bool ParseFileSystemURL(const GURL& url,
+                        GURL* origin_url,
+                        FileSystemType* type,
+                        base::FilePath* file_path) {
   GURL origin;
   FileSystemType file_system_type = kFileSystemTypeUnknown;
 
@@ -37,6 +41,7 @@ bool CrackFileSystemURL(
     { kFileSystemTypeExternal, kExternalDir },
     { kFileSystemTypeTest, kTestDir },
   };
+
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kValidTypes); ++i) {
     if (StartsWithASCII(inner_path, kValidTypes[i].dir, true)) {
       file_system_type = kValidTypes[i].type;
@@ -55,7 +60,7 @@ bool CrackFileSystemURL(
   while (!path.empty() && path[0] == '/')
     path.erase(0, 1);
 
-  FilePath converted_path = FilePath::FromUTF8Unsafe(path);
+  base::FilePath converted_path = base::FilePath::FromUTF8Unsafe(path);
 
   // All parent references should have been resolved in the renderer.
   if (converted_path.ReferencesParent())
@@ -75,44 +80,88 @@ bool CrackFileSystemURL(
 }  // namespace
 
 FileSystemURL::FileSystemURL()
-    : type_(kFileSystemTypeUnknown),
-      is_valid_(false) {}
-
-FileSystemURL::FileSystemURL(const GURL& url)
-    : type_(kFileSystemTypeUnknown) {
-  is_valid_ = CrackFileSystemURL(url, &origin_, &type_, &virtual_path_);
-  MayCrackIsolatedPath();
+    : is_valid_(false),
+      type_(kFileSystemTypeUnknown),
+      mount_type_(kFileSystemTypeUnknown) {
 }
 
-FileSystemURL::FileSystemURL(
-    const GURL& origin,
-    FileSystemType type,
-    const FilePath& path)
-    : origin_(origin),
+// static
+FileSystemURL FileSystemURL::CreateForTest(const GURL& url) {
+  return FileSystemURL(url);
+}
+
+FileSystemURL FileSystemURL::CreateForTest(const GURL& origin,
+                                           FileSystemType type,
+                                           const base::FilePath& path) {
+  return FileSystemURL(origin, type, path);
+}
+
+FileSystemURL::FileSystemURL(const GURL& url)
+    : type_(kFileSystemTypeUnknown),
+      mount_type_(kFileSystemTypeUnknown) {
+  is_valid_ = ParseFileSystemURL(url, &origin_, &type_, &path_);
+  virtual_path_ = path_;
+  mount_type_ = type_;
+}
+
+FileSystemURL::FileSystemURL(const GURL& origin,
+                             FileSystemType type,
+                             const base::FilePath& path)
+    : is_valid_(true),
+      origin_(origin),
       type_(type),
-      virtual_path_(path.NormalizePathSeparators()),
-      is_valid_(true) {
-  MayCrackIsolatedPath();
+      mount_type_(type),
+      path_(path.NormalizePathSeparators()),
+      virtual_path_(path.NormalizePathSeparators()) {
+}
+
+FileSystemURL::FileSystemURL(const GURL& origin,
+                             FileSystemType mount_type,
+                             const base::FilePath& virtual_path,
+                             const std::string& filesystem_id,
+                             FileSystemType cracked_type,
+                             const base::FilePath& cracked_path)
+    : is_valid_(true),
+      origin_(origin),
+      type_(cracked_type),
+      mount_type_(mount_type),
+      path_(cracked_path.NormalizePathSeparators()),
+      filesystem_id_(filesystem_id),
+      virtual_path_(virtual_path.NormalizePathSeparators()) {
 }
 
 FileSystemURL::~FileSystemURL() {}
 
-std::string FileSystemURL::spec() const {
+std::string FileSystemURL::DebugString() const {
   if (!is_valid_)
-    return std::string();
-  return GetFileSystemRootURI(origin_, type_).spec() + "/" +
-      path_.AsUTF8Unsafe();
+    return "invalid filesystem: URL";
+  std::ostringstream ss;
+  ss << GetFileSystemRootURI(origin_, mount_type_);
+
+  // filesystem_id_ will be non empty for (and only for) cracked URLs.
+  if (!filesystem_id_.empty()) {
+    ss << virtual_path_.value();
+    ss << " (";
+    ss << GetFileSystemTypeString(type_) << "@" << filesystem_id_ << ":";
+    ss << path_.value();
+    ss << ")";
+  } else {
+    ss << path_.value();
+  }
+  return ss.str();
 }
 
-FileSystemURL FileSystemURL::WithPath(const FilePath& path) const {
-  return FileSystemURL(origin(), type(), path);
+bool FileSystemURL::IsParent(const FileSystemURL& child) const {
+  return origin() == child.origin() &&
+         type() == child.type() &&
+         filesystem_id() == child.filesystem_id() &&
+         path().IsParent(child.path());
 }
 
 bool FileSystemURL::operator==(const FileSystemURL& that) const {
   return origin_ == that.origin_ &&
       type_ == that.type_ &&
       path_ == that.path_ &&
-      virtual_path_ == that.virtual_path_ &&
       filesystem_id_ == that.filesystem_id_ &&
       is_valid_ == that.is_valid_;
 }
@@ -124,21 +173,9 @@ bool FileSystemURL::Comparator::operator()(const FileSystemURL& lhs,
     return lhs.origin_ < rhs.origin_;
   if (lhs.type_ != rhs.type_)
     return lhs.type_ < rhs.type_;
-  // Compares the virtual path, i.e. the path() part of the original URL
-  // so rhs this reflects the virtual path relationship (rather than
-  // rhs of cracked paths).
-  return lhs.virtual_path_ < rhs.virtual_path_;
-}
-
-void FileSystemURL::MayCrackIsolatedPath() {
-  path_ = virtual_path_;
-  mount_type_ = type_;
-  if (is_valid_ && IsolatedContext::IsIsolatedType(type_)) {
-    // If the type is isolated, crack the path further to get the 'real'
-    // filesystem type and path.
-    is_valid_ = IsolatedContext::GetInstance()->CrackIsolatedPath(
-        virtual_path_, &filesystem_id_, &type_, &path_);
-  }
+  if (lhs.filesystem_id_ != rhs.filesystem_id_)
+    return lhs.filesystem_id_ < rhs.filesystem_id_;
+  return lhs.path_ < rhs.path_;
 }
 
 }  // namespace fileapi

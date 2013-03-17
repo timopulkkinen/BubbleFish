@@ -2,26 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/renderer_host/test_backing_store.h"
+#include "content/browser/renderer_host/test_render_view_host.h"
+
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
+#include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/web_contents/navigation_controller_impl.h"
-#include "content/browser/web_contents/test_web_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/password_form.h"
+#include "content/test/test_web_contents.h"
+#include "media/base/video_frame.h"
 #include "ui/gfx/rect.h"
 #include "webkit/dom_storage/dom_storage_types.h"
-#include "webkit/forms/password_form.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webpreferences.h"
-
-using content::NativeWebKeyboardEvent;
-using webkit::forms::PasswordForm;
 
 namespace content {
 
@@ -121,9 +119,19 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
 void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool)>& callback,
-    skia::PlatformCanvas* output) {
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  callback.Run(false, SkBitmap());
+}
+
+void TestRenderWidgetHostView::CopyFromCompositingSurfaceToVideoFrame(
+    const gfx::Rect& src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
+    const base::Callback<void(bool)>& callback) {
   callback.Run(false);
+}
+
+bool TestRenderWidgetHostView::CanCopyToVideoFrame() const {
+  return false;
 }
 
 void TestRenderWidgetHostView::OnAcceleratedCompositingStateChange() {
@@ -170,41 +178,9 @@ bool TestRenderWidgetHostView::IsSpeaking() const {
 void TestRenderWidgetHostView::StopSpeaking() {
 }
 
-void TestRenderWidgetHostView::PluginFocusChanged(bool focused,
-                                                  int plugin_id) {
-}
-
-void TestRenderWidgetHostView::StartPluginIme() {
-}
-
 bool TestRenderWidgetHostView::PostProcessEventForPluginIme(
     const NativeWebKeyboardEvent& event) {
   return false;
-}
-
-gfx::PluginWindowHandle
-TestRenderWidgetHostView::AllocateFakePluginWindowHandle(
-    bool opaque,
-    bool root) {
-  return gfx::kNullPluginWindow;
-}
-
-void TestRenderWidgetHostView::DestroyFakePluginWindowHandle(
-    gfx::PluginWindowHandle window) {
-}
-
-void TestRenderWidgetHostView::AcceleratedSurfaceSetIOSurface(
-    gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height,
-    uint64 surface_id) {
-}
-
-void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
-    gfx::PluginWindowHandle window,
-    int32 width,
-    int32 height,
-    TransportDIB::Handle transport_dib) {
 }
 
 #elif defined(OS_WIN) && !defined(USE_AURA)
@@ -212,15 +188,9 @@ void TestRenderWidgetHostView::WillWmDestroy() {
 }
 #endif
 
-#if defined(OS_ANDROID)
-void TestRenderWidgetHostView::StartContentIntent(const GURL&) {}
-#endif
-
-#if defined(OS_POSIX) || defined(USE_AURA)
 gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
-#endif
 
 #if defined(TOOLKIT_GTK)
 GdkEventButton* TestRenderWidgetHostView::GetLastMouseDown() {
@@ -235,6 +205,11 @@ gfx::NativeView TestRenderWidgetHostView::BuildInputMethodsGtkMenu() {
 gfx::GLSurfaceHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::GLSurfaceHandle();
 }
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+void TestRenderWidgetHostView::SetClickthroughRegion(SkRegion* region) {
+}
+#endif
 
 bool TestRenderWidgetHostView::LockMouse() {
   return false;
@@ -277,9 +252,7 @@ TestRenderViewHost::~TestRenderViewHost() {
 bool TestRenderViewHost::CreateRenderView(
     const string16& frame_name,
     int opener_route_id,
-    int32 max_page_id,
-    const std::string& embedder_channel_name,
-    int embedder_container_id) {
+    int32 max_page_id) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
   return true;
@@ -295,13 +268,13 @@ void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
 
 void TestRenderViewHost::SendNavigateWithTransition(
     int page_id, const GURL& url, PageTransition transition) {
-  OnMsgDidStartProvisionalLoadForFrame(0, true, GURL(), url);
+  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
   SendNavigateWithParameters(page_id, url, transition, url);
 }
 
 void TestRenderViewHost::SendNavigateWithOriginalRequestURL(
     int page_id, const GURL& url, const GURL& original_request_url) {
-  OnMsgDidStartProvisionalLoadForFrame(0, true, GURL(), url);
+  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
   SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
       original_request_url);
 }
@@ -334,11 +307,11 @@ void TestRenderViewHost::SendNavigateWithParameters(
   params.original_request_url = original_request_url;
 
   ViewHostMsg_FrameNavigate msg(1, params);
-  OnMsgNavigate(msg);
+  OnNavigate(msg);
 }
 
 void TestRenderViewHost::SendShouldCloseACK(bool proceed) {
-  OnMsgShouldCloseACK(proceed, base::TimeTicks(), base::TimeTicks());
+  OnShouldCloseACK(proceed, base::TimeTicks(), base::TimeTicks());
 }
 
 void TestRenderViewHost::SetContentsMimeType(const std::string& mime_type) {
@@ -346,7 +319,7 @@ void TestRenderViewHost::SetContentsMimeType(const std::string& mime_type) {
 }
 
 void TestRenderViewHost::SimulateSwapOutACK() {
-  OnSwapOutACK();
+  OnSwapOutACK(false);
 }
 
 void TestRenderViewHost::SimulateWasHidden() {
@@ -357,10 +330,12 @@ void TestRenderViewHost::SimulateWasShown() {
   WasShown();
 }
 
-void TestRenderViewHost::TestOnMsgStartDragging(
+void TestRenderViewHost::TestOnStartDragging(
     const WebDropData& drop_data) {
   WebKit::WebDragOperationsMask drag_operation = WebKit::WebDragOperationEvery;
-  OnMsgStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Point());
+  DragEventSourceInfo event_info;
+  OnStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Vector2d(),
+                  event_info);
 }
 
 void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {

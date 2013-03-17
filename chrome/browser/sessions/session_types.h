@@ -87,9 +87,7 @@ class TabNavigation {
   const GURL& virtual_url() const { return virtual_url_; }
   const string16& title() const { return title_; }
   const std::string& content_state() const { return content_state_; }
-
-  // Timestamp this navigation occurred.
-  base::Time timestamp() const { return timestamp_; }
+  const string16& search_terms() const { return search_terms_; }
 
   // Converts a set of TabNavigations into a list of NavigationEntrys
   // with sequential page IDs and the given context. The caller owns
@@ -117,6 +115,7 @@ class TabNavigation {
   GURL original_request_url_;
   bool is_overriding_user_agent_;
   base::Time timestamp_;
+  string16 search_terms_;
 };
 
 // SessionTab ----------------------------------------------------------------

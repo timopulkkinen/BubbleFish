@@ -9,7 +9,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/threading/platform_thread.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -36,12 +38,12 @@
 #include "ui/gfx/size.h"
 #include "webkit/glue/webdropdata.h"
 
-using content::BrowserThread;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebDragOperationCopy;
 using WebKit::WebDragOperationLink;
 using WebKit::WebDragOperationMove;
 
+namespace content {
 namespace {
 
 HHOOK msg_hook = NULL;
@@ -135,7 +137,7 @@ class DragDropThread : public base::Thread {
 
 WebContentsDragWin::WebContentsDragWin(
     gfx::NativeWindow source_window,
-    content::WebContents* web_contents,
+    WebContents* web_contents,
     WebDragDest* drag_dest,
     const base::Callback<void()>& drag_end_callback)
     : drag_drop_thread_id_(0),
@@ -154,7 +156,7 @@ WebContentsDragWin::~WebContentsDragWin() {
 void WebContentsDragWin::StartDragging(const WebDropData& drop_data,
                                        WebDragOperationsMask ops,
                                        const gfx::ImageSkia& image,
-                                       const gfx::Point& image_offset) {
+                                       const gfx::Vector2d& image_offset) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   drag_source_ = new WebDragSource(source_window_, web_contents_);
@@ -176,16 +178,11 @@ void WebContentsDragWin::StartDragging(const WebDropData& drop_data,
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_UI;
   if (drag_drop_thread_->StartWithOptions(options)) {
-    gfx::Display display =
-        gfx::Screen::GetDisplayNearestWindow(web_contents_->GetNativeView());
-    ui::ScaleFactor scale_factor = ui::GetScaleFactorFromScale(
-        display.device_scale_factor());
     drag_drop_thread_->message_loop()->PostTask(
         FROM_HERE,
         base::Bind(&WebContentsDragWin::StartBackgroundDragging, this,
                    drop_data, ops, page_url, page_encoding,
-                   image.GetRepresentation(scale_factor).sk_bitmap(),
-                   image_offset));
+                   image, image_offset));
   }
 
   EnableBackgroundDraggingSupport(drag_drop_thread_->thread_id());
@@ -196,8 +193,8 @@ void WebContentsDragWin::StartBackgroundDragging(
     WebDragOperationsMask ops,
     const GURL& page_url,
     const std::string& page_encoding,
-    const SkBitmap& image,
-    const gfx::Point& image_offset) {
+    const gfx::ImageSkia& image,
+    const gfx::Vector2d& image_offset) {
   drag_drop_thread_id_ = base::PlatformThread::CurrentId();
 
   if (DoDragging(drop_data, ops, page_url, page_encoding,
@@ -229,37 +226,47 @@ void WebContentsDragWin::PrepareDragForDownload(
     const std::string& page_encoding) {
   // Parse the download metadata.
   string16 mime_type;
-  FilePath file_name;
+  base::FilePath file_name;
   GURL download_url;
-  if (!drag_download_util::ParseDownloadMetadata(drop_data.download_metadata,
-                                                 &mime_type,
-                                                 &file_name,
-                                                 &download_url))
+  if (!ParseDownloadMetadata(drop_data.download_metadata,
+                             &mime_type,
+                             &file_name,
+                             &download_url))
     return;
 
   // Generate the file name based on both mime type and proposed file name.
   std::string default_name =
-      content::GetContentClient()->browser()->GetDefaultDownloadName();
-  FilePath generated_download_file_name =
+      GetContentClient()->browser()->GetDefaultDownloadName();
+  base::FilePath generated_download_file_name =
       net::GenerateFileName(download_url,
                             std::string(),
                             std::string(),
                             UTF16ToUTF8(file_name.value()),
                             UTF16ToUTF8(mime_type),
                             default_name);
+  base::FilePath temp_dir_path;
+  if (!file_util::CreateNewTempDirectory(
+          FILE_PATH_LITERAL("chrome_drag"), &temp_dir_path))
+    return;
+  base::FilePath download_path =
+      temp_dir_path.Append(generated_download_file_name);
+
+  // We cannot know when the target application will be done using the temporary
+  // file, so schedule it to be deleted after rebooting.
+  file_util::DeleteAfterReboot(download_path);
+  file_util::DeleteAfterReboot(temp_dir_path);
 
   // Provide the data as file (CF_HDROP). A temporary download file with the
   // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
-  linked_ptr<net::FileStream> empty_file_stream;
   scoped_refptr<DragDownloadFile> download_file =
       new DragDownloadFile(
-          generated_download_file_name,
-          empty_file_stream,
+          download_path,
+          scoped_ptr<net::FileStream>(NULL),
           download_url,
-          content::Referrer(page_url, drop_data.referrer_policy),
+          Referrer(page_url, drop_data.referrer_policy),
           page_encoding,
           web_contents_);
-  ui::OSExchangeData::DownloadFileInfo file_download(FilePath(),
+  ui::OSExchangeData::DownloadFileInfo file_download(base::FilePath(),
                                                      download_file.get());
   data->SetDownloadFileInfo(file_download);
 
@@ -270,17 +277,17 @@ void WebContentsDragWin::PrepareDragForDownload(
 void WebContentsDragWin::PrepareDragForFileContents(
     const WebDropData& drop_data, ui::OSExchangeData* data) {
   static const int kMaxFilenameLength = 255;  // FAT and NTFS
-  FilePath file_name(drop_data.file_description_filename);
+  base::FilePath file_name(drop_data.file_description_filename);
 
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
   if (file_name.BaseName().RemoveExtension().empty()) {
     const string16 extension = file_name.Extension();
     // Retrieve the name from the URL.
-    file_name = FilePath(
+    file_name = base::FilePath(
         net::GetSuggestedFilename(drop_data.url, "", "", "", "", ""));
     if (file_name.value().size() + extension.size() > kMaxFilenameLength) {
-      file_name = FilePath(file_name.value().substr(
+      file_name = base::FilePath(file_name.value().substr(
           0, kMaxFilenameLength - extension.size()));
     }
     file_name = file_name.ReplaceExtension(extension);
@@ -303,7 +310,7 @@ bool WebContentsDragWin::DoDragging(const WebDropData& drop_data,
                                     const GURL& page_url,
                                     const std::string& page_encoding,
                                     const gfx::ImageSkia& image,
-                                    const gfx::Point& image_offset) {
+                                    const gfx::Vector2d& image_offset) {
   ui::OSExchangeData data;
 
   if (!drop_data.download_metadata.empty()) {
@@ -342,7 +349,7 @@ bool WebContentsDragWin::DoDragging(const WebDropData& drop_data,
   // Use a local variable to keep track of the contents view window handle.
   // It might not be safe to access the instance after DoDragDrop returns
   // because the window could be disposed in the nested message loop.
-  HWND native_window = web_contents_->GetNativeView();
+  HWND native_window = web_contents_->GetView()->GetNativeView();
 
   // We need to enable recursive tasks on the message loop so we can get
   // updates while in the system DoDragDrop loop.
@@ -356,7 +363,7 @@ bool WebContentsDragWin::DoDragging(const WebDropData& drop_data,
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
     DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
                drag_source_,
-               web_drag_utils_win::WebDragOpMaskToWinDragOpMask(ops),
+               WebDragOpMaskToWinDragOpMask(ops),
                &effect);
   }
 
@@ -422,3 +429,5 @@ void WebContentsDragWin::OnDataObjectDisposed() {
       FROM_HERE,
       base::Bind(&WebContentsDragWin::CloseThread, this));
 }
+
+}  // namespace content

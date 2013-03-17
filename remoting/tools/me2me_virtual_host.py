@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -17,6 +17,7 @@ import json
 import logging
 import optparse
 import os
+import pipes
 import signal
 import socket
 import subprocess
@@ -25,15 +26,17 @@ import tempfile
 import time
 import uuid
 
-# By default this script will try to determine the most appropriate X session
-# command for the system.  To use a specific session instead, set this variable
-# to the executable filename, or a list containing the executable and any
-# arguments, for example:
-# XSESSION_COMMAND = "/usr/bin/gnome-session-fallback"
-# XSESSION_COMMAND = ["/usr/bin/gnome-session", "--session=ubuntu-2d"]
-XSESSION_COMMAND = None
-
 LOG_FILE_ENV_VAR = "CHROME_REMOTE_DESKTOP_LOG_FILE"
+
+# This script has a sensible default for the initial and maximum desktop size,
+# which can be overridden either on the command-line, or via a comma-separated
+# list of sizes in this environment variable.
+DEFAULT_SIZES_ENV_VAR = "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES"
+
+# By default, provide a relatively small size to handle the case where resize-
+# to-client is disabled, and a much larger size to support clients with large
+# or mulitple monitors. These defaults can be overridden in ~/.profile.
+DEFAULT_SIZES = "1600x1200,3840x1600"
 
 SCRIPT_PATH = sys.path[0]
 
@@ -51,9 +54,18 @@ HOME_DIR = os.environ["HOME"]
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
 
-X_AUTH_FILE = os.path.expanduser("~/.Xauthority")
-os.environ["XAUTHORITY"] = X_AUTH_FILE
+# Amount of time to wait between relaunching processes.
+SHORT_BACKOFF_TIME = 5
+LONG_BACKOFF_TIME = 60
 
+# How long a process must run in order not to be counted against the restart
+# thresholds.
+MINIMUM_PROCESS_LIFETIME = 60
+
+# Thresholds for switching from fast- to slow-restart and for giving up
+# trying to restart entirely.
+SHORT_BACKOFF_THRESHOLD = 5
+MAX_LAUNCH_FAILURES = SHORT_BACKOFF_THRESHOLD + 10
 
 # Globals needed by the atexit cleanup() handler.
 g_desktops = []
@@ -67,28 +79,41 @@ class Config:
     self.changed = False
 
   def load(self):
-    try:
-      settings_file = open(self.path, 'r')
-      self.data = json.load(settings_file)
-      self.changed = False
-      settings_file.close()
-    except Exception:
-      return False
-    return True
+    """Loads the config from file.
+
+    Raises:
+      IOError: Error reading data
+      ValueError: Error parsing JSON
+    """
+    settings_file = open(self.path, 'r')
+    self.data = json.load(settings_file)
+    self.changed = False
+    settings_file.close()
 
   def save(self):
+    """Saves the config to file.
+
+    Raises:
+      IOError: Error writing data
+      TypeError: Error serialising JSON
+    """
     if not self.changed:
-      return True
+      return
+    old_umask = os.umask(0066)
     try:
-      old_umask = os.umask(0066)
       settings_file = open(self.path, 'w')
       settings_file.write(json.dumps(self.data, indent=2))
       settings_file.close()
+      self.changed = False
+    finally:
       os.umask(old_umask)
-    except Exception:
-      return False
-    self.changed = False
-    return True
+
+  def save_and_log_errors(self):
+    """Calls self.save(), trapping and logging any errors."""
+    try:
+      self.save()
+    except (IOError, TypeError) as e:
+      logging.error("Failed to save config: " + str(e))
 
   def get(self, key):
     return self.data.get(key)
@@ -168,6 +193,7 @@ class Desktop:
     self.child_env = None
     self.sizes = sizes
     self.pulseaudio_pipe = None
+    self.server_supports_exact_resize = False
     g_desktops.append(self)
 
   @staticmethod
@@ -183,6 +209,7 @@ class Desktop:
     # Create clean environment for new session, so it is cleanly separated from
     # the user's console X session.
     self.child_env = {}
+
     for key in [
         "HOME",
         "LANG",
@@ -194,6 +221,26 @@ class Desktop:
         LOG_FILE_ENV_VAR]:
       if os.environ.has_key(key):
         self.child_env[key] = os.environ[key]
+
+    # Read from /etc/environment if it exists, as it is a standard place to
+    # store system-wide environment settings. During a normal login, this would
+    # typically be done by the pam_env PAM module, depending on the local PAM
+    # configuration.
+    env_filename = "/etc/environment"
+    try:
+      with open(env_filename, "r") as env_file:
+        for line in env_file:
+          line = line.rstrip("\n")
+          # Split at the first "=", leaving any further instances in the value.
+          key_value_pair = line.split("=", 1)
+          if len(key_value_pair) == 2:
+            key, value = tuple(key_value_pair)
+            # The file stores key=value assignments, but the value may be
+            # quoted, so strip leading & trailing quotes from it.
+            value = value.strip("'\"")
+            self.child_env[key] = value
+    except IOError:
+      logging.info("Failed to read %s, skipping." % env_filename)
 
   def _setup_pulseaudio(self):
     self.pulseaudio_pipe = None
@@ -226,7 +273,7 @@ class Desktop:
       pulse_config.write("load-module module-native-protocol-unix\n")
       pulse_config.write(
           ("load-module module-pipe-sink sink_name=%s file=\"%s\" " +
-           "rate=44100 channels=2 format=s16le\n") %
+           "rate=48000 channels=2 format=s16le\n") %
           (sink_name, pipe_name))
       pulse_config.close()
     except IOError, e:
@@ -242,10 +289,15 @@ class Desktop:
     return True
 
   def _launch_x_server(self, extra_x_args):
+    x_auth_file = os.path.expanduser("~/.Xauthority")
+    self.child_env["XAUTHORITY"] = x_auth_file
     devnull = open(os.devnull, "rw")
     display = self.get_unused_display_number()
+
+    # Run "xauth add" with |child_env| so that it modifies the same XAUTHORITY
+    # file which will be used for the X session.
     ret_code = subprocess.call("xauth add :%d . `mcookie`" % display,
-                               shell=True)
+                               env=self.child_env, shell=True)
     if ret_code != 0:
       raise Exception("xauth failed with code %d" % ret_code)
 
@@ -253,15 +305,22 @@ class Desktop:
     max_height = max([height for width, height in self.sizes])
 
     try:
-      xvfb = locate_executable("Xvfb-randr")
+      # TODO(jamiewalch): This script expects to be installed alongside
+      # Xvfb-randr, but that's no longer the case. Fix this once we have
+      # a Xvfb-randr package that installs somewhere sensible.
+      xvfb = "/usr/bin/Xvfb-randr"
+      if not os.path.exists(xvfb):
+        xvfb = locate_executable("Xvfb-randr")
+      self.server_supports_exact_resize = True
     except Exception:
       xvfb = "Xvfb"
+      self.server_supports_exact_resize = False
 
     logging.info("Starting %s on display :%d" % (xvfb, display))
     screen_option = "%dx%dx24" % (max_width, max_height)
     self.x_proc = subprocess.Popen([xvfb, ":%d" % display,
                                     "-noreset",
-                                    "-auth", X_AUTH_FILE,
+                                    "-auth", x_auth_file,
                                     "-nolisten", "tcp",
                                     "-screen", "0", screen_option
                                     ] + extra_x_args)
@@ -302,34 +361,38 @@ class Desktop:
       label = "%dx%d" % (width, height)
       args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
               str(height), "0", "0", "0"]
-      proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                              stderr=devnull)
-      proc.wait()
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
       args = ["xrandr", "--addmode", "screen", label]
-      proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                              stderr=devnull)
-      proc.wait()
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
     # Set the initial mode to the first size specified, otherwise the X server
     # would default to (max_width, max_height), which might not even be in the
     # list.
     label = "%dx%d" % self.sizes[0]
     args = ["xrandr", "-s", label]
-    proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                            stderr=devnull)
-    proc.wait()
+    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+
+    # Set the physical size of the display so that the initial mode is running
+    # at approximately 96 DPI, since some desktops require the DPI to be set to
+    # something realistic.
+    args = ["xrandr", "--dpi", "96"]
+    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
     devnull.close()
 
   def _launch_x_session(self):
-    # Start desktop session
+    # Start desktop session.
     # The /dev/null input redirection is necessary to prevent the X session
     # reading from stdin.  If this code runs as a shell background job in a
     # terminal, any reading from stdin causes the job to be suspended.
     # Daemonization would solve this problem by separating the process from the
     # controlling terminal.
-    logging.info("Launching X session: %s" % XSESSION_COMMAND)
-    self.session_proc = subprocess.Popen(XSESSION_COMMAND,
+    xsession_command = choose_x_session()
+    if xsession_command is None:
+      raise Exception("Unable to choose suitable X session command.")
+
+    logging.info("Launching X session: %s" % xsession_command)
+    self.session_proc = subprocess.Popen(xsession_command,
                                          stdin=open(os.devnull, "r"),
                                          cwd=HOME_DIR,
                                          env=self.child_env)
@@ -347,6 +410,8 @@ class Desktop:
     args = [locate_executable(HOST_BINARY_NAME), "--host-config=/dev/stdin"]
     if self.pulseaudio_pipe:
       args.append("--audio-pipe-name=%s" % self.pulseaudio_pipe)
+    if self.server_supports_exact_resize:
+      args.append("--server-supports-exact-resize")
     self.host_proc = subprocess.Popen(args, env=self.child_env,
                                       stdin=subprocess.PIPE)
     logging.info(args)
@@ -442,18 +507,12 @@ class PidFile:
 def choose_x_session():
   """Chooses the most appropriate X session command for this system.
 
-  If XSESSION_COMMAND is already set, its value is returned directly.
-  Otherwise, a session is chosen for this system.
-
   Returns:
     A string containing the command to run, or a list of strings containing
     the executable program and its arguments, which is suitable for passing as
     the first parameter of subprocess.Popen().  If a suitable session cannot
     be found, returns None.
   """
-  if XSESSION_COMMAND is not None:
-    return XSESSION_COMMAND
-
   # If the session wrapper script (see below) is given a specific session as an
   # argument (such as ubuntu-2d on Ubuntu 12.04), the wrapper will run that
   # session instead of looking for custom .xsession files in the home directory.
@@ -469,7 +528,10 @@ def choose_x_session():
       # (see /etc/X11/Xsession.d/50x11-common_determine-startup), to determine
       # exactly how to run this file.
       if os.access(startup_file, os.X_OK):
-        return startup_file
+        # "/bin/sh -c" is smart about how to execute the session script and
+        # works in cases where plain exec() fails (for example, if the file is
+        # marked executable, but is a plain script with no shebang line).
+        return ["/bin/sh", "-c", pipes.quote(startup_file)]
       else:
         shell = os.environ.get("SHELL", "sh")
         return [shell, startup_file]
@@ -484,20 +546,18 @@ def choose_x_session():
     "/etc/X11/Xsession" ]
   for session_wrapper in SESSION_WRAPPERS:
     if os.path.exists(session_wrapper):
-      break
-  else:
-    # No session wrapper found.
-    return None
-
-  # On Ubuntu 12.04, the default session relies on 3D-accelerated hardware.
-  # Trying to run this with a virtual X display produces weird results on some
-  # systems (for example, upside-down and corrupt displays).  So if the
-  # ubuntu-2d session is available, choose it explicitly.
-  if os.path.exists("/usr/bin/unity-2d-panel"):
-    return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
-
-  # Use the session wrapper by itself, and let the system choose a session.
-  return session_wrapper
+      if os.path.exists("/usr/bin/unity-2d-panel"):
+        # On Ubuntu 12.04, the default session relies on 3D-accelerated
+        # hardware. Trying to run this with a virtual X display produces
+        # weird results on some systems (for example, upside-down and
+        # corrupt displays).  So if the ubuntu-2d session is available,
+        # choose it explicitly.
+        return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
+      else:
+        # Use the session wrapper by itself, and let the system choose a
+        # session.
+        return session_wrapper
+  return None
 
 
 def locate_executable(exe_name):
@@ -551,10 +611,10 @@ def daemonize(log_filename):
       pass
     else:
       # Child process
-      os._exit(0)
+      os._exit(0)  # pylint: disable=W0212
   else:
     # Parent process
-    os._exit(0)
+    os._exit(0)  # pylint: disable=W0212
 
   logging.info("Daemon process running, logging to '%s'" % log_filename)
 
@@ -602,7 +662,10 @@ class SignalHandler:
   def __call__(self, signum, _stackframe):
     if signum == signal.SIGHUP:
       logging.info("SIGHUP caught, restarting host.")
-      self.host_config.load()
+      try:
+        self.host_config.load()
+      except (IOError, ValueError) as e:
+        logging.error("Failed to load config: " + str(e))
       for desktop in g_desktops:
         if desktop.host_proc:
           desktop.host_proc.send_signal(signal.SIGTERM)
@@ -611,13 +674,128 @@ class SignalHandler:
       raise SystemExit
 
 
+class RelaunchInhibitor:
+  """Helper class for inhibiting launch of a child process before a timeout has
+  elapsed.
+
+  A managed process can be in one of these states:
+    running, not inhibited (running == True)
+    stopped and inhibited (running == False and is_inhibited() == True)
+    stopped but not inhibited (running == False and is_inhibited() == False)
+
+  Attributes:
+    label: Name of the tracked process. Only used for logging.
+    running: Whether the process is currently running.
+    earliest_relaunch_time: Time before which the process should not be
+      relaunched, or 0 if there is no limit.
+    failures: The number of times that the process ran for less than a
+      specified timeout, and had to be inhibited.  This count is reset to 0
+      whenever the process has run for longer than the timeout.
+  """
+
+  def __init__(self, label):
+    self.label = label
+    self.running = False
+    self.earliest_relaunch_time = 0
+    self.earliest_successful_termination = 0
+    self.failures = 0
+
+  def is_inhibited(self):
+    return (not self.running) and (time.time() < self.earliest_relaunch_time)
+
+  def record_started(self, minimum_lifetime, relaunch_delay):
+    """Record that the process was launched, and set the inhibit time to
+    |timeout| seconds in the future."""
+    self.earliest_relaunch_time = time.time() + relaunch_delay
+    self.earliest_successful_termination = time.time() + minimum_lifetime
+    self.running = True
+
+  def record_stopped(self):
+    """Record that the process was stopped, and adjust the failure count
+    depending on whether the process ran long enough."""
+    self.running = False
+    if time.time() < self.earliest_successful_termination:
+      self.failures += 1
+    else:
+      self.failures = 0
+    logging.info("Failure count for '%s' is now %d", self.label, self.failures)
+
+
 def relaunch_self():
   cleanup()
   os.execvp(sys.argv[0], sys.argv)
 
 
+def waitpid_with_timeout(pid, deadline):
+  """Wrapper around os.waitpid() which waits until either a child process dies
+  or the deadline elapses.
+
+  Args:
+    pid: Process ID to wait for, or -1 to wait for any child process.
+    deadline: Waiting stops when time.time() exceeds this value.
+
+  Returns:
+    (pid, status): Same as for os.waitpid(), except that |pid| is 0 if no child
+    changed state within the timeout.
+
+  Raises:
+    Same as for os.waitpid().
+  """
+  while time.time() < deadline:
+    pid, status = os.waitpid(pid, os.WNOHANG)
+    if pid != 0:
+      return (pid, status)
+    time.sleep(1)
+  return (0, 0)
+
+
+def waitpid_handle_exceptions(pid, deadline):
+  """Wrapper around os.waitpid()/waitpid_with_timeout(), which waits until
+  either a child process exits or the deadline elapses, and retries if certain
+  exceptions occur.
+
+  Args:
+    pid: Process ID to wait for, or -1 to wait for any child process.
+    deadline: If non-zero, waiting stops when time.time() exceeds this value.
+      If zero, waiting stops when a child process exits.
+
+  Returns:
+    (pid, status): Same as for waitpid_with_timeout(). |pid| is non-zero if and
+    only if a child exited during the wait.
+
+  Raises:
+    Same as for os.waitpid(), except:
+      OSError with errno==EINTR causes the wait to be retried (this can happen,
+      for example, if this parent process receives SIGHUP).
+      OSError with errno==ECHILD means there are no child processes, and so
+      this function sleeps until |deadline|. If |deadline| is zero, this is an
+      error and the OSError exception is raised in this case.
+  """
+  while True:
+    try:
+      if deadline == 0:
+        pid_result, status = os.waitpid(pid, 0)
+      else:
+        pid_result, status = waitpid_with_timeout(pid, deadline)
+      return (pid_result, status)
+    except OSError, e:
+      if e.errno == errno.EINTR:
+        continue
+      elif e.errno == errno.ECHILD:
+        now = time.time()
+        if deadline == 0:
+          # No time-limit and no child processes. This is treated as an error
+          # (see docstring).
+          raise
+        elif deadline > now:
+          time.sleep(deadline - now)
+        return (0, 0)
+      else:
+        # Anything else is an unexpected error.
+        raise
+
+
 def main():
-  DEFAULT_SIZE = "1280x800"
   EPILOG = """This script is not intended for use by end-users.  To configure
 Chrome Remote Desktop, please install the app from the Chrome
 Web Store: https://chrome.google.com/remotedesktop"""
@@ -625,10 +803,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
       usage="Usage: %prog [options] [ -- [ X server options ] ]",
       epilog=EPILOG)
   parser.add_option("-s", "--size", dest="size", action="append",
-                    help="Dimensions of virtual desktop (default: %s). "
-                    "This can be specified multiple times to make multiple "
-                    "screen resolutions available (if the Xvfb server "
-                    "supports this)" % DEFAULT_SIZE)
+                    help="Dimensions of virtual desktop. This can be specified "
+                    "multiple times to make multiple screen resolutions "
+                    "available (if the Xvfb server supports this).")
   parser.add_option("-f", "--foreground", dest="foreground", default=False,
                     action="store_true",
                     help="Don't run as a background daemon.")
@@ -641,6 +818,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_option("", "--check-running", dest="check_running", default=False,
                     action="store_true",
                     help="Return 0 if the daemon is running, or 1 otherwise.")
+  parser.add_option("", "--config", dest="config", action="store",
+                    help="Use the specified configuration file.")
   parser.add_option("", "--reload", dest="reload", default=False,
                     action="store_true",
                     help="Signal currently running host to reload the config.")
@@ -652,7 +831,10 @@ Web Store: https://chrome.google.com/remotedesktop"""
                     help="Prints version of the host.")
   (options, args) = parser.parse_args()
 
-  pid_filename = os.path.join(CONFIG_DIR, "host#%s.pid" % g_host_hash)
+  # Determine the filename of the host configuration and PID files.
+  if not options.config:
+    options.config = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
+  pid_filename = os.path.splitext(options.config)[0] + ".pid"
 
   # Check for a modal command-line option (start, stop, etc.)
   if options.check_running:
@@ -676,13 +858,17 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.add_user:
-    command = ("sudo -k && gksudo --message "
-               "\"Please enter your password to enable Chrome Remote Desktop\" "
-               "-- sh -c "
+    if os.getenv("DISPLAY"):
+      sudo_command = "gksudo --description \"Chrome Remote Desktop\""
+    else:
+      sudo_command = "sudo"
+    command = ("sudo -k && exec %(sudo)s -- sh -c "
                "\"groupadd -f %(group)s && gpasswd --add %(user)s %(group)s\"" %
                { 'group': CHROME_REMOTING_GROUP_NAME,
-                 'user': getpass.getuser() })
-    return os.system(command) >> 8
+                 'user': getpass.getuser(),
+                 'sudo': sudo_command })
+    os.execv("/bin/sh", ["/bin/sh", "-c", command])
+    return 1
 
   if options.host_version:
     # TODO(sergeyu): Also check RPM package version once we add RPM package.
@@ -693,8 +879,12 @@ Web Store: https://chrome.google.com/remotedesktop"""
     print >> sys.stderr, EPILOG
     return 1
 
+  # Collate the list of sizes that XRANDR should support.
   if not options.size:
-    options.size = [DEFAULT_SIZE]
+    default_sizes = DEFAULT_SIZES
+    if os.environ.has_key(DEFAULT_SIZES_ENV_VAR):
+      default_sizes = os.environ[DEFAULT_SIZES_ENV_VAR]
+    options.size = default_sizes.split(",")
 
   sizes = []
   for size in options.size:
@@ -715,30 +905,22 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
     sizes.append((width, height))
 
-  global XSESSION_COMMAND
-  XSESSION_COMMAND = choose_x_session()
-  if XSESSION_COMMAND is None:
-    print >> sys.stderr, "Unable to choose suitable X session command."
-    return 1
-
-  if "--session=ubuntu-2d" in XSESSION_COMMAND:
-    print >> sys.stderr, (
-      "The Unity 2D desktop session will be used.\n"
-      "If you encounter problems with this choice of desktop, please install\n"
-      "the gnome-session-fallback package, and restart this script.\n")
-
+  # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
 
-  config_filename = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
-  host_config = Config(config_filename)
+  # Load the initial host configuration.
+  host_config = Config(options.config)
+  try:
+    host_config.load()
+  except (IOError, ValueError) as e:
+    print >> sys.stderr, "Failed to load config: " + str(e)
+    return 1
 
+  # Register handler to re-load the configuration in response to signals.
   for s in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1]:
     signal.signal(s, SignalHandler(host_config))
 
-  if (not host_config.load()):
-    print >> sys.stderr, "Failed to load " + config_filename
-    return 1
-
+  # Verify that the initial host configuration has the necessary fields.
   auth = Authentication()
   auth_config_valid = auth.copy_from(host_config)
   host = Host()
@@ -747,18 +929,22 @@ Web Store: https://chrome.google.com/remotedesktop"""
     logging.error("Failed to load host configuration.")
     return 1
 
+  # Determine whether a desktop is already active for the specified host
+  # host configuration.
   global g_pidfile
   g_pidfile = PidFile(pid_filename)
   running, pid = g_pidfile.check()
-
   if running:
-    print "An instance of this script is already running."
-    print "Use the -k flag to terminate the running instance."
-    print "If this isn't the case, delete '%s' and try again." % pid_filename
-    return 1
+    # Debian policy requires that services should "start" cleanly and return 0
+    # if they are already running.
+    print "Service already running."
+    return 0
 
+  # Record that we are running a desktop against for this configuration.
   g_pidfile.create()
 
+  # Detach a separate "daemon" process to run the session, unless specifically
+  # requested to run in the foreground.
   if not options.foreground:
     if not os.environ.has_key(LOG_FILE_ENV_VAR):
       log_file = tempfile.NamedTemporaryFile(
@@ -772,16 +958,35 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   desktop = Desktop(sizes)
 
-  # Remember the time when the last session was launched, in order to enforce
-  # a minimum time between launches.  This avoids spinning in case of a
-  # misconfigured system, or other error that prevents a session from starting
-  # properly.
-  last_launch_time = 0
+  # Keep track of the number of consecutive failures of any child process to
+  # run for longer than a set period of time. The script will exit after a
+  # threshold is exceeded.
+  # There is no point in tracking the X session process separately, since it is
+  # launched at (roughly) the same time as the X server, and the termination of
+  # one of these triggers the termination of the other.
+  x_server_inhibitor = RelaunchInhibitor("X server")
+  host_inhibitor = RelaunchInhibitor("host")
+  all_inhibitors = [x_server_inhibitor, host_inhibitor]
+
+  # Don't allow relaunching the script on the first loop iteration.
+  allow_relaunch_self = False
 
   while True:
+    # Set the backoff interval and exit if a process failed too many times.
+    backoff_time = SHORT_BACKOFF_TIME
+    for inhibitor in all_inhibitors:
+      if inhibitor.failures >= MAX_LAUNCH_FAILURES:
+        logging.error("Too many launch failures of '%s', exiting."
+                      % inhibitor.label)
+        return 1
+      elif inhibitor.failures >= SHORT_BACKOFF_THRESHOLD:
+        backoff_time = LONG_BACKOFF_TIME
+
+    relaunch_times = []
+
     # If the session process or X server stops running (e.g. because the user
     # logged out), kill the other. This will trigger the next conditional block
-    # as soon as the os.wait() call (below) returns.
+    # as soon as os.waitpid() reaps its exit-code.
     if desktop.session_proc is None and desktop.x_proc is not None:
       logging.info("Terminating X server")
       desktop.x_proc.terminate()
@@ -789,48 +994,51 @@ Web Store: https://chrome.google.com/remotedesktop"""
       logging.info("Terminating X session")
       desktop.session_proc.terminate()
     elif desktop.x_proc is None and desktop.session_proc is None:
-      # Neither X server nor X session are running.
-      elapsed = time.time() - last_launch_time
-      if elapsed < 60:
-        logging.error("The session lasted less than 1 minute.  Waiting " +
-                      "before starting new session.")
-        time.sleep(60 - elapsed)
-
-      if last_launch_time == 0:
-        # Neither process has been started yet. Do so now.
-        logging.info("Launching X server and X session.")
-        last_launch_time = time.time()
-        desktop.launch_session(args)
-      else:
-        # Both processes have terminated. Since the user's desktop is already
-        # gone at this point, there's no state to lose and now is a good time
-        # to pick up any updates to this script that might have been installed.
+      # Both processes have terminated.
+      if (allow_relaunch_self and x_server_inhibitor.failures == 0 and
+          host_inhibitor.failures == 0):
+        # Since the user's desktop is already gone at this point, there's no
+        # state to lose and now is a good time to pick up any updates to this
+        # script that might have been installed.
         logging.info("Relaunching self")
         relaunch_self()
+      else:
+        # If there is a non-zero |failures| count, restarting the whole script
+        # would lose this information, so just launch the session as normal.
+        if x_server_inhibitor.is_inhibited():
+          logging.info("Waiting before launching X server")
+          relaunch_times.append(x_server_inhibitor.earliest_relaunch_time)
+        else:
+          logging.info("Launching X server and X session.")
+          desktop.launch_session(args)
+          x_server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                            backoff_time)
+          allow_relaunch_self = True
 
     if desktop.host_proc is None:
-      logging.info("Launching host process")
-      desktop.launch_host(host_config)
-
-    try:
-      pid, status = os.wait()
-    except OSError, e:
-      if e.errno == errno.EINTR:
-        # Retry on EINTR, which can happen if a signal such as SIGHUP is
-        # received.
-        continue
+      if host_inhibitor.is_inhibited():
+        logging.info("Waiting before launching host process")
+        relaunch_times.append(host_inhibitor.earliest_relaunch_time)
       else:
-        # Anything else is an unexpected error.
-        raise
+        logging.info("Launching host process")
+        desktop.launch_host(host_config)
+        host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                      backoff_time)
+
+    deadline = min(relaunch_times) if relaunch_times else 0
+    pid, status = waitpid_handle_exceptions(-1, deadline)
+    if pid == 0:
+      continue
 
     logging.info("wait() returned (%s,%s)" % (pid, status))
 
-    # When os.wait() notifies that a process has terminated, any Popen instance
-    # for that process is no longer valid.  Reset any affected instance to
-    # None.
+    # When a process has terminated, and we've reaped its exit-code, any Popen
+    # instance for that process is no longer valid. Reset any affected instance
+    # to None.
     if desktop.x_proc is not None and pid == desktop.x_proc.pid:
       logging.info("X server process terminated")
       desktop.x_proc = None
+      x_server_inhibitor.record_stopped()
 
     if desktop.session_proc is not None and pid == desktop.session_proc.pid:
       logging.info("Session process terminated")
@@ -839,34 +1047,45 @@ Web Store: https://chrome.google.com/remotedesktop"""
     if desktop.host_proc is not None and pid == desktop.host_proc.pid:
       logging.info("Host process terminated")
       desktop.host_proc = None
+      host_inhibitor.record_stopped()
 
       # These exit-codes must match the ones used by the host.
       # See remoting/host/host_error_codes.h.
       # Delete the host or auth configuration depending on the returned error
       # code, so the next time this script is run, a new configuration
       # will be created and registered.
-      if os.WEXITSTATUS(status) == 2:
+      if os.WEXITSTATUS(status) == 100:
         logging.info("Host configuration is invalid - exiting.")
         host_config.clear_auth()
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
-      elif os.WEXITSTATUS(status) == 3:
+      elif os.WEXITSTATUS(status) == 101:
         logging.info("Host ID has been deleted - exiting.")
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
-      elif os.WEXITSTATUS(status) == 4:
+      elif os.WEXITSTATUS(status) == 102:
         logging.info("OAuth credentials are invalid - exiting.")
         host_config.clear_auth()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
-      elif os.WEXITSTATUS(status) == 5:
+      elif os.WEXITSTATUS(status) == 103:
         logging.info("Host domain is blocked by policy - exiting.")
-        os.remove(host.config_file)
+        host_config.clear_auth()
+        host_config.clear_host_info()
+        host_config.save_and_log_errors()
         return 0
-      # Nothing to do for Mac-only status 6 (login screen unsupported)
+      # Nothing to do for Mac-only status 104 (login screen unsupported)
+      elif os.WEXITSTATUS(status) == 105:
+        logging.info("Username is blocked by policy - exiting.")
+        host_config.clear_auth()
+        host_config.clear_host_info()
+        host_config.save_and_log_errors()
+        return 0
+
 
 if __name__ == "__main__":
-  logging.basicConfig(level=logging.DEBUG)
+  logging.basicConfig(level=logging.DEBUG,
+                      format="%(asctime)s:%(levelname)s:%(message)s")
   sys.exit(main())

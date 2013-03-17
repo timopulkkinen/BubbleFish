@@ -4,9 +4,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/test/thread_test_helper.h"
 #include "base/utf_string_conversions.h"
@@ -48,9 +49,10 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     std::string result = the_browser->web_contents()->GetURL().ref();
     if (result != "pass") {
       std::string js_result;
-      ASSERT_TRUE(ExecuteJavaScriptAndExtractString(
-          the_browser->web_contents()->GetRenderViewHost(), L"",
-          L"window.domAutomationController.send(getLog())", &js_result));
+      ASSERT_TRUE(ExecuteScriptAndExtractString(
+          the_browser->web_contents(),
+          "window.domAutomationController.send(getLog())",
+          &js_result));
       FAIL() << "Failed: " << js_result;
     }
   }
@@ -68,6 +70,13 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     NavigateToURL(shell, url);
     EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
   }
+
+  scoped_refptr<IndexedDBContext> GetContext() {
+    StoragePartition* partition =
+        BrowserContext::GetDefaultStoragePartition(
+            shell()->web_contents()->GetBrowserContext());
+    return partition->GetIndexedDBContext();
+  };
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTest) {
@@ -95,9 +104,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, TransactionGetTest) {
   SimpleTest(GetTestUrl("indexeddb", "transaction_get_test.html"));
 }
 
-// Needs to be disabled until after WK 129037 rolls into chromium and we can
-// update this expectation.
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DISABLED_KeyTypesTest) {
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, KeyTypesTest) {
   SimpleTest(GetTestUrl("indexeddb", "key_types_test.html"));
 }
 
@@ -113,12 +120,11 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, TransactionTest) {
   SimpleTest(GetTestUrl("indexeddb", "transaction_test.html"));
 }
 
-// Appears flaky/slow, see: http://crbug.com/120298
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DISABLED_ValueSizeTest) {
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ValueSizeTest) {
   SimpleTest(GetTestUrl("indexeddb", "value_size_test.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DoesntHangTest) {
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DISABLED_DoesntHangTest) {
   SimpleTest(GetTestUrl("indexeddb", "transaction_run_forever.html"));
   CrashTab(shell()->web_contents());
   SimpleTest(GetTestUrl("indexeddb", "transaction_test.html"));
@@ -147,7 +153,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, Bug109187Test) {
 
 class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
  public:
-  virtual void SetUpOnMainThread() {
+  virtual void SetUpOnMainThread() OVERRIDE {
     const int kInitialQuotaKilobytes = 5000;
     const int kTemporaryStorageQuotaMaxSize = kInitialQuotaKilobytes
         * 1024 * QuotaManager::kPerHostTemporaryPortion;
@@ -182,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithLowQuota, QuotaTest) {
 
 class IndexedDBBrowserTestWithGCExposed : public IndexedDBBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
 };
@@ -192,47 +198,163 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed,
   SimpleTest(GetTestUrl("indexeddb", "database_callbacks_first.html"));
 }
 
-class IndexedDBBrowserTestWithVersion0Schema : public IndexedDBBrowserTest {
+static void CopyLevelDBToProfile(Shell* shell,
+                                 scoped_refptr<IndexedDBContext> context,
+                                 const std::string& test_directory) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
+  base::FilePath leveldb_dir(FILE_PATH_LITERAL("file__0.indexeddb.leveldb"));
+  base::FilePath test_data_dir =
+      GetTestFilePath("indexeddb", test_directory.c_str()).Append(leveldb_dir);
+  IndexedDBContextImpl* context_impl =
+      static_cast<IndexedDBContextImpl*>(context.get());
+  base::FilePath dest = context_impl->data_path().Append(leveldb_dir);
+  // If we don't create the destination directory first, the contents of the
+  // leveldb directory are copied directly into profile/IndexedDB instead of
+  // profile/IndexedDB/file__0.xxx/
+  ASSERT_TRUE(file_util::CreateDirectory(dest));
+  const bool kRecursive = true;
+  ASSERT_TRUE(file_util::CopyDirectory(test_data_dir,
+                                       context_impl->data_path(),
+                                       kRecursive));
+}
+
+class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
  public:
-  virtual void SetUpOnMainThread() {
-    scoped_refptr<IndexedDBContext> context =
-        BrowserContext::GetDefaultStoragePartition(
-            shell()->web_contents()->GetBrowserContext())->
-                GetIndexedDBContext();
+  IndexedDBBrowserTestWithPreexistingLevelDB() : disk_usage_(-1) { }
+
+  virtual void SetUpOnMainThread() OVERRIDE {
+    scoped_refptr<IndexedDBContext> context = GetContext();
     BrowserThread::PostTask(
         BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
-        base::Bind(
-            &IndexedDBBrowserTestWithVersion0Schema::CopyLevelDBToProfile,
-            shell(),
-            context));
+        base::Bind(&CopyLevelDBToProfile, shell(), context,
+                   EnclosingLevelDBDir()));
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(BrowserThread::GetMessageLoopProxyForThread(
             BrowserThread::WEBKIT_DEPRECATED)));
     ASSERT_TRUE(helper->Run());
   }
-  static void CopyLevelDBToProfile(Shell* shell,
-                                   scoped_refptr<IndexedDBContext> context) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
-    FilePath leveldb_dir(FILE_PATH_LITERAL("file__0.indexeddb.leveldb"));
-    FilePath test_data_dir =
-        GetTestFilePath("indexeddb", "migration_from_0").Append(leveldb_dir);
-    IndexedDBContextImpl* context_impl =
-        static_cast<IndexedDBContextImpl*>(context.get());
-    FilePath dest = context_impl->data_path().Append(leveldb_dir);
-    // If we don't create the destination directory first, the contents of the
-    // leveldb directory are copied directly into profile/IndexedDB instead of
-    // profile/IndexedDB/file__0.xxx/
-    ASSERT_TRUE(file_util::CreateDirectory(dest));
-    const bool kRecursive = true;
-    ASSERT_TRUE(file_util::CopyDirectory(test_data_dir,
-                                         context_impl->data_path(),
-                                         kRecursive));
+
+  virtual std::string EnclosingLevelDBDir() = 0;
+
+ protected:
+  virtual int64 RequestDiskUsage() {
+    BrowserThread::PostTaskAndReplyWithResult(
+        BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
+        base::Bind(&IndexedDBContext::GetOriginDiskUsage, GetContext(),
+            GURL("file:///")), base::Bind(
+                &IndexedDBBrowserTestWithPreexistingLevelDB::DidGetDiskUsage,
+                this));
+    scoped_refptr<base::ThreadTestHelper> helper(
+        new base::ThreadTestHelper(BrowserThread::GetMessageLoopProxyForThread(
+            BrowserThread::WEBKIT_DEPRECATED)));
+    EXPECT_TRUE(helper->Run());
+    // Wait for DidGetDiskUsage to be called.
+    MessageLoop::current()->RunUntilIdle();
+    return disk_usage_;
+  }
+ private:
+  virtual void DidGetDiskUsage(int64 bytes) {
+    EXPECT_GT(bytes, 0);
+    disk_usage_ = bytes;
+  }
+
+  int64 disk_usage_;
+};
+
+class IndexedDBBrowserTestWithVersion0Schema : public
+    IndexedDBBrowserTestWithPreexistingLevelDB {
+  virtual std::string EnclosingLevelDBDir() OVERRIDE {
+    return "migration_from_0";
   }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion0Schema, MigrationTest) {
   SimpleTest(GetTestUrl("indexeddb", "migration_test.html"));
 }
+
+class IndexedDBBrowserTestWithVersion123456Schema : public
+    IndexedDBBrowserTestWithPreexistingLevelDB {
+  virtual std::string EnclosingLevelDBDir() OVERRIDE {
+    return "schema_version_123456";
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion123456Schema,
+                       DestroyTest) {
+  int64 original_size = RequestDiskUsage();
+  EXPECT_GT(original_size, 0);
+  SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
+  int64 new_size = RequestDiskUsage();
+  EXPECT_NE(original_size, new_size);
+}
+
+class IndexedDBBrowserTestWithVersion987654SSVData : public
+    IndexedDBBrowserTestWithPreexistingLevelDB {
+  virtual std::string EnclosingLevelDBDir() OVERRIDE {
+    return "ssv_version_987654";
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion987654SSVData,
+                       DestroyTest) {
+  int64 original_size = RequestDiskUsage();
+  EXPECT_GT(original_size, 0);
+  SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
+  int64 new_size = RequestDiskUsage();
+  EXPECT_NE(original_size, new_size);
+}
+
+class IndexedDBBrowserTestWithCorruptLevelDB : public
+    IndexedDBBrowserTestWithPreexistingLevelDB {
+  virtual std::string EnclosingLevelDBDir() OVERRIDE {
+    return "corrupt_leveldb";
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithCorruptLevelDB,
+                       DestroyTest) {
+  int64 original_size = RequestDiskUsage();
+  EXPECT_GT(original_size, 0);
+  SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
+  int64 new_size = RequestDiskUsage();
+  EXPECT_NE(original_size, new_size);
+}
+
+class IndexedDBBrowserTestWithMissingSSTFile : public
+    IndexedDBBrowserTestWithPreexistingLevelDB {
+  virtual std::string EnclosingLevelDBDir() OVERRIDE {
+    return "missing_sst";
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithMissingSSTFile,
+                       DestroyTest) {
+  int64 original_size = RequestDiskUsage();
+  EXPECT_GT(original_size, 0);
+  SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
+  int64 new_size = RequestDiskUsage();
+  EXPECT_NE(original_size, new_size);
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, LevelDBLogFileTest) {
+  // Any page that opens an IndexedDB will work here.
+  SimpleTest(GetTestUrl("indexeddb", "database_test.html"));
+  scoped_refptr<IndexedDBContext> context =
+      BrowserContext::GetDefaultStoragePartition(
+          shell()->web_contents()->GetBrowserContext())->
+              GetIndexedDBContext();
+  IndexedDBContextImpl* context_impl =
+      static_cast<IndexedDBContextImpl*>(context.get());
+  base::FilePath leveldb_dir(FILE_PATH_LITERAL("file__0.indexeddb.leveldb"));
+  base::FilePath log_file(FILE_PATH_LITERAL("LOG"));
+  base::FilePath log_file_path =
+      context_impl->data_path().Append(leveldb_dir).Append(log_file);
+  int64 size;
+  EXPECT_TRUE(file_util::GetFileSize(log_file_path, &size));
+  EXPECT_GT(size, 0);
+}
+
+// Complex multi-step (converted from pyauto) tests begin here.
 
 // Verify null key path persists after restarting browser.
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, PRE_NullKeyPathPersistence) {
@@ -268,15 +390,15 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, VersionChangeCrashResilience) {
 // Verify that open DB connections are closed when a tab is destroyed.
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ConnectionsClosedOnTabClose) {
   NavigateAndWaitForTitle(shell(), "version_change_blocked.html", "#tab1",
-                          "setVersion(1) complete");
+                          "setVersion(2) complete");
 
   // Start on a different URL to force a new renderer process.
   Shell* new_shell = CreateBrowser();
   NavigateToURL(new_shell, GURL(chrome::kAboutBlankURL));
   NavigateAndWaitForTitle(new_shell, "version_change_blocked.html", "#tab2",
-                          "setVersion(2) blocked");
+                          "setVersion(3) blocked");
 
-  string16 expected_title16(ASCIIToUTF16("setVersion(2) complete"));
+  string16 expected_title16(ASCIIToUTF16("setVersion(3) complete"));
   TitleWatcher title_watcher(new_shell->web_contents(), expected_title16);
 
   base::KillProcess(

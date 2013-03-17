@@ -28,8 +28,9 @@ class PepperInputHandler {
  private:
   protocol::InputStub* input_stub_;
 
-  float wheel_ticks_x_;
-  float wheel_ticks_y_;
+  // Accumulated sub-pixel deltas from wheel events.
+  float wheel_delta_x_;
+  float wheel_delta_y_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperInputHandler);
 };

@@ -5,13 +5,15 @@
 #include "chrome/browser/chrome_browser_main_mac.h"
 
 #import <Cocoa/Cocoa.h>
+#include <sys/sysctl.h>
 
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "chrome/app/breakpad_mac.h"
 #import "chrome/browser/app_controller_mac.h"
@@ -20,7 +22,8 @@
 #include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/system_monitor/removable_device_notifications_mac.h"
+#include "chrome/browser/storage_monitor/image_capture_device_manager.h"
+#include "chrome/browser/storage_monitor/storage_monitor_mac.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -48,6 +51,103 @@ const int kKeychainReauthorizeAtLaunchMaxTries = 2;
 NSString* const kKeychainReauthorizeAtUpdatePref =
     @"KeychainReauthorizeAtUpdateMay2012";
 const int kKeychainReauthorizeAtUpdateMaxTries = 3;
+
+// This is one enum instead of two so that the values can be correlated in a
+// histogram.
+enum CatSixtyFour {
+  // Older than any expected cat.
+  SABER_TOOTHED_CAT_32 = 0,
+  SABER_TOOTHED_CAT_64,
+
+  // Known cats.
+  SNOW_LEOPARD_32,
+  SNOW_LEOPARD_64,
+  LION_32,  // Unexpected, Lion requires a 64-bit CPU.
+  LION_64,
+  MOUNTAIN_LION_32,  // Unexpected, Mountain Lion requires a 64-bit CPU.
+  MOUNTAIN_LION_64,
+
+  // DON'T add new constants here. It's important to keep the constant values,
+  // um, constant. Add new constants at the bottom.
+
+  // Newer than any known cat.
+  FUTURE_CAT_32,  // Unexpected, it's unlikely Apple will un-obsolete old CPUs.
+  FUTURE_CAT_64,
+
+  // What if the bitsiness of the CPU can't be determined?
+  SABER_TOOTHED_CAT_DUNNO,
+  SNOW_LEOPARD_DUNNO,
+  LION_DUNNO,
+  MOUNTAIN_LION_DUNNO,
+  FUTURE_CAT_DUNNO,
+
+  // Add new constants here.
+
+  CAT_SIXTY_FOUR_MAX
+};
+
+CatSixtyFour CatSixtyFourValue() {
+#if defined(ARCH_CPU_64_BITS)
+  // If 64-bit code is running, then it's established that this CPU can run
+  // 64-bit code, and no further inquiry is necessary.
+  int cpu64 = 1;
+  bool cpu64_known = true;
+#else
+  // Check a sysctl conveniently provided by the kernel that identifies
+  // whether the CPU supports 64-bit operation. Note that this tests the
+  // actual hardware capabilities, not the bitsiness of the running process,
+  // and not the bitsiness of the running kernel. The value thus determines
+  // whether the CPU is capable of running 64-bit programs (in the presence of
+  // proper OS runtime support) without regard to whether the current program
+  // is 64-bit (it may not be) or whether the current kernel is (the kernel
+  // can launch cross-bitted user-space tasks).
+
+  int cpu64;
+  size_t len = sizeof(cpu64);
+  const char kSysctlName[] = "hw.cpu64bit_capable";
+  bool cpu64_known = sysctlbyname(kSysctlName, &cpu64, &len, NULL, 0) == 0;
+  if (!cpu64_known) {
+    PLOG(WARNING) << "sysctlbyname(\"" << kSysctlName << "\")";
+  }
+#endif
+
+  if (base::mac::IsOSSnowLeopard()) {
+    return cpu64_known ? (cpu64 ? SNOW_LEOPARD_64 : SNOW_LEOPARD_32) :
+                         SNOW_LEOPARD_DUNNO;
+  }
+  if (base::mac::IsOSLion()) {
+    return cpu64_known ? (cpu64 ? LION_64 : LION_32) :
+                         LION_DUNNO;
+  }
+  if (base::mac::IsOSMountainLion()) {
+    return cpu64_known ? (cpu64 ? MOUNTAIN_LION_64 : MOUNTAIN_LION_32) :
+                         MOUNTAIN_LION_DUNNO;
+  }
+  if (base::mac::IsOSLaterThanMountainLion_DontCallThis()) {
+    return cpu64_known ? (cpu64 ? FUTURE_CAT_64 : FUTURE_CAT_32) :
+                         FUTURE_CAT_DUNNO;
+  }
+
+  // If it's not any of the expected OS versions or later than them, it must
+  // be prehistoric.
+  return cpu64_known ? (cpu64 ? SABER_TOOTHED_CAT_64 : SABER_TOOTHED_CAT_32) :
+                       SABER_TOOTHED_CAT_DUNNO;
+}
+
+void RecordCatSixtyFour() {
+  CatSixtyFour cat_sixty_four = CatSixtyFourValue();
+
+  // Set this higher than the highest value in the CatSixtyFour enum to
+  // provide some headroom and then leave it alone. See HISTOGRAM_ENUMERATION
+  // in base/metrics/histogram.h.
+  const int kMaxCatsAndSixtyFours = 32;
+  COMPILE_ASSERT(kMaxCatsAndSixtyFours >= CAT_SIXTY_FOUR_MAX,
+                 CatSixtyFour_enum_grew_too_large);
+
+  UMA_HISTOGRAM_ENUMERATION("OSX.CatSixtyFour",
+                            cat_sixty_four,
+                            kMaxCatsAndSixtyFours);
+}
 
 }  // namespace
 
@@ -102,12 +202,14 @@ void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
     CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kNoStartupWindow);
   }
+
+  RecordCatSixtyFour();
 }
 
 void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   ChromeBrowserMainPartsPosix::PreMainMessageLoopStart();
 
-  // Tell Cooca to finish its initialization, which we want to do manually
+  // Tell Cocoa to finish its initialization, which we want to do manually
   // instead of calling NSApplicationMain(). The primary reason is that NSAM()
   // never returns, which would leave all the objects currently on the stack
   // in scoped_ptrs hanging and never cleaned up. We then load the main nib
@@ -133,10 +235,10 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
         ResourceBundle::InitSharedInstanceWithLocale(std::string(), NULL);
     CHECK(!loaded_locale.empty()) << "Default locale could not be found";
 
-    FilePath resources_pack_path;
+    base::FilePath resources_pack_path;
     PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
     ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-        resources_pack_path, ui::SCALE_FACTOR_100P);
+        resources_pack_path, ui::SCALE_FACTOR_NONE);
   }
 
   // This is a no-op if the KeystoneRegistration framework is not present.
@@ -180,8 +282,14 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
 }
 
 void ChromeBrowserMainPartsMac::PreProfileInit() {
-  removable_device_notifications_mac_ =
-      new chrome::RemovableDeviceNotificationsMac();
+  storage_monitor_ = new chrome::StorageMonitorMac();
+  // TODO(gbillock): Make the ImageCapture manager owned by StorageMonitorMac.
+  if (base::mac::IsOSLionOrLater()) {
+    image_capture_device_manager_.reset(new chrome::ImageCaptureDeviceManager);
+    image_capture_device_manager_->SetNotifications(
+        storage_monitor_->receiver());
+  }
+
   ChromeBrowserMainPartsPosix::PreProfileInit();
 }
 

@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 
 #include "base/logging.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "googleurl/src/gurl.h"
 
 using base::DictionaryValue;
@@ -23,8 +24,7 @@ int ExtensionTabUtil::GetWindowIdOfTabStripModel(
 }
 
 int ExtensionTabUtil::GetTabId(const WebContents* web_contents) {
-  NOTIMPLEMENTED();
-  return -1;
+  return SessionID::IdForTab(web_contents);
 }
 
 int ExtensionTabUtil::GetWindowIdOfTab(const WebContents* web_contents) {
@@ -51,8 +51,7 @@ ListValue* ExtensionTabUtil::CreateTabList(
 DictionaryValue* ExtensionTabUtil::CreateTabValue(
     const WebContents* contents,
     TabStripModel* tab_strip,
-    int tab_index,
-    IncludePrivacySensitiveFields include_privacy_sensitive_fields) {
+    int tab_index) {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -65,7 +64,7 @@ bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
 }
 
 bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
-                                     TabContents** contents,
+                                     content::WebContents** contents,
                                      int* tab_id) {
   NOTIMPLEMENTED();
   return false;
@@ -76,7 +75,7 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
                                   bool include_incognito,
                                   Browser** browser,
                                   TabStripModel** tab_strip,
-                                  TabContents** contents,
+                                  content::WebContents** contents,
                                   int* tab_index) {
   NOTIMPLEMENTED();
   return false;

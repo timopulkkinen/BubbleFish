@@ -9,13 +9,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/string16.h"
 #include "base/timer.h"
+#include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_observer.h"
 
 class RenderViewContextMenuProxy;
 struct SpellCheckResult;
-class SpellingServiceClient;
 
 // An observer that listens to events from the RenderViewContextMenu class and
 // shows suggestions from the Spelling ("do you mean") service to a context menu
@@ -51,7 +52,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   // A callback function called when the Spelling service finishes checking a
   // misspelled word.
   void OnTextCheckComplete(
-      int tag,
+      SpellingServiceClient::ServiceType type,
       bool success,
       const string16& text,
       const std::vector<SpellCheckResult>& results);
@@ -74,7 +75,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   // service. The current animation just adds periods at the end of this string:
   //   'Loading' -> 'Loading.' -> 'Loading..' -> 'Loading...' (-> 'Loading')
   string16 loading_message_;
-  int loading_frame_;
+  size_t loading_frame_;
 
   // A flag represending whether a JSON-RPC call to the Spelling service
   // finished successfully and its response had a suggestion not included in the
@@ -103,7 +104,10 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   // Flag indicating whether online spelling correction service is enabled. When
   // this variable is true and we right-click a misspelled word, we send a
   // JSON-RPC request to the service and retrieve suggestions.
-  bool integrate_spelling_service_;
+  BooleanPrefMember integrate_spelling_service_;
+
+  // Flag indicating whether automatic spelling correction is enabled.
+  BooleanPrefMember autocorrect_spelling_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellingMenuObserver);
 };

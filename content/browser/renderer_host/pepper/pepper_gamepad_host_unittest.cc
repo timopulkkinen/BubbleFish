@@ -28,7 +28,7 @@ class PepperGamepadHostTest
  public:
   PepperGamepadHostTest() {
   }
-  ~PepperGamepadHostTest() {
+  virtual ~PepperGamepadHostTest() {
   }
 
   void ConstructService(const WebKit::WebGamepads& test_data) {
@@ -55,7 +55,7 @@ inline ptrdiff_t AddressDiff(const void* a, const void* b) {
 TEST_F(PepperGamepadHostTest, ValidateHardwareBuffersMatch) {
   // Hardware buffer.
   COMPILE_ASSERT(sizeof(ppapi::ContentGamepadHardwareBuffer) ==
-                 sizeof(content::GamepadHardwareBuffer),
+                 sizeof(GamepadHardwareBuffer),
                  gamepad_hardware_buffers_must_match);
   ppapi::ContentGamepadHardwareBuffer ppapi_buf;
   GamepadHardwareBuffer content_buf;
@@ -153,7 +153,7 @@ TEST_F(PepperGamepadHostTest, WaitForReply) {
   fetcher->WaitForDataRead();
 
   // It should not have sent the callback message.
-  service_->message_loop().RunAllPending();
+  service_->message_loop().RunUntilIdle();
   EXPECT_EQ(0u, sink().message_count());
 
   // Set a button down and wait for it to be read twice.
@@ -170,7 +170,7 @@ TEST_F(PepperGamepadHostTest, WaitForReply) {
   fetcher->WaitForDataRead();
 
   // It should have sent a callback.
-  service_->message_loop().RunAllPending();
+  service_->message_loop().RunUntilIdle();
   ppapi::proxy::ResourceMessageReplyParams reply_params;
   IPC::Message reply_msg;
   ASSERT_TRUE(sink().GetFirstResourceReplyMatching(
@@ -178,7 +178,7 @@ TEST_F(PepperGamepadHostTest, WaitForReply) {
 
   // Extract the shared memory handle.
   base::SharedMemoryHandle reply_handle;
-  EXPECT_TRUE(reply_params.GetSharedMemoryHandleAtIndex(0, &reply_handle));
+  EXPECT_TRUE(reply_params.TakeSharedMemoryHandleAtIndex(0, &reply_handle));
 
   // Validate the shared memory.
   base::SharedMemory shared_memory(reply_handle, true);

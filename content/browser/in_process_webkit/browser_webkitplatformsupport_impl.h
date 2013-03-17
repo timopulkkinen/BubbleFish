@@ -8,8 +8,9 @@
 #include "content/common/webkitplatformsupport_impl.h"
 #include "webkit/glue/webfileutilities_impl.h"
 
-class BrowserWebKitPlatformSupportImpl :
-    public content::WebKitPlatformSupportImpl {
+namespace content {
+
+class BrowserWebKitPlatformSupportImpl : public WebKitPlatformSupportImpl {
  public:
   BrowserWebKitPlatformSupportImpl();
   virtual ~BrowserWebKitPlatformSupportImpl();
@@ -37,7 +38,6 @@ class BrowserWebKitPlatformSupportImpl :
   virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();
   virtual void getPluginList(bool refresh, WebKit::WebPluginListBuilder*);
   virtual WebKit::WebData loadResource(const char* name);
-  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
 
@@ -47,5 +47,7 @@ class BrowserWebKitPlatformSupportImpl :
  private:
   webkit_glue::WebFileUtilitiesImpl file_utilities_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITPLATFORMSUPPORT_IMPL_H_

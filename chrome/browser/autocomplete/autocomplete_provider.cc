@@ -5,12 +5,12 @@
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 
 #include "base/logging.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/common/url_constants.h"
@@ -34,6 +34,8 @@ AutocompleteProvider::AutocompleteProvider(
 // static
 const char* AutocompleteProvider::TypeToString(Type type) {
   switch (type) {
+    case TYPE_BOOKMARK:
+      return "Bookmark";
     case TYPE_BUILTIN:
       return "Builtin";
     case TYPE_CONTACT:
@@ -71,6 +73,8 @@ const char* AutocompleteProvider::GetName() const {
 metrics::OmniboxEventProto_ProviderType AutocompleteProvider::
     AsOmniboxEventProviderType() const {
   switch (type_) {
+    case TYPE_BOOKMARK:
+      return metrics::OmniboxEventProto::BOOKMARK;
     case TYPE_BUILTIN:
       return metrics::OmniboxEventProto::BUILTIN;
     case TYPE_CONTACT:
@@ -103,6 +107,9 @@ void AutocompleteProvider::DeleteMatch(const AutocompleteMatch& match) {
 }
 
 void AutocompleteProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
+}
+
+void AutocompleteProvider::ResetSession() {
 }
 
 string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,

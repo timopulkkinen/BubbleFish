@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,13 +21,18 @@
 #include "sync/syncable/directory.h"
 #include "sync/syncable/entry.h"
 #include "sync/syncable/mutable_entry.h"
-#include "sync/syncable/read_transaction.h"
 #include "sync/syncable/syncable_changes_version.h"
 #include "sync/syncable/syncable_proto_util.h"
+#include "sync/syncable/syncable_read_transaction.h"
 #include "sync/syncable/syncable_util.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/time.h"
+
+// TODO(vishwath): Remove this include after node positions have
+// shifted to completely uing Ordinals.
+// See http://crbug.com/145412 .
+#include "sync/internal_api/public/base/node_ordinal.h"
 
 namespace syncer {
 
@@ -51,14 +56,13 @@ using syncable::MutableEntry;
 using syncable::NON_UNIQUE_NAME;
 using syncable::BASE_SERVER_SPECIFICS;
 using syncable::PARENT_ID;
-using syncable::PREV_ID;
 using syncable::SERVER_CTIME;
 using syncable::SERVER_IS_DEL;
 using syncable::SERVER_IS_DIR;
 using syncable::SERVER_MTIME;
 using syncable::SERVER_NON_UNIQUE_NAME;
 using syncable::SERVER_PARENT_ID;
-using syncable::SERVER_POSITION_IN_PARENT;
+using syncable::SERVER_ORDINAL_IN_PARENT;
 using syncable::SERVER_SPECIFICS;
 using syncable::SERVER_VERSION;
 using syncable::UNIQUE_CLIENT_TAG;
@@ -204,7 +208,7 @@ UpdateAttemptResponse AttemptToUpdateEntry(
     // We can't decrypt this node yet.
     DVLOG(1) << "Received an undecryptable "
              << ModelTypeToString(entry->GetServerModelType())
-             << " update, returning encryption_conflict.";
+             << " update, returning conflict_encryption.";
     return CONFLICT_ENCRYPTION;
   } else if (specifics.has_password() &&
              entry->Get(UNIQUE_SERVER_TAG).empty()) {
@@ -212,7 +216,7 @@ UpdateAttemptResponse AttemptToUpdateEntry(
     const sync_pb::PasswordSpecifics& password = specifics.password();
     if (!cryptographer->CanDecrypt(password.encrypted())) {
       DVLOG(1) << "Received an undecryptable password update, returning "
-               << "encryption_conflict.";
+               << "conflict_encryption.";
       return CONFLICT_ENCRYPTION;
     }
   }
@@ -227,6 +231,7 @@ UpdateAttemptResponse AttemptToUpdateEntry(
     // different ways we deal with it once here to reduce the amount of code and
     // potential errors.
     if (!parent.good() || parent.Get(IS_DEL) || !parent.Get(IS_DIR)) {
+      DVLOG(1) <<  "Entry has bad parent, returning conflict_hierarchy.";
       return CONFLICT_HIERARCHY;
     }
     if (entry->Get(PARENT_ID) != new_parent) {
@@ -351,7 +356,8 @@ void UpdateServerFieldsFromUpdate(
                             target);
   }
   if (update.has_position_in_parent())
-    target->Put(SERVER_POSITION_IN_PARENT, update.position_in_parent());
+    target->Put(SERVER_ORDINAL_IN_PARENT,
+                Int64ToNodeOrdinal(update.position_in_parent()));
 
   target->Put(SERVER_IS_DEL, update.deleted());
   // We only mark the entry as unapplied if its version is greater than the
@@ -455,7 +461,7 @@ bool AddItemThenPredecessors(
   if (item->Get(IS_DEL))
     return true;  // Deleted items have no predecessors.
 
-  Id prev_id = item->Get(PREV_ID);
+  Id prev_id = item->GetPredecessorId();
   while (!prev_id.IsRoot()) {
     Entry prev(trans, GET_BY_ID, prev_id);
     CHECK(prev.good()) << "Bad id when walking predecessors.";
@@ -464,7 +470,7 @@ bool AddItemThenPredecessors(
     if (!inserted_items->insert(prev.Get(META_HANDLE)).second)
       break;
     commit_ids->push_back(prev_id);
-    prev_id = prev.Get(PREV_ID);
+    prev_id = prev.GetPredecessorId();
   }
   return true;
 }

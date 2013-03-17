@@ -18,7 +18,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -30,7 +30,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/time_format.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_view_host.h"
@@ -98,7 +97,7 @@ using content::DownloadItem;
 
 class DefaultDownloadDirectory {
  public:
-  const FilePath& path() const { return path_; }
+  const base::FilePath& path() const { return path_; }
  private:
   DefaultDownloadDirectory() {
     if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
@@ -113,21 +112,21 @@ class DefaultDownloadDirectory {
     }
   }
   friend struct base::DefaultLazyInstanceTraits<DefaultDownloadDirectory>;
-  FilePath path_;
+  base::FilePath path_;
 };
 
 static base::LazyInstance<DefaultDownloadDirectory>
     g_default_download_directory = LAZY_INSTANCE_INITIALIZER;
 
-const FilePath& GetDefaultDownloadDirectory() {
+const base::FilePath& GetDefaultDownloadDirectory() {
   return g_default_download_directory.Get().path();
 }
 
 // Consider downloads 'dangerous' if they go to the home directory on Linux and
 // to the desktop on any platform.
-bool DownloadPathIsDangerous(const FilePath& download_path) {
+bool DownloadPathIsDangerous(const base::FilePath& download_path) {
 #if defined(OS_LINUX)
-  FilePath home_dir = file_util::GetHomeDir();
+  base::FilePath home_dir = file_util::GetHomeDir();
   if (download_path == home_dir) {
     return true;
   }
@@ -137,7 +136,7 @@ bool DownloadPathIsDangerous(const FilePath& download_path) {
   // Android does not have a desktop dir.
   return false;
 #else
-  FilePath desktop_dir;
+  base::FilePath desktop_dir;
   if (!PathService::Get(base::DIR_USER_DESKTOP, &desktop_dir)) {
     NOTREACHED();
     return false;
@@ -155,6 +154,61 @@ gfx::ImageSkia* g_foreground_16 = NULL;
 gfx::ImageSkia* g_background_16 = NULL;
 gfx::ImageSkia* g_foreground_32 = NULL;
 gfx::ImageSkia* g_background_32 = NULL;
+
+void PaintCustomDownloadProgress(gfx::Canvas* canvas,
+                                 const gfx::ImageSkia& background_image,
+                                 const gfx::ImageSkia& foreground_image,
+                                 int image_size,
+                                 const gfx::Rect& bounds,
+                                 int start_angle,
+                                 int percent_done) {
+  // Draw the background progress image.
+  canvas->DrawImageInt(background_image,
+                       bounds.x(),
+                       bounds.y());
+
+  // Layer the foreground progress image in an arc proportional to the download
+  // progress. The arc grows clockwise, starting in the midnight position, as
+  // the download progresses. However, if the download does not have known total
+  // size (the server didn't give us one), then we just spin an arc around until
+  // we're done.
+  float sweep_angle = 0.0;
+  float start_pos = static_cast<float>(kStartAngleDegrees);
+  if (percent_done < 0) {
+    sweep_angle = kUnknownAngleDegrees;
+    start_pos = static_cast<float>(start_angle);
+  } else if (percent_done > 0) {
+    sweep_angle = static_cast<float>(kMaxDegrees / 100.0 * percent_done);
+  }
+
+  // Set up an arc clipping region for the foreground image. Don't bother using
+  // a clipping region if it would round to 360 (really 0) degrees, since that
+  // would eliminate the foreground completely and be quite confusing (it would
+  // look like 0% complete when it should be almost 100%).
+  canvas->Save();
+  if (sweep_angle < static_cast<float>(kMaxDegrees - 1)) {
+    SkRect oval;
+    oval.set(SkIntToScalar(bounds.x()),
+             SkIntToScalar(bounds.y()),
+             SkIntToScalar(bounds.x() + image_size),
+             SkIntToScalar(bounds.y() + image_size));
+    SkPath path;
+    path.arcTo(oval,
+               SkFloatToScalar(start_pos),
+               SkFloatToScalar(sweep_angle), false);
+    path.lineTo(SkIntToScalar(bounds.x() + image_size / 2),
+                SkIntToScalar(bounds.y() + image_size / 2));
+
+    // gfx::Canvas::ClipPath does not provide for anti-aliasing.
+    canvas->sk_canvas()->clipPath(path, SkRegion::kIntersect_Op, true);
+  }
+
+  canvas->DrawImageInt(foreground_image,
+                       bounds.x(),
+                       bounds.y());
+  canvas->Restore();
+}
+
 
 void PaintDownloadProgress(gfx::Canvas* canvas,
 #if defined(TOOLKIT_VIEWS)
@@ -202,46 +256,9 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
                        bounds.x(),
                        bounds.y());
 
-  // Layer the foreground progress image in an arc proportional to the download
-  // progress. The arc grows clockwise, starting in the midnight position, as
-  // the download progresses. However, if the download does not have known total
-  // size (the server didn't give us one), then we just spin an arc around until
-  // we're done.
-  float sweep_angle = 0.0;
-  float start_pos = static_cast<float>(kStartAngleDegrees);
-  if (percent_done < 0) {
-    sweep_angle = kUnknownAngleDegrees;
-    start_pos = static_cast<float>(start_angle);
-  } else if (percent_done > 0) {
-    sweep_angle = static_cast<float>(kMaxDegrees / 100.0 * percent_done);
-  }
-
-  // Set up an arc clipping region for the foreground image. Don't bother using
-  // a clipping region if it would round to 360 (really 0) degrees, since that
-  // would eliminate the foreground completely and be quite confusing (it would
-  // look like 0% complete when it should be almost 100%).
-  canvas->Save();
-  if (sweep_angle < static_cast<float>(kMaxDegrees - 1)) {
-    SkRect oval;
-    oval.set(SkIntToScalar(bounds.x()),
-             SkIntToScalar(bounds.y()),
-             SkIntToScalar(bounds.x() + kProgressIconSize),
-             SkIntToScalar(bounds.y() + kProgressIconSize));
-    SkPath path;
-    path.arcTo(oval,
-               SkFloatToScalar(start_pos),
-               SkFloatToScalar(sweep_angle), false);
-    path.lineTo(SkIntToScalar(bounds.x() + kProgressIconSize / 2),
-                SkIntToScalar(bounds.y() + kProgressIconSize / 2));
-
-    // gfx::Canvas::ClipPath does not provide for anti-aliasing.
-    canvas->sk_canvas()->clipPath(path, SkRegion::kIntersect_Op, true);
-  }
-
-  canvas->DrawImageInt(*foreground,
-                       bounds.x(),
-                       bounds.y());
-  canvas->Restore();
+  PaintCustomDownloadProgress(canvas, *background, *foreground,
+                              kProgressIconSize, bounds, start_angle,
+                              percent_done);
 }
 
 void PaintDownloadComplete(gfx::Canvas* canvas,
@@ -270,10 +287,8 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
 
   // Start at full opacity, then loop back and forth five times before ending
   // at zero opacity.
-  canvas->SaveLayerAlpha(GetOpacity(animation_progress), complete_bounds);
-  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y());
-  canvas->Restore();
+  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
+                       GetOpacity(animation_progress));
 }
 
 void PaintDownloadInterrupted(gfx::Canvas* canvas,
@@ -302,10 +317,8 @@ void PaintDownloadInterrupted(gfx::Canvas* canvas,
 
   // Start at zero opacity, then loop back and forth five times before ending
   // at full opacity.
-  canvas->SaveLayerAlpha(GetOpacity(1.0 - animation_progress), complete_bounds);
-  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y());
-  canvas->Restore();
+  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
+                       GetOpacity(1.0 - animation_progress));
 }
 
 // Load a language dependent height so that the dangerous download confirmation
@@ -335,6 +348,7 @@ void DragDownload(const DownloadItem* download,
                   gfx::Image* icon,
                   gfx::NativeView view) {
   DCHECK(download);
+  DCHECK(download->IsComplete());
 
   // Set up our OLE machinery
   ui::OSExchangeData data;
@@ -344,7 +358,7 @@ void DragDownload(const DownloadItem* download,
         download->GetFileNameToReportUser(), icon->ToImageSkia(), &data);
   }
 
-  const FilePath full_path = download->GetFullPath();
+  const base::FilePath full_path = download->GetTargetFilePath();
   data.SetFilename(full_path);
 
   std::string mime_type = download->GetMimeType();
@@ -363,15 +377,18 @@ void DragDownload(const DownloadItem* download,
   if (!root_window || !aura::client::GetDragDropClient(root_window))
     return;
 
-  gfx::Point location = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point location = gfx::Screen::GetScreenFor(view)->GetCursorScreenPoint();
+  // TODO(varunjain): Properly determine and send DRAG_EVENT_SOURCE below.
   aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
       data,
       root_window,
+      view,
       location,
-      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
+      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK,
+      ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
 #else  // We are on WIN without AURA
   // We cannot use Widget::RunShellDrag on WIN since the |view| is backed by a
-  // TabContentsViewWin, not a NativeWidgetWin.
+  // WebContentsViewWin, not a NativeWidgetWin.
   scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
   // Run the drag and drop loop
   DWORD effects;
@@ -442,8 +459,9 @@ string16 GetProgressStatusText(DownloadItem* download) {
                                     speed_text, amount, time_remaining);
 }
 
-FilePath GetCrDownloadPath(const FilePath& suggested_path) {
-  return FilePath(suggested_path.value() + FILE_PATH_LITERAL(".crdownload"));
+base::FilePath GetCrDownloadPath(const base::FilePath& suggested_path) {
+  return base::FilePath(suggested_path.value() +
+                        FILE_PATH_LITERAL(".crdownload"));
 }
 
 bool IsSavableURL(const GURL& url) {

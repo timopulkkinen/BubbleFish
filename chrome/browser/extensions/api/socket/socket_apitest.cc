@@ -12,6 +12,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
@@ -26,19 +27,27 @@ namespace {
 const std::string kHostname = "127.0.0.1";
 const int kPort = 8888;
 
-class SocketApiTest : public PlatformAppApiTest {
+class SocketApiTest : public ExtensionApiTest {
  public:
   SocketApiTest() : resolver_event_(true, false),
                     resolver_creator_(
                         new extensions::MockHostResolverCreator()) {
   }
 
-  void SetUpOnMainThread() OVERRIDE {
+  // We need this while the socket.{listen,accept} methods require the
+  // enable-experimental-extension-apis flag. After that we should remove it,
+  // as well as the "experimental" permission in the test apps' manifests.
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
+  }
+
+  virtual void SetUpOnMainThread() OVERRIDE {
     extensions::HostResolverWrapper::GetInstance()->SetHostResolverForTesting(
         resolver_creator_->CreateMockHostResolver());
   }
 
-  void CleanUpOnMainThread() OVERRIDE {
+  virtual void CleanUpOnMainThread() OVERRIDE {
     extensions::HostResolverWrapper::GetInstance()->
         SetHostResolverForTesting(NULL);
     resolver_creator_->DeleteMockHostResolver();
@@ -115,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketUDPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_UDP_ECHO,
                           net::TestServer::kLocalhost,
-                          FilePath(FILE_PATH_LITERAL("net/data"))));
+                          base::FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
@@ -142,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_TCP_ECHO,
                           net::TestServer::kLocalhost,
-                          FilePath(FILE_PATH_LITERAL("net/data"))));
+                          base::FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
@@ -177,15 +186,16 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerExtension) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketExperimentalPermissionTest) {
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerUnbindOnUnload) {
   ResultCatcher catcher;
-  catcher.RestrictToProfile(browser()->profile());
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("socket/unload"));
+  ASSERT_TRUE(extension);
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 
-  ExtensionTestMessageListener listener("ready", true);
+  UnloadExtension(extension->id());
 
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("socket/experimental")));
-  EXPECT_TRUE(listener.WaitUntilSatisfied());
-  listener.Reply("go");
-
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("socket/unload")))
+      << message_;
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }

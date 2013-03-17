@@ -8,20 +8,15 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/api/webdata/autofill_web_data_service.h"
 #include "chrome/browser/api/webdata/web_data_service_consumer.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "content/public/browser/web_contents_observer.h"
+
+struct FormData;
 
 namespace content {
 class BrowserContext;
-}
-
-namespace webkit {
-namespace forms {
-struct FormData;
-}
 }
 
 class AutofillExternalDelegate;
@@ -29,11 +24,10 @@ class AutofillExternalDelegate;
 // Per-tab Autocomplete history manager. Handles receiving form data
 // from the renderer and the storing and retrieving of form data
 // through WebDataServiceBase.
-class AutocompleteHistoryManager
-    : public content::WebContentsObserver,
-      public WebDataServiceConsumer,
-      public WebContentsUserData<AutocompleteHistoryManager> {
+class AutocompleteHistoryManager : public content::WebContentsObserver,
+                                   public WebDataServiceConsumer {
  public:
+  explicit AutocompleteHistoryManager(content::WebContents* web_contents);
   virtual ~AutocompleteHistoryManager();
 
   // content::WebContentsObserver implementation.
@@ -54,7 +48,7 @@ class AutocompleteHistoryManager
       const std::vector<string16>& autofill_labels,
       const std::vector<string16>& autofill_icons,
       const std::vector<int>& autofill_unique_ids);
-  void OnFormSubmitted(const webkit::forms::FormData& form);
+  void OnFormSubmitted(const FormData& form);
 
   // Must be public for the external delegate to use.
   void OnRemoveAutocompleteEntry(const string16& name, const string16& value);
@@ -63,28 +57,14 @@ class AutocompleteHistoryManager
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
 
  protected:
-  friend class AutocompleteHistoryManagerTest;
   friend class AutofillManagerTest;
-  FRIEND_TEST_ALL_PREFIXES(AutocompleteHistoryManagerTest, ExternalDelegate);
-  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
-                           TestTabContentsWithExternalDelegate);
 
-  // For tests.
-  AutocompleteHistoryManager(content::WebContents* web_contents,
-                             content::BrowserContext* context,
-                             scoped_ptr<AutofillWebDataService> wds);
-
+  // Sends the given |suggestions| for display in the Autofill popup.
   void SendSuggestions(const std::vector<string16>* suggestions);
-  void CancelPendingQuery();
-
-  // Exposed for testing.
-  AutofillExternalDelegate* external_delegate() {
-    return external_delegate_;
-  }
 
  private:
-  explicit AutocompleteHistoryManager(content::WebContents* web_contents);
-  friend class WebContentsUserData<AutocompleteHistoryManager>;
+  // Cancels the currently pending WebDataService query, if there is one.
+  void CancelPendingQuery();
 
   content::BrowserContext* browser_context_;
   scoped_ptr<AutofillWebDataService> autofill_data_;

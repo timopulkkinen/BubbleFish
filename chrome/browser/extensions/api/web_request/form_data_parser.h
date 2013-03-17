@@ -31,9 +31,6 @@ class FormDataParser {
     const std::string& value() const {
       return value_;
     }
-    void set_name(const base::StringPiece& str) {
-      str.CopyToString(&name_);
-    }
     void set_value(const base::StringPiece& str) {
       str.CopyToString(&value_);
     }
@@ -43,7 +40,6 @@ class FormDataParser {
     void set_value(const std::string& str) {
       value_ = str;
     }
-    void Reset();
 
    private:
     std::string name_;
@@ -56,12 +52,12 @@ class FormDataParser {
 
   // Creates a correct parser instance based on the |request|. Returns NULL
   // on failure.
-  static scoped_ptr<FormDataParser> Create(const net::URLRequest* request);
+  static scoped_ptr<FormDataParser> Create(const net::URLRequest& request);
 
   // Creates a correct parser instance based on |content_type_header|, the
   // "Content-Type" request header value. If |content_type_header| is NULL, it
   // defaults to "application/x-www-form-urlencoded". Returns NULL on failure.
-  static scoped_ptr<FormDataParser> Create(
+  static scoped_ptr<FormDataParser> CreateFromContentTypeHeader(
       const std::string* content_type_header);
 
   // Returns true if there was some data, it was well formed and all was read.

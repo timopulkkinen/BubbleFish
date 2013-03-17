@@ -143,42 +143,60 @@ below:
   <translations>
     <file path="resources/webkit_strings_am.xtb" lang="am" />
     <file path="resources/webkit_strings_ar.xtb" lang="ar" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ast.xtb" lang="ast" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ast.xtb" lang="ast" />
+    </if>
     <file path="resources/webkit_strings_bg.xtb" lang="bg" />
     <file path="resources/webkit_strings_bn.xtb" lang="bn" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_bs.xtb" lang="bs" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_bs.xtb" lang="bs" />
+    </if>
     <file path="resources/webkit_strings_ca.xtb" lang="ca" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ca-valencia.xtb" lang="ca@valencia" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ca-valencia.xtb" lang="ca@valencia" />
+    </if>
     <file path="resources/webkit_strings_cs.xtb" lang="cs" />
     <file path="resources/webkit_strings_da.xtb" lang="da" />
     <file path="resources/webkit_strings_de.xtb" lang="de" />
     <file path="resources/webkit_strings_el.xtb" lang="el" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_en-AU.xtb" lang="en-AU" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_en-AU.xtb" lang="en-AU" />
+    </if>
     <file path="resources/webkit_strings_en-GB.xtb" lang="en-GB" />
     <file path="resources/webkit_strings_es.xtb" lang="es" />
     <file path="resources/webkit_strings_es-419.xtb" lang="es-419" />
     <file path="resources/webkit_strings_et.xtb" lang="et" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_eu.xtb" lang="eu" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_eu.xtb" lang="eu" />
+    </if>
     <file path="resources/webkit_strings_fa.xtb" lang="fa" />
     <file path="resources/webkit_strings_fi.xtb" lang="fi" />
     <file path="resources/webkit_strings_fil.xtb" lang="fil" />
     <file path="resources/webkit_strings_fr.xtb" lang="fr" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_gl.xtb" lang="gl" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_gl.xtb" lang="gl" />
+    </if>
     <file path="resources/webkit_strings_gu.xtb" lang="gu" />
     <file path="resources/webkit_strings_hi.xtb" lang="hi" />
     <file path="resources/webkit_strings_hr.xtb" lang="hr" />
     <file path="resources/webkit_strings_hu.xtb" lang="hu" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_hy.xtb" lang="hy" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_hy.xtb" lang="hy" />
+    </if>
     <file path="resources/webkit_strings_id.xtb" lang="id" />
     <file path="resources/webkit_strings_it.xtb" lang="it" />
     <!-- The translation console uses 'iw' for Hebrew, but we use 'he'. -->
     <file path="resources/webkit_strings_iw.xtb" lang="he" />
     <file path="resources/webkit_strings_ja.xtb" lang="ja" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ka.xtb" lang="ka" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ka.xtb" lang="ka" />
+    </if>
     <file path="resources/webkit_strings_kn.xtb" lang="kn" />
     <file path="resources/webkit_strings_ko.xtb" lang="ko" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ku.xtb" lang="ku" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_kw.xtb" lang="kw" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ku.xtb" lang="ku" />
+      <file path="../../third_party/launchpad_translations/webkit_strings_kw.xtb" lang="kw" />
+    </if>
     <file path="resources/webkit_strings_lt.xtb" lang="lt" />
     <file path="resources/webkit_strings_lv.xtb" lang="lv" />
     <file path="resources/webkit_strings_ml.xtb" lang="ml" />
@@ -200,7 +218,9 @@ below:
     <file path="resources/webkit_strings_te.xtb" lang="te" />
     <file path="resources/webkit_strings_th.xtb" lang="th" />
     <file path="resources/webkit_strings_tr.xtb" lang="tr" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ug.xtb" lang="ug" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ug.xtb" lang="ug" />
+    </if>
     <file path="resources/webkit_strings_uk.xtb" lang="uk" />
     <file path="resources/webkit_strings_vi.xtb" lang="vi" />
     <file path="resources/webkit_strings_zh-CN.xtb" lang="zh-CN" />
@@ -263,6 +283,33 @@ below:
       </message>
       <message name="IDS_FORM_OTHER_DATE_LABEL" desc="Label for button that opens a full calendar picker so the user can choose dates other than the ones in the list." meaning="for date label">
         Other...
+      </message>
+      <message name="IDS_FORM_OTHER_MONTH_LABEL" desc="Label for button that opens a full month picker so the user can choose dates other than the ones in the list." meaning="for month label">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_TIME_LABEL" desc="Label for button that opens a full time picker so the user can choose dates other than the ones in the list." meaning="for time label">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_WEEK_LABEL" desc="Label for button that opens a full week picker so the user can choose dates other than the ones in the list." meaning="for week label">
+        Other...
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_DAY_OF_MONTH_FIELD" desc="Text for denoting day of month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        dd
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_MONTH_FIELD" desc="Text for denoting month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        mm
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_YEAR_FIELD" desc="Text for denoting day of month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        yyyy
+      </message>
+      <message name="IDS_FORM_THIS_MONTH_LABEL" desc="Label for button in month picker to select this month.">
+        This month
+      </message>
+      <message name="IDS_FORM_THIS_WEEK_LABEL" desc="Label for button in week picker to select this week.">
+        This week
+      </message>
+      <message name="IDS_FORM_WEEK_NUMBER_LABEL" desc="Label for week number column in a calendar.">
+        Week
       </message>
 
       <message name="IDS_RECENT_SEARCHES_NONE" desc="Label for only item in menu that appears when clicking on the search field image, when no searches have been performed">
@@ -336,6 +383,162 @@ below:
         Hours
       </message>
 
+      <message name="IDS_AX_MEDIA_DEFAULT" desc="Accessible description of a media control.">
+        media control
+      </message>
+
+      <message name="IDS_AX_MEDIA_AUDIO_ELEMENT" desc="Accessible description of audio">
+        audio
+      </message>
+
+      <message name="IDS_AX_MEDIA_VIDEO_ELEMENT" desc="Accessible description of video">
+        video
+      </message>
+
+      <message name="IDS_AX_MEDIA_MUTE_BUTTON" desc="accessibility role description for mute button">
+        mute
+      </message>
+
+      <message name="IDS_AX_MEDIA_UNMUTE_BUTTON" desc="accessibility role description for turn mute off button">
+        unmute
+      </message>
+
+      <message name="IDS_AX_MEDIA_PLAY_BUTTON" desc="accessibility role description for play button">
+        play
+      </message>
+
+      <message name="IDS_AX_MEDIA_PAUSE_BUTTON" desc="accessibility role description for pause button">
+        pause
+      </message>
+
+      <message name="IDS_AX_MEDIA_SLIDER" desc="accessibility role description for timeline slider">
+        movie time
+      </message>
+
+      <message name="IDS_AX_MEDIA_SLIDER_THUMB" desc="accessibility role description for timeline thumb">
+        movie timeline thumb
+      </message>
+
+      <message name="IDS_AX_MEDIA_REWIND_BUTTON" desc="accessibility role description for seek back 30 seconds button">
+        back 30 seconds
+      </message>
+
+      <message name="IDS_AX_MEDIA_RETURN_TO_REALTIME_BUTTON" desc="accessibility role description for return to real time button">
+        return to real time
+      </message>
+
+      <message name="IDS_AX_MEDIA_CURRENT_TIME_DISPLAY" desc="accessibility role description for elapsed time display">
+        elapsed time
+      </message>
+
+      <message name="IDS_AX_MEDIA_TIME_REMAINING_DISPLAY" desc="accessibility role description for time remaining display">
+        remaining time
+      </message>
+
+      <message name="IDS_AX_MEDIA_STATUS_DISPLAY" desc="accessibility role description for movie status">
+        status
+      </message>
+
+      <message name="IDS_AX_MEDIA_ENTER_FULL_SCREEN_BUTTON" desc="accessibility role description for enter fullscreen button">
+        enter full screen
+      </message>
+
+      <message name="IDS_AX_MEDIA_EXIT_FULL_SCREEN_BUTTON" desc="accessibility role description for exit fullscreen button">
+        exit full screen
+      </message>
+
+      <message name="IDS_AX_MEDIA_SEEK_FORWARD_BUTTON" desc="accessibility role description for fast forward button">
+        fast forward
+      </message>
+
+      <message name="IDS_AX_MEDIA_SEEK_BACK_BUTTON" desc="accessibility role description for fast reverse button">
+        fast reverse
+      </message>
+
+      <message name="IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON" desc="accessibility role description for show closed captions button">
+        show closed captions
+      </message>
+
+      <message name="IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON" desc="accessibility role description for hide closed captions button">
+        hide closed captions
+      </message>
+
+      <message name="IDS_AX_MEDIA_AUDIO_ELEMENT_HELP" desc="Accessible help of audio controls">
+        audio
+      </message>
+
+      <message name="IDS_AX_MEDIA_VIDEO_ELEMENT_HELP" desc="Accessible help of video">
+        video
+      </message>
+
+      <message name="IDS_AX_MEDIA_MUTE_BUTTON_HELP" desc="accessibility help description for mute button">
+        mute audio track
+      </message>
+
+      <message name="IDS_AX_MEDIA_UNMUTE_BUTTON_HELP" desc="accessibility help description for turn mute off button">
+        unmute audio track
+      </message>
+
+      <message name="IDS_AX_MEDIA_PLAY_BUTTON_HELP" desc="accessibility help description for play button">
+        begin playback
+      </message>
+
+      <message name="IDS_AX_MEDIA_PAUSE_BUTTON_HELP" desc="accessibility help description for pause button">
+        pause playback
+      </message>
+
+      <message name="IDS_AX_MEDIA_SLIDER_HELP" desc="accessibility help description for timeline slider">
+        movie time scrubber
+      </message>
+
+      <message name="IDS_AX_MEDIA_SLIDER_THUMB_HELP" desc="accessibility help description for timeline thumb">
+        movie time scrubber thumb
+      </message>
+
+      <message name="IDS_AX_MEDIA_REWIND_BUTTON_HELP" desc="accessibility help description for seek back 30 seconds button">
+        seek movie back 30 seconds
+      </message>
+
+      <message name="IDS_AX_MEDIA_RETURN_TO_REALTIME_BUTTON_HELP" desc="accessibility help description for return to real time button">
+        return streaming movie to real time
+      </message>
+
+      <message name="IDS_AX_MEDIA_CURRENT_TIME_DISPLAY_HELP" desc="accessibility help description for elapsed time display">
+        current time in seconds
+      </message>
+
+      <message name="IDS_AX_MEDIA_TIME_REMAINING_DISPLAY_HELP" desc="accessibility help description for time remaining display">
+        number of seconds ofmovie remaining
+      </message>
+
+      <message name="IDS_AX_MEDIA_STATUS_DISPLAY_HELP" desc="accessibility help description for movie status">
+        current movie status
+      </message>
+
+      <message name="IDS_AX_MEDIA_ENTER_FULL_SCREEN_BUTTON_HELP" desc="accessibility help description for enter fullscreen button">
+        play movie in full screen mode
+      </message>
+
+      <message name="IDS_AX_MEDIA_EXIT_FULL_SCREEN_BUTTON_HELP" desc="accessibility help description for exit fullscreen button">
+        exit full screen
+      </message>
+
+      <message name="IDS_AX_MEDIA_SEEK_FORWARD_BUTTON_HELP" desc="accessibility help description for fast forward button">
+        seek quickly forward
+      </message>
+
+      <message name="IDS_AX_MEDIA_SEEK_BACK_BUTTON_HELP" desc="accessibility help description for fast reverse button">
+        seek quickly back
+      </message>
+
+      <message name="IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON_HELP" desc="accessibility help description for show closed captions button">
+        start displaying closed captions
+      </message>
+
+      <message name="IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON_HELP" desc="accessibility help description for hide closed captions button">
+        stop displaying closed captions
+      </message>
+
       <message name="IDS_AX_MILLISECOND_FIELD_TEXT" desc="Accessible description of the millisecond field in a date/time control">
         Milliseconds
       </message>
@@ -367,6 +570,9 @@ below:
         1024 (Medium Grade)
       </message>
 
+      <message name="IDS_FORM_INPUT_WEEK_TEMPLATE" desc="A specfic week (1-53) in a specific year shown in a form control">
+        Week <ph name="WEEKNUMBER">$2<ex>51</ex></ph>, <ph name="YEAR">$1<ex>2012</ex></ph>
+      </message>
       <message name="IDS_FORM_VALIDATION_VALUE_MISSING_MULTIPLE_FILE" desc="Heading or short sentence shown when a file upload control in a webpage requires one or more files selected, but the user didn't specify any files.">
         Please select one or more files.
       </message>
@@ -384,6 +590,12 @@ below:
       </message>
       <message name="IDS_FORM_VALIDATION_STEP_MISMATCH" desc="Heading or short sentence shown when a form control value in a webpage should be aligned to a step value specified by the page author, but a user speficified non-aligned value. e.g. A number type field, minimum value is 0, and step value is 4. If A user-specified value is not a multiple of 4, this warning message is shown.">
         Invalid value.
+      </message>
+      <message name="IDS_FORM_VALIDATION_BAD_INPUT_DATETIME" desc="Heading or short sentence shown when a user specified an incomplete value or an invalid date (such as 02/31/2012) to a date/time form control in a webpage.">
+	Please enter a valid value. The field is incomplete or has an invalid date.
+      </message>
+      <message name="IDS_FORM_VALIDATION_BAD_INPUT_NUMBER" desc="Heading or short sentence shown when a user entered a non-number string to a number field in a webpage.">
+	Please enter a number.
       </message>
 
 <!-- The following IDS_FORM_VALIDATION_* messages were taken from Mozilla's dom.properties file.

@@ -68,13 +68,6 @@ const char* kHorizontalAligments[] = {
     "Right",
 };
 
-const char* kVerticalAlignments[] = {
-    "Default",
-    "Top",
-    "Middle",
-    "Bottom",
-};
-
 // Toggles bit |flag| on |flags| based on state of |checkbox|.
 void SetFlagFromCheckbox(Checkbox* checkbox, int* flags, int flag) {
   if (checkbox->checked())
@@ -222,10 +215,6 @@ void TextExample::CreateExampleView(View* container) {
                             "H-Align",
                             kHorizontalAligments,
                             arraysize(kHorizontalAligments));
-  v_align_cb_ = AddCombobox(layout,
-                            "V-Align",
-                            kVerticalAlignments,
-                            arraysize(kVerticalAlignments));
   eliding_cb_ = AddCombobox(layout,
                             "Eliding",
                             kElidingBehaviors,
@@ -267,7 +256,7 @@ void TextExample::ButtonPressed(Button* button, const ui::Event& event) {
   SetFlagFromCheckbox(break_checkbox_, &flags, gfx::Canvas::CHARACTER_BREAK);
   SetFlagFromCheckbox(bold_checkbox_, &style, gfx::Font::BOLD);
   SetFlagFromCheckbox(italic_checkbox_, &style, gfx::Font::ITALIC);
-  SetFlagFromCheckbox(underline_checkbox_, &style, gfx::Font::UNDERLINED);
+  SetFlagFromCheckbox(underline_checkbox_, &style, gfx::Font::UNDERLINE);
   text_view_->set_halo(halo_checkbox_->checked());
   text_view_->set_text_flags(flags);
   text_view_->SetFontStyle(style);
@@ -291,23 +280,6 @@ void TextExample::OnSelectedIndexChanged(Combobox* combobox) {
         break;
       case 3:
         text_flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
-        break;
-    }
-  } else if (combobox == v_align_cb_) {
-    text_flags &= ~(gfx::Canvas::TEXT_VALIGN_TOP |
-                    gfx::Canvas::TEXT_VALIGN_MIDDLE |
-                    gfx::Canvas::TEXT_VALIGN_BOTTOM);
-    switch (combobox->selected_index()) {
-      case 0:
-        break;
-      case 1:
-        text_flags |= gfx::Canvas::TEXT_VALIGN_TOP;
-        break;
-      case 2:
-        text_flags |= gfx::Canvas::TEXT_VALIGN_MIDDLE;
-        break;
-      case 3:
-        text_flags |= gfx::Canvas::TEXT_VALIGN_BOTTOM;
         break;
     }
   } else if (combobox == text_cb_) {

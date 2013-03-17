@@ -9,7 +9,7 @@
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -57,7 +57,13 @@ CoreOptionsHandler::CoreOptionsHandler()
 CoreOptionsHandler::~CoreOptionsHandler() {}
 
 void CoreOptionsHandler::InitializeHandler() {
-  plugin_status_pref_setter_.Init(Profile::FromWebUI(web_ui()), this);
+  Profile* profile = Profile::FromWebUI(web_ui());
+
+  plugin_status_pref_setter_.Init(
+      profile,
+      base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                 base::Unretained(this),
+                 profile->GetPrefs()));
 
   pref_change_filters_[prefs::kMetricsReportingEnabled] =
       base::Bind(&AllowMetricsReportingChange);
@@ -80,14 +86,6 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
   localized_strings->SetString("optionsPageTitle",
       l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
 
-  // Managed prefs
-  localized_strings->SetString("policyManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_MANAGED_PREFS));
-  localized_strings->SetString("extensionManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_EXTENSION_MANAGED_PREFS));
-  localized_strings->SetString("policyAndExtensionManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_EXTENSION_MANAGED_PREFS));
-
   // Controlled settings bubble.
   localized_strings->SetString("controlledSettingPolicy",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
@@ -95,9 +93,16 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_EXTENSION));
   localized_strings->SetString("controlledSettingRecommended",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_RECOMMENDED));
-  localized_strings->SetString("controlledSettingApplyRecommendation",
+  localized_strings->SetString("controlledSettingHasRecommendation",
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_CONTROLLED_SETTING_APPLY_RECOMMENDATION));
+          IDS_OPTIONS_CONTROLLED_SETTING_HAS_RECOMMENDATION));
+  localized_strings->SetString("controlledSettingFollowRecommendation",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_CONTROLLED_SETTING_FOLLOW_RECOMMENDATION));
+  localized_strings->SetString("controlledSettingsPolicy",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTINGS_POLICY));
+  localized_strings->SetString("controlledSettingsExtension",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTINGS_EXTENSION));
 
   // Search
   RegisterTitle(localized_strings, "searchPage", IDS_OPTIONS_SEARCH_PAGE_TITLE);
@@ -122,6 +127,8 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   localized_strings->SetString("close",
       l10n_util::GetStringUTF16(IDS_CLOSE));
+  localized_strings->SetString("done",
+      l10n_util::GetStringUTF16(IDS_DONE));
 }
 
 void CoreOptionsHandler::Uninitialize() {
@@ -136,22 +143,18 @@ void CoreOptionsHandler::Uninitialize() {
   }
 }
 
-void CoreOptionsHandler::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* pref_name = content::Details<std::string>(details).ptr();
-    if (*pref_name == prefs::kClearPluginLSODataEnabled) {
-      // This preference is stored in Local State, not in the user preferences.
-      UpdateClearPluginLSOData();
-      return;
-    }
-    if (*pref_name == prefs::kPepperFlashSettingsEnabled) {
-      UpdatePepperFlashSettingsEnabled();
-      return;
-    }
-    NotifyPrefChanged(*pref_name, std::string());
+void CoreOptionsHandler::OnPreferenceChanged(PrefService* service,
+                                             const std::string& pref_name) {
+  if (pref_name == prefs::kClearPluginLSODataEnabled) {
+    // This preference is stored in Local State, not in the user preferences.
+    UpdateClearPluginLSOData();
+    return;
   }
+  if (pref_name == prefs::kPepperFlashSettingsEnabled) {
+    UpdatePepperFlashSettingsEnabled();
+    return;
+  }
+  NotifyPrefChanged(pref_name, std::string());
 }
 
 void CoreOptionsHandler::RegisterMessages() {
@@ -203,17 +206,26 @@ base::Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
 }
 
 void CoreOptionsHandler::ObservePref(const std::string& pref_name) {
-  if (g_browser_process->local_state()->FindPreference(pref_name.c_str()))
-    local_state_registrar_.Add(pref_name.c_str(), this);
-  else
-    registrar_.Add(pref_name.c_str(), this);
+  if (g_browser_process->local_state()->FindPreference(pref_name.c_str())) {
+    local_state_registrar_.Add(
+        pref_name.c_str(),
+        base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                   base::Unretained(this),
+                   local_state_registrar_.prefs()));
+  } else {
+    registrar_.Add(
+        pref_name.c_str(),
+        base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                   base::Unretained(this),
+                   registrar_.prefs()));
+  }
 }
 
 void CoreOptionsHandler::StopObservingPref(const std::string& pref_name) {
   if (g_browser_process->local_state()->FindPreference(pref_name.c_str()))
-    local_state_registrar_.Remove(pref_name.c_str(), this);
+    local_state_registrar_.Remove(pref_name.c_str());
   else
-    registrar_.Remove(pref_name.c_str(), this);
+    registrar_.Remove(pref_name.c_str());
 }
 
 void CoreOptionsHandler::SetPref(const std::string& pref_name,
@@ -288,7 +300,7 @@ void CoreOptionsHandler::DispatchPrefChangeNotification(
             PreferenceCallbackMap::const_iterator> range =
       pref_callback_map_.equal_range(name);
   ListValue result_value;
-  result_value.Append(base::Value::CreateStringValue(name.c_str()));
+  result_value.Append(new base::StringValue(name.c_str()));
   result_value.Append(value.release());
   for (PreferenceCallbackMap::const_iterator iter = range.first;
        iter != range.second; ++iter) {
@@ -331,9 +343,28 @@ base::Value* CoreOptionsHandler::CreateValueForPref(
 
 PrefService* CoreOptionsHandler::FindServiceForPref(
     const std::string& pref_name) {
-  return g_browser_process->local_state()->FindPreference(pref_name.c_str()) ?
-      g_browser_process->local_state() :
-      Profile::FromWebUI(web_ui())->GetPrefs();
+  // Proxy is a peculiar case: on ChromeOS, settings exist in both user
+  // prefs and local state, but chrome://settings should affect only user prefs.
+  // Elsewhere the proxy settings are stored in local state.
+  // See http://crbug.com/157147
+  PrefService* user_prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  if (pref_name == prefs::kProxy)
+#if defined(OS_CHROMEOS)
+    return user_prefs;
+#else
+    return g_browser_process->local_state();
+#endif
+
+  // Find which PrefService contains the given pref. Pref names should not
+  // be duplicated across services, however if they are, prefer the user's
+  // prefs.
+  if (user_prefs->FindPreference(pref_name.c_str()))
+    return user_prefs;
+
+  if (g_browser_process->local_state()->FindPreference(pref_name.c_str()))
+    return g_browser_process->local_state();
+
+  return user_prefs;
 }
 
 void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
@@ -447,7 +478,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
       double double_value;
       CHECK(value->GetAsDouble(&double_value));
       int int_value = static_cast<int>(double_value);
-      temp_value.reset(base::Value::CreateIntegerValue(int_value));
+      temp_value.reset(new base::FundamentalValue(int_value));
       value = temp_value.get();
       break;
     }
@@ -461,7 +492,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
       std::string original;
       CHECK(value->GetAsString(&original));
       GURL fixed = URLFixerUpper::FixupURL(original, std::string());
-      temp_value.reset(base::Value::CreateStringValue(fixed.spec()));
+      temp_value.reset(new base::StringValue(fixed.spec()));
       value = temp_value.get();
       break;
     }
@@ -508,19 +539,17 @@ void CoreOptionsHandler::HandleUserMetricsAction(const ListValue* args) {
 }
 
 void CoreOptionsHandler::UpdateClearPluginLSOData() {
-  scoped_ptr<base::Value> enabled(
-      base::Value::CreateBooleanValue(
-          plugin_status_pref_setter_.IsClearPluginLSODataEnabled()));
+  base::FundamentalValue enabled(
+          plugin_status_pref_setter_.IsClearPluginLSODataEnabled());
   web_ui()->CallJavascriptFunction(
-      "OptionsPage.setClearPluginLSODataEnabled", *enabled);
+      "OptionsPage.setClearPluginLSODataEnabled", enabled);
 }
 
 void CoreOptionsHandler::UpdatePepperFlashSettingsEnabled() {
-  scoped_ptr<base::Value> enabled(
-      base::Value::CreateBooleanValue(
-          plugin_status_pref_setter_.IsPepperFlashSettingsEnabled()));
+  base::FundamentalValue enabled(
+          plugin_status_pref_setter_.IsPepperFlashSettingsEnabled());
   web_ui()->CallJavascriptFunction(
-      "OptionsPage.setPepperFlashSettingsEnabled", *enabled);
+      "OptionsPage.setPepperFlashSettingsEnabled", enabled);
 }
 
 }  // namespace options

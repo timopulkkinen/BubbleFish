@@ -9,9 +9,11 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
+#include "chrome/browser/content_settings/content_settings_provider.h"
+#include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
@@ -75,7 +77,6 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
         mock_ui_(NULL),
         cert_id_(0),
         browser_thread_(content::BrowserThread::UI, &message_loop_),
-        infobar_tab_helper_(NULL),
         url_("http://www.example.com") {
   }
 
@@ -97,8 +98,8 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
                                      start_date,
                                      expiration_date);
 
-    TabSpecificContentSettings::CreateForWebContents(contents());
-    infobar_tab_helper_.reset(new InfoBarTabHelper(contents()));
+    TabSpecificContentSettings::CreateForWebContents(web_contents());
+    InfoBarService::CreateForWebContents(web_contents());
 
     // Setup the mock cert store.
     EXPECT_CALL(cert_store_, RetrieveCert(cert_id_, _) )
@@ -130,15 +131,17 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
   MockWebsiteSettingsUI* mock_ui() { return mock_ui_.get(); }
   const SSLStatus& ssl() { return ssl_; }
   TabSpecificContentSettings* tab_specific_content_settings() {
-    return TabSpecificContentSettings::FromWebContents(contents());
+    return TabSpecificContentSettings::FromWebContents(web_contents());
   }
-  InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
+  InfoBarService* infobar_service() {
+    return InfoBarService::FromWebContents(web_contents());
+  }
 
   WebsiteSettings* website_settings() {
     if (!website_settings_.get()) {
       website_settings_.reset(new WebsiteSettings(
           mock_ui(), profile(), tab_specific_content_settings(),
-          infobar_tab_helper_.get(), url(), ssl(), cert_store()));
+          infobar_service(), url(), ssl(), cert_store()));
     }
     return website_settings_.get();
   }
@@ -151,7 +154,6 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
   int cert_id_;
   scoped_refptr<net::X509Certificate> cert_;
   content::TestBrowserThread browser_thread_;
-  scoped_ptr<InfoBarTabHelper> infobar_tab_helper_;
   MockCertStore cert_store_;
   GURL url_;
 };
@@ -174,6 +176,12 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
   setting = content_settings->GetContentSetting(
       url(), url(), CONTENT_SETTINGS_TYPE_NOTIFICATIONS, "");
   EXPECT_EQ(setting, CONTENT_SETTING_ASK);
+  setting = content_settings->GetContentSetting(
+      url(), url(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "");
+  EXPECT_EQ(setting, CONTENT_SETTING_ASK);
+  setting = content_settings->GetContentSetting(
+      url(), url(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "");
+  EXPECT_EQ(setting, CONTENT_SETTING_ASK);
 
   EXPECT_CALL(*mock_ui(), SetIdentityInfo(_));
   EXPECT_CALL(*mock_ui(), SetCookieInfo(_));
@@ -183,7 +191,7 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
   // OnSitePermissionChanged() is called.
 // TODO(markusheintz): This is a temporary hack to fix issue: http://crbug.com/144203.
 #if defined(OS_MACOSX)
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_)).Times(5);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_)).Times(6);
 #else
   EXPECT_CALL(*mock_ui(), SetPermissionInfo(_)).Times(1);
 #endif
@@ -199,6 +207,8 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
                                               CONTENT_SETTING_ALLOW);
   website_settings()->OnSitePermissionChanged(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW);
+  website_settings()->OnSitePermissionChanged(
+        CONTENT_SETTINGS_TYPE_MEDIASTREAM, CONTENT_SETTING_ALLOW);
 
   // Verify that the site permissions were changed correctly.
   setting = content_settings->GetContentSetting(
@@ -212,6 +222,12 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
   EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
   setting = content_settings->GetContentSetting(
       url(), url(), CONTENT_SETTINGS_TYPE_NOTIFICATIONS, "");
+  EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
+  setting = content_settings->GetContentSetting(
+      url(), url(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "");
+  EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
+  setting = content_settings->GetContentSetting(
+      url(), url(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "");
   EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
 }
 
@@ -352,9 +368,9 @@ TEST_F(WebsiteSettingsTest, NoInfoBar) {
   SetDefaultUIExpectations(mock_ui());
   EXPECT_CALL(*mock_ui(), SetSelectedTab(
       WebsiteSettingsUI::TAB_ID_PERMISSIONS));
-  EXPECT_EQ(0u, infobar_tab_helper()->GetInfoBarCount());
+  EXPECT_EQ(0u, infobar_service()->GetInfoBarCount());
   website_settings()->OnUIClosing();
-  EXPECT_EQ(0u, infobar_tab_helper()->GetInfoBarCount());
+  EXPECT_EQ(0u, infobar_service()->GetInfoBarCount());
 }
 
 TEST_F(WebsiteSettingsTest, ShowInfoBar) {
@@ -364,7 +380,8 @@ TEST_F(WebsiteSettingsTest, ShowInfoBar) {
 
   // SetPermissionInfo() is called once initially, and then again every time
   // OnSitePermissionChanged() is called.
-// TODO(markusheintz): This is a temporary hack to fix issue: http://crbug.com/144203.
+  // TODO(markusheintz): This is a temporary hack to fix issue:
+  // http://crbug.com/144203.
 #if defined(OS_MACOSX)
   EXPECT_CALL(*mock_ui(), SetPermissionInfo(_)).Times(2);
 #else
@@ -373,20 +390,16 @@ TEST_F(WebsiteSettingsTest, ShowInfoBar) {
 
   EXPECT_CALL(*mock_ui(), SetSelectedTab(
       WebsiteSettingsUI::TAB_ID_PERMISSIONS));
-  EXPECT_EQ(0u, infobar_tab_helper()->GetInfoBarCount());
+  EXPECT_EQ(0u, infobar_service()->GetInfoBarCount());
   website_settings()->OnSitePermissionChanged(
       CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTING_ALLOW);
   website_settings()->OnUIClosing();
-  EXPECT_EQ(1u, infobar_tab_helper()->GetInfoBarCount());
+  EXPECT_EQ(1u, infobar_service()->GetInfoBarCount());
 
-  // Removing an |InfoBarDelegate| from the |InfoBarTabHelper| does not delete
+  // Removing an |InfoBarDelegate| from the |InfoBarService| does not delete
   // it. Hence the |delegate| must be cleaned up after it was removed from the
-  // |infobar_tab_helper|.
+  // |infobar_service|.
   scoped_ptr<InfoBarDelegate> delegate(
-      infobar_tab_helper()->GetInfoBarDelegateAt(0));
-  infobar_tab_helper()->RemoveInfoBar(delegate.get());
-  // Right now InfoBarDelegates delete themselves via
-  // InfoBarClosed(); once InfoBars own their delegates, this can become a
-  // simple reset() call
-  delegate.release()->InfoBarClosed();
+      infobar_service()->GetInfoBarDelegateAt(0));
+  infobar_service()->RemoveInfoBar(delegate.get());
 }

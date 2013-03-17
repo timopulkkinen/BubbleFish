@@ -9,8 +9,7 @@
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/file_path.h"
-#include "base/time.h"
+#include "base/files/file_path.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -23,6 +22,10 @@ class BASE_EXPORT SysInfo {
   // Return the number of bytes of physical memory on the current machine.
   static int64 AmountOfPhysicalMemory();
 
+  // Return the number of bytes of current available physical memory on the
+  // machine.
+  static int64 AmountOfAvailablePhysicalMemory();
+
   // Return the number of megabytes of physical memory on the current machine.
   static int AmountOfPhysicalMemoryMB() {
     return static_cast<int>(AmountOfPhysicalMemory() / 1024 / 1024);
@@ -31,6 +34,9 @@ class BASE_EXPORT SysInfo {
   // Return the available disk space in bytes on the volume containing |path|,
   // or -1 on failure.
   static int64 AmountOfFreeDiskSpace(const FilePath& path);
+
+  // Returns system uptime in milliseconds.
+  static int64 Uptime();
 
   // Returns the name of the host operating system.
   static std::string OperatingSystemName();
@@ -54,8 +60,7 @@ class BASE_EXPORT SysInfo {
   // Exact return value may differ across platforms.
   // e.g. a 32-bit x86 kernel on a 64-bit capable CPU will return "x86",
   //      whereas a x86-64 kernel on the same CPU will return "x86_64"
-  // TODO(thestig) Rename this to OperatingSystemArchitecture().
-  static std::string CPUArchitecture();
+  static std::string OperatingSystemArchitecture();
 
   // Avoid using this. Use base/cpu.h to get information about the CPU instead.
   // http://crbug.com/148884
@@ -99,6 +104,7 @@ class BASE_EXPORT SysInfo {
   static std::string GetDeviceName();
 
   static int DalvikHeapSizeMB();
+  static int DalvikHeapGrowthLimitMB();
 #endif  // defined(OS_ANDROID)
 };
 

@@ -46,7 +46,10 @@
         "VeriSignClass3_G3",
         "Google1024",
         "Google2048",
-        "EquifaxSecureCA"
+        "GoogleBackup1024",
+        "GoogleBackup2048",
+        "EquifaxSecureCA",
+        "GeoTrustGlobal"
       ],
       "bad_static_spki_hashes": [
         "Aetna",
@@ -137,6 +140,13 @@
         "AlphaSSL_G2",
         "Tor2web"
       ]
+    },
+    {
+      "name": "cryptoCat",
+      "static_spki_hashes": [
+        "DigiCertEVRoot",
+        "CryptoCat1"
+      ]
     }
   ],
 
@@ -163,9 +173,11 @@
     { "name": "talk.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "hostedtalkgadget.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "plus.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "plus.sandbox.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "script.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "history.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
 
-    // Other Google related domain that must use HTTPS.
+    // Other Google-related domains that must use HTTPS.
     { "name": "market.android.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "ssl.google-analytics.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "drive.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
@@ -174,6 +186,10 @@
     { "name": "apis.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "chromiumcodereview.appspot.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
     { "name": "codereview.appspot.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "codereview.chromium.org", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "code.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
+    { "name": "googlecode.com", "include_subdomains": true, "pins": "google" },
+    { "name": "dl.google.com", "include_subdomains": true, "mode": "force-https", "pins": "google" },
 
     // chart.apis.google.com is *not* HSTS because the certificate doesn't match
     // and there are lots of links out there that still use the name. The correct
@@ -187,7 +203,6 @@
     { "name": "youtube.com", "include_subdomains": true, "pins": "google" },
     { "name": "googleapis.com", "include_subdomains": true, "pins": "google" },
     { "name": "googleadservices.com", "include_subdomains": true, "pins": "google" },
-    { "name": "googlecode.com", "include_subdomains": true, "pins": "google" },
     { "name": "appspot.com", "include_subdomains": true, "pins": "google" },
     { "name": "googlesyndication.com", "include_subdomains": true, "pins": "google" },
     { "name": "doubleclick.net", "include_subdomains": true, "pins": "google" },
@@ -428,10 +443,12 @@
     { "name": "neg9.org", "mode": "force-https" },
     { "name": "riseup.net", "include_subdomains": true, "mode": "force-https" },
     { "name": "factor.cc", "mode": "force-https" },
-    { "name": "members.mayfirst.org", "mode": "force-https" },
-    { "name": "support.mayfirst.org", "mode": "force-https" },
-    { "name": "id.mayfirst.org", "mode": "force-https" },
-    { "name": "lists.mayfirst.org", "mode": "force-https" },
+    { "name": "members.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "support.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "id.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "lists.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "webmail.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "roundcube.mayfirst.org", "include_subdomains": true, "mode": "force-https" },
     { "name": "aladdinschools.appspot.com", "mode": "force-https" },
     { "name": "ottospora.nl", "include_subdomains": true, "mode": "force-https" },
     { "name": "www.paycheckrecords.com", "mode": "force-https" },
@@ -462,6 +479,7 @@
     { "name": "blog.torproject.org", "include_subdomains": true, "mode": "force-https", "pins": "tor" },
     { "name": "check.torproject.org", "include_subdomains": true, "mode": "force-https", "pins": "tor" },
     { "name": "www.torproject.org", "include_subdomains": true, "mode": "force-https", "pins": "tor" },
+    { "name": "dist.torproject.org", "include_subdomains": true, "mode": "force-https", "pins": "tor" },
     { "name": "www.moneybookers.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "ledgerscope.net", "mode": "force-https" },
     { "name": "www.ledgerscope.net", "mode": "force-https" },
@@ -481,11 +499,11 @@
     { "name": "www.developer.mydigipass.com", "mode": "force-https" },
     { "name": "sandbox.mydigipass.com", "mode": "force-https" },
     { "name": "www.sandbox.mydigipass.com", "mode": "force-https" },
-    { "name": "crypto.cat", "include_subdomains": true, "mode": "force-https" },
+    { "name": "crypto.cat", "mode": "force-https", "pins": "cryptoCat" },
     { "name": "bigshinylock.minazo.net", "include_subdomains": true, "mode": "force-https" },
     { "name": "crate.io", "include_subdomains": true, "mode": "force-https" },
-    { "name": "twitter.com", "pins": "twitterCom" },
-    { "name": "www.twitter.com", "include_subdomains": true, "pins": "twitterCom" },
+    { "name": "twitter.com", "mode": "force-https", "pins": "twitterCom" },
+    { "name": "www.twitter.com", "include_subdomains": true, "mode": "force-https", "pins": "twitterCom" },
     { "name": "api.twitter.com", "include_subdomains": true, "pins": "twitterCDN" },
     { "name": "oauth.twitter.com", "include_subdomains": true, "pins": "twitterCom" },
     { "name": "mobile.twitter.com", "include_subdomains": true, "pins": "twitterCom" },
@@ -526,6 +544,40 @@
     { "name": "makeyourlaws.org", "mode": "force-https" },
     { "name": "www.makeyourlaws.org", "mode": "force-https" },
     { "name": "iop.intuit.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "surfeasy.com", "mode": "force-https" },
+    { "name": "www.surfeasy.com", "mode": "force-https" },
+    { "name": "packagist.org", "mode": "force-https" },
+    { "name": "lookout.com", "mode": "force-https" },
+    { "name": "www.lookout.com", "mode": "force-https" },
+    { "name": "mylookout.com", "mode": "force-https" },
+    { "name": "www.mylookout.com", "mode": "force-https" },
+    { "name": "dm.lookout.com", "mode": "force-https" },
+    { "name": "dm.mylookout.com", "mode": "force-https" },
+    { "name": "itriskltd.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "stocktrade.de", "include_subdomains": true, "mode": "force-https" },
+    { "name": "openshift.redhat.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "therapynotes.com", "mode": "force-https" },
+    { "name": "www.therapynotes.com", "mode": "force-https" },
+    { "name": "wiz.biz", "include_subdomains": true, "mode": "force-https" },
+    { "name": "my.onlime.ch", "include_subdomains": true, "mode": "force-https" },
+    { "name": "webmail.onlime.ch", "include_subdomains": true, "mode": "force-https" },
+    { "name": "crm.onlime.ch", "include_subdomains": true, "mode": "force-https" },
+    { "name": "www.gov.uk", "include_subdomains": true, "mode": "force-https" },
+    { "name": "silentcircle.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "silentcircle.org", "include_subdomains": true, "mode": "force-https" },
+    { "name": "serverdensity.io", "include_subdomains": true, "mode": "force-https" },
+    { "name": "my.alfresco.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "webmail.gigahost.dk", "include_subdomains": true, "mode": "force-https" },
+    { "name": "paymill.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "paymill.de", "include_subdomains": true, "mode": "force-https" },
+    { "name": "gocardless.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "espra.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "zoo24.de", "include_subdomains": true, "mode": "force-https" },
+    { "name": "mega.co.nz", "mode": "force-https" },
+    { "name": "api.mega.co.nz", "include_subdomains": true, "mode": "force-https" },
+    { "name": "lockify.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "writeapp.me", "mode": "force-https" },
+    { "name": "bugzilla.mozilla.org", "include_subdomains": true, "mode": "force-https" },
 
     // Entries that are only valid if the client supports SNI.
     { "name": "gmail.com", "mode": "force-https", "pins": "google", "snionly": true },

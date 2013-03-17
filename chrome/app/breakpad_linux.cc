@@ -15,8 +15,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,11 +24,12 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/eintr_wrapper.h"
-#include "base/file_path.h"
-#include "base/global_descriptors_posix.h"
+#include "base/files/file_path.h"
 #include "base/linux_util.h"
 #include "base/path_service.h"
+#include "base/platform_file.h"
+#include "base/posix/eintr_wrapper.h"
+#include "base/posix/global_descriptors.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "breakpad/src/client/linux/handler/exception_handler.h"
@@ -40,6 +41,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info_posix.h"
+#include "chrome/common/dump_without_crashing.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
 #include "content/public/common/content_descriptors.h"
@@ -50,6 +52,7 @@
 
 #include "base/android/build_info.h"
 #include "base/android/path_utils.h"
+#include "chrome/common/descriptors_android.h"
 #include "third_party/lss/linux_syscall_support.h"
 #else
 #include "sandbox/linux/seccomp-legacy/linux_syscall_support.h"
@@ -78,13 +81,7 @@ using google_breakpad::MinidumpDescriptor;
 
 namespace {
 
-#if !defined(ADDRESS_SANITIZER)
 const char kUploadURL[] = "https://clients2.google.com/cr/report";
-#else
-// AddressSanitizer should currently upload the crash reports to the staging
-// crash server.
-const char kUploadURL[] = "https://clients2.google.com/cr/staging_report";
-#endif
 
 bool g_is_crash_reporter_enabled = false;
 uint64_t g_process_start_time = 0;
@@ -92,6 +89,9 @@ char* g_crash_log_path = NULL;
 ExceptionHandler* g_breakpad = NULL;
 #if defined(ADDRESS_SANITIZER)
 const char* g_asan_report_str = NULL;
+#endif
+#if defined(OS_ANDROID)
+char* g_process_type = NULL;
 #endif
 
 // Writes the value |v| as 16 hex characters to the memory pointed at by
@@ -125,6 +125,15 @@ uint64_t kernel_timeval_to_ms(struct kernel_timeval *tv) {
 
 // String buffer size to use to convert a uint64_t to string.
 size_t kUint64StringSize = 21;
+
+void SetProcessStartTime() {
+  // Set the base process start time value.
+  struct timeval tv;
+  if (!gettimeofday(&tv, NULL))
+    g_process_start_time = timeval_to_ms(&tv);
+  else
+    g_process_start_time = 0;
+}
 
 // uint64_t version of my_int_len() from
 // breakpad/src/common/linux/linux_libc_support.h. Return the length of the
@@ -178,6 +187,30 @@ char* my_strncat(char *dest, const char* src, size_t len) {
   return ret;
 }
 #endif
+
+// Populates the passed in allocated strings and their sizes with the GUID,
+// crash url and distro of the crashing process.
+// The passed strings are expected to be at least kGuidSize, kMaxActiveURLSize
+// and kDistroSize bytes long respectively.
+void PopulateGUIDAndURLAndDistro(char* guid, size_t* guid_len_param,
+                                 char* crash_url, size_t* crash_url_len_param,
+                                 char* distro, size_t* distro_len_param) {
+  size_t guid_len = std::min(my_strlen(child_process_logging::g_client_id),
+                             kGuidSize);
+  size_t crash_url_len =
+      std::min(my_strlen(child_process_logging::g_active_url),
+               kMaxActiveURLSize);
+  size_t distro_len = std::min(my_strlen(base::g_linux_distro), kDistroSize);
+  memcpy(guid, child_process_logging::g_client_id, guid_len);
+  memcpy(crash_url, child_process_logging::g_active_url, crash_url_len);
+  memcpy(distro, base::g_linux_distro, distro_len);
+  if (guid_len_param)
+    *guid_len_param = guid_len;
+  if (crash_url_len_param)
+    *crash_url_len_param = crash_url_len;
+  if (distro_len_param)
+    *distro_len_param = distro_len;
+}
 
 // MIME substrings.
 const char g_rn[] = "\r\n";
@@ -396,16 +429,10 @@ bool FinalizeCrashDoneAndroid() {
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       android_build_info->package_version_code());
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
-                      CHROME_SYMBOLS_ID);
+                      CHROME_BUILD_ID);
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       "### ### ### ### ### ### ### ### ### ### ### ### ###");
   return false;
-}
-
-bool CrashDoneNonBrowserAndroid(const MinidumpDescriptor& minidump,
-                                void* context,
-                                bool succeeded) {
-  return FinalizeCrashDoneAndroid();
 }
 #endif
 
@@ -414,13 +441,17 @@ bool CrashDone(const MinidumpDescriptor& minidump,
                const bool succeeded) {
   // WARNING: this code runs in a compromised context. It may not call into
   // libc nor allocate memory normally.
-  if (!succeeded)
+  if (!succeeded) {
+    const char msg[] = "Failed to generate minidump.";
+    WriteLog(msg, sizeof(msg) - 1);
     return false;
+  }
 
   DCHECK(!minidump.IsFD());
 
-  BreakpadInfo info;
+  BreakpadInfo info = {0};
   info.filename = minidump.path();
+  info.fd = minidump.fd();
 #if defined(ADDRESS_SANITIZER)
   google_breakpad::PageAllocator allocator;
   const size_t log_path_len = my_strlen(minidump.path());
@@ -481,12 +512,12 @@ void AsanLinuxBreakpadCallback(const char* report) {
 void EnableCrashDumping(bool unattended) {
   g_is_crash_reporter_enabled = true;
 
-  FilePath tmp_path("/tmp");
+  base::FilePath tmp_path("/tmp");
   PathService::Get(base::DIR_TEMP, &tmp_path);
 
-  FilePath dumps_path(tmp_path);
+  base::FilePath dumps_path(tmp_path);
   if (PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path)) {
-    FilePath logfile =
+    base::FilePath logfile =
         dumps_path.AppendASCII(CrashUploadList::kReporterLogFilename);
     std::string logfile_str = logfile.value();
     const size_t crash_log_path_len = logfile_str.size() + 1;
@@ -494,12 +525,14 @@ void EnableCrashDumping(bool unattended) {
     strncpy(g_crash_log_path, logfile_str.c_str(), crash_log_path_len);
   }
   DCHECK(!g_breakpad);
+  MinidumpDescriptor minidump_descriptor(dumps_path.value());
+  minidump_descriptor.set_size_limit(kMaxMinidumpFileSize);
 #if defined(OS_ANDROID)
   unattended = true;  // Android never uploads directly.
 #endif
   if (unattended) {
     g_breakpad = new ExceptionHandler(
-        MinidumpDescriptor(dumps_path.value()),
+        minidump_descriptor,
         NULL,
         CrashDoneNoUpload,
         NULL,
@@ -511,7 +544,7 @@ void EnableCrashDumping(bool unattended) {
 #if !defined(OS_ANDROID)
   // Attended mode
   g_breakpad = new ExceptionHandler(
-      MinidumpDescriptor(dumps_path.value()),
+      minidump_descriptor,
       NULL,
       CrashDoneUpload,
       NULL,
@@ -520,6 +553,78 @@ void EnableCrashDumping(bool unattended) {
 #endif
 }
 
+#if defined(OS_ANDROID)
+bool CrashDoneInProcessNoUpload(
+    const google_breakpad::MinidumpDescriptor& descriptor,
+    void* context,
+    const bool succeeded) {
+  // WARNING: this code runs in a compromised context. It may not call into
+  // libc nor allocate memory normally.
+  if (!succeeded) {
+    static const char msg[] = "Crash dump generation failed.\n";
+    WriteLog(msg, sizeof(msg) - 1);
+    return false;
+  }
+
+  // Start constructing the message to send to the browser.
+  char guid[kGuidSize + 1] = {0};
+  char crash_url[kMaxActiveURLSize + 1] = {0};
+  char distro[kDistroSize + 1] = {0};
+  size_t guid_length = 0;
+  size_t crash_url_length = 0;
+  size_t distro_length = 0;
+  PopulateGUIDAndURLAndDistro(guid, &guid_length, crash_url, &crash_url_length,
+                              distro, &distro_length);
+  BreakpadInfo info = {0};
+  info.filename = NULL;
+  info.fd = descriptor.fd();
+  info.process_type = g_process_type;
+  info.process_type_length = my_strlen(g_process_type);
+  info.crash_url = crash_url;
+  info.crash_url_length = crash_url_length;
+  info.guid = guid;
+  info.guid_length = guid_length;
+  info.distro = distro;
+  info.distro_length = distro_length;
+  info.upload = false;
+  info.process_start_time = g_process_start_time;
+  HandleCrashDump(info);
+  return FinalizeCrashDoneAndroid();
+}
+
+void EnableNonBrowserCrashDumping(int minidump_fd) {
+  // This will guarantee that the BuildInfo has been initialized and subsequent
+  // calls will not require memory allocation.
+  base::android::BuildInfo::GetInstance();
+  child_process_logging::SetClientId("Android");
+
+  // On Android, the current sandboxing uses process isolation, in which the
+  // child process runs with a different UID. That breaks the normal crash
+  // reporting where the browser process generates the minidump by inspecting
+  // the child process. This is because the browser process now does not have
+  // the permission to access the states of the child process (as it has a
+  // different UID).
+  // TODO(jcivelli): http://b/issue?id=6776356 we should use a watchdog
+  // process forked from the renderer process that generates the minidump.
+  if (minidump_fd == -1) {
+    LOG(ERROR) << "Minidump file descriptor not found, crash reporting will "
+        " not work.";
+    return;
+  }
+  SetProcessStartTime();
+
+  g_is_crash_reporter_enabled = true;
+  // Save the process type (it is leaked).
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  const std::string process_type =
+      parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
+  const size_t process_type_len = process_type.size() + 1;
+  g_process_type = new char[process_type_len];
+  strncpy(g_process_type, process_type.c_str(), process_type_len);
+  new google_breakpad::ExceptionHandler(MinidumpDescriptor(minidump_fd),
+      NULL, CrashDoneInProcessNoUpload, NULL, true, -1);
+}
+#else
 // Non-Browser = Extension, Gpu, Plugins, Ppapi and Renderer
 bool NonBrowserCrashHandler(const void* crash_context,
                             size_t crash_context_size,
@@ -528,7 +633,7 @@ bool NonBrowserCrashHandler(const void* crash_context,
   int fds[2] = { -1, -1 };
   if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
     static const char msg[] = "Failed to create socket for crash dumping.\n";
-    WriteLog(msg, sizeof(msg)-1);
+    WriteLog(msg, sizeof(msg) - 1);
     return false;
   }
 
@@ -536,16 +641,7 @@ bool NonBrowserCrashHandler(const void* crash_context,
   char guid[kGuidSize + 1] = {0};
   char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
-  const size_t guid_len =
-      std::min(my_strlen(child_process_logging::g_client_id), kGuidSize);
-  const size_t crash_url_len =
-      std::min(my_strlen(child_process_logging::g_active_url),
-               kMaxActiveURLSize);
-  const size_t distro_len =
-      std::min(my_strlen(base::g_linux_distro), kDistroSize);
-  memcpy(guid, child_process_logging::g_client_id, guid_len);
-  memcpy(crash_url, child_process_logging::g_active_url, crash_url_len);
-  memcpy(distro, base::g_linux_distro, distro_len);
+  PopulateGUIDAndURLAndDistro(guid, NULL, crash_url, NULL, distro, NULL);
 
   char b;  // Dummy variable for sys_read below.
   const char* b_addr = &b;  // Get the address of |b| so we can create the
@@ -603,7 +699,7 @@ bool NonBrowserCrashHandler(const void* crash_context,
 
   if (HANDLE_EINTR(sys_sendmsg(fd, &msg, 0)) < 0) {
     static const char errmsg[] = "Failed to tell parent about crash.\n";
-    WriteLog(errmsg, sizeof(errmsg)-1);
+    WriteLog(errmsg, sizeof(errmsg) - 1);
     IGNORE_RET(sys_close(fds[1]));
     return false;
   }
@@ -611,17 +707,10 @@ bool NonBrowserCrashHandler(const void* crash_context,
 
   if (HANDLE_EINTR(sys_read(fds[0], &b, 1)) != 1) {
     static const char errmsg[] = "Parent failed to complete crash dump.\n";
-    WriteLog(errmsg, sizeof(errmsg)-1);
+    WriteLog(errmsg, sizeof(errmsg) - 1);
   }
 
-#if defined(OS_ANDROID)
-  // When false is returned, breakpad will continue to its minidump generator
-  // and then to the HandlerCallback, which, in this case, is
-  // CrashDoneNonBrowserAndroid().
-  return false;
-#else
   return true;
-#endif
 }
 
 void EnableNonBrowserCrashDumping() {
@@ -630,25 +719,56 @@ void EnableNonBrowserCrashDumping() {
   // We deliberately leak this object.
   DCHECK(!g_breakpad);
 
-  ExceptionHandler::MinidumpCallback crash_done_callback = NULL;
-#if defined(OS_ANDROID)
-  crash_done_callback = CrashDoneNonBrowserAndroid;
-#endif
-
   g_breakpad = new ExceptionHandler(
       MinidumpDescriptor("/tmp"),  // Unused but needed or Breakpad will assert.
       NULL,
-      crash_done_callback,
+      NULL,
       reinterpret_cast<void*>(fd),  // Param passed to the crash handler.
       true,
       -1);
   g_breakpad->set_crash_handler(NonBrowserCrashHandler);
 }
+#endif  // defined(OS_ANDROID)
 
 }  // namespace
 
+void LoadDataFromFD(google_breakpad::PageAllocator& allocator,
+                    int fd, bool close_fd, uint8_t** file_data, size_t* size) {
+  STAT_STRUCT st;
+  if (FSTAT_FUNC(fd, &st) != 0) {
+    static const char msg[] = "Cannot upload crash dump: stat failed\n";
+    WriteLog(msg, sizeof(msg) - 1);
+    if (close_fd)
+      IGNORE_RET(sys_close(fd));
+    return;
+  }
+
+  *file_data = reinterpret_cast<uint8_t*>(allocator.Alloc(st.st_size));
+  if (!(*file_data)) {
+    static const char msg[] = "Cannot upload crash dump: cannot alloc\n";
+    WriteLog(msg, sizeof(msg) - 1);
+    if (close_fd)
+      IGNORE_RET(sys_close(fd));
+    return;
+  }
+  my_memset(*file_data, 0xf, st.st_size);
+
+  *size = st.st_size;
+  int byte_read = sys_read(fd, *file_data, *size);
+  if (byte_read == -1) {
+    static const char msg[] = "Cannot upload crash dump: read failed\n";
+    WriteLog(msg, sizeof(msg) - 1);
+    if (close_fd)
+      IGNORE_RET(sys_close(fd));
+    return;
+  }
+
+  if (close_fd)
+    IGNORE_RET(sys_close(fd));
+}
+
 void LoadDataFromFile(google_breakpad::PageAllocator& allocator,
-                      const BreakpadInfo& info, const char* filename,
+                      const char* filename,
                       int* fd, uint8_t** file_data, size_t* size) {
   // WARNING: this code runs in a compromised context. It may not call into
   // libc nor allocate memory normally.
@@ -657,45 +777,48 @@ void LoadDataFromFile(google_breakpad::PageAllocator& allocator,
 
   if (*fd < 0) {
     static const char msg[] = "Cannot upload crash dump: failed to open\n";
-    WriteLog(msg, sizeof(msg));
-    return;
-  }
-  STAT_STRUCT st;
-  if (FSTAT_FUNC(*fd, &st) != 0) {
-    static const char msg[] = "Cannot upload crash dump: stat failed\n";
-    WriteLog(msg, sizeof(msg));
-    IGNORE_RET(sys_close(*fd));
+    WriteLog(msg, sizeof(msg) - 1);
     return;
   }
 
-  *file_data = reinterpret_cast<uint8_t*>(allocator.Alloc(st.st_size));
-  if (!(*file_data)) {
-    static const char msg[] = "Cannot upload crash dump: cannot alloc\n";
-    WriteLog(msg, sizeof(msg));
-    IGNORE_RET(sys_close(*fd));
-    return;
-  }
-  my_memset(*file_data, 0xf, st.st_size);
-
-  *size = st.st_size;
-  sys_read(*fd, *file_data, *size);
-  IGNORE_RET(sys_close(*fd));
+  LoadDataFromFD(allocator, *fd, true, file_data, size);
 }
 
 void HandleCrashDump(const BreakpadInfo& info) {
   int dumpfd;
+  bool keep_fd = false;
   size_t dump_size;
   uint8_t* dump_data;
   google_breakpad::PageAllocator allocator;
-  LoadDataFromFile(allocator, info, info.filename,
-                   &dumpfd, &dump_data, &dump_size);
+
+  if (info.fd != -1) {
+    // Dump is provided with an open FD.
+    keep_fd = true;
+    dumpfd = info.fd;
+
+    // The FD is pointing to the end of the file.
+    // Rewind, we'll read the data next.
+    if (lseek(dumpfd, 0, SEEK_SET) == -1) {
+      static const char msg[] = "Cannot upload crash dump: failed to "
+          "reposition minidump FD\n";
+      WriteLog(msg, sizeof(msg) - 1);
+      IGNORE_RET(sys_close(dumpfd));
+      return;
+    }
+    LoadDataFromFD(allocator, info.fd, false, &dump_data, &dump_size);
+  } else {
+    // Dump is provided with a path.
+    keep_fd = false;
+    LoadDataFromFile(allocator, info.filename, &dumpfd, &dump_data, &dump_size);
+  }
+
+  // TODO(jcivelli): make log work when using FDs.
 #if defined(ADDRESS_SANITIZER)
   int logfd;
   size_t log_size;
   uint8_t* log_data;
   // Load the AddressSanitizer log into log_data.
-  LoadDataFromFile(allocator, info, info.log_filename,
-                   &logfd, &log_data, &log_size);
+  LoadDataFromFile(allocator, info.log_filename, &logfd, &log_data, &log_size);
 #endif
 
   // We need to build a MIME block for uploading to the server. Since we are
@@ -712,33 +835,45 @@ void HandleCrashDump(const BreakpadInfo& info) {
       "/tmp/chromium-upload-XXXXXXXXXXXXXXXX";
   char temp_file[sizeof(temp_file_template)];
   int temp_file_fd = -1;
-  if (info.upload) {
-    memcpy(temp_file, temp_file_template, sizeof(temp_file_template));
-
-    for (unsigned i = 0; i < 10; ++i) {
-      uint64_t t;
-      sys_read(ufd, &t, sizeof(t));
-      write_uint64_hex(temp_file + sizeof(temp_file) - (16 + 1), t);
-
-      temp_file_fd = sys_open(temp_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
-      if (temp_file_fd >= 0)
-        break;
-    }
-
-    if (temp_file_fd < 0) {
-      static const char msg[] = "Failed to create temporary file in /tmp: "
-          "cannot upload crash dump\n";
+  if (keep_fd) {
+    temp_file_fd = dumpfd;
+    // Rewind the destination, we are going to overwrite it.
+    if (lseek(dumpfd, 0, SEEK_SET) == -1) {
+      static const char msg[] = "Cannot upload crash dump: failed to "
+          "reposition minidump FD (2)\n";
       WriteLog(msg, sizeof(msg) - 1);
-      IGNORE_RET(sys_close(ufd));
+      IGNORE_RET(sys_close(dumpfd));
       return;
     }
   } else {
-    temp_file_fd = sys_open(info.filename, O_WRONLY, 0600);
-    if (temp_file_fd < 0) {
-      static const char msg[] = "Failed to save crash dump: failed to open\n";
-      WriteLog(msg, sizeof(msg) - 1);
-      IGNORE_RET(sys_close(ufd));
-      return;
+    if (info.upload) {
+      memcpy(temp_file, temp_file_template, sizeof(temp_file_template));
+
+      for (unsigned i = 0; i < 10; ++i) {
+        uint64_t t;
+        sys_read(ufd, &t, sizeof(t));
+        write_uint64_hex(temp_file + sizeof(temp_file) - (16 + 1), t);
+
+        temp_file_fd = sys_open(temp_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (temp_file_fd >= 0)
+          break;
+      }
+
+      if (temp_file_fd < 0) {
+        static const char msg[] = "Failed to create temporary file in /tmp: "
+            "cannot upload crash dump\n";
+        WriteLog(msg, sizeof(msg) - 1);
+        IGNORE_RET(sys_close(ufd));
+        return;
+      }
+    } else {
+      temp_file_fd = sys_open(info.filename, O_WRONLY, 0600);
+      if (temp_file_fd < 0) {
+        static const char msg[] = "Failed to save crash dump: failed to open\n";
+        WriteLog(msg, sizeof(msg) - 1);
+        IGNORE_RET(sys_close(ufd));
+        return;
+      }
     }
   }
 
@@ -840,17 +975,14 @@ void HandleCrashDump(const BreakpadInfo& info) {
 #elif defined(OS_CHROMEOS)
     static const char chrome_product_msg[] = "Chrome_ChromeOS";
 #else  // OS_LINUX
+#if !defined(ADDRESS_SANITIZER)
     static const char chrome_product_msg[] = "Chrome_Linux";
+#else
+    static const char chrome_product_msg[] = "Chrome_Linux_ASan";
+#endif
 #endif
 
-#if defined (OS_ANDROID)
-    base::android::BuildInfo* android_build_info =
-        base::android::BuildInfo::GetInstance();
-    static const char* version_msg =
-        android_build_info->package_version_code();
-#else
     static const char version_msg[] = PRODUCT_VERSION;
-#endif
 
     writer.AddBoundary();
     writer.AddPairString("prod", chrome_product_msg);
@@ -875,7 +1007,10 @@ void HandleCrashDump(const BreakpadInfo& info) {
     static const char device[] = "device";
     static const char model[] = "model";
     static const char brand[] = "brand";
+    static const char exception_info[] = "exception_info";
 
+    base::android::BuildInfo* android_build_info =
+        base::android::BuildInfo::GetInstance();
     writer.AddPairString(
         android_build_id, android_build_info->android_build_id());
     writer.AddBoundary();
@@ -888,6 +1023,11 @@ void HandleCrashDump(const BreakpadInfo& info) {
     writer.AddBoundary();
     writer.AddPairString(brand, android_build_info->brand());
     writer.AddBoundary();
+    if (android_build_info->java_exception_info() != NULL) {
+      writer.AddPairString(exception_info,
+                           android_build_info->java_exception_info());
+      writer.AddBoundary();
+    }
 #endif
     writer.Flush();
   }
@@ -919,15 +1059,26 @@ void HandleCrashDump(const BreakpadInfo& info) {
 
   // If GPU info is known, send it.
   if (*child_process_logging::g_gpu_vendor_id) {
+#if !defined(OS_ANDROID)
     static const char vendor_msg[] = "gpu-venid";
     static const char device_msg[] = "gpu-devid";
+#endif
+    static const char gl_vendor_msg[] = "gpu-gl-vendor";
+    static const char gl_renderer_msg[] = "gpu-gl-renderer";
     static const char driver_msg[] = "gpu-driver";
     static const char psver_msg[] = "gpu-psver";
     static const char vsver_msg[] = "gpu-vsver";
 
+#if !defined(OS_ANDROID)
     writer.AddPairString(vendor_msg, child_process_logging::g_gpu_vendor_id);
     writer.AddBoundary();
     writer.AddPairString(device_msg, child_process_logging::g_gpu_device_id);
+    writer.AddBoundary();
+#endif
+    writer.AddPairString(gl_vendor_msg, child_process_logging::g_gpu_gl_vendor);
+    writer.AddBoundary();
+    writer.AddPairString(gl_renderer_msg,
+                         child_process_logging::g_gpu_gl_renderer);
     writer.AddBoundary();
     writer.AddPairString(driver_msg, child_process_logging::g_gpu_driver_ver);
     writer.AddBoundary();
@@ -1062,34 +1213,41 @@ void HandleCrashDump(const BreakpadInfo& info) {
   IGNORE_RET(sys_close(temp_file_fd));
 
 #if defined(OS_ANDROID)
-  __android_log_write(ANDROID_LOG_WARN,
-                      kGoogleBreakpad,
-                      "Output crash dump file:");
-  __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad, info.filename);
+  if (info.filename) {
+    int filename_length = my_strlen(info.filename);
 
-  char pid_buf[kUint64StringSize];
-  uint64_t pid_str_len = my_uint64_len(info.pid);
-  my_uint64tos(pid_buf, info.pid, pid_str_len);
+    // If this was a file, we need to copy it to the right place and use the
+    // right file name so it gets uploaded by the browser.
+    const char msg[] = "Output crash dump file:";
+    WriteLog(msg, sizeof(msg) - 1);
+    WriteLog(info.filename, filename_length - 1);
 
-  // -1 because we won't need the null terminator on the original filename.
-  size_t done_filename_len = my_strlen(info.filename) + pid_str_len - 1;
-  char* done_filename = reinterpret_cast<char*>(
-      allocator.Alloc(done_filename_len));
-  // Rename the file such that the pid is the suffix in order to signal other
-  // processes that the minidump is complete. The advantage of using the pid as
-  // the suffix is that it is trivial to associate the minidump with the
-  // crashed process.
-  // Finally, note strncpy prevents null terminators from
-  // being copied. Pad the rest with 0's.
-  my_strncpy(done_filename, info.filename, done_filename_len);
-  // Append the suffix a null terminator should be added.
-  my_strncat(done_filename, pid_buf, pid_str_len);
-  // Rename the minidump file to signal that it is complete.
-  if (rename(info.filename, done_filename)) {
-    __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad, "Failed to rename:");
-    __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad, info.filename);
-    __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad, "to");
-    __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad, done_filename);
+    char pid_buf[kUint64StringSize];
+    uint64_t pid_str_length = my_uint64_len(info.pid);
+    my_uint64tos(pid_buf, info.pid, pid_str_length);
+
+    // -1 because we won't need the null terminator on the original filename.
+    unsigned done_filename_len = filename_length - 1 + pid_str_length;
+    char* done_filename = reinterpret_cast<char*>(
+        allocator.Alloc(done_filename_len));
+    // Rename the file such that the pid is the suffix in order signal to other
+    // processes that the minidump is complete. The advantage of using the pid
+    // as the suffix is that it is trivial to associate the minidump with the
+    // crashed process.
+    // Finally, note strncpy prevents null terminators from
+    // being copied. Pad the rest with 0's.
+    my_strncpy(done_filename, info.filename, done_filename_len);
+    // Append the suffix a null terminator should be added.
+    my_strncat(done_filename, pid_buf, pid_str_length);
+    // Rename the minidump file to signal that it is complete.
+    if (rename(info.filename, done_filename)) {
+      const char failed_msg[] = "Failed to rename:";
+      WriteLog(failed_msg, sizeof(failed_msg) - 1);
+      WriteLog(info.filename, filename_length - 1);
+      const char to_msg[] = "to";
+      WriteLog(to_msg, sizeof(to_msg) - 1);
+      WriteLog(done_filename, done_filename_len - 1);
+    }
   }
 #endif
 
@@ -1270,8 +1428,10 @@ void InitCrashReporter() {
              process_type == switches::kZygoteProcess ||
              process_type == switches::kGpuProcess) {
 #if defined(OS_ANDROID)
-    child_process_logging::SetClientId("Android");
-#endif
+    NOTREACHED() << "Breakpad initialized with InitCrashReporter() instead of "
+      "InitNonBrowserCrashReporter in " << process_type << " process.";
+    return;
+#else
     // We might be chrooted in a zygote or renderer process so we cannot call
     // GetCollectStatsConsent because that needs access the the user's home
     // dir. Instead, we set a command line flag for these processes.
@@ -1290,14 +1450,11 @@ void InitCrashReporter() {
       child_process_logging::SetClientId(switch_value);
     }
     EnableNonBrowserCrashDumping();
+    VLOG(1) << "Non Browser crash dumping enabled for: " << process_type;
+#endif  // #if defined(OS_ANDROID)
   }
 
-  // Set the base process start time value.
-  struct timeval tv;
-  if (!gettimeofday(&tv, NULL))
-    g_process_start_time = timeval_to_ms(&tv);
-  else
-    g_process_start_time = 0;
+  SetProcessStartTime();
 
   logging::SetDumpWithoutCrashingFunction(&DumpProcess);
 #if defined(ADDRESS_SANITIZER)
@@ -1305,6 +1462,24 @@ void InitCrashReporter() {
   __asan_set_error_report_callback(AsanLinuxBreakpadCallback);
 #endif
 }
+
+#if defined(OS_ANDROID)
+void InitNonBrowserCrashReporterForAndroid() {
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableCrashReporter)) {
+    // On Android we need to provide a FD to the file where the minidump is
+    // generated as the renderer and browser run with different UIDs
+    // (preventing the browser from inspecting the renderer process).
+    int minidump_fd = base::GlobalDescriptors::GetInstance()->
+        MaybeGet(kAndroidMinidumpDescriptor);
+    if (minidump_fd == base::kInvalidPlatformFileValue) {
+      NOTREACHED() << "Could not find minidump FD, crash reporting disabled.";
+    } else {
+      EnableNonBrowserCrashDumping(minidump_fd);
+    }
+  }
+}
+#endif  // OS_ANDROID
 
 bool IsCrashReporterEnabled() {
   return g_is_crash_reporter_enabled;

@@ -11,24 +11,32 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
+#include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "content/browser/renderer_host/backing_store_aura.h"
 #include "content/browser/renderer_host/dip_util.h"
+#include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/ui_events_helper.h"
 #include "content/browser/renderer_host/web_input_event_aura.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/tooltip_client.h"
@@ -40,20 +48,25 @@
 #include "ui/aura/window_tracker.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_recognizer.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/hidden_window.h"
+#include "ui/gfx/gdi_util.h"
 #endif
+
+using gfx::RectToSkIRect;
+using gfx::SkIRectToRect;
 
 using WebKit::WebScreenInfo;
 using WebKit::WebTouchEvent;
@@ -103,17 +116,89 @@ BOOL CALLBACK ShowWindowsCallback(HWND window, LPARAM param) {
   RenderWidgetHostViewAura* widget =
       reinterpret_cast<RenderWidgetHostViewAura*>(param);
 
-  HWND parent =
-      widget->GetNativeView()->GetRootWindow()->GetAcceleratedWidget();
-  if (GetProp(window, kWidgetOwnerProperty) == widget)
+  if (GetProp(window, kWidgetOwnerProperty) == widget) {
+    HWND parent =
+        widget->GetNativeView()->GetRootWindow()->GetAcceleratedWidget();
     SetParent(window, parent);
+  }
+  return TRUE;
+}
+
+struct CutoutRectsParams {
+  RenderWidgetHostViewAura* widget;
+  std::vector<gfx::Rect> cutout_rects;
+  std::map<HWND, webkit::npapi::WebPluginGeometry>* geometry;
+};
+
+// Used to update the region for the windowed plugin to draw in. We start with
+// the clip rect from the renderer, then remove the cutout rects from the
+// renderer, and then remove the transient windows from the root window and the
+// constrained windows from the parent window.
+BOOL CALLBACK SetCutoutRectsCallback(HWND window, LPARAM param) {
+  CutoutRectsParams* params = reinterpret_cast<CutoutRectsParams*>(param);
+
+  if (GetProp(window, kWidgetOwnerProperty) == params->widget) {
+    // First calculate the offset of this plugin from the root window, since
+    // the cutouts are relative to the root window.
+    HWND parent = params->widget->GetNativeView()->GetRootWindow()->
+        GetAcceleratedWidget();
+    POINT offset;
+    offset.x = offset.y = 0;
+    MapWindowPoints(window, parent, &offset, 1);
+
+    // Now get the cached clip rect and cutouts for this plugin window that came
+    // from the renderer.
+    std::map<HWND, webkit::npapi::WebPluginGeometry>::iterator i =
+        params->geometry->begin();
+    while (i != params->geometry->end() &&
+           i->second.window != window &&
+           GetParent(i->second.window) != window) {
+      ++i;
+    }
+
+    if (i == params->geometry->end()) {
+      NOTREACHED();
+      return TRUE;
+    }
+
+    HRGN hrgn = CreateRectRgn(i->second.clip_rect.x(),
+                              i->second.clip_rect.y(),
+                              i->second.clip_rect.right(),
+                              i->second.clip_rect.bottom());
+    // We start with the cutout rects that came from the renderer, then add the
+    // ones that came from transient and constrained windows.
+    std::vector<gfx::Rect> cutout_rects = i->second.cutout_rects;
+    for (size_t i = 0; i < params->cutout_rects.size(); ++i) {
+      gfx::Rect offset_cutout = params->cutout_rects[i];
+      offset_cutout.Offset(-offset.x, -offset.y);
+      cutout_rects.push_back(offset_cutout);
+    }
+    gfx::SubtractRectanglesFromRegion(hrgn, cutout_rects);
+    SetWindowRgn(window, hrgn, TRUE);
+  }
+  return TRUE;
+}
+
+// A callback function for EnumThreadWindows to enumerate and dismiss
+// any owned popup windows.
+BOOL CALLBACK DismissOwnedPopups(HWND window, LPARAM arg) {
+  const HWND toplevel_hwnd = reinterpret_cast<HWND>(arg);
+
+  if (::IsWindowVisible(window)) {
+    const HWND owner = ::GetWindow(window, GW_OWNER);
+    if (toplevel_hwnd == owner) {
+      ::PostMessage(window, WM_CANCELMODE, 0, 0);
+    }
+  }
+
   return TRUE;
 }
 #endif
 
 void UpdateWebTouchEventAfterDispatch(WebKit::WebTouchEvent* event,
                                       WebKit::WebTouchPoint* point) {
-  if (point->state != WebKit::WebTouchPoint::StateReleased)
+  if (point->state != WebKit::WebTouchPoint::StateReleased &&
+      point->state != WebKit::WebTouchPoint::StateCancelled)
     return;
   --event->touchesLength;
   for (unsigned i = point - event->touches;
@@ -128,11 +213,13 @@ bool CanRendererHandleEvent(const ui::MouseEvent* event) {
     return false;
 
 #if defined(OS_WIN)
-  // Renderer cannot handle WM_XBUTTON events.
+  // Renderer cannot handle WM_XBUTTON or NC events.
   switch (event->native_event().message) {
     case WM_XBUTTONDOWN:
     case WM_XBUTTONUP:
     case WM_XBUTTONDBLCLK:
+    case WM_NCMOUSELEAVE:
+    case WM_NCMOUSEMOVE:
     case WM_NCXBUTTONDOWN:
     case WM_NCXBUTTONUP:
     case WM_NCXBUTTONDBLCLK:
@@ -144,19 +231,29 @@ bool CanRendererHandleEvent(const ui::MouseEvent* event) {
   return true;
 }
 
+// We don't mark these as handled so that they're sent back to the
+// DefWindowProc so it can generate WM_APPCOMMAND as necessary.
+bool IsXButtonUpEvent(const ui::MouseEvent* event) {
+#if defined(OS_WIN)
+  switch (event->native_event().message) {
+    case WM_XBUTTONUP:
+    case WM_NCXBUTTONUP:
+      return true;
+  }
+#endif
+  return false;
+}
+
 void GetScreenInfoForWindow(WebScreenInfo* results, aura::Window* window) {
   const gfx::Display display = window ?
-      gfx::Screen::GetDisplayNearestWindow(window) :
-      gfx::Screen::GetPrimaryDisplay();
-  const gfx::Size size = display.size();
-  results->rect = WebKit::WebRect(0, 0, size.width(), size.height());
-  results->availableRect = results->rect;
+      gfx::Screen::GetScreenFor(window)->GetDisplayNearestWindow(window) :
+      gfx::Screen::GetScreenFor(window)->GetPrimaryDisplay();
+  results->rect = display.bounds();
+  results->availableRect = display.work_area();
   // TODO(derat|oshima): Don't hardcode this. Get this from display object.
   results->depth = 24;
   results->depthPerComponent = 8;
-  int default_dpi = display.device_scale_factor() * 160;
-  results->verticalDPI = default_dpi;
-  results->horizontalDPI = default_dpi;
+  results->deviceScaleFactor = display.device_scale_factor();
 }
 
 bool ShouldSendPinchGesture() {
@@ -166,14 +263,122 @@ bool ShouldSendPinchGesture() {
   return pinch_allowed;
 }
 
-bool ShouldReleaseFrontSurface() {
-  static bool release_front_surface_allowed =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableUIReleaseFrontSurface);
-  return release_front_surface_allowed;
+bool PointerEventActivates(const ui::Event& event) {
+  if (event.type() == ui::ET_MOUSE_PRESSED)
+    return true;
+
+  if (event.type() == ui::ET_GESTURE_BEGIN) {
+    const ui::GestureEvent& gesture =
+        static_cast<const ui::GestureEvent&>(event);
+    return gesture.details().touch_points() == 1;
+  }
+
+  return false;
+}
+
+// Swap ack for the renderer when kCompositeToMailbox is enabled.
+void SendCompositorFrameAck(
+    int32 route_id,
+    int renderer_host_id,
+    const gpu::Mailbox& received_mailbox,
+    const gfx::Size& received_size,
+    bool skip_frame,
+    const scoped_refptr<ui::Texture>& texture_to_produce) {
+  cc::CompositorFrameAck ack;
+  ack.gl_frame_data.reset(new cc::GLFrameData());
+  DCHECK(!texture_to_produce || !skip_frame);
+  if (texture_to_produce) {
+    std::string mailbox_name = texture_to_produce->Produce();
+    std::copy(mailbox_name.data(),
+              mailbox_name.data() + mailbox_name.length(),
+              reinterpret_cast<char*>(ack.gl_frame_data->mailbox.name));
+    ack.gl_frame_data->size = texture_to_produce->size();
+    ack.gl_frame_data->sync_point =
+        content::ImageTransportFactory::GetInstance()->InsertSyncPoint();
+  } else if (skip_frame) {
+    // Skip the frame, i.e. tell the producer to reuse the same buffer that
+    // we just received.
+    ack.gl_frame_data->size = received_size;
+    ack.gl_frame_data->mailbox = received_mailbox;
+  }
+
+  RenderWidgetHostImpl::SendSwapCompositorFrameAck(
+      route_id, renderer_host_id, ack);
+}
+
+void AcknowledgeBufferForGpu(
+    int32 route_id,
+    int gpu_host_id,
+    const std::string& received_mailbox,
+    bool skip_frame,
+    const scoped_refptr<ui::Texture>& texture_to_produce) {
+  AcceleratedSurfaceMsg_BufferPresented_Params ack;
+  uint32 sync_point = 0;
+  DCHECK(!texture_to_produce || !skip_frame);
+  if (texture_to_produce) {
+    ack.mailbox_name = texture_to_produce->Produce();
+    sync_point =
+        content::ImageTransportFactory::GetInstance()->InsertSyncPoint();
+  } else if (skip_frame) {
+    ack.mailbox_name = received_mailbox;
+    ack.sync_point = 0;
+  }
+
+  ack.sync_point = sync_point;
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(
+      route_id, gpu_host_id, ack);
 }
 
 }  // namespace
+
+// We need to watch for mouse events outside a Web Popup or its parent
+// and dismiss the popup for certain events.
+class RenderWidgetHostViewAura::EventFilterForPopupExit :
+    public ui::EventHandler {
+ public:
+  explicit EventFilterForPopupExit(RenderWidgetHostViewAura* rwhva)
+      : rwhva_(rwhva) {
+    DCHECK(rwhva_);
+    aura::RootWindow* root_window = rwhva_->window_->GetRootWindow();
+    DCHECK(root_window);
+    root_window->AddPreTargetHandler(this);
+  }
+
+  virtual ~EventFilterForPopupExit() {
+    aura::RootWindow* root_window = rwhva_->window_->GetRootWindow();
+    DCHECK(root_window);
+    root_window->RemovePreTargetHandler(this);
+  }
+
+  // Overridden from ui::EventHandler
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+    rwhva_->ApplyEventFilterForPopupExit(event);
+  }
+
+ private:
+  RenderWidgetHostViewAura* rwhva_;
+
+  DISALLOW_COPY_AND_ASSIGN(EventFilterForPopupExit);
+};
+
+void RenderWidgetHostViewAura::ApplyEventFilterForPopupExit(
+    ui::MouseEvent* event) {
+  if (in_shutdown_) {
+    event_filter_for_popup_exit_.reset();
+    return;
+  }
+  if (is_fullscreen_ || event->type() != ui::ET_MOUSE_PRESSED ||
+      !event->target())
+    return;
+
+  DCHECK(popup_parent_host_view_);
+  aura::Window* target = static_cast<aura::Window*>(event->target());
+  if (target != window_ && target != popup_parent_host_view_->window_) {
+    event_filter_for_popup_exit_.reset();
+    in_shutdown_ = true;
+    host_->Shutdown();
+  }
+}
 
 // We have to implement the WindowObserver interface on a separate object
 // because clang doesn't like implementing multiple interfaces that have
@@ -181,12 +386,24 @@ bool ShouldReleaseFrontSurface() {
 // RenderWidgetHostViewAura.
 class RenderWidgetHostViewAura::WindowObserver : public aura::WindowObserver {
  public:
-  explicit WindowObserver(RenderWidgetHostViewAura* view) : view_(view) {}
-  virtual ~WindowObserver() {}
+  explicit WindowObserver(RenderWidgetHostViewAura* view)
+      : view_(view) {
+    view_->window_->AddObserver(this);
+  }
+
+  virtual ~WindowObserver() {
+    view_->window_->RemoveObserver(this);
+  }
 
   // Overridden from aura::WindowObserver:
+  virtual void OnWindowAddedToRootWindow(aura::Window* window) OVERRIDE {
+    if (window == view_->window_)
+      view_->AddedToRootWindow();
+  }
+
   virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE {
-    view_->RemovingFromRootWindow();
+    if (window == view_->window_)
+      view_->RemovingFromRootWindow();
   }
 
  private:
@@ -195,13 +412,122 @@ class RenderWidgetHostViewAura::WindowObserver : public aura::WindowObserver {
   DISALLOW_COPY_AND_ASSIGN(WindowObserver);
 };
 
+#if defined(OS_WIN)
+// On Windows, we need to watch the top level window for changes to transient
+// windows because they can cover the view and we need to ensure that they're
+// rendered on top of windowed NPAPI plugins.
+class RenderWidgetHostViewAura::TransientWindowObserver
+    : public aura::WindowObserver {
+ public:
+  explicit TransientWindowObserver(RenderWidgetHostViewAura* view)
+      : view_(view), top_level_(NULL) {
+    view_->window_->AddObserver(this);
+  }
+
+  virtual ~TransientWindowObserver() {
+    view_->window_->RemoveObserver(this);
+    StopObserving();
+  }
+
+  // Overridden from aura::WindowObserver:
+  virtual void OnWindowHierarchyChanged(
+      const aura::WindowObserver::HierarchyChangeParams& params) OVERRIDE {
+    aura::Window* top_level = GetToplevelWindow();
+    if (top_level == top_level_)
+      return;
+
+    StopObserving();
+    top_level_ = top_level;
+    if (top_level_ && top_level_ != view_->window_)
+      top_level_->AddObserver(this);
+  }
+
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+    if (window == top_level_)
+      StopObserving();
+  }
+
+  virtual void OnWindowBoundsChanged(aura::Window* window,
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE {
+    if (window->transient_parent())
+      SendPluginCutoutRects();
+  }
+
+  virtual void OnWindowVisibilityChanged(aura::Window* window,
+                                         bool visible) OVERRIDE {
+    if (window->transient_parent())
+      SendPluginCutoutRects();
+  }
+
+  virtual void OnAddTransientChild(aura::Window* window,
+                                   aura::Window* transient) OVERRIDE {
+    transient->AddObserver(this);
+    // Just wait for the OnWindowBoundsChanged of the transient, since the size
+    // is not known now.
+  }
+
+  virtual void OnRemoveTransientChild(aura::Window* window,
+                                      aura::Window* transient) OVERRIDE {
+    transient->RemoveObserver(this);
+    SendPluginCutoutRects();
+  }
+
+  aura::Window* GetToplevelWindow() {
+    aura::RootWindow* root = view_->window_->GetRootWindow();
+    if (!root)
+      return NULL;
+    aura::client::ActivationClient* activation_client =
+        aura::client::GetActivationClient(root);
+    if (!activation_client)
+      return NULL;
+    return activation_client->GetToplevelWindow(view_->window_);
+  }
+
+  void StopObserving() {
+    if (!top_level_)
+      return;
+
+    const aura::Window::Windows& transients = top_level_->transient_children();
+    for (size_t i = 0; i < transients.size(); ++i)
+      transients[i]->RemoveObserver(this);
+
+    if (top_level_ != view_->window_)
+      top_level_->RemoveObserver(this);
+    top_level_ = NULL;
+  }
+
+  void SendPluginCutoutRects() {
+    std::vector<gfx::Rect> cutouts;
+    const aura::Window::Windows& transients = top_level_->transient_children();
+    for (size_t i = 0; i < transients.size(); ++i) {
+      if (transients[i]->IsVisible())
+        cutouts.push_back(transients[i]->GetBoundsInRootWindow());
+    }
+
+    view_->UpdateTransientRects(cutouts);
+  }
+ private:
+  RenderWidgetHostViewAura* view_;
+  aura::Window* top_level_;
+
+  DISALLOW_COPY_AND_ASSIGN(TransientWindowObserver);
+};
+
+#endif
+
 class RenderWidgetHostViewAura::ResizeLock {
  public:
-  ResizeLock(aura::RootWindow* root_window, const gfx::Size new_size)
+  ResizeLock(aura::RootWindow* root_window,
+             const gfx::Size new_size,
+             bool defer_compositor_lock)
       : root_window_(root_window),
         new_size_(new_size),
-        compositor_lock_(root_window_->GetCompositorLock()),
-        weak_ptr_factory_(this) {
+        compositor_lock_(defer_compositor_lock ?
+                         NULL :
+                         root_window_->compositor()->GetCompositorLock()),
+        weak_ptr_factory_(this),
+        defer_compositor_lock_(defer_compositor_lock) {
     root_window_->HoldMouseMoves();
 
     BrowserThread::PostDelayedTask(
@@ -216,6 +542,7 @@ class RenderWidgetHostViewAura::ResizeLock {
   }
 
   void UnlockCompositor() {
+    defer_compositor_lock_ = false;
     compositor_lock_ = NULL;
   }
 
@@ -231,11 +558,21 @@ class RenderWidgetHostViewAura::ResizeLock {
     return new_size_;
   }
 
+  bool GrabDeferredLock() {
+    if (root_window_ && defer_compositor_lock_) {
+      compositor_lock_ = root_window_->compositor()->GetCompositorLock();
+      defer_compositor_lock_ = false;
+      return true;
+    }
+    return false;
+  }
+
  private:
   aura::RootWindow* root_window_;
   gfx::Size new_size_;
-  scoped_refptr<aura::CompositorLock> compositor_lock_;
+  scoped_refptr<ui::CompositorLock> compositor_lock_;
   base::WeakPtrFactory<ResizeLock> weak_ptr_factory_;
+  bool defer_compositor_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(ResizeLock);
 };
@@ -255,19 +592,21 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host)
       can_compose_inline_(true),
       has_composition_text_(false),
       device_scale_factor_(1.0f),
-      current_surface_(0),
-      current_surface_is_protected_(true),
-      current_surface_in_use_by_compositor_(true),
-      protection_state_id_(0),
-      surface_route_id_(0),
       paint_canvas_(NULL),
       synthetic_move_sent_(false),
-      accelerated_compositing_state_changed_(false) {
+      accelerated_compositing_state_changed_(false),
+      can_lock_compositor_(YES),
+      paint_observer_(NULL) {
   host_->SetView(this);
   window_observer_.reset(new WindowObserver(this));
-  window_->AddObserver(window_observer_.get());
   aura::client::SetTooltipText(window_, &tooltip_);
   aura::client::SetActivationDelegate(window_, this);
+  aura::client::SetActivationChangeObserver(window_, this);
+  aura::client::SetFocusChangeObserver(window_, this);
+  gfx::Screen::GetScreenFor(window_)->AddObserver(this);
+#if defined(OS_WIN)
+  transient_observer_.reset(new TransientWindowObserver(this));
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -281,26 +620,38 @@ void RenderWidgetHostViewAura::InitAsChild(
 
 void RenderWidgetHostViewAura::InitAsPopup(
     RenderWidgetHostView* parent_host_view,
-    const gfx::Rect& bounds_in_display) {
+    const gfx::Rect& bounds_in_screen) {
   popup_parent_host_view_ =
       static_cast<RenderWidgetHostViewAura*>(parent_host_view);
+
+  RenderWidgetHostViewAura* old_child =
+      popup_parent_host_view_->popup_child_host_view_;
+  if (old_child) {
+    // TODO(jhorwich): Allow multiple popup_child_host_view_ per view, or
+    // similar mechanism to ensure a second popup doesn't cause the first one
+    // to never get a chance to filter events. See crbug.com/160589.
+    DCHECK(old_child->popup_parent_host_view_ == popup_parent_host_view_);
+    old_child->popup_parent_host_view_ = NULL;
+  }
   popup_parent_host_view_->popup_child_host_view_ = this;
   window_->SetType(aura::client::WINDOW_TYPE_MENU);
   window_->Init(ui::LAYER_TEXTURED);
   window_->SetName("RenderWidgetHostViewAura");
 
-  aura::Window* parent = NULL;
   aura::RootWindow* root = popup_parent_host_view_->window_->GetRootWindow();
+  window_->SetDefaultParentByRootWindow(root, bounds_in_screen);
+
+  // TODO(erg): While I could make sure details of the StackingClient are
+  // hidden behind aura, hiding the details of the ScreenPositionClient will
+  // take another effort.
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(root);
+  gfx::Point origin_in_parent(bounds_in_screen.origin());
   if (screen_position_client) {
-    gfx::Point origin_in_screen(bounds_in_display.origin());
-    screen_position_client->ConvertPointToScreen(root, &origin_in_screen);
-    parent = aura::client::GetStackingClient()->GetDefaultParent(
-        window_, gfx::Rect(origin_in_screen, bounds_in_display.size()));
+    screen_position_client->ConvertPointFromScreen(
+        window_->parent(), &origin_in_parent);
   }
-  window_->SetParent(parent);
-  SetBounds(bounds_in_display);
+  SetBounds(gfx::Rect(origin_in_parent, bounds_in_screen.size()));
   Show();
 }
 
@@ -311,7 +662,9 @@ void RenderWidgetHostViewAura::InitAsFullscreen(
   window_->Init(ui::LAYER_TEXTURED);
   window_->SetName("RenderWidgetHostViewAura");
   window_->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
-  aura::Window* parent = NULL;
+
+  aura::RootWindow* parent = NULL;
+  gfx::Rect bounds;
   if (reference_host_view) {
     aura::Window* reference_window =
         static_cast<RenderWidgetHostViewAura*>(reference_host_view)->window_;
@@ -319,14 +672,12 @@ void RenderWidgetHostViewAura::InitAsFullscreen(
       host_tracker_.reset(new aura::WindowTracker);
       host_tracker_->Add(reference_window);
     }
-    gfx::Display display =
-        gfx::Screen::GetDisplayNearestWindow(reference_window);
-    aura::client::StackingClient* stacking_client =
-        aura::client::GetStackingClient();
-    if (stacking_client)
-      parent = stacking_client->GetDefaultParent(window_, display.bounds());
+    gfx::Display display = gfx::Screen::GetScreenFor(window_)->
+        GetDisplayNearestWindow(reference_window);
+    parent = reference_window->GetRootWindow();
+    bounds = display.bounds();
   }
-  window_->SetParent(parent);
+  window_->SetDefaultParentByRootWindow(parent, bounds);
   Show();
   Focus();
 }
@@ -342,14 +693,13 @@ void RenderWidgetHostViewAura::WasShown() {
 
   if (!current_surface_ && host_->is_accelerated_compositing_active() &&
       !released_front_lock_.get()) {
-    released_front_lock_ = window_->GetRootWindow()->GetCompositorLock();
+    released_front_lock_ = GetCompositor()->GetCompositorLock();
   }
-
-  AdjustSurfaceProtection();
 
 #if defined(OS_WIN)
   LPARAM lparam = reinterpret_cast<LPARAM>(this);
   EnumChildWindows(ui::GetHiddenWindow(), ShowWindowsCallback, lparam);
+  transient_observer_->SendPluginCutoutRects();
 #endif
 }
 
@@ -360,19 +710,14 @@ void RenderWidgetHostViewAura::WasHidden() {
 
   released_front_lock_ = NULL;
 
-  if (ShouldReleaseFrontSurface() &&
-      host_->is_accelerated_compositing_active()) {
-    current_surface_ = 0;
-    UpdateExternalTexture();
-  }
-
-  AdjustSurfaceProtection();
-
 #if defined(OS_WIN)
-  HWND parent = window_->GetRootWindow()->GetAcceleratedWidget();
-  LPARAM lparam = reinterpret_cast<LPARAM>(this);
+  aura::RootWindow* root_window = window_->GetRootWindow();
+  if (root_window) {
+    HWND parent = root_window->GetAcceleratedWidget();
+    LPARAM lparam = reinterpret_cast<LPARAM>(this);
 
-  EnumChildWindows(parent, HideWindowsCallback, lparam);
+    EnumChildWindows(parent, HideWindowsCallback, lparam);
+  }
 #endif
 }
 
@@ -384,9 +729,22 @@ void RenderWidgetHostViewAura::SetBounds(const gfx::Rect& rect) {
   if (window_->bounds().size() != rect.size() &&
       host_->is_accelerated_compositing_active()) {
     aura::RootWindow* root_window = window_->GetRootWindow();
-    if (root_window) {
+    ui::Compositor* compositor = root_window ?
+        root_window->compositor() : NULL;
+    if (root_window && compositor) {
+      // Listen to changes in the compositor lock state.
+      if (!compositor->HasObserver(this))
+        compositor->AddObserver(this);
+
+      bool defer_compositor_lock =
+         can_lock_compositor_ == NO_PENDING_RENDERER_FRAME ||
+         can_lock_compositor_ == NO_PENDING_COMMIT;
+
+      if (can_lock_compositor_ == YES)
+        can_lock_compositor_ = YES_DID_LOCK;
+
       resize_locks_.push_back(make_linked_ptr(
-          new ResizeLock(root_window, rect.size())));
+          new ResizeLock(root_window, rect.size(), defer_compositor_lock)));
     }
   }
   window_->SetBounds(rect);
@@ -399,11 +757,13 @@ gfx::NativeView RenderWidgetHostViewAura::GetNativeView() const {
 
 gfx::NativeViewId RenderWidgetHostViewAura::GetNativeViewId() const {
 #if defined(OS_WIN)
-  HWND window = window_->GetRootWindow()->GetAcceleratedWidget();
-  return reinterpret_cast<gfx::NativeViewId>(window);
-#else
-  return static_cast<gfx::NativeViewId>(NULL);
+  aura::RootWindow* root_window = window_->GetRootWindow();
+  if (root_window) {
+    HWND window = root_window->GetAcceleratedWidget();
+    return reinterpret_cast<gfx::NativeViewId>(window);
+  }
 #endif
+  return static_cast<gfx::NativeViewId>(NULL);
 }
 
 gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
@@ -412,7 +772,7 @@ gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewAura::MovePluginWindows(
-    const gfx::Point& scroll_offset,
+    const gfx::Vector2d& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& plugin_window_moves) {
 #if defined(OS_WIN)
   // We need to clip the rectangle to the tab's viewport, otherwise we will draw
@@ -429,16 +789,31 @@ void RenderWidgetHostViewAura::MovePluginWindows(
                       view_bounds.height());
 
   for (size_t i = 0; i < moves.size(); ++i) {
-    gfx::Rect clip = moves[i].clip_rect;
-    clip.Offset(moves[i].window_rect.origin());
-    clip.Offset(scroll_offset);
-    clip = clip.Intersect(view_port);
-    clip.Offset(-moves[i].window_rect.x(), -moves[i].window_rect.y());
-    clip.Offset(-scroll_offset.x(), -scroll_offset.y());
+    gfx::Rect clip(moves[i].clip_rect);
+    gfx::Vector2d view_port_offset(
+        moves[i].window_rect.OffsetFromOrigin() + scroll_offset);
+    clip.Offset(view_port_offset);
+    clip.Intersect(view_port);
+    clip.Offset(-view_port_offset);
     moves[i].clip_rect = clip;
 
-    moves[i].window_rect.Offset(view_bounds.origin());
+    moves[i].window_rect.Offset(view_bounds.OffsetFromOrigin());
+
+    plugin_window_moves_[moves[i].window] = moves[i];
+
+    // transient_rects_ and constrained_rects_ are relative to the root window.
+    // We want to convert them to be relative to the plugin window.
+    std::vector<gfx::Rect> cutout_rects;
+    cutout_rects.assign(transient_rects_.begin(), transient_rects_.end());
+    cutout_rects.insert(cutout_rects.end(), constrained_rects_.begin(),
+                        constrained_rects_.end());
+    for (size_t j = 0; j < cutout_rects.size(); ++j) {
+      gfx::Rect offset_cutout = cutout_rects[j];
+      offset_cutout -= moves[i].window_rect.OffsetFromOrigin();
+      moves[i].cutout_rects.push_back(offset_cutout);
+    }
   }
+
   MovePluginWindowsHelper(parent, moves);
 
   // Make sure each plugin window (or its wrapper if it exists) has a pointer to
@@ -456,10 +831,11 @@ void RenderWidgetHostViewAura::MovePluginWindows(
 }
 
 void RenderWidgetHostViewAura::Focus() {
-  // Make sure we have a FocusManager before attempting to Focus(). In some
+  // Make sure we have a FocusClient before attempting to Focus(). In some
   // situations we may not yet be in a valid Window hierarchy (such as reloading
-  // after out of memory discared the tab).
-  if (window_->GetFocusManager())
+  // after out of memory discarded the tab).
+  aura::client::FocusClient* client = aura::client::GetFocusClient(window_);
+  if (client)
     window_->Focus();
 }
 
@@ -472,7 +848,7 @@ bool RenderWidgetHostViewAura::HasFocus() const {
 }
 
 bool RenderWidgetHostViewAura::IsSurfaceAvailableForCopy() const {
-  return current_surface_ != 0;
+  return current_surface_ || !!host_->GetBackingStore(false);
 }
 
 void RenderWidgetHostViewAura::Show() {
@@ -493,12 +869,15 @@ gfx::Rect RenderWidgetHostViewAura::GetViewBounds() const {
 
 void RenderWidgetHostViewAura::UpdateCursor(const WebCursor& cursor) {
   current_cursor_ = cursor;
-  const gfx::Display display = gfx::Screen::GetDisplayNearestWindow(window_);
-  current_cursor_.SetScaleFactor(display.device_scale_factor());
+  const gfx::Display display = gfx::Screen::GetScreenFor(window_)->
+      GetDisplayNearestWindow(window_);
+  current_cursor_.SetDeviceScaleFactor(display.device_scale_factor());
   UpdateCursorIfOverSelf();
 }
 
 void RenderWidgetHostViewAura::SetIsLoading(bool is_loading) {
+  if (is_loading_ && !is_loading && paint_observer_)
+    paint_observer_->OnPageLoadComplete();
   is_loading_ = is_loading;
   UpdateCursorIfOverSelf();
 }
@@ -527,7 +906,8 @@ void RenderWidgetHostViewAura::ImeCompositionRangeChanged(
 }
 
 void RenderWidgetHostViewAura::DidUpdateBackingStore(
-    const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+    const gfx::Rect& scroll_rect,
+    const gfx::Vector2d& scroll_delta,
     const std::vector<gfx::Rect>& copy_rects) {
   if (accelerated_compositing_state_changed_)
     UpdateExternalTexture();
@@ -545,26 +925,31 @@ void RenderWidgetHostViewAura::DidUpdateBackingStore(
   if (paint_canvas_) {
     SkRect sk_clip_rect;
     if (paint_canvas_->sk_canvas()->getClipBounds(&sk_clip_rect))
-      clip_rect = gfx::SkRectToRect(sk_clip_rect);
+      clip_rect = gfx::ToEnclosingRect(gfx::SkRectToRectF(sk_clip_rect));
   }
 
   if (!scroll_rect.IsEmpty())
     SchedulePaintIfNotInClip(scroll_rect, clip_rect);
 
+#if defined(OS_WIN)
+  aura::RootWindow* root_window = window_->GetRootWindow();
+#endif
   for (size_t i = 0; i < copy_rects.size(); ++i) {
-    gfx::Rect rect = copy_rects[i].Subtract(scroll_rect);
+    gfx::Rect rect = gfx::SubtractRects(copy_rects[i], scroll_rect);
     if (rect.IsEmpty())
       continue;
 
     SchedulePaintIfNotInClip(rect, clip_rect);
 
 #if defined(OS_WIN)
-    // Send the invalid rect in screen coordinates.
-    gfx::Rect screen_rect = GetViewBounds();
-    gfx::Rect invalid_screen_rect(rect);
-    invalid_screen_rect.Offset(screen_rect.x(), screen_rect.y());
-    HWND hwnd = window_->GetRootWindow()->GetAcceleratedWidget();
-    PaintPluginWindowsHelper(hwnd, invalid_screen_rect);
+    if (root_window) {
+      // Send the invalid rect in screen coordinates.
+      gfx::Rect screen_rect = GetViewBounds();
+      gfx::Rect invalid_screen_rect(rect);
+      invalid_screen_rect.Offset(screen_rect.x(), screen_rect.y());
+      HWND hwnd = root_window->GetAcceleratedWidget();
+      PaintPluginWindowsHelper(hwnd, invalid_screen_rect);
+    }
 #endif  // defined(OS_WIN)
   }
 }
@@ -599,27 +984,37 @@ void RenderWidgetHostViewAura::SelectionChanged(const string16& text,
   if (text.empty() || range.is_empty())
     return;
 
+  BrowserContext* browser_context = host_->GetProcess()->GetBrowserContext();
   // Set the BUFFER_SELECTION to the ui::Clipboard.
   ui::ScopedClipboardWriter clipboard_writer(
       ui::Clipboard::GetForCurrentThread(),
-      ui::Clipboard::BUFFER_SELECTION);
+      ui::Clipboard::BUFFER_SELECTION,
+      BrowserContext::GetMarkerForOffTheRecordContext(browser_context));
   clipboard_writer.WriteText(text);
 #endif  // defined(USE_X11) && !defined(OS_CHROMEOS)
 }
 
 void RenderWidgetHostViewAura::SelectionBoundsChanged(
-    const gfx::Rect& start_rect,
-    WebKit::WebTextDirection start_direction,
-    const gfx::Rect& end_rect,
-    WebKit::WebTextDirection end_direction) {
-  if (selection_start_rect_ == start_rect && selection_end_rect_ == end_rect)
+    const ViewHostMsg_SelectionBounds_Params& params) {
+  if (selection_anchor_rect_ == params.anchor_rect &&
+      selection_focus_rect_ == params.focus_rect)
     return;
 
-  selection_start_rect_ = start_rect;
-  selection_end_rect_ = end_rect;
+  selection_anchor_rect_ = params.anchor_rect;
+  selection_focus_rect_ = params.focus_rect;
 
   if (GetInputMethod())
     GetInputMethod()->OnCaretBoundsChanged(this);
+}
+
+void RenderWidgetHostViewAura::ScrollOffsetChanged() {
+  aura::RootWindow* root = window_->GetRootWindow();
+  if (!root)
+    return;
+  aura::client::CursorClient* cursor_client =
+      aura::client::GetCursorClient(root);
+  if (cursor_client && !cursor_client->IsCursorVisible())
+    cursor_client->DisableMouseEvents();
 }
 
 BackingStore* RenderWidgetHostViewAura::AllocBackingStore(
@@ -630,38 +1025,37 @@ BackingStore* RenderWidgetHostViewAura::AllocBackingStore(
 void RenderWidgetHostViewAura::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool)>& callback,
-    skia::PlatformCanvas* output) {
-  base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  base::ScopedClosureRunner scoped_callback_runner(
+      base::Bind(callback, false, SkBitmap()));
 
-  std::map<uint64, scoped_refptr<ui::Texture> >::iterator it =
-      image_transport_clients_.find(current_surface_);
-  if (it == image_transport_clients_.end())
+  if (!current_surface_)
     return;
-
-  ui::Texture* container = it->second;
-  DCHECK(container);
 
   gfx::Size dst_size_in_pixel = ConvertSizeToPixel(this, dst_size);
-  if (!output->initialize(
-      dst_size_in_pixel.width(), dst_size_in_pixel.height(), true))
+
+  SkBitmap output;
+  output.setConfig(SkBitmap::kARGB_8888_Config,
+                   dst_size_in_pixel.width(), dst_size_in_pixel.height());
+  if (!output.allocPixels())
     return;
+  output.setIsOpaque(true);
 
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
   GLHelper* gl_helper = factory->GetGLHelper();
   if (!gl_helper)
     return;
 
-  unsigned char* addr = static_cast<unsigned char*>(
-      output->getTopDevice()->accessBitmap(true).getPixels());
+  unsigned char* addr = static_cast<unsigned char*>(output.getPixels());
   scoped_callback_runner.Release();
   // Wrap the callback with an internal handler so that we can inject our
-  // own completion handlers (where we can call AdjustSurfaceProtection).
+  // own completion handlers (where we can try to free the frontbuffer).
   base::Callback<void(bool)> wrapper_callback = base::Bind(
       &RenderWidgetHostViewAura::CopyFromCompositingSurfaceFinished,
       AsWeakPtr(),
+      output,
       callback);
-  pending_thumbnail_tasks_.push_back(callback);
+  ++pending_thumbnail_tasks_;
 
   // Convert |src_subrect| from the views coordinate (upper-left origin) into
   // the OpenGL coordinate (lower-left origin).
@@ -669,12 +1063,25 @@ void RenderWidgetHostViewAura::CopyFromCompositingSurface(
   src_subrect_in_gl.set_y(GetViewBounds().height() - src_subrect.bottom());
 
   gfx::Rect src_subrect_in_pixel = ConvertRectToPixel(this, src_subrect_in_gl);
-  gl_helper->CopyTextureTo(container->texture_id(),
-                           container->size(),
-                           src_subrect_in_pixel,
-                           dst_size_in_pixel,
-                           addr,
-                           wrapper_callback);
+  gl_helper->CropScaleReadbackAndCleanTexture(
+      current_surface_->PrepareTexture(),
+      current_surface_->size(),
+      src_subrect_in_pixel,
+      dst_size_in_pixel,
+      addr,
+      wrapper_callback);
+}
+
+void RenderWidgetHostViewAura::CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(false);
+}
+
+bool RenderWidgetHostViewAura::CanCopyToVideoFrame() const {
+  return false;
 }
 
 void RenderWidgetHostViewAura::OnAcceleratedCompositingStateChange() {
@@ -689,222 +1096,304 @@ void RenderWidgetHostViewAura::OnAcceleratedCompositingStateChange() {
   accelerated_compositing_state_changed_ = true;
 }
 
+bool RenderWidgetHostViewAura::ShouldSkipFrame(const gfx::Size& size) {
+  if (can_lock_compositor_ == NO_PENDING_RENDERER_FRAME ||
+      can_lock_compositor_ == NO_PENDING_COMMIT ||
+      resize_locks_.empty())
+    return false;
+
+  gfx::Size container_size = ConvertSizeToDIP(this, size);
+  ResizeLockList::iterator it = resize_locks_.begin();
+  while (it != resize_locks_.end()) {
+    if ((*it)->expected_size() == container_size)
+      break;
+    ++it;
+  }
+
+  // We could be getting an unexpected frame due to an animation
+  // (i.e. we start resizing but we get an old size frame first).
+  return it == resize_locks_.end() || ++it != resize_locks_.end();
+}
+
 void RenderWidgetHostViewAura::UpdateExternalTexture() {
   // Delay processing accelerated compositing state change till here where we
   // act upon the state change. (Clear the external texture if switching to
   // software mode or set the external texture if going to accelerated mode).
-  if (accelerated_compositing_state_changed_) {
-    // Don't scale the contents in accelerated mode because the renderer takes
-    // care of it.
-    window_->layer()->set_scale_content(
-        !host_->is_accelerated_compositing_active());
-
+  if (accelerated_compositing_state_changed_)
     accelerated_compositing_state_changed_ = false;
-  }
 
-  if (current_surface_ != 0 && host_->is_accelerated_compositing_active()) {
-    ui::Texture* container = image_transport_clients_[current_surface_];
-    window_->SetExternalTexture(container);
-    current_surface_in_use_by_compositor_ = true;
+  if (current_surface_ && host_->is_accelerated_compositing_active()) {
+    window_->SetExternalTexture(current_surface_.get());
 
-    if (!container) {
-      resize_locks_.clear();
-    } else {
-      typedef std::vector<linked_ptr<ResizeLock> > ResizeLockList;
-      ResizeLockList::iterator it = resize_locks_.begin();
-      while (it != resize_locks_.end()) {
-        gfx::Size container_size = ConvertSizeToDIP(this,
-            container->size());
-        if ((*it)->expected_size() == container_size)
-          break;
-        ++it;
-      }
-      if (it != resize_locks_.end()) {
-        ++it;
-        ui::Compositor* compositor = GetCompositor();
-        if (compositor) {
-          // Delay the release of the lock until we've kicked a frame with the
-          // new texture, to avoid resizing the UI before we have a chance to
-          // draw a "good" frame.
-          locks_pending_draw_.insert(
-              locks_pending_draw_.begin(), resize_locks_.begin(), it);
-          // However since we got the size we were looking for, unlock the
-          // compositor.
-          for (ResizeLockList::iterator it2 = resize_locks_.begin();
-              it2 !=it; ++it2) {
-            it2->get()->UnlockCompositor();
-          }
-          if (!compositor->HasObserver(this))
-            compositor->AddObserver(this);
-        }
-        resize_locks_.erase(resize_locks_.begin(), it);
-      }
+    ResizeLockList::iterator it = resize_locks_.begin();
+    while (it != resize_locks_.end()) {
+      gfx::Size container_size = ConvertSizeToDIP(this,
+                                                  current_surface_->size());
+      if ((*it)->expected_size() == container_size)
+        break;
+      ++it;
     }
-  } else {
-    window_->SetExternalTexture(NULL);
-    if (ShouldReleaseFrontSurface() &&
-        host_->is_accelerated_compositing_active()) {
-      // The current surface may have pipelined gl commands, so always wait for
-      // the next composite to start.  If the current surface is still null,
-      // then we really know its no longer in use.
+    if (it != resize_locks_.end()) {
+      ++it;
       ui::Compositor* compositor = GetCompositor();
       if (compositor) {
-        on_compositing_will_start_callbacks_.push_back(
-            base::Bind(&RenderWidgetHostViewAura::
-                           SetSurfaceNotInUseByCompositor,
-                       AsWeakPtr()));
+        // Delay the release of the lock until we've kicked a frame with the
+        // new texture, to avoid resizing the UI before we have a chance to
+        // draw a "good" frame.
+        locks_pending_commit_.insert(
+            locks_pending_commit_.begin(), resize_locks_.begin(), it);
+        // However since we got the size we were looking for, unlock the
+        // compositor.
+        for (ResizeLockList::iterator it2 = resize_locks_.begin();
+            it2 !=it; ++it2) {
+          it2->get()->UnlockCompositor();
+        }
         if (!compositor->HasObserver(this))
           compositor->AddObserver(this);
       }
+      resize_locks_.erase(resize_locks_.begin(), it);
     }
+  } else {
+    window_->SetExternalTexture(NULL);
     resize_locks_.clear();
   }
 }
 
+bool RenderWidgetHostViewAura::SwapBuffersPrepare(
+    const gfx::Rect& surface_rect,
+    const gfx::Rect& damage_rect,
+    const std::string& mailbox_name,
+    const BufferPresentedCallback& ack_callback) {
+  if (last_swapped_surface_size_ != surface_rect.size()) {
+    // The surface could have shrunk since we skipped an update, in which
+    // case we can expect a full update.
+    DLOG_IF(ERROR, damage_rect != surface_rect) << "Expected full damage rect";
+    skipped_damage_.setEmpty();
+    last_swapped_surface_size_ = surface_rect.size();
+  }
+
+  if (ShouldSkipFrame(surface_rect.size()) || mailbox_name.empty()) {
+    skipped_damage_.op(RectToSkIRect(damage_rect), SkRegion::kUnion_Op);
+    ack_callback.Run(true, scoped_refptr<ui::Texture>());
+    return false;
+  }
+
+  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  current_surface_ = factory->CreateTransportClient(device_scale_factor_);
+  if (!current_surface_) {
+    LOG(ERROR) << "Failed to create ImageTransport texture";
+    ack_callback.Run(true, scoped_refptr<ui::Texture>());
+    return false;
+  }
+
+  current_surface_->Consume(mailbox_name, surface_rect.size());
+  released_front_lock_ = NULL;
+  UpdateExternalTexture();
+
+  return true;
+}
+
+void RenderWidgetHostViewAura::SwapBuffersCompleted(
+    const BufferPresentedCallback& ack_callback,
+    const scoped_refptr<ui::Texture>& texture_to_return) {
+  ui::Compositor* compositor = GetCompositor();
+  if (!compositor) {
+    ack_callback.Run(false, texture_to_return);
+  } else {
+    // Add sending an ACK to the list of things to do OnCompositingDidCommit
+    can_lock_compositor_ = NO_PENDING_COMMIT;
+    on_compositing_did_commit_callbacks_.push_back(
+        base::Bind(ack_callback, false, texture_to_return));
+    if (!compositor->HasObserver(this))
+      compositor->AddObserver(this);
+  }
+}
+
+#if defined(OS_WIN)
+void RenderWidgetHostViewAura::UpdateTransientRects(
+    const std::vector<gfx::Rect>& rects) {
+  transient_rects_ = rects;
+  UpdateCutoutRects();
+}
+
+void RenderWidgetHostViewAura::UpdateConstrainedWindowRects(
+    const std::vector<gfx::Rect>& rects) {
+  constrained_rects_ = rects;
+  UpdateCutoutRects();
+}
+
+void RenderWidgetHostViewAura::UpdateCutoutRects() {
+  if (!window_->GetRootWindow())
+    return;
+  HWND parent = window_->GetRootWindow()->GetAcceleratedWidget();
+  CutoutRectsParams params;
+  params.widget = this;
+  params.cutout_rects.assign(transient_rects_.begin(), transient_rects_.end());
+  params.cutout_rects.insert(params.cutout_rects.end(),
+                             constrained_rects_.begin(),
+                             constrained_rects_.end());
+  params.geometry = &plugin_window_moves_;
+  LPARAM lparam = reinterpret_cast<LPARAM>(&params);
+  EnumChildWindows(parent, SetCutoutRectsCallback, lparam);
+}
+#endif
+
 void RenderWidgetHostViewAura::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params_in_pixel,
     int gpu_host_id) {
-  surface_route_id_ = params_in_pixel.route_id;
-  // If protection state changed, then this swap is stale. We must still ACK but
-  // do not update current_surface_ since it may have been discarded.
-  if (params_in_pixel.protection_state_id &&
-      params_in_pixel.protection_state_id != protection_state_id_) {
-    DCHECK(!current_surface_);
-    if (!params_in_pixel.skip_ack)
-      InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
+  BufferPresentedCallback ack_callback = base::Bind(
+      &AcknowledgeBufferForGpu,
+      params_in_pixel.route_id,
+      gpu_host_id,
+      params_in_pixel.mailbox_name);
+  BuffersSwapped(
+      params_in_pixel.size, params_in_pixel.mailbox_name, ack_callback);
+}
+
+void RenderWidgetHostViewAura::OnSwapCompositorFrame(
+    const cc::CompositorFrame& frame) {
+  if (!frame.gl_frame_data || frame.gl_frame_data->mailbox.IsZero())
+    return;
+
+  BufferPresentedCallback ack_callback = base::Bind(
+      &SendCompositorFrameAck,
+      host_->GetRoutingID(), host_->GetProcess()->GetID(),
+      frame.gl_frame_data->mailbox, frame.gl_frame_data->size);
+
+  if (!frame.gl_frame_data->sync_point) {
+    LOG(ERROR) << "CompositorFrame without sync point. Skipping frame...";
+    ack_callback.Run(true, scoped_refptr<ui::Texture>());
     return;
   }
-  current_surface_ = params_in_pixel.surface_handle;
-  // If we don't require an ACK that means the content is not a fresh updated
-  // new frame, rather we are just resetting our handle to some old content that
-  // we still hadn't discarded. Although we could display immediately, by not
-  // resetting the compositor lock here, we give us some time to get a fresh
-  // frame which means fewer content flashes.
-  if (!params_in_pixel.skip_ack)
-    released_front_lock_ = NULL;
 
-  UpdateExternalTexture();
+  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  factory->WaitSyncPoint(frame.gl_frame_data->sync_point);
+
+  std::string mailbox_name(
+      reinterpret_cast<const char*>(frame.gl_frame_data->mailbox.name),
+      sizeof(frame.gl_frame_data->mailbox.name));
+  BuffersSwapped(
+      frame.gl_frame_data->size, mailbox_name, ack_callback);
+}
+
+void RenderWidgetHostViewAura::BuffersSwapped(
+    const gfx::Size& size,
+    const std::string& mailbox_name,
+    const BufferPresentedCallback& ack_callback) {
+  scoped_refptr<ui::Texture> texture_to_return(current_surface_);
+  const gfx::Rect surface_rect = gfx::Rect(gfx::Point(), size);
+  if (!SwapBuffersPrepare(
+      surface_rect, surface_rect, mailbox_name, ack_callback)) {
+    return;
+  }
+
+  previous_damage_.setRect(RectToSkIRect(surface_rect));
+  skipped_damage_.setEmpty();
 
   ui::Compositor* compositor = GetCompositor();
-  if (!compositor) {
-    // We have no compositor, so we have no way to display the surface.
-    // Must still send the ACK.
-    if (!params_in_pixel.skip_ack)
-      InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
-  } else {
-    DCHECK(image_transport_clients_.find(params_in_pixel.surface_handle) !=
-           image_transport_clients_.end());
-    gfx::Size surface_size_in_pixel =
-        image_transport_clients_[params_in_pixel.surface_handle]->size();
-    gfx::Size surface_size = ConvertSizeToDIP(this,
-                                                       surface_size_in_pixel);
+  if (compositor) {
+    gfx::Size surface_size = ConvertSizeToDIP(this, size);
     window_->SchedulePaintInRect(gfx::Rect(surface_size));
-
-    if (!params_in_pixel.skip_ack) {
-      if (!resize_locks_.empty()) {
-        // If we are waiting for the resize, fast-track the ACK.
-        if (compositor->IsThreaded()) {
-          // We need the compositor thread to pick up the active buffer before
-          // ACKing.
-          on_compositing_did_commit_callbacks_.push_back(
-              base::Bind(&RenderWidgetHostViewAura::InsertSyncPointAndACK,
-                         params_in_pixel.route_id,
-                         gpu_host_id));
-          if (!compositor->HasObserver(this))
-            compositor->AddObserver(this);
-        } else {
-          // The compositor will pickup the active buffer during a draw, so we
-          // can ACK immediately.
-          InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id,
-                                compositor);
-        }
-      } else {
-        // Add sending an ACK to the list of things to do OnCompositingWillStart
-        on_compositing_will_start_callbacks_.push_back(
-            base::Bind(&RenderWidgetHostViewAura::InsertSyncPointAndACK,
-                       params_in_pixel.route_id,
-                       gpu_host_id));
-        if (!compositor->HasObserver(this))
-          compositor->AddObserver(this);
-      }
-    }
   }
+
+  if (paint_observer_)
+    paint_observer_->OnUpdateCompositorContent();
+
+  SwapBuffersCompleted(ack_callback, texture_to_return);
 }
 
 void RenderWidgetHostViewAura::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params_in_pixel,
     int gpu_host_id) {
-  surface_route_id_ = params_in_pixel.route_id;
-  // If visible state changed, then this PSB is stale. We must still ACK but
-  // do not update current_surface_.
-  if (params_in_pixel.protection_state_id &&
-      params_in_pixel.protection_state_id != protection_state_id_) {
-    DCHECK(!current_surface_);
-    InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
+  scoped_refptr<ui::Texture> previous_texture(current_surface_);
+  const gfx::Rect surface_rect =
+      gfx::Rect(gfx::Point(), params_in_pixel.surface_size);
+  gfx::Rect damage_rect(params_in_pixel.x,
+                        params_in_pixel.y,
+                        params_in_pixel.width,
+                        params_in_pixel.height);
+  BufferPresentedCallback ack_callback = base::Bind(
+      &AcknowledgeBufferForGpu, params_in_pixel.route_id, gpu_host_id,
+      params_in_pixel.mailbox_name);
+
+  if (!SwapBuffersPrepare(
+      surface_rect, damage_rect, params_in_pixel.mailbox_name, ack_callback)) {
     return;
   }
-  current_surface_ = params_in_pixel.surface_handle;
-  released_front_lock_ = NULL;
-  DCHECK(current_surface_);
-  UpdateExternalTexture();
+
+  SkRegion damage(RectToSkIRect(damage_rect));
+  if (!skipped_damage_.isEmpty()) {
+    damage.op(skipped_damage_, SkRegion::kUnion_Op);
+    skipped_damage_.setEmpty();
+  }
+
+  DCHECK(surface_rect.Contains(SkIRectToRect(damage.getBounds())));
+  ui::Texture* current_texture = current_surface_.get();
+
+  const gfx::Size surface_size_in_pixel = params_in_pixel.surface_size;
+  DLOG_IF(ERROR, previous_texture &&
+      previous_texture->size() != current_texture->size() &&
+      SkIRectToRect(damage.getBounds()) != surface_rect) <<
+      "Expected full damage rect after size change";
+  if (previous_texture && !previous_damage_.isEmpty() &&
+      previous_texture->size() == current_texture->size()) {
+    ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+    GLHelper* gl_helper = factory->GetGLHelper();
+    gl_helper->CopySubBufferDamage(
+        current_texture->PrepareTexture(),
+        previous_texture->PrepareTexture(),
+        damage,
+        previous_damage_);
+  }
+  previous_damage_ = damage;
 
   ui::Compositor* compositor = GetCompositor();
-  if (!compositor) {
-    // We have no compositor, so we have no way to display the surface
-    // Must still send the ACK
-    InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
-  } else {
-    DCHECK(image_transport_clients_.find(params_in_pixel.surface_handle) !=
-           image_transport_clients_.end());
-    gfx::Size surface_size_in_pixel =
-        image_transport_clients_[params_in_pixel.surface_handle]->size();
-
+  if (compositor) {
     // Co-ordinates come in OpenGL co-ordinate space.
     // We need to convert to layer space.
     gfx::Rect rect_to_paint = ConvertRectToDIP(this, gfx::Rect(
         params_in_pixel.x,
         surface_size_in_pixel.height() - params_in_pixel.y -
-            params_in_pixel.height,
+        params_in_pixel.height,
         params_in_pixel.width,
         params_in_pixel.height));
 
     // Damage may not have been DIP aligned, so inflate damage to compensate
     // for any round-off error.
     rect_to_paint.Inset(-1, -1);
-    rect_to_paint = rect_to_paint.Intersect(window_->bounds());
+    rect_to_paint.Intersect(window_->bounds());
 
+    if (paint_observer_)
+      paint_observer_->OnUpdateCompositorContent();
     window_->SchedulePaintInRect(rect_to_paint);
-
-    if (!resize_locks_.empty()) {
-      // If we are waiting for the resize, fast-track the ACK.
-      if (compositor->IsThreaded()) {
-        // We need the compositor thread to pick up the active buffer before
-        // ACKing.
-        on_compositing_did_commit_callbacks_.push_back(
-            base::Bind(&RenderWidgetHostViewAura::InsertSyncPointAndACK,
-                       params_in_pixel.route_id,
-                       gpu_host_id));
-        if (!compositor->HasObserver(this))
-          compositor->AddObserver(this);
-      } else {
-        // The compositor will pickup the active buffer during a draw, so we
-        // can ACK immediately.
-        InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id,
-                              compositor);
-      }
-    } else {
-      // Add sending an ACK to the list of things to do OnCompositingWillStart
-      on_compositing_will_start_callbacks_.push_back(
-          base::Bind(&RenderWidgetHostViewAura::InsertSyncPointAndACK,
-                     params_in_pixel.route_id,
-                     gpu_host_id));
-      if (!compositor->HasObserver(this))
-        compositor->AddObserver(this);
-    }
   }
+
+  SwapBuffersCompleted(ack_callback, previous_texture);
 }
 
 void RenderWidgetHostViewAura::AcceleratedSurfaceSuspend() {
+}
+
+void RenderWidgetHostViewAura::AcceleratedSurfaceRelease() {
+  // This really tells us to release the frontbuffer.
+  if (current_surface_) {
+    ui::Compositor* compositor = GetCompositor();
+    if (compositor) {
+      // We need to wait for a commit to clear to guarantee that all we
+      // will not issue any more GL referencing the previous surface.
+      can_lock_compositor_ = NO_PENDING_COMMIT;
+      on_compositing_did_commit_callbacks_.push_back(
+          base::Bind(&RenderWidgetHostViewAura::
+                     SetSurfaceNotInUseByCompositor,
+                     AsWeakPtr(),
+                     current_surface_));  // Hold a ref so the texture will not
+                                          // get deleted until after commit.
+      if (!compositor->HasObserver(this))
+        compositor->AddObserver(this);
+    }
+    current_surface_ = NULL;
+    UpdateExternalTexture();
+  }
 }
 
 bool RenderWidgetHostViewAura::HasAcceleratedSurface(
@@ -915,77 +1404,20 @@ bool RenderWidgetHostViewAura::HasAcceleratedSurface(
   return false;
 }
 
-// TODO(backer): Drop the |shm_handle| once I remove some unused service side
-// code.
-void RenderWidgetHostViewAura::AcceleratedSurfaceNew(
-      int32 width_in_pixel,
-      int32 height_in_pixel,
-      uint64 surface_handle) {
-  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  scoped_refptr<ui::Texture> surface(factory->CreateTransportClient(
-      gfx::Size(width_in_pixel, height_in_pixel), device_scale_factor_,
-      surface_handle));
-  if (!surface) {
-    LOG(ERROR) << "Failed to create ImageTransport texture";
-    return;
-  }
-
-  image_transport_clients_[surface_handle] = surface;
-}
-
-void RenderWidgetHostViewAura::AcceleratedSurfaceRelease(
-    uint64 surface_handle) {
-  DCHECK(image_transport_clients_.find(surface_handle) !=
-         image_transport_clients_.end());
-  if (current_surface_ == surface_handle) {
-    current_surface_ = 0;
-    UpdateExternalTexture();
-  }
-  image_transport_clients_.erase(surface_handle);
-}
-
-void RenderWidgetHostViewAura::SetSurfaceNotInUseByCompositor(ui::Compositor*) {
-  if (current_surface_ || !host_->is_hidden())
-    return;
-  current_surface_in_use_by_compositor_ = false;
-  AdjustSurfaceProtection();
-}
-
-void RenderWidgetHostViewAura::AdjustSurfaceProtection() {
-  // If the current surface is non null, it is protected.
-  // If we are visible, it is protected.
-  // Otherwise, change to not proctected once done thumbnailing and compositing.
-  bool surface_is_protected =
-      current_surface_ ||
-      !host_->is_hidden() ||
-      (current_surface_is_protected_ &&
-          (!pending_thumbnail_tasks_.empty() ||
-              current_surface_in_use_by_compositor_));
-  if (current_surface_is_protected_ == surface_is_protected)
-    return;
-  current_surface_is_protected_ = surface_is_protected;
-  ++protection_state_id_;
-
-  if (!surface_route_id_ || !shared_surface_handle_.parent_gpu_process_id)
-    return;
-
-  RenderWidgetHostImpl::SendFrontSurfaceIsProtected(
-      surface_is_protected,
-      protection_state_id_,
-      surface_route_id_,
-      shared_surface_handle_.parent_gpu_process_id);
+void RenderWidgetHostViewAura::SetSurfaceNotInUseByCompositor(
+    scoped_refptr<ui::Texture>) {
 }
 
 void RenderWidgetHostViewAura::CopyFromCompositingSurfaceFinished(
-    base::Callback<void(bool)> callback, bool result) {
-  for (size_t i = 0; i != pending_thumbnail_tasks_.size(); ++i) {
-    if (pending_thumbnail_tasks_[i].Equals(callback)) {
-      pending_thumbnail_tasks_.erase(pending_thumbnail_tasks_.begin()+i);
-      break;
-    }
-  }
-  AdjustSurfaceProtection();
-  callback.Run(result);
+    base::WeakPtr<RenderWidgetHostViewAura> render_widget_host_view,
+    const SkBitmap& bitmap,
+    const base::Callback<void(bool, const SkBitmap&)>& callback,
+    bool result) {
+  callback.Run(result, bitmap);
+
+  if (!render_widget_host_view.get())
+    return;
+  --render_widget_host_view->pending_thumbnail_tasks_;
 }
 
 void RenderWidgetHostViewAura::SetBackground(const SkBitmap& background) {
@@ -995,20 +1427,30 @@ void RenderWidgetHostViewAura::SetBackground(const SkBitmap& background) {
 }
 
 void RenderWidgetHostViewAura::GetScreenInfo(WebScreenInfo* results) {
-  GetScreenInfoForWindow(results, window_);
+  GetScreenInfoForWindow(results, window_->GetRootWindow() ? window_ : NULL);
 }
 
 gfx::Rect RenderWidgetHostViewAura::GetBoundsInRootWindow() {
-  return window_->GetToplevelWindow()->GetBoundsInRootWindow();
+  return window_->GetToplevelWindow()->GetBoundsInScreen();
 }
 
-void RenderWidgetHostViewAura::ProcessTouchAck(
-    WebKit::WebInputEvent::Type type, bool processed) {
-  // The ACKs for the touch-events arrive in the same sequence as they were
-  // dispatched.
-  aura::RootWindow* root_window = window_->GetRootWindow();
-  if (root_window)
-    root_window->AdvanceQueuedTouchEvent(window_, processed);
+void RenderWidgetHostViewAura::ProcessAckedTouchEvent(
+    const WebKit::WebTouchEvent& touch_event, InputEventAckState ack_result) {
+  ScopedVector<ui::TouchEvent> events;
+  if (!MakeUITouchEventsFromWebTouchEvents(touch_event, &events))
+    return;
+
+  aura::RootWindow* root = window_->GetRootWindow();
+  // |root| is NULL during tests.
+  if (!root)
+    return;
+
+  ui::EventResult result = (ack_result ==
+      INPUT_EVENT_ACK_STATE_CONSUMED) ? ui::ER_HANDLED : ui::ER_UNHANDLED;
+  for (ScopedVector<ui::TouchEvent>::iterator iter = events.begin(),
+      end = events.end(); iter != end; ++iter) {
+    root->ProcessedTouchEvent((*iter), window_, result);
+  }
 }
 
 void RenderWidgetHostViewAura::SetHasHorizontalScrollbar(
@@ -1019,6 +1461,10 @@ void RenderWidgetHostViewAura::SetHasHorizontalScrollbar(
 void RenderWidgetHostViewAura::SetScrollOffsetPinning(
     bool is_pinned_to_left, bool is_pinned_to_right) {
   // Not needed. Mac-only.
+}
+
+void RenderWidgetHostViewAura::OnAccessibilityNotifications(
+    const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewAura::GetCompositingSurface() {
@@ -1043,7 +1489,7 @@ bool RenderWidgetHostViewAura::LockMouse() {
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
   if (cursor_client)
-    cursor_client->ShowCursor(false);
+    cursor_client->HideCursor();
   synthetic_move_sent_ = true;
   window_->MoveCursorTo(gfx::Rect(window_->bounds().size()).CenterPoint());
   if (aura::client::GetTooltipClient(root_window))
@@ -1063,7 +1509,7 @@ void RenderWidgetHostViewAura::UnlockMouse() {
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
   if (cursor_client)
-    cursor_client->ShowCursor(true);
+    cursor_client->ShowCursor();
   if (aura::client::GetTooltipClient(root_window))
     aura::client::GetTooltipClient(root_window)->SetTooltipsEnabled(true);
 
@@ -1124,12 +1570,13 @@ void RenderWidgetHostViewAura::InsertChar(char16 ch, int flags) {
   }
 
   if (host_) {
+    double now = ui::EventTimeForNow().InSecondsF();
     // Send a WebKit::WebInputEvent::Char event to |host_|.
     NativeWebKeyboardEvent webkit_event(ui::ET_KEY_PRESSED,
                                         true /* is_char */,
                                         ch,
                                         flags,
-                                        base::Time::Now().ToDoubleT());
+                                        now);
     host_->ForwardKeyboardEvent(webkit_event);
   }
 }
@@ -1147,18 +1594,23 @@ gfx::Rect RenderWidgetHostViewAura::ConvertRectToScreen(const gfx::Rect& rect) {
   gfx::Point end = gfx::Point(rect.right(), rect.bottom());
 
   aura::RootWindow* root_window = window_->GetRootWindow();
-  aura::client::ScreenPositionClient* screen_position_client =
-      aura::client::GetScreenPositionClient(root_window);
-  screen_position_client->ConvertPointToScreen(window_, &origin);
-  screen_position_client->ConvertPointToScreen(window_, &end);
-  return gfx::Rect(origin.x(),
-                   origin.y(),
-                   end.x() - origin.x(),
-                   end.y() - origin.y());
+  if (root_window) {
+    aura::client::ScreenPositionClient* screen_position_client =
+        aura::client::GetScreenPositionClient(root_window);
+    screen_position_client->ConvertPointToScreen(window_, &origin);
+    screen_position_client->ConvertPointToScreen(window_, &end);
+    return gfx::Rect(origin.x(),
+                     origin.y(),
+                     end.x() - origin.x(),
+                     end.y() - origin.y());
+  }
+
+  return rect;
 }
 
 gfx::Rect RenderWidgetHostViewAura::GetCaretBounds() {
-  const gfx::Rect rect = selection_start_rect_.Union(selection_end_rect_);
+  const gfx::Rect rect =
+      gfx::UnionRects(selection_anchor_rect_, selection_focus_rect_);
   return ConvertRectToScreen(rect);
 }
 
@@ -1257,52 +1709,42 @@ void RenderWidgetHostViewAura::ExtendSelectionAndDelete(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostViewAura, gfx::DisplayObserver implementation:
+
+void RenderWidgetHostViewAura::OnDisplayBoundsChanged(
+    const gfx::Display& display) {
+  gfx::Screen* screen = gfx::Screen::GetScreenFor(window_);
+  if (display.id() == screen->GetDisplayNearestWindow(window_).id()) {
+    UpdateScreenInfo(window_);
+  }
+}
+
+void RenderWidgetHostViewAura::OnDisplayAdded(
+    const gfx::Display& new_display) {
+}
+
+void RenderWidgetHostViewAura::OnDisplayRemoved(
+    const gfx::Display& old_display) {
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, aura::WindowDelegate implementation:
 
 gfx::Size RenderWidgetHostViewAura::GetMinimumSize() const {
   return gfx::Size();
 }
 
+gfx::Size RenderWidgetHostViewAura::GetMaximumSize() const {
+  return gfx::Size();
+}
+
 void RenderWidgetHostViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
                                                const gfx::Rect& new_bounds) {
-  // We don't care about this one, we are always sized via SetSize() or
-  // SetBounds().
-}
-
-void RenderWidgetHostViewAura::OnFocus(aura::Window* old_focused_window) {
-  // We need to honor input bypass if the associated tab is does not want input.
-  // This gives the current focused window a chance to be the text input
-  // client and handle events.
-  if (host_->ignore_input_events())
-    return;
-
-  host_->GotFocus();
-  host_->SetActive(true);
-
-  ui::InputMethod* input_method = GetInputMethod();
-  if (input_method) {
-    // Ask the system-wide IME to send all TextInputClient messages to |this|
-    // object.
-    input_method->SetFocusedTextInputClient(this);
-    host_->SetInputMethodActive(input_method->IsActive());
-  } else {
-    host_->SetInputMethodActive(false);
-  }
-}
-
-void RenderWidgetHostViewAura::OnBlur() {
-  host_->SetActive(false);
-  host_->Blur();
-
-  DetachFromInputMethod();
-  host_->SetInputMethodActive(false);
-
-  // If we lose the focus while fullscreen, close the window; Pepper Flash won't
-  // do it for us (unlike NPAPI Flash).
-  if (is_fullscreen_ && !in_shutdown_) {
-    in_shutdown_ = true;
-    host_->Shutdown();
-  }
+  // We care about this only in fullscreen mode, where there is no
+  // WebContentsViewAura. We are sized via SetSize() or SetBounds() by
+  // WebContentsViewAura in other cases.
+  if (is_fullscreen_)
+    SetSize(new_bounds.size());
 }
 
 gfx::NativeCursor RenderWidgetHostViewAura::GetCursor(const gfx::Point& point) {
@@ -1337,6 +1779,8 @@ void RenderWidgetHostViewAura::OnPaint(gfx::Canvas* canvas) {
   if (backing_store) {
     static_cast<BackingStoreAura*>(backing_store)->SkiaShowRect(gfx::Point(),
                                                                 canvas);
+    if (paint_observer_)
+      paint_observer_->OnPaintComplete();
   } else if (aura::Env::GetInstance()->render_white_bg()) {
     canvas->DrawColor(SK_ColorWHITE);
   }
@@ -1353,8 +1797,9 @@ void RenderWidgetHostViewAura::OnDeviceScaleFactorChanged(
   if (backing_store)  // NULL in hardware path.
     backing_store->ScaleFactorChanged(device_scale_factor);
 
-  host_->SetDeviceScaleFactor(device_scale_factor);
-  current_cursor_.SetScaleFactor(device_scale_factor);
+  UpdateScreenInfo(window_);
+  host_->NotifyScreenInfoChanged();
+  current_cursor_.SetDeviceScaleFactor(device_scale_factor);
 }
 
 void RenderWidgetHostViewAura::OnWindowDestroying() {
@@ -1396,38 +1841,38 @@ scoped_refptr<ui::Texture> RenderWidgetHostViewAura::CopyTexture() {
   if (!gl_helper)
     return scoped_refptr<ui::Texture>();
 
-  std::map<uint64, scoped_refptr<ui::Texture> >::iterator it =
-      image_transport_clients_.find(current_surface_);
-  if (it == image_transport_clients_.end())
+  if (!current_surface_)
     return scoped_refptr<ui::Texture>();
 
-  ui::Texture* container = it->second;
-  DCHECK(container);
   WebKit::WebGLId texture_id =
-      gl_helper->CopyTexture(container->texture_id(), container->size());
+      gl_helper->CopyTexture(current_surface_->PrepareTexture(),
+                             current_surface_->size());
   if (!texture_id)
     return scoped_refptr<ui::Texture>();
 
   return scoped_refptr<ui::Texture>(
       factory->CreateOwnedTexture(
-          container->size(), device_scale_factor_, texture_id));
+          current_surface_->size(), device_scale_factor_, texture_id));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, ui::EventHandler implementation:
 
-ui::EventResult RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
+void RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnKeyEvent");
-  if (popup_child_host_view_ && popup_child_host_view_->NeedsInputGrab() &&
-      popup_child_host_view_->OnKeyEvent(event))
-    return ui::ER_HANDLED;
+  if (popup_child_host_view_ && popup_child_host_view_->NeedsInputGrab()) {
+    popup_child_host_view_->OnKeyEvent(event);
+    if (event->handled())
+      return;
+  }
 
   // We need to handle the Escape key for Pepper Flash.
   if (is_fullscreen_ && event->key_code() == ui::VKEY_ESCAPE) {
     // Focus the window we were created from.
     if (host_tracker_.get() && !host_tracker_->windows().empty()) {
       aura::Window* host = *(host_tracker_->windows().begin());
-      if (host->GetFocusManager())
+      aura::client::FocusClient* client = aura::client::GetFocusClient(host);
+      if (client)
         host->Focus();
     }
     if (!in_shutdown_) {
@@ -1437,29 +1882,30 @@ ui::EventResult RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
   } else {
     // We don't have to communicate with an input method here.
     if (!event->HasNativeEvent()) {
-      // Send a fabricated event, which is usually a VKEY_PROCESSKEY IME event.
-      NativeWebKeyboardEvent webkit_event(event->type(),
-                                          false /* is_char */,
-                                          event->GetCharacter(),
-                                          event->flags(),
-                                          base::Time::Now().ToDoubleT());
+      NativeWebKeyboardEvent webkit_event(
+          event->type(),
+          event->is_char(),
+          event->is_char() ? event->GetCharacter() : event->key_code(),
+          event->flags(),
+          ui::EventTimeForNow().InSecondsF());
       host_->ForwardKeyboardEvent(webkit_event);
     } else {
       NativeWebKeyboardEvent webkit_event(event);
       host_->ForwardKeyboardEvent(webkit_event);
     }
   }
-  return ui::ER_HANDLED;
+  event->SetHandled();
 }
 
-ui::EventResult RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
+void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnMouseEvent");
+
   if (mouse_locked_) {
     // Hide the cursor if someone else has shown it.
     aura::client::CursorClient* cursor_client =
         aura::client::GetCursorClient(window_->GetRootWindow());
     if (cursor_client && cursor_client->IsCursorVisible())
-      cursor_client->ShowCursor(false);
+      cursor_client->DisableMouseEvents();
 
     WebKit::WebMouseEvent mouse_event = MakeWebMouseEvent(event);
     gfx::Point center(gfx::Rect(window_->bounds().size()).CenterPoint());
@@ -1481,34 +1927,49 @@ ui::EventResult RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
       }
 
       // Forward event to renderer.
-      if (CanRendererHandleEvent(event))
+      if (CanRendererHandleEvent(event) &&
+          !(event->flags() & ui::EF_FROM_TOUCH))
         host_->ForwardMouseEvent(mouse_event);
     }
+    return;
+  }
 
-    return ui::ER_UNHANDLED;
+  // As the overscroll is handled during scroll events from the trackpad, the
+  // RWHVA window is transformed by the overscroll controller. This transform
+  // triggers a synthetic mouse-move event to be generated (by the aura
+  // RootWindow). But this event interferes with the overscroll gesture. So,
+  // ignore such synthetic mouse-move events if an overscroll gesture is in
+  // progress.
+  if (host_->overscroll_controller() &&
+      host_->overscroll_controller()->overscroll_mode() != OVERSCROLL_NONE &&
+      event->flags() & ui::EF_IS_SYNTHESIZED &&
+      (event->type() == ui::ET_MOUSE_ENTERED ||
+       event->type() == ui::ET_MOUSE_EXITED ||
+       event->type() == ui::ET_MOUSE_MOVED)) {
+    event->StopPropagation();
+    return;
   }
 
   if (event->type() == ui::ET_MOUSEWHEEL) {
+#if defined(OS_WIN)
+    // We get mouse wheel/scroll messages even if we are not in the foreground.
+    // So here we check if we have any owned popup windows in the foreground and
+    // dismiss them.
+    aura::RootWindow* root_window = window_->GetRootWindow();
+    if (root_window) {
+      HWND parent = root_window->GetAcceleratedWidget();
+      HWND toplevel_hwnd = ::GetAncestor(parent, GA_ROOT);
+      EnumThreadWindows(GetCurrentThreadId(),
+                        DismissOwnedPopups,
+                        reinterpret_cast<LPARAM>(toplevel_hwnd));
+    }
+#endif
     WebKit::WebMouseWheelEvent mouse_wheel_event =
         MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent*>(event));
     if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0)
       host_->ForwardWheelEvent(mouse_wheel_event);
-  } else if (event->type() == ui::ET_SCROLL) {
-    WebKit::WebGestureEvent gesture_event =
-        MakeWebGestureEventFlingCancel();
-    host_->ForwardGestureEvent(gesture_event);
-    WebKit::WebMouseWheelEvent mouse_wheel_event =
-        MakeWebMouseWheelEvent(static_cast<ui::ScrollEvent*>(event));
-    host_->ForwardWheelEvent(mouse_wheel_event);
-    RecordAction(UserMetricsAction("TrackpadScroll"));
-  } else if (event->type() == ui::ET_SCROLL_FLING_START ||
-      event->type() == ui::ET_SCROLL_FLING_CANCEL) {
-    WebKit::WebGestureEvent gesture_event =
-        MakeWebGestureEvent(static_cast<ui::ScrollEvent*>(event));
-    host_->ForwardGestureEvent(gesture_event);
-    if (event->type() == ui::ET_SCROLL_FLING_START)
-      RecordAction(UserMetricsAction("TrackpadScrollFling"));
-  } else if (CanRendererHandleEvent(event)) {
+  } else if (CanRendererHandleEvent(event) &&
+             !(event->flags() & ui::EF_FROM_TOUCH)) {
     WebKit::WebMouseEvent mouse_event = MakeWebMouseEvent(event);
     ModifyEventMovementAndCoords(&mouse_event);
     host_->ForwardMouseEvent(mouse_event);
@@ -1530,43 +1991,73 @@ ui::EventResult RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
 
   // Needed to propagate mouse event to native_tab_contents_view_aura.
   // TODO(pkotwicz): Find a better way of doing this.
-  if (window_->parent()->delegate())
+  if (window_->parent()->delegate() && !(event->flags() & ui::EF_FROM_TOUCH))
     window_->parent()->delegate()->OnMouseEvent(event);
 
-  // Return true so that we receive released/drag events.
-  return ui::ER_HANDLED;
+  if (!IsXButtonUpEvent(event))
+    event->SetHandled();
 }
 
-ui::EventResult RenderWidgetHostViewAura::OnTouchEvent(ui::TouchEvent* event) {
-  TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnTouchEvent");
-  // Update the touch event first.
-  WebKit::WebTouchPoint* point = UpdateWebTouchEvent(event,
-      &touch_event_);
-
-  // Forward the touch event only if a touch point was updated, and there's a
-  // touch-event handler in the page.
-  if (point && host_->has_touch_handler()) {
-    host_->ForwardTouchEvent(touch_event_);
-    UpdateWebTouchEventAfterDispatch(&touch_event_, point);
-    return ui::ER_ASYNC;
+void RenderWidgetHostViewAura::OnScrollEvent(ui::ScrollEvent* event) {
+  TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnScrollEvent");
+  if (event->type() == ui::ET_SCROLL) {
+    if (event->finger_count() != 2)
+      return;
+    WebKit::WebGestureEvent gesture_event =
+        MakeWebGestureEventFlingCancel();
+    host_->ForwardGestureEvent(gesture_event);
+    WebKit::WebMouseWheelEvent mouse_wheel_event =
+        MakeWebMouseWheelEvent(static_cast<ui::ScrollEvent*>(event));
+    host_->ForwardWheelEvent(mouse_wheel_event);
+    RecordAction(UserMetricsAction("TrackpadScroll"));
+  } else if (event->type() == ui::ET_SCROLL_FLING_START ||
+      event->type() == ui::ET_SCROLL_FLING_CANCEL) {
+    WebKit::WebGestureEvent gesture_event =
+        MakeWebGestureEvent(static_cast<ui::ScrollEvent*>(event));
+    host_->ForwardGestureEvent(gesture_event);
+    if (event->type() == ui::ET_SCROLL_FLING_START)
+      RecordAction(UserMetricsAction("TrackpadScrollFling"));
   }
 
-  return ui::ER_UNHANDLED;
+  event->SetHandled();
 }
 
-ui::EventResult RenderWidgetHostViewAura::OnGestureEvent(
-    ui::GestureEvent* event) {
+void RenderWidgetHostViewAura::OnTouchEvent(ui::TouchEvent* event) {
+  TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnTouchEvent");
+  // Update the touch event first.
+  WebKit::WebTouchPoint* point = UpdateWebTouchEventFromUIEvent(*event,
+                                                                &touch_event_);
+
+  // Forward the touch event only if a touch point was updated, and there's a
+  // touch-event handler in the page, and no other touch-event is in the queue.
+  // It is important to always consume the event if there is a touch-event
+  // handler in the page, or some touch-event is already in the queue, even if
+  // no point has been updated, to make sure that this event does not get
+  // processed by the gesture recognizer before the events in the queue.
+  if (host_->ShouldForwardTouchEvent())
+    event->StopPropagation();
+
+  if (point) {
+    if (host_->ShouldForwardTouchEvent())
+      host_->ForwardTouchEvent(touch_event_);
+    UpdateWebTouchEventAfterDispatch(&touch_event_, point);
+  }
+}
+
+void RenderWidgetHostViewAura::OnGestureEvent(ui::GestureEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnGestureEvent");
   // Pinch gestures are currently disabled by default. See crbug.com/128477.
   if ((event->type() == ui::ET_GESTURE_PINCH_BEGIN ||
       event->type() == ui::ET_GESTURE_PINCH_UPDATE ||
       event->type() == ui::ET_GESTURE_PINCH_END) && !ShouldSendPinchGesture()) {
-    return ui::ER_CONSUMED;
+    event->SetHandled();
+    return;
   }
 
   RenderViewHostDelegate* delegate = NULL;
   if (popup_type_ == WebKit::WebPopupTypeNone && !is_fullscreen_)
     delegate = RenderViewHost::From(host_)->GetDelegate();
+
   if (delegate && event->type() == ui::ET_GESTURE_BEGIN &&
       event->details().touch_points() == 1) {
     delegate->HandleGestureBegin();
@@ -1578,6 +2069,7 @@ ui::EventResult RenderWidgetHostViewAura::OnGestureEvent(
     // event to stop any in-progress flings.
     WebKit::WebGestureEvent fling_cancel = gesture;
     fling_cancel.type = WebKit::WebInputEvent::GestureFlingCancel;
+    fling_cancel.sourceDevice = WebKit::WebGestureEvent::Touchscreen;
     host_->ForwardGestureEvent(fling_cancel);
   }
 
@@ -1599,34 +2091,89 @@ ui::EventResult RenderWidgetHostViewAura::OnGestureEvent(
   }
 
   // If a gesture is not processed by the webpage, then WebKit processes it
-  // (e.g. generates synthetic mouse events). So CONSUMED should be returned
-  // from here to avoid any duplicate synthetic mouse-events being generated
-  // from aura.
-  return ui::ER_CONSUMED;
+  // (e.g. generates synthetic mouse events).
+  event->SetHandled();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, aura::client::ActivationDelegate implementation:
 
-bool RenderWidgetHostViewAura::ShouldActivate(const ui::Event* event) {
-  bool activate = false;
-  if (event) {
-    if (event->type() == ui::ET_MOUSE_PRESSED) {
-      activate = true;
-    } else if (event->type() == ui::ET_GESTURE_BEGIN) {
-      activate = static_cast<const ui::GestureEvent*>(event)->
-          details().touch_points() == 1;
-    }
-  }
-  if (activate)
-    host_->OnPointerEventActivate();
+bool RenderWidgetHostViewAura::ShouldActivate() const {
+  aura::RootWindow* root_window = window_->GetRootWindow();
+  if (!root_window)
+    return true;
+  const ui::Event* event = root_window->current_event();
+  if (!event)
+    return true;
   return is_fullscreen_;
 }
 
-void RenderWidgetHostViewAura::OnActivated() {
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostViewAura,
+//     aura::client::ActivationChangeObserver implementation:
+
+void RenderWidgetHostViewAura::OnWindowActivated(aura::Window* gained_active,
+                                                 aura::Window* lost_active) {
+  DCHECK(window_ == gained_active || window_ == lost_active);
+  if (window_ == gained_active) {
+    const ui::Event* event = window_->GetRootWindow()->current_event();
+    if (event && PointerEventActivates(*event))
+      host_->OnPointerEventActivate();
+  }
 }
 
-void RenderWidgetHostViewAura::OnLostActive() {
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostViewAura, aura::client::FocusChangeObserver implementation:
+
+void RenderWidgetHostViewAura::OnWindowFocused(aura::Window* gained_focus,
+                                               aura::Window* lost_focus) {
+  DCHECK(window_ == gained_focus || window_ == lost_focus);
+  if (window_ == gained_focus) {
+    // We need to honor input bypass if the associated tab is does not want
+    // input. This gives the current focused window a chance to be the text
+    // input client and handle events.
+    if (host_->ignore_input_events())
+      return;
+
+    host_->GotFocus();
+    host_->SetActive(true);
+
+    ui::InputMethod* input_method = GetInputMethod();
+    if (input_method) {
+      // Ask the system-wide IME to send all TextInputClient messages to |this|
+      // object.
+      input_method->SetFocusedTextInputClient(this);
+      host_->SetInputMethodActive(input_method->IsActive());
+
+      // Often the application can set focus to the view in response to a key
+      // down. However the following char event shouldn't be sent to the web
+      // page.
+      host_->SuppressNextCharEvents();
+    } else {
+      host_->SetInputMethodActive(false);
+    }
+  } else if (window_ == lost_focus) {
+    host_->SetActive(false);
+    host_->Blur();
+
+    DetachFromInputMethod();
+    host_->SetInputMethodActive(false);
+
+    // If we lose the focus while fullscreen, close the window; Pepper Flash
+    // won't do it for us (unlike NPAPI Flash).
+    if (is_fullscreen_ && !in_shutdown_) {
+      in_shutdown_ = true;
+      host_->Shutdown();
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostViewAura, aura::RootWindowObserver implementation:
+
+void RenderWidgetHostViewAura::OnRootWindowMoved(const aura::RootWindow* root,
+                                                 const gfx::Point& new_origin) {
+  UpdateScreenInfo(window_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1634,39 +2181,61 @@ void RenderWidgetHostViewAura::OnLostActive() {
 
 void RenderWidgetHostViewAura::OnCompositingDidCommit(
     ui::Compositor* compositor) {
-  RunCompositingDidCommitCallbacks(compositor);
-}
-
-void RenderWidgetHostViewAura::OnCompositingWillStart(
-    ui::Compositor* compositor) {
-  RunCompositingWillStartCallbacks(compositor);
+  if (can_lock_compositor_ == NO_PENDING_COMMIT) {
+    can_lock_compositor_ = YES;
+    for (ResizeLockList::iterator it = resize_locks_.begin();
+        it != resize_locks_.end(); ++it)
+      if ((*it)->GrabDeferredLock())
+        can_lock_compositor_ = YES_DID_LOCK;
+  }
+  RunCompositingDidCommitCallbacks();
+  locks_pending_commit_.clear();
 }
 
 void RenderWidgetHostViewAura::OnCompositingStarted(
-    ui::Compositor* compositor) {
-  locks_pending_draw_.clear();
+    ui::Compositor* compositor, base::TimeTicks start_time) {
+  last_draw_ended_ = start_time;
 }
 
 void RenderWidgetHostViewAura::OnCompositingEnded(
     ui::Compositor* compositor) {
+  if (paint_observer_)
+    paint_observer_->OnCompositingComplete();
 }
 
 void RenderWidgetHostViewAura::OnCompositingAborted(
     ui::Compositor* compositor) {
 }
 
+void RenderWidgetHostViewAura::OnCompositingLockStateChanged(
+    ui::Compositor* compositor) {
+  // A compositor lock that is part of a resize lock timed out. We
+  // should display a renderer frame.
+  if (!compositor->IsLocked() && can_lock_compositor_ == YES_DID_LOCK) {
+    can_lock_compositor_ = NO_PENDING_RENDERER_FRAME;
+  }
+}
+
+void RenderWidgetHostViewAura::OnUpdateVSyncParameters(
+    ui::Compositor* compositor,
+    base::TimeTicks timebase,
+    base::TimeDelta interval) {
+  if (IsShowing() && !last_draw_ended_.is_null())
+    host_->UpdateVSyncParameters(last_draw_ended_, interval);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, ImageTransportFactoryObserver implementation:
 
 void RenderWidgetHostViewAura::OnLostResources() {
-  image_transport_clients_.clear();
-  current_surface_ = 0;
-  protection_state_id_ = 0;
-  current_surface_is_protected_ = true;
-  current_surface_in_use_by_compositor_ = true;
-  surface_route_id_ = 0;
+  current_surface_ = NULL;
   UpdateExternalTexture();
-  locks_pending_draw_.clear();
+  locks_pending_commit_.clear();
+
+  // Make sure all ImageTransportClients are deleted now that the context those
+  // are using is becoming invalid. This sends pending ACKs and needs to happen
+  // after calling UpdateExternalTexture() which syncs with the impl thread.
+  RunCompositingDidCommitCallbacks();
 
   DCHECK(!shared_surface_handle_.is_null());
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
@@ -1680,21 +2249,32 @@ void RenderWidgetHostViewAura::OnLostResources() {
 // RenderWidgetHostViewAura, private:
 
 RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
+  if (paint_observer_)
+    paint_observer_->OnViewDestroyed();
   if (!shared_surface_handle_.is_null()) {
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
     factory->DestroySharedSurfaceHandle(shared_surface_handle_);
     factory->RemoveObserver(this);
   }
-  window_->RemoveObserver(window_observer_.get());
+  window_observer_.reset();
+#if defined(OS_WIN)
+  transient_observer_.reset();
+#endif
+  if (window_->GetRootWindow())
+    window_->GetRootWindow()->RemoveRootWindowObserver(this);
   UnlockMouse();
-  if (popup_type_ != WebKit::WebPopupTypeNone) {
-    DCHECK(popup_parent_host_view_);
+  if (popup_type_ != WebKit::WebPopupTypeNone && popup_parent_host_view_) {
+    DCHECK(popup_parent_host_view_->popup_child_host_view_ == NULL ||
+           popup_parent_host_view_->popup_child_host_view_ == this);
     popup_parent_host_view_->popup_child_host_view_ = NULL;
   }
+  if (popup_child_host_view_) {
+    DCHECK(popup_child_host_view_->popup_parent_host_view_ == NULL ||
+           popup_child_host_view_->popup_parent_host_view_ == this);
+    popup_child_host_view_->popup_parent_host_view_ = NULL;
+  }
   aura::client::SetTooltipText(window_, NULL);
-
-  for (size_t i = 0; i != pending_thumbnail_tasks_.size(); ++i)
-    pending_thumbnail_tasks_[i].Run(false);
+  gfx::Screen::GetScreenFor(window_)->RemoveObserver(this);
 
   // This call is usually no-op since |this| object is already removed from the
   // Aura root window and we don't have a way to get an input method object
@@ -1703,7 +2283,8 @@ RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
 }
 
 void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
-  const gfx::Point screen_point = gfx::Screen::GetCursorScreenPoint();
+  const gfx::Point screen_point =
+      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
   aura::RootWindow* root_window = window_->GetRootWindow();
   if (!root_window)
     return;
@@ -1716,7 +2297,8 @@ void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
     return;
 
   gfx::NativeCursor cursor = current_cursor_.GetNativeCursor();
-  if (is_loading_)
+  // Do not show loading cursor when the cursor is currently hidden.
+  if (is_loading_ && cursor != ui::kCursorNone)
     cursor = ui::kCursorPointer;
 
   aura::client::CursorClient* cursor_client =
@@ -1782,7 +2364,7 @@ void RenderWidgetHostViewAura::SchedulePaintIfNotInClip(
     const gfx::Rect& rect,
     const gfx::Rect& clip) {
   if (!clip.IsEmpty()) {
-    gfx::Rect to_paint = rect.Subtract(clip);
+    gfx::Rect to_paint = gfx::SubtractRects(rect, clip);
     if (!to_paint.IsEmpty())
       window_->SchedulePaintInRect(to_paint);
   } else {
@@ -1801,42 +2383,27 @@ bool RenderWidgetHostViewAura::ShouldMoveToCenter() {
       global_mouse_position_.y() > rect.bottom() - border_y;
 }
 
-void RenderWidgetHostViewAura::RunCompositingDidCommitCallbacks(
-    ui::Compositor* compositor) {
-  for (std::vector< base::Callback<void(ui::Compositor*)> >::const_iterator
+void RenderWidgetHostViewAura::RunCompositingDidCommitCallbacks() {
+  for (std::vector<base::Closure>::const_iterator
       it = on_compositing_did_commit_callbacks_.begin();
       it != on_compositing_did_commit_callbacks_.end(); ++it) {
-    it->Run(compositor);
+    it->Run();
   }
   on_compositing_did_commit_callbacks_.clear();
 }
 
-void RenderWidgetHostViewAura::RunCompositingWillStartCallbacks(
-    ui::Compositor* compositor) {
-  for (std::vector< base::Callback<void(ui::Compositor*)> >::const_iterator
-      it = on_compositing_will_start_callbacks_.begin();
-      it != on_compositing_will_start_callbacks_.end(); ++it) {
-    it->Run(compositor);
-  }
-  on_compositing_will_start_callbacks_.clear();
-}
-
-// static
-void RenderWidgetHostViewAura::InsertSyncPointAndACK(
-     int32 route_id, int gpu_host_id, ui::Compositor* compositor) {
-  uint32 sync_point = 0;
-  // If we have no compositor, so we must still send the ACK. A zero
-  // sync point will not be waited for in the GPU process.
-  if (compositor) {
-    ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    sync_point = factory->InsertSyncPoint();
-  }
-
-  RenderWidgetHostImpl::AcknowledgeBufferPresent(
-      route_id, gpu_host_id, sync_point);
+void RenderWidgetHostViewAura::AddedToRootWindow() {
+  window_->GetRootWindow()->AddRootWindowObserver(this);
+  host_->ParentChanged(GetNativeViewId());
+  UpdateScreenInfo(window_);
+  if (popup_type_ != WebKit::WebPopupTypeNone)
+    event_filter_for_popup_exit_.reset(new EventFilterForPopupExit(this));
 }
 
 void RenderWidgetHostViewAura::RemovingFromRootWindow() {
+  event_filter_for_popup_exit_.reset();
+  window_->GetRootWindow()->RemoveRootWindowObserver(this);
+  host_->ParentChanged(0);
   // We are about to disconnect ourselves from the compositor, we need to issue
   // the callbacks now, because we won't get notified when the frame is done.
   // TODO(piman): this might in theory cause a race where the GPU process starts
@@ -1844,9 +2411,8 @@ void RenderWidgetHostViewAura::RemovingFromRootWindow() {
   // frame though, because we will reissue a new frame right away without that
   // composited data.
   ui::Compositor* compositor = GetCompositor();
-  RunCompositingDidCommitCallbacks(compositor);
-  RunCompositingWillStartCallbacks(compositor);
-  locks_pending_draw_.clear();
+  RunCompositingDidCommitCallbacks();
+  locks_pending_commit_.clear();
   if (compositor && compositor->HasObserver(this))
     compositor->RemoveObserver(this);
   DetachFromInputMethod();

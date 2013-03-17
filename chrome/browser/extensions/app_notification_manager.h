@@ -76,7 +76,7 @@ class AppNotificationManager
       const tracked_objects::Location& from_here,
       const syncer::SyncChangeList& change_list) OVERRIDE;
   // Associate and merge sync data model with our data model.
-  virtual syncer::SyncError MergeDataAndStartSyncing(
+  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
@@ -119,7 +119,7 @@ class AppNotificationManager
   virtual ~AppNotificationManager();
 
   // Starts loading storage_ using |storage_path|.
-  void LoadOnFileThread(const FilePath& storage_path);
+  void LoadOnFileThread(const base::FilePath& storage_path);
 
   // Called on the UI thread to handle the loaded results from storage_.
   void HandleLoadResults(NotificationMap* map);

@@ -7,13 +7,15 @@
 
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
 #include <string>
 
-#include "ppapi/c/pp_resource.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
-#include "ppapi/cpp/dev/message_loop_dev.h"
+#include "ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_time.h"
 #include "ppapi/cpp/dev/scrollbar_dev.h"
+#include "ppapi/cpp/message_loop.h"
 #include "ppapi/cpp/view.h"
 #include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
@@ -43,10 +45,14 @@ class TestCase {
   virtual bool Init();
 
   // Override to implement the test case. It will be called after the plugin is
-  // first displayed, passing a string. If the string is empty, the
-  // should run all tests for this test case. Otherwise, it should run the test
-  // whose name matches test_filter exactly (if there is one). This should
-  // generally be implemented using the RUN_TEST* macros.
+  // first displayed, passing a string. If the string is empty, RunTests should
+  // run all tests for this test case. Otherwise, it must be a comma-delimited
+  // list of test names, possibly prefixed. E.g.:
+  //   "Foo_GoodTest,DISABLED_Foo_BadTest,Foo_OtherGoodTest"
+  // All listed tests which are not prefixed will be run.
+  //
+  // This should generally be implemented in a TestCase subclass using the
+  // RUN_TEST* macros.
   virtual void RunTests(const std::string& test_filter) = 0;
 
   static std::string MakeFailureMessage(const char* file, int line,
@@ -82,6 +88,13 @@ class TestCase {
 
   static void QuitMainMessageLoop(PP_Instance instance);
 
+  const std::map<std::string, bool>& remaining_tests() {
+    return remaining_tests_;
+  }
+  const std::set<std::string>& skipped_tests() {
+    return skipped_tests_;
+  }
+
  protected:
 #if !(defined __native_client__)
   // Overridden by each test to supply a ScriptableObject corresponding to the
@@ -101,9 +114,15 @@ class TestCase {
   // Makes sure the test is run over HTTP.
   bool EnsureRunningOverHTTP();
 
+  // Returns true if |filter| only contains a TestCase name, which normally
+  // means "run all tests". Some TestCases require special setup for individual
+  // tests, and can use this function to decide whether to ignore those tests.
+  bool ShouldRunAllTests(const std::string& filter);
+
   // Return true if the given test name matches the filter. This is true if
-  // (a) filter is empty or (b) test_name and filter match exactly.
-  bool MatchesFilter(const std::string& test_name, const std::string& filter);
+  // (a) filter is empty or (b) test_name matches a test name listed in filter
+  // exactly.
+  bool ShouldRunTest(const std::string& test_name, const std::string& filter);
 
   // Check for leaked resources and vars at the end of the test. If any exist,
   // return a string with some information about the error. Otherwise, return
@@ -112,6 +131,8 @@ class TestCase {
   // You should pass the error string from the test so far; if it is non-empty,
   // CheckResourcesAndVars will do nothing and return the same string.
   std::string CheckResourcesAndVars(std::string errors);
+
+  PP_TimeTicks NowInTimeTicks();
 
   // Run the given test method on a background thread and return the result.
   template <class T>
@@ -122,11 +143,12 @@ class TestCase {
              "Chrome, use the --enable-pepper-testing flag.";
     }
     // These tests are only valid if running out-of-process (threading is not
-    // supported in-process). Just consider it a pass.
+    // supported in-process). For in-process, just consider it a pass.
     if (!testing_interface_->IsOutOfProcess())
       return std::string();
+    pp::MessageLoop background_loop(instance_);
     ThreadedTestRunner<T> runner(instance_->pp_instance(),
-        static_cast<T*>(this), test_to_run);
+        static_cast<T*>(this), test_to_run, background_loop);
     RunOnThreadInternal(&ThreadedTestRunner<T>::ThreadFunction, &runner,
                         testing_interface_);
     return runner.result();
@@ -162,10 +184,12 @@ class TestCase {
     typedef std::string(T::*TestMethodType)();
     ThreadedTestRunner(PP_Instance instance,
                        T* test_case,
-                       TestMethodType test_to_run)
+                       TestMethodType test_to_run,
+                       pp::MessageLoop loop)
         : instance_(instance),
           test_case_(test_case),
-          test_to_run_(test_to_run) {
+          test_to_run_(test_to_run),
+          loop_(loop) {
     }
     const std::string& result() { return result_; }
     static void ThreadFunction(void* runner) {
@@ -174,9 +198,11 @@ class TestCase {
 
    private:
     void Run() {
-      // TODO(dmichael): Create and attach a pp::MessageLoop for this thread so
-      //                 nested loops work.
+      PP_DCHECK(PP_OK == loop_.AttachToCurrentThread());
       result_ = (test_case_->*test_to_run_)();
+      // Now give the loop a chance to clean up.
+      loop_.PostQuit(true /* should_destroy */);
+      loop_.Run();
       // Tell the main thread to quit its nested message loop, now that the test
       // is complete.
       TestCase::QuitMainMessageLoop(instance_);
@@ -186,6 +212,7 @@ class TestCase {
     PP_Instance instance_;
     T* test_case_;
     TestMethodType test_to_run_;
+    pp::MessageLoop loop_;
   };
 
   // The internals for RunOnThread. This allows us to avoid including
@@ -205,6 +232,24 @@ class TestCase {
 
   // Var ids that should be ignored when checking for leaks on shutdown.
   std::set<int64_t> ignored_leaked_vars_;
+
+  // The tests that were found in test_filter but have not yet been run. The
+  // bool indicates whether the test should be run (i.e., it will be false if
+  // the test name was prefixed in the test_filter string).
+  //
+  // This is initialized lazily the first time that ShouldRunTest is called by
+  // RunTests. When RunTests is finished, this should be empty. Any remaining
+  // tests are tests that were listed in the test_filter but didn't match
+  // any calls to ShouldRunTest, meaning it was probably a typo. TestingInstance
+  // should log this and consider it a failure.
+  std::map<std::string, bool> remaining_tests_;
+  // Flag indicating whether we have populated remaining_tests_ yet.
+  bool have_populated_remaining_tests_;
+
+  // If ShouldRunTest is called but the given test name doesn't match anything
+  // in the test_filter, the test name will be added here. This allows
+  // TestingInstance to detect when not all tests were listed.
+  std::set<std::string> skipped_tests_;
 
 #if !(defined __native_client__)
   // Holds the test object, if any was retrieved from CreateTestObject.
@@ -254,25 +299,42 @@ class TestCaseFactory {
 // RunTest function. This assumes the function name is TestFoo where Foo is the
 // test |name|.
 #define RUN_TEST(name, test_filter) \
-  if (MatchesFilter(#name, test_filter)) { \
+  if (ShouldRunTest(#name, test_filter)) { \
     set_callback_type(PP_OPTIONAL); \
-    instance_->LogTest(#name, CheckResourcesAndVars(Test##name())); \
+    PP_TimeTicks start_time(NowInTimeTicks()); \
+    instance_->LogTest(#name, \
+                       CheckResourcesAndVars(Test##name()), \
+                       start_time); \
   }
 
 // Like RUN_TEST above but forces functions taking callbacks to complete
 // asynchronously on success or error.
 #define RUN_TEST_FORCEASYNC(name, test_filter) \
-  if (MatchesFilter(#name, test_filter)) { \
+  if (ShouldRunTest(#name, test_filter)) { \
     set_callback_type(PP_REQUIRED); \
+    PP_TimeTicks start_time(NowInTimeTicks()); \
     instance_->LogTest(#name"ForceAsync", \
-                       CheckResourcesAndVars(Test##name())); \
+                       CheckResourcesAndVars(Test##name()), \
+                       start_time); \
   }
 
 #define RUN_TEST_BLOCKING(test_case, name, test_filter) \
-  if (MatchesFilter(#name, test_filter)) { \
+  if (ShouldRunTest(#name, test_filter)) { \
     set_callback_type(PP_BLOCKING); \
-    instance_->LogTest(#name"Blocking", \
-        CheckResourcesAndVars(RunOnThread(&test_case::Test##name))); \
+    PP_TimeTicks start_time(NowInTimeTicks()); \
+    instance_->LogTest( \
+        #name"Blocking", \
+        CheckResourcesAndVars(RunOnThread(&test_case::Test##name)), \
+        start_time); \
+  }
+
+#define RUN_TEST_BACKGROUND(test_case, name, test_filter) \
+  if (ShouldRunTest(#name, test_filter)) { \
+    PP_TimeTicks start_time(NowInTimeTicks()); \
+    instance_->LogTest( \
+        #name"Background", \
+        CheckResourcesAndVars(RunOnThread(&test_case::Test##name)), \
+        start_time); \
   }
 
 #define RUN_TEST_FORCEASYNC_AND_NOT(name, test_filter) \
@@ -287,10 +349,11 @@ class TestCaseFactory {
     RUN_TEST_FORCEASYNC(name, test_filter); \
     RUN_TEST(name, test_filter); \
     RUN_TEST_BLOCKING(test_case, name, test_filter); \
+    RUN_TEST_BACKGROUND(test_case, name, test_filter); \
   } while (false)
 
 #define RUN_TEST_WITH_REFERENCE_CHECK(name, test_filter) \
-  if (MatchesFilter(#name, test_filter)) { \
+  if (ShouldRunTest(#name, test_filter)) { \
     set_callback_type(PP_OPTIONAL); \
     uint32_t objects = testing_interface_->GetLiveObjectsForInstance( \
         instance_->pp_instance()); \
@@ -300,8 +363,13 @@ class TestCaseFactory {
             instance_->pp_instance()) != objects) \
       error_message = MakeFailureMessage(__FILE__, __LINE__, \
           "reference leak check"); \
-    instance_->LogTest(#name, error_message); \
+    PP_TimeTicks start_time(NowInTimeTicks()); \
+    instance_->LogTest(#name, \
+                       CheckResourcesAndVars(error_message), \
+                       start_time); \
   }
+// TODO(dmichael): Add CheckResourcesAndVars above when Windows tests pass
+//                 cleanly. crbug.com/173503
 
 // Helper macros for checking values in tests, and returning a location
 // description of the test fails.

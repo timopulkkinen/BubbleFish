@@ -11,10 +11,12 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
+#include "net/base/server_bound_cert_store.h"
 #include "net/base/ssl_client_cert_type.h"
 
 namespace base {
@@ -24,8 +26,8 @@ class TaskRunner;
 namespace net {
 
 class ServerBoundCertServiceJob;
+class ServerBoundCertServiceRequest;
 class ServerBoundCertServiceWorker;
-class ServerBoundCertStore;
 
 // A class for creating and fetching server bound certs.
 // Inherits from NonThreadSafe in order to use the function
@@ -33,8 +35,30 @@ class ServerBoundCertStore;
 class NET_EXPORT ServerBoundCertService
     : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
-  // Opaque type used to cancel a request.
-  typedef void* RequestHandle;
+  class NET_EXPORT RequestHandle {
+   public:
+    RequestHandle();
+    ~RequestHandle();
+
+    // Cancel the request.  Does nothing if the request finished or was already
+    // cancelled.
+    void Cancel();
+
+    bool is_active() const { return request_ != NULL; }
+
+   private:
+    friend class ServerBoundCertService;
+
+    void RequestStarted(ServerBoundCertService* service,
+                        ServerBoundCertServiceRequest* request,
+                        const CompletionCallback& callback);
+
+    void OnRequestComplete(int result);
+
+    ServerBoundCertService* service_;
+    ServerBoundCertServiceRequest* request_;
+    CompletionCallback callback_;
+  };
 
   // Password used on EncryptedPrivateKeyInfo data stored in EC private_key
   // values.  (This is not used to provide any security, but to workaround NSS
@@ -77,8 +101,9 @@ class NET_EXPORT ServerBoundCertService
   // could not be completed immediately, in which case the result code will
   // be passed to the callback when available.
   //
-  // |*out_req| will be filled with a handle to the async request. This handle
-  // is not valid after the request has completed.
+  // |*out_req| will be initialized with a handle to the async request. This
+  // RequestHandle object must be cancelled or destroyed before the
+  // ServerBoundCertService is destroyed.
   int GetDomainBoundCert(
       const std::string& origin,
       const std::vector<uint8>& requested_types,
@@ -87,11 +112,6 @@ class NET_EXPORT ServerBoundCertService
       std::string* cert,
       const CompletionCallback& callback,
       RequestHandle* out_req);
-
-  // Cancels the specified request. |req| is the handle returned by
-  // GetDomainBoundCert(). After a request is canceled, its completion
-  // callback will not be called.
-  void CancelRequest(RequestHandle req);
 
   // Returns the backing ServerBoundCertStore.
   ServerBoundCertStore* GetCertStore();
@@ -103,29 +123,23 @@ class NET_EXPORT ServerBoundCertService
   uint64 inflight_joins() const { return inflight_joins_; }
 
  private:
-  friend class ServerBoundCertServiceWorker;  // Calls HandleResult.
+  // Cancels the specified request. |req| is the handle stored by
+  // GetDomainBoundCert(). After a request is canceled, its completion
+  // callback will not be called.
+  void CancelRequest(ServerBoundCertServiceRequest* req);
 
-  // On success, |private_key| stores a DER-encoded PrivateKeyInfo
-  // struct, |cert| stores a DER-encoded certificate, |creation_time| stores the
-  // start of the validity period of the certificate and |expiration_time|
-  // stores the expiration time of the certificate. Returns OK if successful and
-  // an error code otherwise.
-  // |serial_number| is passed in because it is created with the function
-  // base::RandInt, which opens the file /dev/urandom. /dev/urandom is opened
-  // with a LazyInstance, which is not allowed on a worker thread.
-  static int GenerateCert(const std::string& server_identifier,
+  void GotServerBoundCert(const std::string& server_identifier,
                           SSLClientCertType type,
-                          uint32 serial_number,
-                          base::Time* creation_time,
-                          base::Time* expiration_time,
-                          std::string* private_key,
-                          std::string* cert);
-
-  void HandleResult(const std::string& server_identifier,
-                    int error,
+                          base::Time expiration_time,
+                          const std::string& key,
+                          const std::string& cert);
+  void GeneratedServerBoundCert(
+      const std::string& server_identifier,
+      int error,
+      scoped_ptr<ServerBoundCertStore::ServerBoundCert> cert);
+  void HandleResult(int error,
+                    const std::string& server_identifier,
                     SSLClientCertType type,
-                    base::Time creation_time,
-                    base::Time expiration_time,
                     const std::string& private_key,
                     const std::string& cert);
 
@@ -135,6 +149,7 @@ class NET_EXPORT ServerBoundCertService
   // inflight_ maps from a server to an active generation which is taking
   // place.
   std::map<std::string, ServerBoundCertServiceJob*> inflight_;
+  base::WeakPtrFactory<ServerBoundCertService> weak_ptr_factory_;
 
   uint64 requests_;
   uint64 cert_store_hits_;

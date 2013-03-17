@@ -17,6 +17,7 @@
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "net/base/big_endian.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -28,109 +29,86 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
+#include "ui/gfx/safe_integer_conversions.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skbitmap_operations.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
+#endif
 
 namespace ui {
 
 namespace {
 
 // Font sizes relative to base font.
-const int kSmallFontSizeDelta = -2;
+const int kSmallFontSizeDelta = -1;
 const int kMediumFontSizeDelta = 3;
 const int kLargeFontSizeDelta = 8;
 
-ResourceBundle* g_shared_instance_ = NULL;
+// PNG-related constants.
+const unsigned char kPngMagic[8] = { 0x89, 'P', 'N', 'G', 13, 10, 26, 10 };
+const size_t kPngChunkMetadataSize = 12;  // length, type, crc32
+const unsigned char kPngScaleChunkType[4] = { 'c', 's', 'C', 'l' };
+const unsigned char kPngDataChunkType[4] = { 'I', 'D', 'A', 'T' };
 
-bool ShouldHighlightMissingScaledResources() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHighlightMissingScaledResources);
-}
+ResourceBundle* g_shared_instance_ = NULL;
 
 }  // namespace
 
-// An ImageSkiaSource that loads bitmaps for requested scale factor from
-// ResourceBundle on demand for given resource_id. It falls back
-// to the 1x bitmap if the bitmap for the requested scale factor does not
-// exist. If the resource for the requested scale factor is not exactly
-// |scale_factor| * the size of the 1x resource, it will end up with
-// broken UI because it will be drawn as if the bitmap was the correct size.
-// When --highlight-missing-scaled-resources flag is specified, it
-// will show the scaled image blended with red instead.
+// An ImageSkiaSource that loads bitmaps for the requested scale factor from
+// ResourceBundle on demand for a given |resource_id|. If the bitmap for the
+// requested scale factor does not exist, it will return the 1x bitmap scaled
+// by the scale factor. This may lead to broken UI if the correct size of the
+// scaled image is not exactly |scale_factor| * the size of the 1x resource.
+// When --highlight-missing-scaled-resources flag is specified, scaled 1x images
+// are higlighted by blending them with red.
 class ResourceBundle::ResourceBundleImageSource : public gfx::ImageSkiaSource {
  public:
-  ResourceBundleImageSource(ResourceBundle* rb,
-                            int resource_id,
-                            const gfx::Size& size_in_dip)
-      : rb_(rb),
-        resource_id_(resource_id),
-        size_in_dip_(size_in_dip) {
-  }
+  ResourceBundleImageSource(ResourceBundle* rb, int resource_id)
+      : rb_(rb), resource_id_(resource_id) {}
   virtual ~ResourceBundleImageSource() {}
 
   // gfx::ImageSkiaSource overrides:
   virtual gfx::ImageSkiaRep GetImageForScale(
       ui::ScaleFactor scale_factor) OVERRIDE {
-    scoped_ptr<SkBitmap> result(rb_->LoadBitmap(resource_id_, scale_factor));
-    float scale = ui::GetScaleFactorScale(scale_factor);
-    gfx::Size size_in_pixel = size_in_dip_.Scale(scale);
+    SkBitmap image;
+    bool fell_back_to_1x = false;
+    bool found = rb_->LoadBitmap(resource_id_, &scale_factor,
+                                 &image, &fell_back_to_1x);
+    if (!found)
+      return gfx::ImageSkiaRep();
 
-    if (scale_factor != SCALE_FACTOR_100P &&
-        (!result.get() ||
-         result->width() != size_in_pixel.width() ||
-         result->height() != size_in_pixel.height())) {
-
-      // If non 1x resource is missing from |image| or is the incorrect
-      // size and --highlight-missing-scaled-resources is specified, logs
-      // the resource id and creates a version of the resource at the correct
-      // size. Blends the created resource with red to make it
-      // distinguishable from bitmaps in the resource pak.
+    if (fell_back_to_1x) {
+      // GRIT fell back to the 100% image, so rescale it to the correct size.
+      float scale = GetScaleFactorScale(scale_factor);
+      image = skia::ImageOperations::Resize(
+          image,
+          skia::ImageOperations::RESIZE_LANCZOS3,
+          gfx::ToFlooredInt(image.width() * scale),
+          gfx::ToFlooredInt(image.height() * scale));
+      // If --highlight-missing-scaled-resources is specified, log the resource
+      // id and blend the created resource with red.
       if (ShouldHighlightMissingScaledResources()) {
-        if (!result.get()) {
-          LOG(ERROR) << "Missing " << scale << "x resource. id="
-                     << resource_id_;
-        } else {
-          LOG(ERROR) << "Incorrectly sized " << scale << "x resource. id="
-                     << resource_id_;
-        }
-
-        scoped_ptr<SkBitmap> bitmap1x(
-            rb_->LoadBitmap(resource_id_, SCALE_FACTOR_100P));
-        DCHECK(bitmap1x.get());
-        SkBitmap bitmap_scaled = skia::ImageOperations::Resize(
-            *bitmap1x,
-            skia::ImageOperations::RESIZE_LANCZOS3,
-            size_in_pixel.width(),
-            size_in_pixel.height());
+        LOG(ERROR) << "Missing " << scale << "x scaled resource. id="
+                   << resource_id_;
 
         SkBitmap mask;
         mask.setConfig(SkBitmap::kARGB_8888_Config,
-                       bitmap_scaled.width(),
-                       bitmap_scaled.height());
+                       image.width(), image.height());
         mask.allocPixels();
         mask.eraseColor(SK_ColorRED);
-        result.reset(new SkBitmap());
-        *result.get() = SkBitmapOperations::CreateBlendedBitmap(
-            bitmap_scaled, mask, 0.2);
-      } else if (!result.get() || result->width() == size_in_dip_.width()) {
-        // The scaled resource pack may have the 1x image if its grd file
-        // points to 1x image. Fallback to 1x by returning empty image
-        // in this case. This 1x image will be scaled when drawn.
-        return gfx::ImageSkiaRep();
+        image = SkBitmapOperations::CreateBlendedBitmap(image, mask, 0.2);
       }
-      // If the size of scaled image isn't exactly |scale| * 1x version,
-      // create ImageSkia as usual. This will end up with
-      // corrupted visual representation as the size of image doesn't
-      // match the expected size.
     }
-    DCHECK(result.get());
-    return gfx::ImageSkiaRep(*result.get(), scale_factor);
+
+    return gfx::ImageSkiaRep(image, scale_factor);
   }
 
  private:
   ResourceBundle* rb_;
   const int resource_id_;
-  const gfx::Size size_in_dip_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceBundleImageSource);
 };
@@ -142,6 +120,16 @@ std::string ResourceBundle::InitSharedInstanceWithLocale(
   g_shared_instance_ = new ResourceBundle(delegate);
 
   g_shared_instance_->LoadCommonResources();
+  std::string result = g_shared_instance_->LoadLocaleResources(pref_locale);
+  return result;
+}
+
+// static
+std::string ResourceBundle::InitSharedInstanceLocaleOnly(
+    const std::string& pref_locale, Delegate* delegate) {
+  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
+  g_shared_instance_ = new ResourceBundle(delegate);
+
   std::string result = g_shared_instance_->LoadLocaleResources(pref_locale);
   return result;
 }
@@ -165,7 +153,7 @@ void ResourceBundle::InitSharedInstanceWithPakFile(
 }
 
 // static
-void ResourceBundle::InitSharedInstanceWithPakPath(const FilePath& path) {
+void ResourceBundle::InitSharedInstanceWithPakPath(const base::FilePath& path) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle(NULL);
 
@@ -196,12 +184,12 @@ bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
   return !GetLocaleFilePath(locale, true).empty();
 }
 
-void ResourceBundle::AddDataPackFromPath(const FilePath& path,
+void ResourceBundle::AddDataPackFromPath(const base::FilePath& path,
                                          ScaleFactor scale_factor) {
   AddDataPackFromPathInternal(path, scale_factor, false);
 }
 
-void ResourceBundle::AddOptionalDataPackFromPath(const FilePath& path,
+void ResourceBundle::AddOptionalDataPackFromPath(const base::FilePath& path,
                                          ScaleFactor scale_factor) {
   AddDataPackFromPathInternal(path, scale_factor, true);
 }
@@ -211,7 +199,7 @@ void ResourceBundle::AddDataPackFromFile(base::PlatformFile file,
   scoped_ptr<DataPack> data_pack(
       new DataPack(scale_factor));
   if (data_pack->LoadFromFile(file)) {
-    data_packs_.push_back(data_pack.release());
+    AddDataPack(data_pack.release());
   } else {
     LOG(ERROR) << "Failed to load data pack from file."
                << "\nSome features may not be available.";
@@ -219,12 +207,12 @@ void ResourceBundle::AddDataPackFromFile(base::PlatformFile file,
 }
 
 #if !defined(OS_MACOSX)
-FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
-                                           bool test_file_exists) {
+base::FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
+                                                 bool test_file_exists) {
   if (app_locale.empty())
-    return FilePath();
+    return base::FilePath();
 
-  FilePath locale_file_path;
+  base::FilePath locale_file_path;
 
   PathService::Get(ui::DIR_LOCALES, &locale_file_path);
 
@@ -238,10 +226,10 @@ FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
 
   // Don't try to load empty values or values that are not absolute paths.
   if (locale_file_path.empty() || !locale_file_path.IsAbsolute())
-    return FilePath();
+    return base::FilePath();
 
   if (test_file_exists && !file_util::PathExists(locale_file_path))
-    return FilePath();
+    return base::FilePath();
 
   return locale_file_path;
 }
@@ -251,7 +239,7 @@ std::string ResourceBundle::LoadLocaleResources(
     const std::string& pref_locale) {
   DCHECK(!locale_resources_data_.get()) << "locale.pak already loaded";
   std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
-  FilePath locale_file_path = GetOverriddenPakPath();
+  base::FilePath locale_file_path = GetOverriddenPakPath();
   if (locale_file_path.empty()) {
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kLocalePak)) {
@@ -282,13 +270,13 @@ std::string ResourceBundle::LoadLocaleResources(
   return app_locale;
 }
 
-void ResourceBundle::LoadTestResources(const FilePath& path,
-                                       const FilePath& locale_path) {
+void ResourceBundle::LoadTestResources(const base::FilePath& path,
+                                       const base::FilePath& locale_path) {
   // Use the given resource pak for both common and localized resources.
   scoped_ptr<DataPack> data_pack(
       new DataPack(SCALE_FACTOR_100P));
   if (!path.empty() && data_pack->LoadFromPath(path))
-    data_packs_.push_back(data_pack.release());
+    AddDataPack(data_pack.release());
 
   data_pack.reset(new DataPack(ui::SCALE_FACTOR_NONE));
   if (!locale_path.empty() && data_pack->LoadFromPath(locale_path)) {
@@ -303,11 +291,11 @@ void ResourceBundle::UnloadLocaleResources() {
   locale_resources_data_.reset();
 }
 
-void ResourceBundle::OverrideLocalePakForTest(const FilePath& pak_path) {
+void ResourceBundle::OverrideLocalePakForTest(const base::FilePath& pak_path) {
   overridden_pak_path_ = pak_path;
 }
 
-const FilePath& ResourceBundle::GetOverriddenPakPath() {
+const base::FilePath& ResourceBundle::GetOverriddenPakPath() {
   return overridden_pak_path_;
 }
 
@@ -316,11 +304,6 @@ std::string ResourceBundle::ReloadLocaleResources(
   base::AutoLock lock_scope(*locale_resources_data_lock_);
   UnloadLocaleResources();
   return LoadLocaleResources(pref_locale);
-}
-
-SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
-  const SkBitmap* bitmap = GetImageNamed(resource_id).ToSkBitmap();
-  return const_cast<SkBitmap*>(bitmap);
 }
 
 gfx::ImageSkia* ResourceBundle::GetImageSkiaNamed(int resource_id) {
@@ -344,24 +327,24 @@ gfx::Image& ResourceBundle::GetImageNamed(int resource_id) {
     DCHECK(!delegate_ && !data_packs_.empty()) <<
         "Missing call to SetResourcesDataDLL?";
 
-    // TODO(oshima): Pick the scale factor from currently used scale factors.
-    scoped_ptr<SkBitmap> bitmap(LoadBitmap(resource_id, SCALE_FACTOR_100P));
-    if (!bitmap.get()) {
+    // TODO(oshima): Consider reading the image size from png IHDR chunk and
+    // skip decoding here and remove #ifdef below.
+    // ResourceBundle::GetSharedInstance() is destroyed after the
+    // BrowserMainLoop has finished running. |image_skia| is guaranteed to be
+    // destroyed before the resource bundle is destroyed.
+#if defined(OS_CHROMEOS)
+    ui::ScaleFactor scale_factor_to_load = ui::GetMaxScaleFactor();
+#else
+    ui::ScaleFactor scale_factor_to_load = ui::SCALE_FACTOR_100P;
+#endif
+    gfx::ImageSkia image_skia(new ResourceBundleImageSource(this, resource_id),
+                              scale_factor_to_load);
+    if (image_skia.isNull()) {
       LOG(WARNING) << "Unable to load image with id " << resource_id;
       NOTREACHED();  // Want to assert in debug mode.
       // The load failed to retrieve the image; show a debugging red square.
       return GetEmptyImage();
     }
-
-    // ResourceBundle::GetSharedInstance() is destroyed after the
-    // BrowserMainLoop has finished running. |image_skia| is guaranteed to be
-    // destroyed before the resource bundle is destroyed.
-    gfx::Size size_in_dip(bitmap->width(), bitmap->height());
-    gfx::ImageSkia image_skia(
-        new ResourceBundleImageSource(this, resource_id, size_in_dip),
-        size_in_dip);
-    image_skia.AddRepresentation(gfx::ImageSkiaRep(*bitmap.get(),
-                                                   SCALE_FACTOR_100P));
     image_skia.SetReadOnly();
     image = gfx::Image(image_skia);
   }
@@ -382,6 +365,11 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
 }
 
 base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
+    int resource_id) const {
+  return LoadDataResourceBytesForScale(resource_id, ui::SCALE_FACTOR_NONE);
+}
+
+base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytesForScale(
     int resource_id,
     ScaleFactor scale_factor) const {
   base::RefCountedStaticMemory* bytes = NULL;
@@ -389,7 +377,8 @@ base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
     bytes = delegate_->LoadDataResourceBytes(resource_id, scale_factor);
 
   if (!bytes) {
-    base::StringPiece data = GetRawDataResource(resource_id, scale_factor);
+    base::StringPiece data =
+        GetRawDataResourceForScale(resource_id, scale_factor);
     if (!data.empty()) {
       bytes = new base::RefCountedStaticMemory(
           reinterpret_cast<const unsigned char*>(data.data()), data.length());
@@ -399,7 +388,11 @@ base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
   return bytes;
 }
 
-base::StringPiece ResourceBundle::GetRawDataResource(
+base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) const {
+  return GetRawDataResourceForScale(resource_id, ui::SCALE_FACTOR_NONE);
+}
+
+base::StringPiece ResourceBundle::GetRawDataResourceForScale(
     int resource_id,
     ScaleFactor scale_factor) const {
   base::StringPiece data;
@@ -415,7 +408,8 @@ base::StringPiece ResourceBundle::GetRawDataResource(
     }
   }
   for (size_t i = 0; i < data_packs_.size(); i++) {
-    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P &&
+    if ((data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P ||
+         data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE) &&
         data_packs_[i]->GetStringPiece(resource_id, &data))
       return data;
   }
@@ -443,7 +437,7 @@ string16 ResourceBundle::GetLocalizedString(int message_id) {
   if (!locale_resources_data_->GetStringPiece(message_id, &data)) {
     // Fall back on the main data pack (shouldn't be any strings here except in
     // unittests).
-    data = GetRawDataResource(message_id, ui::SCALE_FACTOR_NONE);
+    data = GetRawDataResource(message_id);
     if (data.empty()) {
       NOTREACHED() << "unable to find resource: " << message_id;
       return string16();
@@ -479,6 +473,8 @@ const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
       return *small_font_;
     case MediumFont:
       return *medium_font_;
+    case SmallBoldFont:
+      return *small_bold_font_;
     case MediumBoldFont:
       return *medium_bold_font_;
     case LargeFont:
@@ -499,7 +495,8 @@ void ResourceBundle::ReloadFonts() {
 ResourceBundle::ResourceBundle(Delegate* delegate)
     : delegate_(delegate),
       images_and_fonts_lock_(new base::Lock),
-      locale_resources_data_lock_(new base::Lock) {
+      locale_resources_data_lock_(new base::Lock),
+      max_scale_factor_(SCALE_FACTOR_100P) {
 }
 
 ResourceBundle::~ResourceBundle() {
@@ -511,14 +508,14 @@ void ResourceBundle::FreeImages() {
   images_.clear();
 }
 
-void ResourceBundle::AddDataPackFromPathInternal(const FilePath& path,
+void ResourceBundle::AddDataPackFromPathInternal(const base::FilePath& path,
                                                  ScaleFactor scale_factor,
                                                  bool optional) {
   // Do not pass an empty |path| value to this method. If the absolute path is
   // unknown pass just the pack file name.
   DCHECK(!path.empty());
 
-  FilePath pack_path = path;
+  base::FilePath pack_path = path;
   if (delegate_)
     pack_path = delegate_->GetPathForResourcePack(pack_path, scale_factor);
 
@@ -529,11 +526,19 @@ void ResourceBundle::AddDataPackFromPathInternal(const FilePath& path,
   scoped_ptr<DataPack> data_pack(
       new DataPack(scale_factor));
   if (data_pack->LoadFromPath(pack_path)) {
-    data_packs_.push_back(data_pack.release());
+    AddDataPack(data_pack.release());
   } else if (!optional) {
     LOG(ERROR) << "Failed to load " << pack_path.value()
                << "\nSome features may not be available.";
   }
+}
+
+void ResourceBundle::AddDataPack(DataPack* data_pack) {
+  data_packs_.push_back(data_pack);
+
+  if (GetScaleFactorScale(data_pack->GetScaleFactor()) >
+      GetScaleFactorScale(max_scale_factor_))
+    max_scale_factor_ = data_pack->GetScaleFactor();
 }
 
 void ResourceBundle::LoadFontsIfNecessary() {
@@ -543,6 +548,7 @@ void ResourceBundle::LoadFontsIfNecessary() {
       base_font_.reset(delegate_->GetFont(BaseFont).release());
       bold_font_.reset(delegate_->GetFont(BoldFont).release());
       small_font_.reset(delegate_->GetFont(SmallFont).release());
+      small_bold_font_.reset(delegate_->GetFont(SmallBoldFont).release());
       medium_font_.reset(delegate_->GetFont(MediumFont).release());
       medium_bold_font_.reset(delegate_->GetFont(MediumBoldFont).release());
       large_font_.reset(delegate_->GetFont(LargeFont).release());
@@ -561,6 +567,12 @@ void ResourceBundle::LoadFontsIfNecessary() {
     if (!small_font_.get()) {
       small_font_.reset(new gfx::Font());
       *small_font_ = base_font_->DeriveFont(kSmallFontSizeDelta);
+    }
+
+    if (!small_bold_font_.get()) {
+      small_bold_font_.reset(new gfx::Font());
+      *small_bold_font_ = base_font_->DeriveFont(
+          kSmallFontSizeDelta, base_font_->GetStyle() | gfx::Font::BOLD);
     }
 
     if (!medium_font_.get()) {
@@ -589,37 +601,56 @@ void ResourceBundle::LoadFontsIfNecessary() {
   }
 }
 
-SkBitmap* ResourceBundle::LoadBitmap(const ResourceHandle& data_handle,
-                                     int resource_id) const {
+bool ResourceBundle::LoadBitmap(const ResourceHandle& data_handle,
+                                int resource_id,
+                                SkBitmap* bitmap,
+                                bool* fell_back_to_1x) const {
+  DCHECK(fell_back_to_1x);
   scoped_refptr<base::RefCountedMemory> memory(
       data_handle.GetStaticMemory(resource_id));
   if (!memory)
-    return NULL;
+    return false;
 
-  SkBitmap bitmap;
-  if (gfx::PNGCodec::Decode(memory->front(), memory->size(), &bitmap))
-    return new SkBitmap(bitmap);
+  if (DecodePNG(memory->front(), memory->size(), bitmap, fell_back_to_1x))
+    return true;
 
+#if !defined(OS_IOS)
+  // iOS does not compile or use the JPEG codec.  On other platforms,
   // 99% of our assets are PNGs, however fallback to JPEG.
-  SkBitmap* allocated_bitmap =
-      gfx::JPEGCodec::Decode(memory->front(), memory->size());
-  if (allocated_bitmap)
-    return allocated_bitmap;
+  scoped_ptr<SkBitmap> jpeg_bitmap(
+      gfx::JPEGCodec::Decode(memory->front(), memory->size()));
+  if (jpeg_bitmap.get()) {
+    bitmap->swap(*jpeg_bitmap.get());
+    *fell_back_to_1x = false;
+    return true;
+  }
+#endif
 
   NOTREACHED() << "Unable to decode theme image resource " << resource_id;
-  return NULL;
+  return false;
 }
 
-SkBitmap* ResourceBundle::LoadBitmap(int resource_id,
-                                     ScaleFactor scale_factor) const {
+bool ResourceBundle::LoadBitmap(int resource_id,
+                                ScaleFactor* scale_factor,
+                                SkBitmap* bitmap,
+                                bool* fell_back_to_1x) const {
+  DCHECK(fell_back_to_1x);
   for (size_t i = 0; i < data_packs_.size(); ++i) {
-    if (data_packs_[i]->GetScaleFactor() == scale_factor) {
-      SkBitmap* bitmap = LoadBitmap(*data_packs_[i], resource_id);
-      if (bitmap)
-        return bitmap;
+    // If the resource is in the package with SCALE_FACTOR_NONE, it
+    // can be used in any scale factor, but set 100P in ImageSkia so
+    // that it will be scaled property.
+    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE &&
+        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
+      *scale_factor = ui::SCALE_FACTOR_100P;
+      DCHECK(!*fell_back_to_1x);
+      return true;
+    }
+    if (data_packs_[i]->GetScaleFactor() == *scale_factor &&
+        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
+      return true;
     }
   }
-  return NULL;
+  return false;
 }
 
 gfx::Image& ResourceBundle::GetEmptyImage() {
@@ -631,9 +662,58 @@ gfx::Image& ResourceBundle::GetEmptyImage() {
     bitmap.setConfig(SkBitmap::kARGB_8888_Config, 32, 32);
     bitmap.allocPixels();
     bitmap.eraseARGB(255, 255, 0, 0);
-    empty_image_ = gfx::Image(bitmap);
+    empty_image_ = gfx::Image::CreateFrom1xBitmap(bitmap);
   }
   return empty_image_;
+}
+
+// static
+bool ResourceBundle::ShouldHighlightMissingScaledResources() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kHighlightMissingScaledResources);
+}
+
+// static
+bool ResourceBundle::PNGContainsFallbackMarker(const unsigned char* buf,
+                               size_t size) {
+  if (size < arraysize(kPngMagic) ||
+      memcmp(buf, kPngMagic, arraysize(kPngMagic)) != 0) {
+    // Data invalid or a JPEG.
+    return false;
+  }
+  size_t pos = arraysize(kPngMagic);
+
+  // Scan for custom chunks until we find one, find the IDAT chunk, or run out
+  // of chunks.
+  for (;;) {
+    if (size - pos < kPngChunkMetadataSize)
+      break;
+    uint32 length = 0;
+    net::ReadBigEndian(reinterpret_cast<const char*>(buf + pos), &length);
+    if (size - pos - kPngChunkMetadataSize < length)
+      break;
+    if (length == 0 && memcmp(buf + pos + sizeof(uint32), kPngScaleChunkType,
+                              arraysize(kPngScaleChunkType)) == 0) {
+      return true;
+    }
+    if (memcmp(buf + pos + sizeof(uint32), kPngDataChunkType,
+               arraysize(kPngDataChunkType)) == 0) {
+      // Stop looking for custom chunks, any custom chunks should be before an
+      // IDAT chunk.
+      break;
+    }
+    pos += length + kPngChunkMetadataSize;
+  }
+  return false;
+}
+
+// static
+bool ResourceBundle::DecodePNG(const unsigned char* buf,
+                               size_t size,
+                               SkBitmap* bitmap,
+                               bool* fell_back_to_1x) {
+  *fell_back_to_1x = PNGContainsFallbackMarker(buf, size);
+  return gfx::PNGCodec::Decode(buf, size, bitmap);
 }
 
 }  // namespace ui

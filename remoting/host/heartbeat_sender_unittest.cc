@@ -34,6 +34,7 @@ using testing::SaveArg;
 namespace remoting {
 
 namespace {
+const char kTestBotJid[] = "remotingunittest@bot.talk.google.com";
 const char kHostId[] = "0";
 const char kTestJid[] = "user@gmail.com/chromoting123";
 const char kStanzaId[] = "123";
@@ -68,8 +69,8 @@ class HeartbeatSenderTest
     EXPECT_CALL(signal_strategy_, GetLocalJid())
         .WillRepeatedly(Return(kTestJid));
 
-    heartbeat_sender_.reset(
-        new HeartbeatSender(this, kHostId, &signal_strategy_, &key_pair_));
+    heartbeat_sender_.reset(new HeartbeatSender(
+        this, kHostId, &signal_strategy_, &key_pair_, kTestBotJid));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -98,14 +99,14 @@ TEST_F(HeartbeatSenderTest, DoSendStanza) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   scoped_ptr<XmlElement> stanza(sent_iq);
   ASSERT_TRUE(stanza != NULL);
   ValidateHeartbeatStanza(stanza.get(), "0");
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::DISCONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 // Call Start() followed by Stop(), twice, and make sure two valid heartbeats
@@ -120,14 +121,14 @@ TEST_F(HeartbeatSenderTest, DoSendStanzaTwice) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   scoped_ptr<XmlElement> stanza(sent_iq);
   ASSERT_TRUE(stanza != NULL);
   ValidateHeartbeatStanza(stanza.get(), "0");
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::DISCONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   EXPECT_CALL(signal_strategy_, GetLocalJid())
       .WillRepeatedly(Return(kTestJid));
@@ -137,13 +138,13 @@ TEST_F(HeartbeatSenderTest, DoSendStanzaTwice) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   scoped_ptr<XmlElement> stanza2(sent_iq);
   ValidateHeartbeatStanza(stanza2.get(), "1");
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::DISCONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 // Call Start() followed by Stop(), make sure a valid Iq stanza is sent,
@@ -159,7 +160,7 @@ TEST_F(HeartbeatSenderTest, DoSendStanzaWithExpectedSequenceId) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   scoped_ptr<XmlElement> stanza(sent_iq);
   ASSERT_TRUE(stanza != NULL);
@@ -184,7 +185,7 @@ TEST_F(HeartbeatSenderTest, DoSendStanzaWithExpectedSequenceId) {
   const int kExpectedSequenceId = 456;
   expected_sequence_id->AddText(base::IntToString(kExpectedSequenceId));
   heartbeat_sender_->ProcessResponse(NULL, response.get());
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   scoped_ptr<XmlElement> stanza2(sent_iq2);
   ASSERT_TRUE(stanza2 != NULL);
@@ -192,7 +193,7 @@ TEST_F(HeartbeatSenderTest, DoSendStanzaWithExpectedSequenceId) {
                           base::IntToString(kExpectedSequenceId).c_str());
 
   heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::DISCONNECTED);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 // Verify that ProcessResponse parses set-interval result.
@@ -220,7 +221,7 @@ TEST_F(HeartbeatSenderTest, ProcessResponseSetInterval) {
 void HeartbeatSenderTest::ValidateHeartbeatStanza(
     XmlElement* stanza, const char* expectedSequenceId) {
   EXPECT_EQ(stanza->Attr(buzz::QName("", "to")),
-            std::string(kChromotingBotJid));
+            std::string(kTestBotJid));
   EXPECT_EQ(stanza->Attr(buzz::QName("", "type")), "set");
   XmlElement* heartbeat_stanza =
       stanza->FirstNamed(QName(kChromotingXmlNamespace, "heartbeat"));

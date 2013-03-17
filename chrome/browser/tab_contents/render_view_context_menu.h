@@ -20,7 +20,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class PrintPreviewContextMenuObserver;
 class Profile;
@@ -190,13 +190,14 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
  private:
   friend class RenderViewContextMenuTest;
+  friend class RenderViewContextMenuPrefsTest;
 
   static bool IsDevToolsURL(const GURL& url);
   static bool IsInternalResourcesURL(const GURL& url);
   static bool ExtensionContextAndPatternMatch(
       const content::ContextMenuParams& params,
       extensions::MenuItem::ContextList contexts,
-      const URLPatternSet& target_url_patterns);
+      const extensions::URLPatternSet& target_url_patterns);
   static bool MenuItemMatchesParams(
       const content::ContextMenuParams& params,
       const extensions::MenuItem* item);
@@ -205,6 +206,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   const extensions::Extension* GetExtension() const;
   void AppendPlatformAppItems();
   void AppendPopupExtensionItems();
+  void AppendPanelItems();
   bool AppendCustomItems();
   void AppendDeveloperItems();
   void AppendLinkItems();
@@ -216,6 +218,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   void AppendPageItems();
   void AppendFrameItems();
   void AppendCopyItem();
+  void AppendPrintItem();
   void AppendEditableItems();
   void AppendSearchProvider();
   void AppendAllExtensionItems();

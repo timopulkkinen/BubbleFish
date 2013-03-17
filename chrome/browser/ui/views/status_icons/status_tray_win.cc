@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/views/status_icons/status_tray_win.h"
 
-#include "base/win/metro.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/ui/views/status_icons/status_icon_win.h"
 #include "chrome/common/chrome_constants.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/screen.h"
+#include "win8/util/win8_util.h"
 
 static const UINT kStatusIconMessage = WM_APP + 1;
 
@@ -78,7 +78,8 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
              i != status_icons().end(); ++i) {
           StatusIconWin* win_icon = static_cast<StatusIconWin*>(*i);
           if (win_icon->icon_id() == wparam) {
-            gfx::Point cursor_pos(gfx::Screen::GetCursorScreenPoint());
+            gfx::Point cursor_pos(
+                gfx::Screen::GetNativeScreen()->GetCursorScreenPoint());
             win_icon->HandleClickEvent(cursor_pos, lparam == WM_LBUTTONDOWN);
             break;
           }
@@ -98,7 +99,7 @@ StatusTrayWin::~StatusTrayWin() {
 }
 
 StatusIcon* StatusTrayWin::CreatePlatformStatusIcon() {
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     return new StatusIconMetro(next_icon_id_++);
   } else {
     return new StatusIconWin(next_icon_id_++, window_, kStatusIconMessage);

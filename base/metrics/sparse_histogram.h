@@ -11,10 +11,14 @@
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_base.h"
+#include "base/metrics/sample_map.h"
 #include "base/synchronization/lock.h"
 
 namespace base {
+
+class HistogramSamples;
 
 class BASE_EXPORT_PRIVATE SparseHistogram : public HistogramBase {
  public:
@@ -24,27 +28,41 @@ class BASE_EXPORT_PRIVATE SparseHistogram : public HistogramBase {
 
   virtual ~SparseHistogram();
 
+  // HistogramBase implementation:
+  virtual HistogramType GetHistogramType() const OVERRIDE;
+  virtual bool HasConstructionArguments(Sample minimum,
+                                        Sample maximum,
+                                        size_t bucket_count) const OVERRIDE;
   virtual void Add(Sample value) OVERRIDE;
-
-  virtual void SnapshotSample(std::map<Sample, Count>* sample) const;
+  virtual void AddSamples(const HistogramSamples& samples) OVERRIDE;
+  virtual bool AddSamplesFromPickle(PickleIterator* iter) OVERRIDE;
+  virtual scoped_ptr<HistogramSamples> SnapshotSamples() const OVERRIDE;
   virtual void WriteHTMLGraph(std::string* output) const OVERRIDE;
   virtual void WriteAscii(std::string* output) const OVERRIDE;
 
  protected:
-  // Clients should always use FactoryGet to create SparseHistogram.
-  SparseHistogram(const std::string& name);
+  // HistogramBase implementation:
+  virtual bool SerializeInfoImpl(Pickle* pickle) const OVERRIDE;
 
  private:
-  friend class SparseHistogramTest;  // For constuctor calling.
+  // Clients should always use FactoryGet to create SparseHistogram.
+  explicit SparseHistogram(const std::string& name);
+
+  friend BASE_EXPORT_PRIVATE HistogramBase* DeserializeHistogramInfo(
+      PickleIterator* iter);
+  static HistogramBase* DeserializeInfoImpl(PickleIterator* iter);
 
   virtual void GetParameters(DictionaryValue* params) const OVERRIDE;
   virtual void GetCountAndBucketData(Count* count,
                                      ListValue* buckets) const OVERRIDE;
 
-  std::map<Sample, Count> samples_;
+  // For constuctor calling.
+  friend class SparseHistogramTest;
 
-  // Protects access to above map.
+  // Protects access to |samples_|.
   mutable base::Lock lock_;
+
+  SampleMap samples_;
 
   DISALLOW_COPY_AND_ASSIGN(SparseHistogram);
 };

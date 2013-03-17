@@ -29,7 +29,8 @@ class ResourceMessageReplyParams;
 namespace host {
 
 class HostFactory;
-class InstanceMessageFilter;
+struct HostMessageContext;
+struct ReplyMessageContext;
 class ResourceHost;
 
 // The host provides routing and tracking for resource message calls that
@@ -53,30 +54,44 @@ class PPAPI_HOST_EXPORT PpapiHost : public IPC::Sender, public IPC::Listener {
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // Sends the given reply message to the plugin.
-  void SendReply(const proxy::ResourceMessageReplyParams& params,
+  void SendReply(const ReplyMessageContext& context,
                  const IPC::Message& msg);
+
+  // Sends the given unsolicited reply message to the plugin.
+  void SendUnsolicitedReply(PP_Resource resource, const IPC::Message& msg);
+
+  // Adds the given host resource as a pending one (with no corresponding
+  // PluginResource object and no PP_Resource ID yet). The pending resource ID
+  // is returned. See PpapiHostMsg_AttachToPendingHost.
+  int AddPendingResourceHost(scoped_ptr<ResourceHost> resource_host);
 
   // Adds the given host factory filter to the host. The PpapiHost will take
   // ownership of the pointer.
   void AddHostFactoryFilter(scoped_ptr<HostFactory> filter);
 
-  // Adds the given message filter to the host. The PpapiHost will take
-  // ownership of the pointer.
-  void AddInstanceMessageFilter(scoped_ptr<InstanceMessageFilter> filter);
+  // Returns null if the resource doesn't exist.
+  host::ResourceHost* GetResourceHost(PP_Resource resource) const;
 
  private:
   friend class InstanceMessageFilter;
 
+  void HandleResourceCall(
+      const proxy::ResourceMessageCallParams& params,
+      const IPC::Message& nested_msg,
+      HostMessageContext* context);
+
   // Message handlers.
   void OnHostMsgResourceCall(const proxy::ResourceMessageCallParams& params,
                              const IPC::Message& nested_msg);
+  void OnHostMsgResourceSyncCall(
+      const proxy::ResourceMessageCallParams& params,
+      const IPC::Message& nested_msg,
+      IPC::Message* reply_msg);
   void OnHostMsgResourceCreated(const proxy::ResourceMessageCallParams& param,
                                 PP_Instance instance,
                                 const IPC::Message& nested_msg);
+  void OnHostMsgAttachToPendingHost(PP_Resource resource, int pending_host_id);
   void OnHostMsgResourceDestroyed(PP_Resource resource);
-
-  // Returns null if the resource doesn't exist.
-  host::ResourceHost* GetResourceHost(PP_Resource resource);
 
   // Non-owning pointer.
   IPC::Sender* sender_;
@@ -89,14 +104,15 @@ class PPAPI_HOST_EXPORT PpapiHost : public IPC::Sender, public IPC::Listener {
   // an ObserverList.
   ScopedVector<HostFactory> host_factory_filters_;
 
-  // Filters for instance messages. Note that since we don't support deleting
-  // these dynamically we don't need to worry about modifications during
-  // iteration. If we add that capability, this should be replaced with an
-  // ObserverList.
-  ScopedVector<InstanceMessageFilter> instance_message_filters_;
-
   typedef std::map<PP_Resource, linked_ptr<ResourceHost> > ResourceMap;
   ResourceMap resources_;
+
+  // Resources that have been created in the host and have not yet had the
+  // corresponding PluginResource associated with them.
+  // See PpapiHostMsg_AttachToPendingHost.
+  typedef std::map<int, linked_ptr<ResourceHost> > PendingHostResourceMap;
+  PendingHostResourceMap pending_resource_hosts_;
+  int next_pending_resource_host_id_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiHost);
 };

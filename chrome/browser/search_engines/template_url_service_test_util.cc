@@ -5,9 +5,9 @@
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 
 #include "base/bind.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -17,11 +17,17 @@
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/automation/value_conversion_util.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/google/google_util_chromeos.h"
+#endif
 
 using content::BrowserThread;
 
@@ -70,7 +76,7 @@ class TemplateURLServiceTestingProfile : public TestingProfile {
 
  private:
   scoped_refptr<WebDataService> service_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   content::TestBrowserThread db_thread_;
   content::TestBrowserThread io_thread_;
 };
@@ -97,7 +103,7 @@ class TestingTemplateURLService : public TemplateURLService {
  protected:
   virtual void SetKeywordSearchTermsForURL(const TemplateURL* t_url,
                                            const GURL& url,
-                                           const string16& term) {
+                                           const string16& term) OVERRIDE {
     search_term_ = term;
   }
 
@@ -113,7 +119,7 @@ void TemplateURLServiceTestingProfile::SetUp() {
   // Make unique temp directory.
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-  FilePath path = temp_dir_.path().AppendASCII("TestDataService.db");
+  base::FilePath path = temp_dir_.path().AppendASCII("TestDataService.db");
   service_ = new WebDataService;
   ASSERT_TRUE(service_->InitWithPath(path));
 }
@@ -175,6 +181,10 @@ void TemplateURLServiceTestUtil::SetUp() {
       TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
           profile_.get(), TestingTemplateURLService::Build));
   service->AddObserver(this);
+
+#if defined(OS_CHROMEOS)
+  google_util::chromeos::ClearBrandForCurrentSession();
+#endif
 }
 
 void TemplateURLServiceTestUtil::TearDown() {
@@ -185,7 +195,7 @@ void TemplateURLServiceTestUtil::TearDown() {
   UIThreadSearchTermsData::SetGoogleBaseURL(std::string());
 
   // Flush the message loop to make application verifiers happy.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 void TemplateURLServiceTestUtil::OnTemplateURLServiceChanged() {
@@ -262,8 +272,10 @@ void TemplateURLServiceTestUtil::SetManagedDefaultSearchPreferences(
     const std::string& search_url,
     const std::string& suggest_url,
     const std::string& icon_url,
-    const std::string& encodings) {
-  TestingPrefService* pref_service = profile_->GetTestingPrefService();
+    const std::string& encodings,
+    const std::string& alternate_url,
+    const std::string& search_terms_replacement_key) {
+  TestingPrefServiceSyncable* pref_service = profile_->GetTestingPrefService();
   pref_service->SetManagedPref(prefs::kDefaultSearchProviderEnabled,
                                Value::CreateBooleanValue(enabled));
   pref_service->SetManagedPref(prefs::kDefaultSearchProviderName,
@@ -278,13 +290,19 @@ void TemplateURLServiceTestUtil::SetManagedDefaultSearchPreferences(
                                Value::CreateStringValue(icon_url));
   pref_service->SetManagedPref(prefs::kDefaultSearchProviderEncodings,
                                Value::CreateStringValue(encodings));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderAlternateURLs,
+      alternate_url.empty() ? new base::ListValue() :
+          CreateListValueFrom(alternate_url));
+  pref_service->SetManagedPref(
+      prefs::kDefaultSearchProviderSearchTermsReplacementKey,
+      Value::CreateStringValue(search_terms_replacement_key));
   model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
                    content::NotificationService::AllSources(),
                    content::NotificationService::NoDetails());
 }
 
 void TemplateURLServiceTestUtil::RemoveManagedDefaultSearchPreferences() {
-  TestingPrefService* pref_service = profile_->GetTestingPrefService();
+  TestingPrefServiceSyncable* pref_service = profile_->GetTestingPrefService();
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderEnabled);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderName);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderKeyword);
@@ -292,6 +310,9 @@ void TemplateURLServiceTestUtil::RemoveManagedDefaultSearchPreferences() {
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderSuggestURL);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderIconURL);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderEncodings);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderAlternateURLs);
+  pref_service->RemoveManagedPref(
+      prefs::kDefaultSearchProviderSearchTermsReplacementKey);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderID);
   pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderPrepopulateID);
   model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
@@ -312,5 +333,5 @@ void TemplateURLServiceTestUtil::StartIOThread() {
 }
 
 void TemplateURLServiceTestUtil::PumpLoop() {
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }

@@ -4,15 +4,19 @@
 
 #include "content/common/android/surface_texture_bridge.h"
 
+#include <android/native_window_jni.h>
+
+// TODO(boliu): Remove this include when we move off ICS.
+#include "base/android/build_info.h"
 #include "base/android/jni_android.h"
 #include "base/logging.h"
 #include "content/common/android/surface_texture_listener.h"
 #include "jni/SurfaceTexture_jni.h"
+#include "jni/Surface_jni.h"
 
 using base::android::AttachCurrentThread;
 using base::android::CheckException;
 using base::android::GetClass;
-using base::android::GetMethodID;
 using base::android::ScopedJavaLocalRef;
 
 namespace {
@@ -21,9 +25,20 @@ bool g_jni_initialized = false;
 void RegisterNativesIfNeeded(JNIEnv* env) {
   if (!g_jni_initialized) {
     JNI_SurfaceTexture::RegisterNativesImpl(env);
+    JNI_Surface::RegisterNativesImpl(env);
     g_jni_initialized = true;
   }
 }
+
+// TODO(boliu): Remove this method when when we move off ICS. See
+// http://crbug.com/161864.
+bool GlContextMethodsAvailable() {
+  bool available = base::android::BuildInfo::GetInstance()->sdk_int() >= 16;
+  if (!available)
+    LOG(WARNING) << "Running on unsupported device: rendering may not work";
+  return available;
+}
+
 }  // namespace
 
 namespace content {
@@ -102,6 +117,35 @@ void SurfaceTextureBridge::SetDefaultBufferSize(int width, int height) {
   JNI_SurfaceTexture::Java_SurfaceTexture_setDefaultBufferSize(
       env, j_surface_texture_.obj(), static_cast<jint>(width),
       static_cast<jint>(height));
+}
+
+void SurfaceTextureBridge::AttachToGLContext(int texture_id) {
+  if (GlContextMethodsAvailable()) {
+    JNIEnv* env = AttachCurrentThread();
+    // Note: This method is only available on JB and greater.
+    JNI_SurfaceTexture::Java_SurfaceTexture_attachToGLContext(
+        env, j_surface_texture_.obj(), texture_id);
+  }
+}
+
+void SurfaceTextureBridge::DetachFromGLContext() {
+  if (GlContextMethodsAvailable()) {
+    JNIEnv* env = AttachCurrentThread();
+    // Note: This method is only available on JB and greater.
+    JNI_SurfaceTexture::Java_SurfaceTexture_detachFromGLContext(
+        env, j_surface_texture_.obj());
+  }
+}
+
+ANativeWindow* SurfaceTextureBridge::CreateSurface() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> jsurface(
+      JNI_Surface::Java_Surface_Constructor(
+          env, j_surface_texture_.obj()));
+  DCHECK(!jsurface.is_null());
+  ANativeWindow* native_window = ANativeWindow_fromSurface(env, jsurface.obj());
+  JNI_Surface::Java_Surface_release(env, jsurface.obj());
+  return native_window;
 }
 
 }  // namespace content

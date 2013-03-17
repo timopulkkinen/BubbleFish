@@ -7,13 +7,11 @@
 #include <string>
 
 #include "base/at_exit.h"
-#include "base/base64.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "jingle/notifier/base/notification_method.h"
@@ -24,12 +22,13 @@
 #include "net/base/transport_security_state.h"
 #include "net/url_request/url_request_test_util.h"
 #include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/base/model_type_state_map.h"
+#include "sync/internal_api/public/base/model_type_invalidation_map.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/invalidation_handler.h"
 #include "sync/notifier/invalidation_util.h"
 #include "sync/notifier/invalidator_factory.h"
 #include "sync/notifier/invalidator.h"
+#include "sync/tools/null_invalidation_state_tracker.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -60,14 +59,13 @@ class NotificationPrinter : public InvalidationHandler {
   }
 
   virtual void OnIncomingInvalidation(
-      const ObjectIdStateMap& id_state_map,
-      IncomingInvalidationSource source) OVERRIDE {
-    const ModelTypeStateMap& type_state_map =
-        ObjectIdStateMapToModelTypeStateMap(id_state_map);
-    for (ModelTypeStateMap::const_iterator it = type_state_map.begin();
-         it != type_state_map.end(); ++it) {
-      LOG(INFO) << (source == REMOTE_INVALIDATION ? "Remote" : "Local")
-                << " Invalidation: type = "
+      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE {
+    const ModelTypeInvalidationMap& type_invalidation_map =
+        ObjectIdInvalidationMapToModelTypeInvalidationMap(invalidation_map);
+    for (ModelTypeInvalidationMap::const_iterator it =
+             type_invalidation_map.begin(); it != type_invalidation_map.end();
+         ++it) {
+      LOG(INFO) << "Remote invalidation: type = "
                 << ModelTypeToString(it->first)
                 << ", payload = " << it->second.payload;
     }
@@ -77,50 +75,12 @@ class NotificationPrinter : public InvalidationHandler {
   DISALLOW_COPY_AND_ASSIGN(NotificationPrinter);
 };
 
-class NullInvalidationStateTracker
-    : public base::SupportsWeakPtr<NullInvalidationStateTracker>,
-      public InvalidationStateTracker {
- public:
-  NullInvalidationStateTracker() {}
-  virtual ~NullInvalidationStateTracker() {}
-
-  virtual InvalidationVersionMap GetAllMaxVersions() const OVERRIDE {
-    return InvalidationVersionMap();
-  }
-
-  virtual void SetMaxVersion(
-      const invalidation::ObjectId& id,
-      int64 max_invalidation_version) OVERRIDE {
-    LOG(INFO) << "Setting max invalidation version for "
-              << ObjectIdToString(id) << " to " << max_invalidation_version;
-  }
-
-  virtual void Forget(const ObjectIdSet& ids) OVERRIDE {
-    for (ObjectIdSet::const_iterator it = ids.begin(); it != ids.end(); ++it) {
-      LOG(INFO) << "Forgetting saved state for " << ObjectIdToString(*it);
-    }
-  }
-
-  virtual std::string GetInvalidationState() const OVERRIDE {
-    return std::string();
-  }
-
-  virtual void SetInvalidationState(const std::string& state) OVERRIDE {
-    std::string base64_state;
-    CHECK(base::Base64Encode(state, &base64_state));
-    LOG(INFO) << "Setting invalidation state to: " << base64_state;
-  }
-};
-
 // Needed to use a real host resolver.
-class MyTestURLRequestContext : public TestURLRequestContext {
+class MyTestURLRequestContext : public net::TestURLRequestContext {
  public:
   MyTestURLRequestContext() : TestURLRequestContext(true) {
     context_storage_.set_host_resolver(
-        net::CreateSystemHostResolver(
-            net::HostResolver::kDefaultParallelism,
-            net::HostResolver::kDefaultRetryAttempts,
-            NULL));
+        net::HostResolver::CreateDefaultResolver(NULL));
     context_storage_.set_transport_security_state(
         new net::TransportSecurityState());
     Init();
@@ -129,13 +89,13 @@ class MyTestURLRequestContext : public TestURLRequestContext {
   virtual ~MyTestURLRequestContext() {}
 };
 
-class MyTestURLRequestContextGetter : public TestURLRequestContextGetter {
+class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
  public:
   explicit MyTestURLRequestContextGetter(
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy)
       : TestURLRequestContextGetter(io_message_loop_proxy) {}
 
-  virtual TestURLRequestContext* GetURLRequestContext() OVERRIDE {
+  virtual net::TestURLRequestContext* GetURLRequestContext() OVERRIDE {
     // Construct |context_| lazily so it gets constructed on the right
     // thread (the IO thread).
     if (!context_.get())

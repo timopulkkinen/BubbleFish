@@ -24,7 +24,6 @@ class IOBuffer;
 
 namespace extensions {
 
-class ApiResourceEventNotifier;
 class Socket;
 
 class SocketAsyncApiFunction : public AsyncApiFunction {
@@ -68,7 +67,7 @@ class SocketExtensionWithDnsLookupFunction : public SocketAsyncApiFunction {
 
 class SocketCreateFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.create")
+  DECLARE_EXTENSION_FUNCTION("socket.create", SOCKET_CREATE)
 
   SocketCreateFunction();
 
@@ -88,13 +87,11 @@ class SocketCreateFunction : public SocketAsyncApiFunction {
 
   scoped_ptr<api::socket::Create::Params> params_;
   SocketType socket_type_;
-  int src_id_;
-  ApiResourceEventNotifier* event_notifier_;
 };
 
 class SocketDestroyFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.destroy")
+  DECLARE_EXTENSION_FUNCTION("socket.destroy", SOCKET_DESTROY)
 
  protected:
   virtual ~SocketDestroyFunction() {}
@@ -109,7 +106,7 @@ class SocketDestroyFunction : public SocketAsyncApiFunction {
 
 class SocketConnectFunction : public SocketExtensionWithDnsLookupFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.connect")
+  DECLARE_EXTENSION_FUNCTION("socket.connect", SOCKET_CONNECT)
 
   SocketConnectFunction();
 
@@ -135,7 +132,7 @@ class SocketConnectFunction : public SocketExtensionWithDnsLookupFunction {
 
 class SocketDisconnectFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.disconnect")
+  DECLARE_EXTENSION_FUNCTION("socket.disconnect", SOCKET_DISCONNECT)
 
  protected:
   virtual ~SocketDisconnectFunction() {}
@@ -150,7 +147,7 @@ class SocketDisconnectFunction : public SocketAsyncApiFunction {
 
 class SocketBindFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.bind")
+  DECLARE_EXTENSION_FUNCTION("socket.bind", SOCKET_BIND)
 
  protected:
   virtual ~SocketBindFunction() {}
@@ -167,7 +164,7 @@ class SocketBindFunction : public SocketAsyncApiFunction {
 
 class SocketListenFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.listen");
+  DECLARE_EXTENSION_FUNCTION("socket.listen", SOCKET_LISTEN)
 
   SocketListenFunction();
 
@@ -184,7 +181,7 @@ class SocketListenFunction : public SocketAsyncApiFunction {
 
 class SocketAcceptFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.accept");
+  DECLARE_EXTENSION_FUNCTION("socket.accept", SOCKET_ACCEPT)
 
   SocketAcceptFunction();
 
@@ -202,7 +199,7 @@ class SocketAcceptFunction : public SocketAsyncApiFunction {
 
 class SocketReadFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.read")
+  DECLARE_EXTENSION_FUNCTION("socket.read", SOCKET_READ)
 
   SocketReadFunction();
 
@@ -220,7 +217,7 @@ class SocketReadFunction : public SocketAsyncApiFunction {
 
 class SocketWriteFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.write")
+  DECLARE_EXTENSION_FUNCTION("socket.write", SOCKET_WRITE)
 
   SocketWriteFunction();
 
@@ -240,7 +237,7 @@ class SocketWriteFunction : public SocketAsyncApiFunction {
 
 class SocketRecvFromFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.recvFrom")
+  DECLARE_EXTENSION_FUNCTION("socket.recvFrom", SOCKET_RECVFROM)
 
   SocketRecvFromFunction();
 
@@ -261,7 +258,7 @@ class SocketRecvFromFunction : public SocketAsyncApiFunction {
 
 class SocketSendToFunction : public SocketExtensionWithDnsLookupFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.sendTo")
+  DECLARE_EXTENSION_FUNCTION("socket.sendTo", SOCKET_SENDTO)
 
   SocketSendToFunction();
 
@@ -289,7 +286,7 @@ class SocketSendToFunction : public SocketExtensionWithDnsLookupFunction {
 
 class SocketSetKeepAliveFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.setKeepAlive")
+  DECLARE_EXTENSION_FUNCTION("socket.setKeepAlive", SOCKET_SETKEEPALIVE)
 
   SocketSetKeepAliveFunction();
 
@@ -306,7 +303,7 @@ class SocketSetKeepAliveFunction : public SocketAsyncApiFunction {
 
 class SocketSetNoDelayFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.setNoDelay")
+  DECLARE_EXTENSION_FUNCTION("socket.setNoDelay", SOCKET_SETNODELAY)
 
   SocketSetNoDelayFunction();
 
@@ -323,7 +320,7 @@ class SocketSetNoDelayFunction : public SocketAsyncApiFunction {
 
 class SocketGetInfoFunction : public SocketAsyncApiFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.getInfo");
+  DECLARE_EXTENSION_FUNCTION("socket.getInfo", SOCKET_GETINFO)
 
   SocketGetInfoFunction();
 
@@ -340,7 +337,7 @@ class SocketGetInfoFunction : public SocketAsyncApiFunction {
 
 class SocketGetNetworkListFunction : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("socket.getNetworkList");
+  DECLARE_EXTENSION_FUNCTION("socket.getNetworkList", SOCKET_GETNETWORKLIST)
 
  protected:
   virtual ~SocketGetNetworkListFunction() {}

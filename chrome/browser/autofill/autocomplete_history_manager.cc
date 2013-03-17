@@ -6,26 +6,22 @@
 
 #include <vector>
 
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/prefs/pref_service_base.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
-#include "chrome/browser/autofill/credit_card.h"
+#include "chrome/browser/autofill/validation.h"
 #include "chrome/common/autofill_messages.h"
+#include "chrome/common/form_data.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "webkit/forms/form_data.h"
 
 using base::StringPiece16;
 using content::BrowserContext;
 using content::WebContents;
-using webkit::forms::FormData;
-using webkit::forms::FormField;
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(AutocompleteHistoryManager)
 
 namespace {
 
@@ -98,14 +94,14 @@ bool IsSSN(const string16& text) {
   return true;
 }
 
-bool IsTextField(const FormField& field) {
+bool IsTextField(const FormFieldData& field) {
   return
-      field.form_control_type == ASCIIToUTF16("text") ||
-      field.form_control_type == ASCIIToUTF16("search") ||
-      field.form_control_type == ASCIIToUTF16("tel") ||
-      field.form_control_type == ASCIIToUTF16("url") ||
-      field.form_control_type == ASCIIToUTF16("email") ||
-      field.form_control_type == ASCIIToUTF16("text");
+      field.form_control_type == "text" ||
+      field.form_control_type == "search" ||
+      field.form_control_type == "tel" ||
+      field.form_control_type == "url" ||
+      field.form_control_type == "email" ||
+      field.form_control_type == "text";
 }
 
 }  // namespace
@@ -113,15 +109,14 @@ bool IsTextField(const FormField& field) {
 AutocompleteHistoryManager::AutocompleteHistoryManager(
     WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
+      browser_context_(web_contents->GetBrowserContext()),
+      autofill_data_(
+          AutofillWebDataService::FromBrowserContext(browser_context_)),
       pending_query_handle_(0),
       query_id_(0),
       external_delegate_(NULL) {
-  browser_context_ = web_contents->GetBrowserContext();
-  // May be NULL in unit tests.
-  autofill_data_ = AutofillWebDataService::FromBrowserContext(browser_context_);
   autofill_enabled_.Init(prefs::kAutofillEnabled,
-                         PrefServiceBase::FromBrowserContext(browser_context_),
-                         NULL);
+                         PrefServiceFromBrowserContext(browser_context_));
 }
 
 AutocompleteHistoryManager::~AutocompleteHistoryManager() {
@@ -209,14 +204,14 @@ void AutocompleteHistoryManager::OnFormSubmitted(const FormData& form) {
   //  - text field
   //  - value is not a credit card number
   //  - value is not a SSN
-  std::vector<FormField> values;
-  for (std::vector<FormField>::const_iterator iter =
+  std::vector<FormFieldData> values;
+  for (std::vector<FormFieldData>::const_iterator iter =
            form.fields.begin();
        iter != form.fields.end(); ++iter) {
     if (!iter->value.empty() &&
         !iter->name.empty() &&
         IsTextField(*iter) &&
-        !CreditCard::IsValidCreditCardNumber(iter->value) &&
+        !autofill::IsValidCreditCardNumber(iter->value) &&
         !IsSSN(iter->value)) {
       values.push_back(*iter);
     }
@@ -237,25 +232,9 @@ void AutocompleteHistoryManager::SetExternalDelegate(
   external_delegate_ = delegate;
 }
 
-AutocompleteHistoryManager::AutocompleteHistoryManager(
-    WebContents* web_contents,
-    BrowserContext* browser_context,
-    scoped_ptr<AutofillWebDataService> awd)
-    : content::WebContentsObserver(web_contents),
-      browser_context_(browser_context),
-      autofill_data_(awd.Pass()),
-      pending_query_handle_(0),
-      query_id_(0),
-      external_delegate_(NULL) {
-  autofill_enabled_.Init(prefs::kAutofillEnabled,
-                         PrefServiceBase::FromBrowserContext(browser_context_),
-                         NULL);
-}
-
 void AutocompleteHistoryManager::CancelPendingQuery() {
   if (pending_query_handle_) {
-    SendSuggestions(NULL);
-    if (autofill_data_.get())
+    if (autofill_data_)
       autofill_data_->CancelRequest(pending_query_handle_);
     pending_query_handle_ = 0;
   }

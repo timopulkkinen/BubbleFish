@@ -12,6 +12,7 @@
 #include "ipc/ipc_channel_handle.h"
 #include "third_party/npapi/bindings/npruntime.h"
 
+namespace content {
 class JavaBridgeChannel;
 struct NPVariant_Param;
 
@@ -21,9 +22,9 @@ struct NPVariant_Param;
 // bound to the window object of the main frame when that window object is next
 // cleared. These objects remain bound until the window object is cleared
 // again.
-class JavaBridgeDispatcher : public content::RenderViewObserver {
+class JavaBridgeDispatcher : public RenderViewObserver {
  public:
-  JavaBridgeDispatcher(content::RenderView* render_view);
+  JavaBridgeDispatcher(RenderView* render_view);
   virtual ~JavaBridgeDispatcher();
 
  private:
@@ -36,7 +37,7 @@ class JavaBridgeDispatcher : public content::RenderViewObserver {
                         const NPVariant_Param& variant_param);
   void OnRemoveNamedObject(const string16& name);
 
-  void EnsureChannelIsSetUp();
+  bool EnsureChannelIsSetUp();
 
   // Objects that will be bound to the window when the window object is next
   // cleared. We hold a ref to these.
@@ -44,5 +45,7 @@ class JavaBridgeDispatcher : public content::RenderViewObserver {
   ObjectMap objects_;
   scoped_refptr<JavaBridgeChannel> channel_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_JAVA_JAVA_BRIDGE_DISPATCHER_H_

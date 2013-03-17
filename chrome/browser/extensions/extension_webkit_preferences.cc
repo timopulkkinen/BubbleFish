@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "webkit/glue/webpreferences.h"
 
 namespace extension_webkit_preferences {
@@ -27,11 +28,11 @@ void SetPreferences(const extensions::Extension* extension,
     // be subject to that.
     webkit_prefs->allow_scripts_to_close_windows = true;
 
-    // Disable force-compositing-mode for extension background pages, to reduce
+    // Disable all gpu features for extension background pages, to reduce
     // memory impact of extensions. See crbug.com/123935. This also "works
     // around" crbug.com/123935
     if (render_view_type == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
-      webkit_prefs->force_compositing_mode = false;
+      webkit_prefs->accelerated_compositing_enabled = false;
     }
   }
 
@@ -53,7 +54,7 @@ void SetPreferences(const extensions::Extension* extension,
   // sometimes loaded with chrome-extension: URLs - we should expect the
   // performance characteristics to be similar in both cases.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (extension->location() == extensions::Extension::COMPONENT &&
+  if (extension->location() == extensions::Manifest::COMPONENT &&
       !command_line.HasSwitch(switches::kAllowWebUICompositing)) {
     webkit_prefs->accelerated_compositing_enabled = false;
     webkit_prefs->accelerated_2d_canvas_enabled = false;

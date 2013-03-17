@@ -12,13 +12,14 @@
 #include "base/metrics/histogram.h"
 #include "media/base/media_log.h"
 #include "media/base/video_frame.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "webkit/media/media_stream_audio_renderer.h"
 #include "webkit/media/media_stream_client.h"
 #include "webkit/media/video_frame_provider.h"
 #include "webkit/media/webmediaplayer_delegate.h"
@@ -45,13 +46,15 @@ WebMediaPlayerMS::WebMediaPlayerMS(
       client_(client),
       delegate_(delegate),
       media_stream_client_(media_stream_client),
-      video_frame_provider_started_(false),
       paused_(true),
+      current_frame_used_(false),
       pending_repaint_(false),
-      got_first_frame_(false),
+      received_first_frame_(false),
+      sequence_started_(false),
       total_frame_count_(0),
       dropped_frame_count_(0),
-      media_log_(media_log) {
+      media_log_(media_log),
+      volume_modified_(false) {
   DVLOG(1) << "WebMediaPlayerMS::ctor";
   DCHECK(media_stream_client);
   media_log_->AddEvent(
@@ -63,6 +66,18 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (video_frame_provider_) {
     video_frame_provider_->Stop();
+  }
+
+  if (audio_renderer_) {
+    if (audio_renderer_->IsLocalRenderer()) {
+      audio_renderer_->Stop();
+    } else if (!paused_) {
+      // The |audio_renderer_| can be shared by multiple remote streams, and
+      // it will be stopped when WebRtcAudioDeviceImpl goes away. So we simply
+      // pause the |audio_renderer_| here to avoid re-creating the
+      // |audio_renderer_|.
+      audio_renderer_->Pause();
+    }
   }
 
   media_log_->AddEvent(
@@ -88,13 +103,23 @@ void WebMediaPlayerMS::load(const WebKit::WebURL& url, CORSMode cors_mode) {
       url,
       base::Bind(&WebMediaPlayerMS::OnSourceError, AsWeakPtr()),
       base::Bind(&WebMediaPlayerMS::OnFrameAvailable, AsWeakPtr()));
-  if (video_frame_provider_) {
-    SetNetworkState(WebMediaPlayer::NetworkStateLoaded);
+
+  audio_renderer_ = media_stream_client_->GetAudioRenderer(url);
+
+  if (video_frame_provider_ || audio_renderer_) {
     GetClient()->sourceOpened();
     GetClient()->setOpaque(true);
-    SetReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
-    SetReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
-    RepaintInternal();
+    if (audio_renderer_)
+      audio_renderer_->Start();
+
+    if (video_frame_provider_) {
+      video_frame_provider_->Start();
+    } else {
+      // This is audio-only mode.
+      DCHECK(audio_renderer_);
+      SetReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
+      SetReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
+    }
   } else {
     SetNetworkState(WebMediaPlayer::NetworkStateNetworkError);
   }
@@ -108,16 +133,13 @@ void WebMediaPlayerMS::play() {
   DVLOG(1) << "WebMediaPlayerMS::play";
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  if (video_frame_provider_ && paused_)
+    video_frame_provider_->Play();
+
+  if (audio_renderer_ && paused_)
+    audio_renderer_->Play();
+
   paused_ = false;
-  if (video_frame_provider_) {
-    if (video_frame_provider_started_) {
-      video_frame_provider_->Play();
-    } else {
-      video_frame_provider_started_ = true;
-      video_frame_provider_->Start();
-    }
-  }
-  // TODO(wjia): add audio. See crbug.com/142988.
 
   media_log_->AddEvent(media_log_->CreateEvent(media::MediaLogEvent::PLAY));
 
@@ -131,7 +153,10 @@ void WebMediaPlayerMS::pause() {
 
   if (video_frame_provider_)
     video_frame_provider_->Pause();
-  // TODO(wjia): add audio. See crbug.com/142988.
+
+  if (audio_renderer_ && !paused_)
+    audio_renderer_->Pause();
+
   paused_ = true;
 
   media_log_->AddEvent(media_log_->CreateEvent(media::MediaLogEvent::PAUSE));
@@ -164,8 +189,23 @@ void WebMediaPlayerMS::setRate(float rate) {
 
 void WebMediaPlayerMS::setVolume(float volume) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // TODO(wjia): set audio volume. See crbug.com/142988.
-  NOTIMPLEMENTED();
+  if (!audio_renderer_)
+    return;
+
+  // The first time setVolume() is called, the call will come from WebKit's
+  // initialization code, not from javascript.  For local video streams we
+  // have this temporary workaround for WebRTC applications that automatically
+  // mutes the audio output of locally captured streams when the stream is
+  // assigned to a video or audio tag.
+  // So, when WebKit calls us, we set the volume to 0 (mute) for local
+  // audio streams only but subsequent calls will actually set the volume
+  // since those calls will be from the application.
+  // More details here: http://crbug.com/164811.
+  if (!volume_modified_ && audio_renderer_->IsLocalRenderer())
+    volume = 0.0f;
+
+  audio_renderer_->SetVolume(volume);
+  volume_modified_ = true;
 }
 
 void WebMediaPlayerMS::setVisible(bool visible) {
@@ -188,8 +228,7 @@ bool WebMediaPlayerMS::hasVideo() const {
 
 bool WebMediaPlayerMS::hasAudio() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // TODO(wjia): add audio support. See crbug.com/142988.
-  return false;
+  return (audio_renderer_ != NULL);
 }
 
 WebKit::WebSize WebMediaPlayerMS::naturalSize() const {
@@ -198,7 +237,7 @@ WebKit::WebSize WebMediaPlayerMS::naturalSize() const {
   gfx::Size size;
   if (current_frame_)
     size = current_frame_->natural_size();
-  DVLOG(1) << "WebMediaPlayerMS::naturalSize, " << size.ToString();
+  DVLOG(3) << "WebMediaPlayerMS::naturalSize, " << size.ToString();
   return WebKit::WebSize(size);
 }
 
@@ -221,6 +260,8 @@ float WebMediaPlayerMS::currentTime() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (current_frame_.get()) {
     return current_frame_->GetTimestamp().InSecondsF();
+  } else if (audio_renderer_) {
+    return audio_renderer_->GetCurrentRenderTime().InSecondsF();
   }
   return 0.0f;
 }
@@ -254,7 +295,7 @@ float WebMediaPlayerMS::maxTimeSeekable() const {
 
 bool WebMediaPlayerMS::didLoadingProgress() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return false;
+  return true;
 }
 
 unsigned long long WebMediaPlayerMS::totalBytes() const {
@@ -270,10 +311,17 @@ void WebMediaPlayerMS::setSize(const WebSize& size) {
 void WebMediaPlayerMS::paint(WebCanvas* canvas,
                              const WebRect& rect,
                              uint8_t alpha) {
-  DVLOG(1) << "WebMediaPlayerMS::paint";
+  DVLOG(3) << "WebMediaPlayerMS::paint";
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  video_renderer_.Paint(current_frame_, canvas, rect, alpha);
+  gfx::RectF dest_rect(rect.x, rect.y, rect.width, rect.height);
+  video_renderer_.Paint(current_frame_, canvas, dest_rect, alpha);
+
+  {
+    base::AutoLock auto_lock(current_frame_lock_);
+    if (current_frame_.get())
+      current_frame_used_ = true;
+  }
 }
 
 bool WebMediaPlayerMS::hasSingleSecurityOrigin() const {
@@ -320,19 +368,21 @@ unsigned WebMediaPlayerMS::videoDecodedByteCount() const {
 }
 
 WebKit::WebVideoFrame* WebMediaPlayerMS::getCurrentFrame() {
-  DVLOG(1) << "WebMediaPlayerMS::getCurrentFrame";
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(3) << "WebMediaPlayerMS::getCurrentFrame";
+  base::AutoLock auto_lock(current_frame_lock_);
   DCHECK(!pending_repaint_);
-  pending_repaint_ = true;
-  if (current_frame_.get())
+  if (current_frame_.get()) {
+    pending_repaint_ = true;
+    current_frame_used_ = true;
     return new webkit_media::WebVideoFrameImpl(current_frame_);
+  }
   return NULL;
 }
 
 void WebMediaPlayerMS::putCurrentFrame(
     WebKit::WebVideoFrame* web_video_frame) {
-  DVLOG(1) << "WebMediaPlayerMS::putCurrentFrame";
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(3) << "WebMediaPlayerMS::putCurrentFrame";
+  base::AutoLock auto_lock(current_frame_lock_);
   DCHECK(pending_repaint_);
   pending_repaint_ = false;
   if (web_video_frame) {
@@ -342,30 +392,52 @@ void WebMediaPlayerMS::putCurrentFrame(
 
 void WebMediaPlayerMS::OnFrameAvailable(
     const scoped_refptr<media::VideoFrame>& frame) {
-  DVLOG(1) << "WebMediaPlayerMS::OnFrameAvailable";
+  DVLOG(3) << "WebMediaPlayerMS::OnFrameAvailable";
   DCHECK(thread_checker_.CalledOnValidThread());
   ++total_frame_count_;
-  if (!got_first_frame_) {
-    got_first_frame_ = true;
+  if (!received_first_frame_) {
+    received_first_frame_ = true;
+    {
+      base::AutoLock auto_lock(current_frame_lock_);
+      DCHECK(!current_frame_used_);
+      current_frame_ =
+          media::VideoFrame::CreateBlackFrame(frame->natural_size());
+    }
+    SetReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
+    SetReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
+    GetClient()->sizeChanged();
+  }
+
+  // Do not update |current_frame_| when paused.
+  if (paused_)
+    return;
+
+  if (!sequence_started_) {
+    sequence_started_ = true;
     start_time_ = frame->GetTimestamp();
   }
-  current_frame_ = frame;
-  current_frame_->SetTimestamp(frame->GetTimestamp() - start_time_);
-  if (pending_repaint_) {
-    // TODO(wjia): Figure out how to calculate dropped frame count for
-    // both S/W and H/W compositing.
-    // ++dropped_frame_count_;
-  } else {
-    GetClient()->repaint();
+  bool size_changed = !current_frame_ ||
+      current_frame_->natural_size() != frame->natural_size();
+
+  {
+    base::AutoLock auto_lock(current_frame_lock_);
+    if (!current_frame_used_ && current_frame_.get())
+      ++dropped_frame_count_;
+    current_frame_ = frame;
+    current_frame_->SetTimestamp(frame->GetTimestamp() - start_time_);
+    current_frame_used_ = false;
   }
+
+  if (size_changed)
+    GetClient()->sizeChanged();
+
+  GetClient()->repaint();
 }
 
 void WebMediaPlayerMS::RepaintInternal() {
   DVLOG(1) << "WebMediaPlayerMS::RepaintInternal";
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!pending_repaint_) {
-    GetClient()->repaint();
-  }
+  GetClient()->repaint();
 }
 
 void WebMediaPlayerMS::OnSourceError() {

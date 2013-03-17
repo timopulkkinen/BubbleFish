@@ -8,6 +8,7 @@
 #include "base/message_loop_proxy.h"
 #include "jingle/notifier/base/notifier_options_util.h"
 #include "jingle/notifier/listener/push_client_observer.h"
+#include "jingle/notifier/listener/send_ping_task.h"
 #include "jingle/notifier/listener/push_notifications_send_update_task.h"
 
 namespace notifier {
@@ -60,6 +61,7 @@ void XmppPushClient::OnConnect(
 
 void XmppPushClient::OnTransientDisconnection() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(1) << "Push: Transient disconnection";
   base_task_.reset();
   FOR_EACH_OBSERVER(PushClientObserver, observers_,
                     OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
@@ -67,6 +69,7 @@ void XmppPushClient::OnTransientDisconnection() {
 
 void XmppPushClient::OnCredentialsRejected() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(1) << "Push: Credentials rejected";
   base_task_.reset();
   FOR_EACH_OBSERVER(
       PushClientObserver, observers_,
@@ -78,6 +81,11 @@ void XmppPushClient::OnNotificationReceived(
   DCHECK(thread_checker_.CalledOnValidThread());
   FOR_EACH_OBSERVER(PushClientObserver, observers_,
                     OnIncomingNotification(notification));
+}
+
+void XmppPushClient::OnPingResponseReceived() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  FOR_EACH_OBSERVER(PushClientObserver, observers_, OnPingResponse());
 }
 
 void XmppPushClient::OnSubscribed() {
@@ -140,6 +148,17 @@ void XmppPushClient::SendNotification(const Notification& notification) {
   // Owned by |base_task_|.
   PushNotificationsSendUpdateTask* task =
       new PushNotificationsSendUpdateTask(base_task_, notification);
+  task->Start();
+}
+
+void XmppPushClient::SendPing() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (!base_task_.get()) {
+    DVLOG(1) << "Push: Cannot send ping";
+    return;
+  }
+  // Owned by |base_task_|.
+  SendPingTask* task = new SendPingTask(base_task_, this);
   task->Start();
 }
 

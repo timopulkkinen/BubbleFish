@@ -24,12 +24,9 @@ namespace dom_storage {
 
 static const int kSessionStoraceScavengingSeconds = 60;
 
-DomStorageContext::UsageInfo::UsageInfo() : data_size(0) {}
-DomStorageContext::UsageInfo::~UsageInfo() {}
-
 DomStorageContext::DomStorageContext(
-    const FilePath& localstorage_directory,
-    const FilePath& sessionstorage_directory,
+    const base::FilePath& localstorage_directory,
+    const base::FilePath& sessionstorage_directory,
     quota::SpecialStoragePolicy* special_storage_policy,
     DomStorageTaskRunner* task_runner)
     : localstorage_directory_(localstorage_directory),
@@ -49,14 +46,15 @@ DomStorageContext::~DomStorageContext() {
   if (session_storage_database_.get()) {
     // SessionStorageDatabase shouldn't be deleted right away: deleting it will
     // potentially involve waiting in leveldb::DBImpl::~DBImpl, and waiting
-    // shouldn't happen on this thread. This will unassign the ref counted
-    // pointer without decreasing the ref count, and is balanced by the Release
-    // that happens later.
+    // shouldn't happen on this thread.
+    SessionStorageDatabase* to_release = session_storage_database_.get();
+    to_release->AddRef();
+    session_storage_database_ = NULL;
     task_runner_->PostShutdownBlockingTask(
         FROM_HERE,
         DomStorageTaskRunner::COMMIT_SEQUENCE,
         base::Bind(&SessionStorageDatabase::Release,
-                   base::Unretained(session_storage_database_.release())));
+                   base::Unretained(to_release)));
   }
 }
 
@@ -71,7 +69,7 @@ DomStorageNamespace* DomStorageContext::GetStorageNamespace(
         if (!file_util::CreateDirectory(localstorage_directory_)) {
           LOG(ERROR) << "Failed to create 'Local Storage' directory,"
                         " falling back to in-memory only.";
-          localstorage_directory_ = FilePath();
+          localstorage_directory_ = base::FilePath();
         }
       }
       DomStorageNamespace* local =
@@ -84,16 +82,17 @@ DomStorageNamespace* DomStorageContext::GetStorageNamespace(
   return found->second;
 }
 
-void DomStorageContext::GetUsageInfo(std::vector<UsageInfo>* infos,
-                                     bool include_file_info) {
+void DomStorageContext::GetLocalStorageUsage(
+    std::vector<LocalStorageUsageInfo>* infos,
+    bool include_file_info) {
   if (localstorage_directory_.empty())
     return;
   FileEnumerator enumerator(localstorage_directory_, false,
                             FileEnumerator::FILES);
-  for (FilePath path = enumerator.Next(); !path.empty();
+  for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
     if (path.MatchesExtension(DomStorageArea::kDatabaseFileExtension)) {
-      UsageInfo info;
+      LocalStorageUsageInfo info;
       info.origin = DomStorageArea::OriginFromDatabaseFileName(path);
       if (include_file_info) {
         FileEnumerator::FindInfo find_info;
@@ -104,13 +103,32 @@ void DomStorageContext::GetUsageInfo(std::vector<UsageInfo>* infos,
       infos->push_back(info);
     }
   }
-  // TODO(marja): Get usage infos for sessionStorage (crbug.com/123599).
 }
 
-void DomStorageContext::DeleteOrigin(const GURL& origin) {
+void DomStorageContext::GetSessionStorageUsage(
+    std::vector<SessionStorageUsageInfo>* infos) {
+  if (!session_storage_database_.get())
+    return;
+  std::map<std::string, std::vector<GURL> > namespaces_and_origins;
+  session_storage_database_->ReadNamespacesAndOrigins(
+      &namespaces_and_origins);
+  for (std::map<std::string, std::vector<GURL> >::const_iterator it =
+           namespaces_and_origins.begin();
+       it != namespaces_and_origins.end(); ++it) {
+    for (std::vector<GURL>::const_iterator origin_it = it->second.begin();
+         origin_it != it->second.end(); ++origin_it) {
+      SessionStorageUsageInfo info;
+      info.persistent_namespace_id = it->first;
+      info.origin = *origin_it;
+      infos->push_back(info);
+    }
+  }
+}
+
+void DomStorageContext::DeleteLocalStorage(const GURL& origin) {
   DCHECK(!is_shutdown_);
   DomStorageNamespace* local = GetStorageNamespace(kLocalStorageNamespaceId);
-  local->DeleteOrigin(origin);
+  local->DeleteLocalStorageOrigin(origin);
   // Synthesize a 'cleared' event if the area is open so CachedAreas in
   // renderers get emptied out too.
   DomStorageArea* area = local->GetOpenStorageArea(origin);
@@ -118,9 +136,34 @@ void DomStorageContext::DeleteOrigin(const GURL& origin) {
     NotifyAreaCleared(area, origin);
 }
 
+void DomStorageContext::DeleteSessionStorage(
+    const SessionStorageUsageInfo& usage_info) {
+  DCHECK(!is_shutdown_);
+  DomStorageNamespace* dom_storage_namespace = NULL;
+  std::map<std::string, int64>::const_iterator it =
+      persistent_namespace_id_to_namespace_id_.find(
+          usage_info.persistent_namespace_id);
+  if (it != persistent_namespace_id_to_namespace_id_.end()) {
+    dom_storage_namespace = GetStorageNamespace(it->second);
+  } else {
+    int64 namespace_id = AllocateSessionId();
+    CreateSessionNamespace(namespace_id, usage_info.persistent_namespace_id);
+    dom_storage_namespace = GetStorageNamespace(namespace_id);
+  }
+  dom_storage_namespace->DeleteSessionStorageOrigin(usage_info.origin);
+  // Synthesize a 'cleared' event if the area is open so CachedAreas in
+  // renderers get emptied out too.
+  DomStorageArea* area =
+      dom_storage_namespace->GetOpenStorageArea(usage_info.origin);
+  if (area)
+    NotifyAreaCleared(area, usage_info.origin);
+}
+
 void DomStorageContext::PurgeMemory() {
   // We can only purge memory from the local storage namespace
   // which is backed by disk.
+  // TODO(marja): Purge sessionStorage, too. (Requires changes to the FastClear
+  // functionality.)
   StorageNamespaceMap::iterator found =
       namespaces_.find(kLocalStorageNamespaceId);
   if (found != namespaces_.end())
@@ -210,6 +253,8 @@ void DomStorageContext::CreateSessionNamespace(
   namespaces_[namespace_id] = new DomStorageNamespace(
       namespace_id, persistent_namespace_id, session_storage_database_.get(),
       task_runner_);
+  persistent_namespace_id_to_namespace_id_[persistent_namespace_id] =
+      namespace_id;
 }
 
 void DomStorageContext::DeleteSessionNamespace(
@@ -218,8 +263,8 @@ void DomStorageContext::DeleteSessionNamespace(
   StorageNamespaceMap::const_iterator it = namespaces_.find(namespace_id);
   if (it == namespaces_.end())
     return;
+  std::string persistent_namespace_id = it->second->persistent_namespace_id();
   if (session_storage_database_.get()) {
-    std::string persistent_namespace_id = it->second->persistent_namespace_id();
     if (!should_persist_data) {
       task_runner_->PostShutdownBlockingTask(
           FROM_HERE,
@@ -228,11 +273,16 @@ void DomStorageContext::DeleteSessionNamespace(
               base::IgnoreResult(&SessionStorageDatabase::DeleteNamespace),
               session_storage_database_,
               persistent_namespace_id));
-    } else if (!scavenging_started_) {
-      // Protect the persistent namespace ID from scavenging.
-      protected_persistent_session_ids_.insert(persistent_namespace_id);
+    } else {
+      // Ensure that the data gets committed before we shut down.
+      it->second->Shutdown();
+      if (!scavenging_started_) {
+        // Protect the persistent namespace ID from scavenging.
+        protected_persistent_session_ids_.insert(persistent_namespace_id);
+      }
     }
   }
+  persistent_namespace_id_to_namespace_id_.erase(persistent_namespace_id);
   namespaces_.erase(namespace_id);
 }
 
@@ -252,9 +302,9 @@ void DomStorageContext::CloneSessionNamespace(
 
 void DomStorageContext::ClearSessionOnlyOrigins() {
   if (!localstorage_directory_.empty()) {
-    std::vector<UsageInfo> infos;
+    std::vector<LocalStorageUsageInfo> infos;
     const bool kDontIncludeFileInfo = false;
-    GetUsageInfo(&infos, kDontIncludeFileInfo);
+    GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
     for (size_t i = 0; i < infos.size(); ++i) {
       const GURL& origin = infos[i].origin;
       if (special_storage_policy_->IsStorageProtected(origin))
@@ -263,7 +313,7 @@ void DomStorageContext::ClearSessionOnlyOrigins() {
         continue;
 
       const bool kNotRecursive = false;
-      FilePath database_file_path = localstorage_directory_.Append(
+      base::FilePath database_file_path = localstorage_directory_.Append(
           DomStorageArea::DatabaseFileNameFromOrigin(origin));
       file_util::Delete(database_file_path, kNotRecursive);
       file_util::Delete(
@@ -272,21 +322,16 @@ void DomStorageContext::ClearSessionOnlyOrigins() {
     }
   }
   if (session_storage_database_.get()) {
-    std::vector<std::string> namespace_ids;
-    session_storage_database_->ReadNamespaceIds(&namespace_ids);
-    for (std::vector<std::string>::const_iterator it = namespace_ids.begin();
-         it != namespace_ids.end(); ++it) {
-      std::vector<GURL> origins;
-      session_storage_database_->ReadOriginsInNamespace(*it, &origins);
-
-      for (std::vector<GURL>::const_iterator origin_it = origins.begin();
-           origin_it != origins.end(); ++origin_it) {
-        if (special_storage_policy_->IsStorageProtected(*origin_it))
-          continue;
-        if (!special_storage_policy_->IsStorageSessionOnly(*origin_it))
-          continue;
-        session_storage_database_->DeleteArea(*it, *origin_it);
-      }
+    std::vector<SessionStorageUsageInfo> infos;
+    GetSessionStorageUsage(&infos);
+    for (size_t i = 0; i < infos.size(); ++i) {
+      const GURL& origin = infos[i].origin;
+      if (special_storage_policy_->IsStorageProtected(origin))
+        continue;
+      if (!special_storage_policy_->IsStorageSessionOnly(origin))
+        continue;
+      session_storage_database_->DeleteArea(infos[i].persistent_namespace_id,
+                                            origin);
     }
   }
 }
@@ -331,14 +376,15 @@ void DomStorageContext::FindUnusedNamespacesInCommitSequence(
   DCHECK(session_storage_database_.get());
   // Delete all namespaces which don't have an associated DomStorageNamespace
   // alive.
-  std::vector<std::string> namespace_ids;
-  session_storage_database_->ReadNamespaceIds(&namespace_ids);
-  for (std::vector<std::string>::const_iterator it = namespace_ids.begin();
-       it != namespace_ids.end(); ++it) {
-    if (namespace_ids_in_use.find(*it) == namespace_ids_in_use.end() &&
-        protected_persistent_session_ids.find(*it) ==
+  std::map<std::string, std::vector<GURL> > namespaces_and_origins;
+  session_storage_database_->ReadNamespacesAndOrigins(&namespaces_and_origins);
+  for (std::map<std::string, std::vector<GURL> >::const_iterator it =
+           namespaces_and_origins.begin();
+       it != namespaces_and_origins.end(); ++it) {
+    if (namespace_ids_in_use.find(it->first) == namespace_ids_in_use.end() &&
+        protected_persistent_session_ids.find(it->first) ==
         protected_persistent_session_ids.end()) {
-      deletable_persistent_namespace_ids_.push_back(*it);
+      deletable_persistent_namespace_ids_.push_back(it->first);
     }
   }
   if (!deletable_persistent_namespace_ids_.empty()) {

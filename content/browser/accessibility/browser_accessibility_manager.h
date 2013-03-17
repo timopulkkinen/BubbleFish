@@ -14,12 +14,13 @@
 #include "content/common/content_export.h"
 #include "ui/gfx/native_widget_types.h"
 
+struct AccessibilityHostMsg_NotificationParams;
+
+namespace content {
 class BrowserAccessibility;
 #if defined(OS_WIN)
 class BrowserAccessibilityManagerWin;
 #endif
-
-struct AccessibilityHostMsg_NotificationParams;
 
 // Class that can perform actions on behalf of the BrowserAccessibilityManager.
 class CONTENT_EXPORT BrowserAccessibilityDelegate {
@@ -35,6 +36,7 @@ class CONTENT_EXPORT BrowserAccessibilityDelegate {
       int acc_obj_id, int start_offset, int end_offset) = 0;
   virtual bool HasFocus() const = 0;
   virtual gfx::Rect GetViewBounds() const = 0;
+  virtual gfx::Point GetLastTouchEventLocation() const = 0;
 };
 
 class CONTENT_EXPORT BrowserAccessibilityFactory {
@@ -53,7 +55,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   // to the caller.
   static BrowserAccessibilityManager* Create(
     gfx::NativeView parent_view,
-    const content::AccessibilityNodeData& src,
+    const AccessibilityNodeData& src,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory = new BrowserAccessibilityFactory());
 
@@ -61,7 +63,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   // to the caller.
   static BrowserAccessibilityManager* CreateEmptyDocument(
     gfx::NativeView parent_view,
-    content::AccessibilityNodeData::State state,
+    AccessibilityNodeData::State state,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory = new BrowserAccessibilityFactory());
 
@@ -150,17 +152,12 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
 
   // Is the on-screen keyboard allowed to be shown, in response to a
   // focus event on a text box?
-  bool IsOSKAllowed();
-
-  // Should the on-screen keyboard be shown only when a touch is within the
-  // control bounds? If false, the OSK should be shown if any touch event leads
-  // to a control getting focus.
-  bool ShouldRestrictOSKToControlBounds();
+  bool IsOSKAllowed(const gfx::Rect& bounds);
 
  protected:
   BrowserAccessibilityManager(
       gfx::NativeView parent_view,
-      const content::AccessibilityNodeData& src,
+      const AccessibilityNodeData& src,
       BrowserAccessibilityDelegate* delegate,
       BrowserAccessibilityFactory* factory);
 
@@ -191,14 +188,13 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   // received from the renderer process. When |include_children| is true
   // the node's children will also be updated, otherwise only the node
   // itself is updated.
-  void UpdateNode(const content::AccessibilityNodeData& src,
-                  bool include_children);
+  void UpdateNode(const AccessibilityNodeData& src, bool include_children);
 
   // Recursively build a tree of BrowserAccessibility objects from
   // the AccessibilityNodeData tree received from the renderer process.
   BrowserAccessibility* CreateAccessibilityTree(
       BrowserAccessibility* parent,
-      const content::AccessibilityNodeData& src,
+      const AccessibilityNodeData& src,
       int index_in_parent,
       bool send_show_events);
 
@@ -232,5 +228,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManager);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_H_

@@ -24,7 +24,6 @@ struct HttpRequestInfo;
 class HttpRequestHeaders;
 class HttpStreamParser;
 class IOBuffer;
-class UploadDataStream;
 
 class HttpBasicStream : public HttpStream {
  public:
@@ -43,7 +42,6 @@ class HttpBasicStream : public HttpStream {
                                const CompletionCallback& callback) OVERRIDE;
 
   virtual int SendRequest(const HttpRequestHeaders& headers,
-                          scoped_ptr<UploadDataStream> request_body,
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
 
@@ -71,6 +69,9 @@ class HttpBasicStream : public HttpStream {
   virtual void SetConnectionReused() OVERRIDE;
 
   virtual bool IsConnectionReusable() const OVERRIDE;
+
+  virtual bool GetLoadTimingInfo(
+      LoadTimingInfo* load_timing_info) const OVERRIDE;
 
   virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 

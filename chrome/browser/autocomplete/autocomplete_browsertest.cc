@@ -12,9 +12,10 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -48,6 +49,11 @@ string16 AutocompleteResultAsString(const AutocompleteResult& result) {
 
 class AutocompleteBrowserTest : public ExtensionBrowserTest {
  protected:
+  void WaitForTemplateURLServiceToLoad() {
+    ui_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(browser()->profile()));
+  }
+
   LocationBar* GetLocationBar() const {
     return browser()->window()->GetLocationBar();
   }
@@ -59,6 +65,7 @@ class AutocompleteBrowserTest : public ExtensionBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
+  WaitForTemplateURLServiceToLoad();
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* location_entry = location_bar->GetLocationEntry();
 
@@ -102,6 +109,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
+  WaitForTemplateURLServiceToLoad();
   // The results depend on the history backend being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
   ui_test_utils::WaitForHistoryToLoad(
@@ -112,9 +120,9 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
   AutocompleteController* autocomplete_controller = GetAutocompleteController();
 
   {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("chrome"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
+    autocomplete_controller->Start(AutocompleteInput(
+        ASCIIToUTF16("chrome"), string16::npos, string16(), true, false, true,
+        AutocompleteInput::SYNCHRONOUS_MATCHES));
 
     OmniboxView* location_entry = location_bar->GetLocationEntry();
 
@@ -145,6 +153,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
 }
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
+  WaitForTemplateURLServiceToLoad();
   // http://code.google.com/p/chromium/issues/detail?id=38385
   // Make sure that tabbing away from an empty omnibar causes a revert
   // and select all.
@@ -165,6 +174,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
 }
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, FocusSearch) {
+  WaitForTemplateURLServiceToLoad();
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* location_entry = location_bar->GetLocationEntry();
 
@@ -247,63 +257,5 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, FocusSearch) {
     location_entry->GetSelectionBounds(&selection_start, &selection_end);
     EXPECT_EQ(4U, std::min(selection_start, selection_end));
     EXPECT_EQ(7U, std::max(selection_start, selection_end));
-  }
-}
-
-IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, ExtensionAppProvider) {
-  ExtensionService* service = browser()->profile()->GetExtensionService();
-  size_t extension_count = service->extensions()->size();
-
-  FilePath test_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  // Load a packaged app.
-  extensions::UnpackedInstaller::Create(service)->Load(
-      test_dir.AppendASCII("extensions").AppendASCII("packaged_app"));
-  WaitForExtensionLoad();
-  // Load a hosted app.
-  extensions::UnpackedInstaller::Create(service)->Load(
-      test_dir.AppendASCII("extensions").AppendASCII("app"));
-  WaitForExtensionLoad();
-  ASSERT_EQ(extension_count + 2U, service->extensions()->size());
-
-  // The results depend on the history backend being loaded. Make sure it is
-  // loaded so that the autocomplete results are consistent.
-  ui_test_utils::WaitForHistoryToLoad(
-      HistoryServiceFactory::GetForProfile(browser()->profile(),
-                                           Profile::EXPLICIT_ACCESS));
-
-  AutocompleteController* autocomplete_controller = GetAutocompleteController();
-
-  // Try out the packaged app.
-  {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("Packaged App Test"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
-
-    EXPECT_TRUE(autocomplete_controller->done());
-    const AutocompleteResult& result = autocomplete_controller->result();
-    EXPECT_GT(result.size(), 1U) << AutocompleteResultAsString(result);
-    AutocompleteMatch match = result.match_at(0);
-    EXPECT_EQ(ASCIIToUTF16("Packaged App Test"), match.contents);
-    EXPECT_EQ(AutocompleteMatch::EXTENSION_APP, match.type);
-    EXPECT_FALSE(match.deletable);
-  }
-
-  chrome::NewTab(browser());
-
-  // Try out the hosted app.
-  {
-    autocomplete_controller->Start(
-        ASCIIToUTF16("App Test"), string16(), true, false, true,
-        AutocompleteInput::SYNCHRONOUS_MATCHES);
-
-    EXPECT_TRUE(autocomplete_controller->done());
-    const AutocompleteResult& result = autocomplete_controller->result();
-    // 'App test' is also a substring of extension 'Packaged App Test'.
-    EXPECT_GT(result.size(), 2U) << AutocompleteResultAsString(result);
-    AutocompleteMatch match = result.match_at(0);
-    EXPECT_EQ(ASCIIToUTF16("App Test"), match.contents);
-    EXPECT_EQ(AutocompleteMatch::EXTENSION_APP, match.type);
-    EXPECT_FALSE(match.deletable);
   }
 }

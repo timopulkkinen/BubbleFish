@@ -35,7 +35,7 @@ class FakeDelegate : public SingleLoginAttempt::Delegate {
  public:
   FakeDelegate() : state_(IDLE) {}
 
-  void OnConnect(
+  virtual void OnConnect(
       base::WeakPtr<buzz::XmppTaskParentInterface> base_task) OVERRIDE {
     state_ = CONNECTED;
     base_task_ = base_task;
@@ -70,10 +70,11 @@ class FakeDelegate : public SingleLoginAttempt::Delegate {
   ServerInformation redirect_server_;
 };
 
-class MyTestURLRequestContext : public TestURLRequestContext {
+class MyTestURLRequestContext : public net::TestURLRequestContext {
  public:
   MyTestURLRequestContext() : TestURLRequestContext(true) {
-    context_storage_.set_host_resolver(new net::HangingHostResolver());
+    context_storage_.set_host_resolver(
+        scoped_ptr<net::HostResolver>(new net::HangingHostResolver()));
     Init();
   }
   virtual ~MyTestURLRequestContext() {}
@@ -84,9 +85,10 @@ class SingleLoginAttemptTest : public ::testing::Test {
   SingleLoginAttemptTest()
       : login_settings_(
           buzz::XmppClientSettings(),
-          new TestURLRequestContextGetter(
+          new net::TestURLRequestContextGetter(
               base::MessageLoopProxy::current(),
-              scoped_ptr<TestURLRequestContext>(new MyTestURLRequestContext())),
+              scoped_ptr<net::TestURLRequestContext>(
+                  new MyTestURLRequestContext())),
           ServerList(
               1,
               ServerInformation(
@@ -96,7 +98,7 @@ class SingleLoginAttemptTest : public ::testing::Test {
         attempt_(login_settings_, &fake_delegate_) {}
 
   virtual void TearDown() OVERRIDE {
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
 
   void FireRedirect(buzz::XmlElement* redirect_error) {

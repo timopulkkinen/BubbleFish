@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/time.h"
 #include "base/win/win_util.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/gfx/point.h"
 
@@ -277,7 +278,10 @@ float GetTouchForce(const base::NativeEvent& native_event) {
 
 bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* x_offset,
-                      float* y_offset) {
+                      float* y_offset,
+                      float* x_offset_ordinal,
+                      float* y_offset_ordinal,
+                      int* finger_count) {
   // Not supported in Windows.
   NOTIMPLEMENTED();
   return false;
@@ -286,6 +290,8 @@ bool GetScrollOffsets(const base::NativeEvent& native_event,
 bool GetFlingData(const base::NativeEvent& native_event,
                   float* vx,
                   float* vy,
+                  float* vx_ordinal,
+                  float* vy_ordinal,
                   bool* is_cancel) {
   // Not supported in Windows.
   NOTIMPLEMENTED();
@@ -349,9 +355,7 @@ int GetModifiersFromKeyState() {
 
 // Windows emulates mouse messages for touch events.
 bool IsMouseEventFromTouch(UINT message) {
-  return (message == WM_MOUSEMOVE ||
-      message == WM_LBUTTONDOWN || message == WM_LBUTTONUP ||
-      message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) &&
+  return (message >= WM_MOUSEFIRST) && (message <= WM_MOUSELAST) &&
       (GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) ==
       MOUSEEVENTF_FROMTOUCH;
 }

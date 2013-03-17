@@ -9,11 +9,13 @@
 
 #include "base/command_line.h"
 #include "base/string_util.h"
+#include "base/sys_info.h"
 #include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/program_manager.h"
@@ -28,11 +30,12 @@ namespace gles2 {
 
 ContextGroup::ContextGroup(
     MailboxManager* mailbox_manager,
+    ImageManager* image_manager,
     MemoryTracker* memory_tracker,
     bool bind_generates_resource)
     : mailbox_manager_(mailbox_manager ? mailbox_manager : new MailboxManager),
+      image_manager_(image_manager ? image_manager : new ImageManager),
       memory_tracker_(memory_tracker),
-      num_contexts_(0),
       enforce_gl_minimums_(CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnforceGLMinimums)),
       bind_generates_resource_(bind_generates_resource),
@@ -67,10 +70,13 @@ static void GetIntegerv(GLenum pname, uint32* var) {
   *var = value;
 }
 
-bool ContextGroup::Initialize(const DisallowedFeatures& disallowed_features,
-                              const char* allowed_features) {
-  if (num_contexts_ > 0) {
-    ++num_contexts_;
+bool ContextGroup::Initialize(
+    GLES2Decoder* decoder,
+    const DisallowedFeatures& disallowed_features,
+    const char* allowed_features) {
+  // If we've already initialized the group just add the context.
+  if (HaveContexts()) {
+    decoders_.push_back(base::AsWeakPtr<GLES2Decoder>(decoder));
     return true;
   }
 
@@ -135,26 +141,16 @@ bool ContextGroup::Initialize(const DisallowedFeatures& disallowed_features,
     return false;
   }
 
-  // Limit Intel on Mac to 4096 max tex size and 512 max cube map tex size.
-  // Limit AMD on Mac to 4096 max tex size and max cube map tex size.
-  // TODO(gman): Update this code to check for a specific version of
-  // the drivers above which we no longer need this fix.
-#if defined(OS_MACOSX)
-  if (!feature_info_->feature_flags().disable_workarounds) {
-    if (feature_info_->feature_flags().is_intel) {
-      max_texture_size = std::min(
-          static_cast<GLint>(4096), max_texture_size);
-      max_cube_map_texture_size = std::min(
-          static_cast<GLint>(512), max_cube_map_texture_size);
-    }
-    if (feature_info_->feature_flags().is_amd) {
-      max_texture_size = std::min(
-          static_cast<GLint>(4096), max_texture_size);
-      max_cube_map_texture_size = std::min(
-          static_cast<GLint>(4096), max_cube_map_texture_size);
-    }
+  if (feature_info_->workarounds().max_texture_size) {
+    max_texture_size = std::min(
+        max_texture_size, feature_info_->workarounds().max_texture_size);
   }
-#endif
+  if (feature_info_->workarounds().max_cube_map_texture_size) {
+    max_cube_map_texture_size = std::min(
+        max_cube_map_texture_size,
+        feature_info_->workarounds().max_cube_map_texture_size);
+  }
+
   texture_manager_.reset(new TextureManager(memory_tracker_,
                                             feature_info_.get(),
                                             max_texture_size,
@@ -207,14 +203,31 @@ bool ContextGroup::Initialize(const DisallowedFeatures& disallowed_features,
     return false;
   }
 
-  ++num_contexts_;
+  decoders_.push_back(base::AsWeakPtr<GLES2Decoder>(decoder));
   return true;
 }
 
-void ContextGroup::Destroy(bool have_context) {
-  DCHECK(num_contexts_ > 0);
-  if (--num_contexts_ > 0)
+namespace {
+
+bool IsNull(const base::WeakPtr<gles2::GLES2Decoder>& decoder) {
+  return !decoder;
+}
+
+}  // namespace anonymous
+
+bool ContextGroup::HaveContexts() {
+  decoders_.erase(std::remove_if(decoders_.begin(), decoders_.end(), IsNull),
+                  decoders_.end());
+  return !decoders_.empty();
+}
+
+void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
+  decoders_.erase(std::remove(decoders_.begin(), decoders_.end(), decoder),
+                  decoders_.end());
+  // If we still have contexts do nothing.
+  if (HaveContexts()) {
     return;
+  }
 
   if (buffer_manager_ != NULL) {
     buffer_manager_->Destroy(have_context);
@@ -269,8 +282,16 @@ uint32 ContextGroup::GetMemRepresented() const {
   return total;
 }
 
+void ContextGroup::LoseContexts(GLenum reset_status) {
+  for (size_t ii = 0; ii < decoders_.size(); ++ii) {
+    if (decoders_[ii]) {
+      decoders_[ii]->LoseContext(reset_status);
+    }
+  }
+}
+
 ContextGroup::~ContextGroup() {
-  CHECK(num_contexts_ == 0);
+  CHECK(!HaveContexts());
 }
 
 bool ContextGroup::CheckGLFeature(GLint min_required, GLint* v) {

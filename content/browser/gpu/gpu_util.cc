@@ -15,9 +15,7 @@
 #include "content/public/common/content_switches.h"
 #include "ui/gl/gl_switches.h"
 
-using content::GpuFeatureType;
-using content::GpuSwitchingOption;
-
+namespace content {
 namespace {
 
 const char kGpuFeatureNameAccelerated2dCanvas[] = "accelerated_2d_canvas";
@@ -26,8 +24,13 @@ const char kGpuFeatureNameWebgl[] = "webgl";
 const char kGpuFeatureNameMultisampling[] = "multisampling";
 const char kGpuFeatureNameFlash3d[] = "flash_3d";
 const char kGpuFeatureNameFlashStage3d[] = "flash_stage3d";
+const char kGpuFeatureNameFlashStage3dBaseline[] = "flash_stage3d_baseline";
 const char kGpuFeatureNameTextureSharing[] = "texture_sharing";
 const char kGpuFeatureNameAcceleratedVideoDecode[] = "accelerated_video_decode";
+const char kGpuFeatureName3dCss[] = "3d_css";
+const char kGpuFeatureNameAcceleratedVideo[] = "accelerated_video";
+const char kGpuFeatureNamePanelFitting[] = "panel_fitting";
+const char kGpuFeatureNameForceCompositingMode[] = "force_compositing_mode";
 const char kGpuFeatureNameAll[] = "all";
 const char kGpuFeatureNameUnknown[] = "unknown";
 
@@ -84,51 +87,69 @@ int GetGpuBlacklistHistogramValueWin(GpuFeatureStatus status) {
 
 }  // namespace
 
-namespace gpu_util {
-
 GpuFeatureType StringToGpuFeatureType(const std::string& feature_string) {
   if (feature_string == kGpuFeatureNameAccelerated2dCanvas)
-    return content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS;
+    return GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS;
   if (feature_string == kGpuFeatureNameAcceleratedCompositing)
-    return content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING;
+    return GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING;
   if (feature_string == kGpuFeatureNameWebgl)
-    return content::GPU_FEATURE_TYPE_WEBGL;
+    return GPU_FEATURE_TYPE_WEBGL;
   if (feature_string == kGpuFeatureNameMultisampling)
-    return content::GPU_FEATURE_TYPE_MULTISAMPLING;
+    return GPU_FEATURE_TYPE_MULTISAMPLING;
   if (feature_string == kGpuFeatureNameFlash3d)
-    return content::GPU_FEATURE_TYPE_FLASH3D;
+    return GPU_FEATURE_TYPE_FLASH3D;
   if (feature_string == kGpuFeatureNameFlashStage3d)
-    return content::GPU_FEATURE_TYPE_FLASH_STAGE3D;
+    return GPU_FEATURE_TYPE_FLASH_STAGE3D;
+  if (feature_string == kGpuFeatureNameFlashStage3dBaseline)
+    return GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE;
   if (feature_string == kGpuFeatureNameTextureSharing)
-    return content::GPU_FEATURE_TYPE_TEXTURE_SHARING;
+    return GPU_FEATURE_TYPE_TEXTURE_SHARING;
   if (feature_string == kGpuFeatureNameAcceleratedVideoDecode)
-    return content::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE;
+    return GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE;
+  if (feature_string == kGpuFeatureName3dCss)
+    return GPU_FEATURE_TYPE_3D_CSS;
+  if (feature_string == kGpuFeatureNameAcceleratedVideo)
+    return GPU_FEATURE_TYPE_ACCELERATED_VIDEO;
+  if (feature_string == kGpuFeatureNamePanelFitting)
+    return GPU_FEATURE_TYPE_PANEL_FITTING;
+  if (feature_string == kGpuFeatureNameForceCompositingMode)
+    return GPU_FEATURE_TYPE_FORCE_COMPOSITING_MODE;
   if (feature_string == kGpuFeatureNameAll)
-    return content::GPU_FEATURE_TYPE_ALL;
-  return content::GPU_FEATURE_TYPE_UNKNOWN;
+    return GPU_FEATURE_TYPE_ALL;
+  return GPU_FEATURE_TYPE_UNKNOWN;
 }
 
 std::string GpuFeatureTypeToString(GpuFeatureType type) {
   std::vector<std::string> matches;
-  if (type == content::GPU_FEATURE_TYPE_ALL) {
+  if (type == GPU_FEATURE_TYPE_ALL) {
     matches.push_back(kGpuFeatureNameAll);
   } else {
-    if (type & content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS)
+    if (type & GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS)
       matches.push_back(kGpuFeatureNameAccelerated2dCanvas);
-    if (type & content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING)
+    if (type & GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING)
       matches.push_back(kGpuFeatureNameAcceleratedCompositing);
-    if (type & content::GPU_FEATURE_TYPE_WEBGL)
+    if (type & GPU_FEATURE_TYPE_WEBGL)
       matches.push_back(kGpuFeatureNameWebgl);
-    if (type & content::GPU_FEATURE_TYPE_MULTISAMPLING)
+    if (type & GPU_FEATURE_TYPE_MULTISAMPLING)
       matches.push_back(kGpuFeatureNameMultisampling);
-    if (type & content::GPU_FEATURE_TYPE_FLASH3D)
+    if (type & GPU_FEATURE_TYPE_FLASH3D)
       matches.push_back(kGpuFeatureNameFlash3d);
-    if (type & content::GPU_FEATURE_TYPE_FLASH_STAGE3D)
+    if (type & GPU_FEATURE_TYPE_FLASH_STAGE3D)
       matches.push_back(kGpuFeatureNameFlashStage3d);
-    if (type & content::GPU_FEATURE_TYPE_TEXTURE_SHARING)
+    if (type & GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE)
+      matches.push_back(kGpuFeatureNameFlashStage3dBaseline);
+    if (type & GPU_FEATURE_TYPE_TEXTURE_SHARING)
       matches.push_back(kGpuFeatureNameTextureSharing);
-    if (type & content::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE)
+    if (type & GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE)
       matches.push_back(kGpuFeatureNameAcceleratedVideoDecode);
+    if (type & GPU_FEATURE_TYPE_3D_CSS)
+      matches.push_back(kGpuFeatureName3dCss);
+    if (type & GPU_FEATURE_TYPE_ACCELERATED_VIDEO)
+      matches.push_back(kGpuFeatureNameAcceleratedVideo);
+    if (type & GPU_FEATURE_TYPE_PANEL_FITTING)
+      matches.push_back(kGpuFeatureNamePanelFitting);
+    if (type & GPU_FEATURE_TYPE_FORCE_COMPOSITING_MODE)
+      matches.push_back(kGpuFeatureNameForceCompositingMode);
     if (!matches.size())
       matches.push_back(kGpuFeatureNameUnknown);
   }
@@ -138,21 +159,21 @@ std::string GpuFeatureTypeToString(GpuFeatureType type) {
 GpuSwitchingOption StringToGpuSwitchingOption(
     const std::string& switching_string) {
   if (switching_string == switches::kGpuSwitchingOptionNameAutomatic)
-    return content::GPU_SWITCHING_OPTION_AUTOMATIC;
+    return GPU_SWITCHING_OPTION_AUTOMATIC;
   if (switching_string == switches::kGpuSwitchingOptionNameForceIntegrated)
-    return content::GPU_SWITCHING_OPTION_FORCE_INTEGRATED;
+    return GPU_SWITCHING_OPTION_FORCE_INTEGRATED;
   if (switching_string == switches::kGpuSwitchingOptionNameForceDiscrete)
-    return content::GPU_SWITCHING_OPTION_FORCE_DISCRETE;
-  return content::GPU_SWITCHING_OPTION_UNKNOWN;
+    return GPU_SWITCHING_OPTION_FORCE_DISCRETE;
+  return GPU_SWITCHING_OPTION_UNKNOWN;
 }
 
 std::string GpuSwitchingOptionToString(GpuSwitchingOption option) {
   switch (option) {
-    case content::GPU_SWITCHING_OPTION_AUTOMATIC:
+    case GPU_SWITCHING_OPTION_AUTOMATIC:
       return switches::kGpuSwitchingOptionNameAutomatic;
-    case content::GPU_SWITCHING_OPTION_FORCE_INTEGRATED:
+    case GPU_SWITCHING_OPTION_FORCE_INTEGRATED:
       return switches::kGpuSwitchingOptionNameForceIntegrated;
-    case content::GPU_SWITCHING_OPTION_FORCE_DISCRETE:
+    case GPU_SWITCHING_OPTION_FORCE_DISCRETE:
       return switches::kGpuSwitchingOptionNameForceDiscrete;
     default:
       return "unknown";
@@ -174,7 +195,7 @@ void UpdateStats(const GpuBlacklist* blacklist,
         0, max_entry_id + 1);
   } else {
     std::vector<uint32> flag_entries;
-    blacklist->GetDecisionEntries(flag_entries, disabled);
+    blacklist->GetDecisionEntries(&flag_entries, disabled);
     DCHECK_GT(flag_entries.size(), 0u);
     for (size_t i = 0; i < flag_entries.size(); ++i) {
       UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
@@ -186,16 +207,16 @@ void UpdateStats(const GpuBlacklist* blacklist,
   // us to understand the impact of an entry before enable it.
   std::vector<uint32> flag_disabled_entries;
   disabled = true;
-  blacklist->GetDecisionEntries(flag_disabled_entries, disabled);
+  blacklist->GetDecisionEntries(&flag_disabled_entries, disabled);
   for (size_t i = 0; i < flag_disabled_entries.size(); ++i) {
     UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerDisabledEntry",
         flag_disabled_entries[i], max_entry_id + 1);
   }
 
-  const content::GpuFeatureType kGpuFeatures[] = {
-      content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
-      content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING,
-      content::GPU_FEATURE_TYPE_WEBGL
+  const GpuFeatureType kGpuFeatures[] = {
+      GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
+      GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING,
+      GPU_FEATURE_TYPE_WEBGL
   };
   const std::string kGpuBlacklistFeatureHistogramNames[] = {
       "GPU.BlacklistFeatureTestResults.Accelerated2dCanvas",
@@ -219,7 +240,7 @@ void UpdateStats(const GpuBlacklist* blacklist,
   };
 #endif
   const size_t kNumFeatures =
-      sizeof(kGpuFeatures) / sizeof(content::GpuFeatureType);
+      sizeof(kGpuFeatures) / sizeof(GpuFeatureType);
   for (size_t i = 0; i < kNumFeatures; ++i) {
     // We can't use UMA_HISTOGRAM_ENUMERATION here because the same name is
     // expected if the macro is used within a loop.
@@ -228,20 +249,20 @@ void UpdateStats(const GpuBlacklist* blacklist,
       value = kGpuFeatureBlacklisted;
     else if (kGpuFeatureUserFlags[i])
       value = kGpuFeatureDisabled;
-    base::Histogram* histogram_pointer = base::LinearHistogram::FactoryGet(
+    base::HistogramBase* histogram_pointer = base::LinearHistogram::FactoryGet(
         kGpuBlacklistFeatureHistogramNames[i],
         1, kGpuFeatureNumStatus, kGpuFeatureNumStatus + 1,
-        base::Histogram::kUmaTargetedHistogramFlag);
+        base::HistogramBase::kUmaTargetedHistogramFlag);
     histogram_pointer->Add(value);
 #if defined(OS_WIN)
     histogram_pointer = base::LinearHistogram::FactoryGet(
         kGpuBlacklistFeatureHistogramNamesWin[i],
         1, kNumWinSubVersions * kGpuFeatureNumStatus,
         kNumWinSubVersions * kGpuFeatureNumStatus + 1,
-        base::Histogram::kUmaTargetedHistogramFlag);
+        base::HistogramBase::kUmaTargetedHistogramFlag);
     histogram_pointer->Add(GetGpuBlacklistHistogramValueWin(value));
 #endif
   }
 }
 
-}  // namespace gpu_util;
+}  // namespace content

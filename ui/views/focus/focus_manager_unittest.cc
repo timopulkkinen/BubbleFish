@@ -17,18 +17,15 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/focus_manager.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
-#else
-#include "ui/views/controls/tabbed_pane/native_tabbed_pane_wrapper.h"
-#include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #endif
 
 namespace views {
 
 void FocusNativeView(gfx::NativeView view) {
 #if defined(USE_AURA)
-  view->GetFocusManager()->SetFocusedWindow(view, NULL);
+  aura::client::GetFocusClient(view)->FocusWindow(view);
 #elif defined(OS_WIN)
   SetFocus(view);
 #else
@@ -59,11 +56,11 @@ class SimpleTestView : public View {
     set_id(view_id);
   }
 
-  virtual void OnFocus() {
+  virtual void OnFocus() OVERRIDE {
     event_list_->push_back(FocusTestEvent(ON_FOCUS, id()));
   }
 
-  virtual void OnBlur() {
+  virtual void OnBlur() OVERRIDE {
     event_list_->push_back(FocusTestEvent(ON_BLUR, id()));
   }
 
@@ -136,11 +133,10 @@ TEST_F(FocusManagerTest, WidgetFocusChangeListener) {
   TestWidgetFocusChangeListener widget_listener;
   AddWidgetFocusChangeListener(&widget_listener);
 
-  Widget::InitParams params;
-  params.type = views::Widget::InitParams::TYPE_WINDOW;
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(10, 10, 100, 100);
-  params.parent_widget = GetWidget();
+  params.parent = GetWidget()->GetNativeView();
 
   scoped_ptr<Widget> widget1(new Widget);
   widget1->Init(params);
@@ -176,63 +172,14 @@ class TestTextfield : public Textfield {
   }
 };
 
-class TestTabbedPane : public TabbedPane {
- public:
-  TestTabbedPane() {}
-  virtual gfx::NativeView TestGetNativeControlView() {
-    return native_tabbed_pane_->GetTestingHandle();
-  }
-};
-
 // Tests that NativeControls do set the focused View appropriately on the
 // FocusManager.
-TEST_F(FocusManagerTest, FAILS_FocusNativeControls) {
+TEST_F(FocusManagerTest, DISABLED_FocusNativeControls) {
   TestTextfield* textfield = new TestTextfield();
-  TestTabbedPane* tabbed_pane = new TestTabbedPane();
-  tabbed_pane->set_use_native_win_control(true);
-  TestTextfield* textfield2 = new TestTextfield();
-
   GetContentsView()->AddChildView(textfield);
-  GetContentsView()->AddChildView(tabbed_pane);
-
-  tabbed_pane->AddTab(ASCIIToUTF16("Awesome textfield"), textfield2);
-
   // Simulate the native view getting the native focus (such as by user click).
   FocusNativeView(textfield->TestGetNativeControlView());
   EXPECT_EQ(textfield, GetFocusManager()->GetFocusedView());
-
-  FocusNativeView(tabbed_pane->TestGetNativeControlView());
-  EXPECT_EQ(tabbed_pane, GetFocusManager()->GetFocusedView());
-
-  FocusNativeView(textfield2->TestGetNativeControlView());
-  EXPECT_EQ(textfield2, GetFocusManager()->GetFocusedView());
-}
-#endif
-
-// There is no tabbed pane in Aura.
-#if !defined(USE_AURA)
-TEST_F(FocusManagerTest, ContainsView) {
-  View* view = new View();
-  scoped_ptr<View> detached_view(new View());
-  TabbedPane* tabbed_pane = new TabbedPane();
-  tabbed_pane->set_use_native_win_control(true);
-  TabbedPane* nested_tabbed_pane = new TabbedPane();
-  nested_tabbed_pane->set_use_native_win_control(true);
-  NativeTextButton* tab_button = new NativeTextButton(
-      NULL, ASCIIToUTF16("tab button"));
-
-  GetContentsView()->AddChildView(view);
-  GetContentsView()->AddChildView(tabbed_pane);
-  // Adding a View inside a TabbedPane to test the case of nested root view.
-
-  tabbed_pane->AddTab(ASCIIToUTF16("Awesome tab"), nested_tabbed_pane);
-  nested_tabbed_pane->AddTab(ASCIIToUTF16("Awesomer tab"), tab_button);
-
-  EXPECT_TRUE(GetFocusManager()->ContainsView(view));
-  EXPECT_TRUE(GetFocusManager()->ContainsView(tabbed_pane));
-  EXPECT_TRUE(GetFocusManager()->ContainsView(nested_tabbed_pane));
-  EXPECT_TRUE(GetFocusManager()->ContainsView(tab_button));
-  EXPECT_FALSE(GetFocusManager()->ContainsView(detached_view.get()));
 }
 #endif
 
@@ -577,7 +524,7 @@ class FocusManagerDtorTest : public FocusManagerTest {
         : dtor_tracker_(dtor_tracker) {
     }
 
-    FocusManager* CreateFocusManager(Widget* widget) OVERRIDE {
+    virtual FocusManager* CreateFocusManager(Widget* widget) OVERRIDE {
       return new FocusManagerDtorTracked(widget, dtor_tracker_);
     }
 
@@ -640,13 +587,9 @@ class FocusManagerDtorTest : public FocusManagerTest {
 #if !defined(USE_AURA)
 TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
   // Setup views hierarchy.
-  TabbedPane* tabbed_pane = new TabbedPane();
-  tabbed_pane->set_use_native_win_control(true);
-  GetContentsView()->AddChildView(tabbed_pane);
-
-  NativeButtonDtorTracked* button = new NativeButtonDtorTracked(
-      ASCIIToUTF16("button"), &dtor_tracker_);
-  tabbed_pane->AddTab(ASCIIToUTF16("Awesome tab"), button);
+  GetContentsView()->AddChildView(new TestTextfield());
+  GetContentsView()->AddChildView(new NativeButtonDtorTracked(
+      ASCIIToUTF16("button"), &dtor_tracker_));
 
   // Close the window.
   GetWidget()->Close();
@@ -659,5 +602,48 @@ TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
   ASSERT_STREQ("FocusManagerDtorTracked", dtor_tracker_[2].c_str());
 }
 #endif
+
+namespace {
+
+class FocusInAboutToRequestFocusFromTabTraversalView : public View {
+ public:
+  FocusInAboutToRequestFocusFromTabTraversalView() : view_to_focus_(NULL) {}
+
+  void set_view_to_focus(View* view) { view_to_focus_ = view; }
+
+  virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE {
+    view_to_focus_->RequestFocus();
+  }
+
+ private:
+  views::View* view_to_focus_;
+
+  DISALLOW_COPY_AND_ASSIGN(FocusInAboutToRequestFocusFromTabTraversalView);
+};
+}  // namespace
+
+// Verifies a focus change done during a call to
+// AboutToRequestFocusFromTabTraversal() is honored.
+TEST_F(FocusManagerTest, FocusInAboutToRequestFocusFromTabTraversal) {
+  // Create 3 views focuses the 3 and advances to the second. The 2nd views
+  // implementation of AboutToRequestFocusFromTabTraversal() focuses the first.
+  views::View* v1 = new View;
+  v1->set_focusable(true);
+  GetContentsView()->AddChildView(v1);
+
+  FocusInAboutToRequestFocusFromTabTraversalView* v2 =
+      new FocusInAboutToRequestFocusFromTabTraversalView;
+  v2->set_focusable(true);
+  v2->set_view_to_focus(v1);
+  GetContentsView()->AddChildView(v2);
+
+  views::View* v3 = new View;
+  v3->set_focusable(true);
+  GetContentsView()->AddChildView(v3);
+
+  v3->RequestFocus();
+  GetWidget()->GetFocusManager()->AdvanceFocus(true);
+  EXPECT_TRUE(v1->HasFocus());
+}
 
 }  // namespace views

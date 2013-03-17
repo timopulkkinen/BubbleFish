@@ -4,9 +4,9 @@
 
 #include "chrome/common/extensions/csp_validator.h"
 
-#include "base/string_split.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_tokenizer.h"
 
 namespace extensions {
 
@@ -35,13 +35,29 @@ struct DirectiveStatus {
   bool is_secure;
 };
 
-bool HasOnlySecureTokens(StringTokenizer& tokenizer, Extension::Type type) {
+bool HasOnlySecureTokens(base::StringTokenizer& tokenizer,
+                         Manifest::Type type) {
   while (tokenizer.GetNext()) {
     std::string source = tokenizer.token();
     StringToLowerASCII(&source);
 
-    if (EndsWith(source, "*", true))
-      return false;
+    // Don't alow whitelisting of all hosts. This boils down to:
+    //   1. Maximum of 2 '*' characters.
+    //   2. Each '*' is either followed by a '.' or preceded by a ':'
+    int wildcards = 0;
+    size_t length = source.length();
+    for (size_t i = 0; i < length; ++i) {
+      if (source[i] == L'*') {
+        wildcards++;
+        if (wildcards > 2)
+          return false;
+
+        bool isWildcardPort = i > 0 && source[i - 1] == L':';
+        bool isWildcardSubdomain = i + 1 < length && source[i + 1] == L'.';
+        if (!isWildcardPort && !isWildcardSubdomain)
+          return false;
+      }
+    }
 
     // We might need to relax this whitelist over time.
     if (source == "'self'" ||
@@ -60,8 +76,8 @@ bool HasOnlySecureTokens(StringTokenizer& tokenizer, Extension::Type type) {
     }
 
     // crbug.com/146487
-    if (type == Extension::TYPE_EXTENSION ||
-        type == Extension::TYPE_LEGACY_PACKAGED_APP) {
+    if (type == Manifest::TYPE_EXTENSION ||
+        type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
       if (source == "'unsafe-eval'")
         continue;
     }
@@ -74,9 +90,9 @@ bool HasOnlySecureTokens(StringTokenizer& tokenizer, Extension::Type type) {
 
 // Returns true if |directive_name| matches |status.directive_name|.
 bool UpdateStatus(const std::string& directive_name,
-                  StringTokenizer& tokenizer,
+                  base::StringTokenizer& tokenizer,
                   DirectiveStatus* status,
-                  Extension::Type type) {
+                  Manifest::Type type) {
   if (status->seen_in_policy)
     return false;
   if (directive_name != status->directive_name)
@@ -98,7 +114,7 @@ bool ContentSecurityPolicyIsLegal(const std::string& policy) {
 }
 
 bool ContentSecurityPolicyIsSecure(const std::string& policy,
-                                   Extension::Type type) {
+                                   Manifest::Type type) {
   // See http://www.w3.org/TR/CSP/#parse-a-csp-policy for parsing algorithm.
   std::vector<std::string> directives;
   base::SplitString(policy, ';', &directives);
@@ -109,7 +125,7 @@ bool ContentSecurityPolicyIsSecure(const std::string& policy,
 
   for (size_t i = 0; i < directives.size(); ++i) {
     std::string& input = directives[i];
-    StringTokenizer tokenizer(input, " \t\r\n");
+    base::StringTokenizer tokenizer(input, " \t\r\n");
     if (!tokenizer.GetNext())
       continue;
 
@@ -140,7 +156,7 @@ bool ContentSecurityPolicyIsSecure(const std::string& policy,
 }
 
 bool ContentSecurityPolicyIsSandboxed(
-    const std::string& policy, Extension::Type type) {
+    const std::string& policy, Manifest::Type type) {
   // See http://www.w3.org/TR/CSP/#parse-a-csp-policy for parsing algorithm.
   std::vector<std::string> directives;
   base::SplitString(policy, ';', &directives);
@@ -149,7 +165,7 @@ bool ContentSecurityPolicyIsSandboxed(
 
   for (size_t i = 0; i < directives.size(); ++i) {
     std::string& input = directives[i];
-    StringTokenizer tokenizer(input, " \t\r\n");
+    base::StringTokenizer tokenizer(input, " \t\r\n");
     if (!tokenizer.GetNext())
       continue;
 
@@ -170,7 +186,7 @@ bool ContentSecurityPolicyIsSandboxed(
         return false;
 
       // Platform apps don't allow navigation.
-      if (type == Extension::TYPE_PLATFORM_APP) {
+      if (type == Manifest::TYPE_PLATFORM_APP) {
         if (token == kAllowTopNavigation)
           return false;
       }

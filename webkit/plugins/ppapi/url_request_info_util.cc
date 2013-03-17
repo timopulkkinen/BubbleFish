@@ -12,13 +12,13 @@
 #include "ppapi/shared_impl/url_request_info_data.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPBody.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/weburlrequest_extradata_impl.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -64,7 +64,7 @@ bool AppendFileRefToBody(
   if (!plugin_delegate)
     return false;
 
-  FilePath platform_path;
+  base::FilePath platform_path;
   switch (file_ref->GetFileSystemType()) {
     case PP_FILESYSTEMTYPE_LOCALTEMPORARY:
     case PP_FILESYSTEMTYPE_LOCALPERSISTENT:
@@ -80,7 +80,7 @@ bool AppendFileRefToBody(
       NOTREACHED();
   }
   http_body->appendFileRange(
-      webkit_glue::FilePathToWebString(platform_path),
+      webkit_base::FilePathToWebString(platform_path),
       start_offset,
       number_of_bytes,
       expected_last_modified_time);

@@ -12,17 +12,17 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
-using webkit::forms::PasswordForm;
+using content::PasswordForm;
 
 #define GNOME_KEYRING_DEFINE_POINTER(name) \
   typeof(&::gnome_keyring_##name) GnomeKeyringLoader::gnome_keyring_##name;

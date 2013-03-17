@@ -8,7 +8,7 @@
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/common/file_utilities_messages.h"
 
-using content::BrowserThread;
+namespace content {
 
 FileUtilitiesMessageFilter::FileUtilitiesMessageFilter(int process_id)
     : process_id_(process_id) {
@@ -36,7 +36,7 @@ bool FileUtilitiesMessageFilter::OnMessageReceived(const IPC::Message& message,
 }
 
 void FileUtilitiesMessageFilter::OnGetFileInfo(
-    const FilePath& path,
+    const base::FilePath& path,
     base::PlatformFileInfo* result,
     base::PlatformFileError* status) {
   *result = base::PlatformFileInfo();
@@ -54,7 +54,7 @@ void FileUtilitiesMessageFilter::OnGetFileInfo(
 }
 
 void FileUtilitiesMessageFilter::OnOpenFile(
-    const FilePath& path,
+    const base::FilePath& path,
     int mode,
     IPC::PlatformFileForTransit* result) {
   // Open the file only when the child process has been granted permission to
@@ -89,3 +89,5 @@ void FileUtilitiesMessageFilter::OnOpenFile(
   *result = base::FileDescriptor(file_handle, true);
 #endif
 }
+
+}  // namespace content

@@ -12,9 +12,10 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "ui/aura/display_observer.h"
-#include "ui/aura/display_manager.h"
+#include "base/time.h"
+#include "ui/gfx/display_observer.h"
 #include "ui/gfx/display.h"
 
 namespace aura {
@@ -31,6 +32,8 @@ namespace ash {
 namespace internal {
 class RootWindowController;
 }
+
+typedef std::pair<int64, int64> DisplayIdPair;
 
 struct ASH_EXPORT DisplayLayout {
   // Layout options where the secondary display should be positioned.
@@ -68,7 +71,7 @@ struct ASH_EXPORT DisplayLayout {
 
 // DisplayController owns and maintains RootWindows for each attached
 // display, keeping them in sync with display configuration changes.
-class ASH_EXPORT DisplayController : public aura::DisplayObserver {
+class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
  public:
   class ASH_EXPORT Observer {
    public:
@@ -83,9 +86,18 @@ class ASH_EXPORT DisplayController : public aura::DisplayObserver {
   DisplayController();
   virtual ~DisplayController();
 
-  // Gets primary display. This information is stored in global
-  // object as this can be accessed after Shell is closed.
+  void Shutdown();
+
+  // Returns primary display. This is safe to use after ash::Shell is
+  // deleted.
   static const gfx::Display& GetPrimaryDisplay();
+
+  // Returns the number of display. This is safe to use after
+  // ash::Shell is deleted.
+  static int GetNumDisplays();
+
+  // True if the primary display has been initialized.
+  static bool HasPrimaryDisplay();
 
   // Initializes primary display.
   void InitPrimaryDisplay();
@@ -102,6 +114,16 @@ class ASH_EXPORT DisplayController : public aura::DisplayObserver {
 
   // Returns the root window for |display_id|.
   aura::RootWindow* GetRootWindowForDisplayId(int64 id);
+
+  // Cycles display mode.
+  void CycleDisplayMode();
+
+  // Swap primary and secondary display.
+  void SwapPrimaryDisplay();
+
+  // Sets the ID of the primary display.  If the display is not connected, it
+  // will switch the primary display when connected.
+  void SetPrimaryDisplayId(int64 id);
 
   // Sets primary display. This re-assigns the current root
   // window to given |display|.
@@ -121,20 +143,35 @@ class ASH_EXPORT DisplayController : public aura::DisplayObserver {
   // mode, this return a RootWindowController for the primary root window only.
   std::vector<internal::RootWindowController*> GetAllRootWindowControllers();
 
+  // Gets/Sets/Clears the overscan insets for the specified |display_id|. See
+  // display_manager.h for the details.
+  gfx::Insets GetOverscanInsets(int64 display_id) const;
+  void SetOverscanInsets(int64 display_id, const gfx::Insets& insets_in_dip);
+  void ClearCustomOverscanInsets(int64 display_id);
+
   const DisplayLayout& default_display_layout() const {
     return default_display_layout_;
   }
   void SetDefaultDisplayLayout(const DisplayLayout& layout);
 
-  // Sets/gets the display layout for the specified display or display
-  // name.  Getter returns the default value in case it doesn't have
-  // its own layout yet.
-  void SetLayoutForDisplayName(const std::string& name,
-                               const DisplayLayout& layout);
-  const DisplayLayout& GetLayoutForDisplay(const gfx::Display& display) const;
+  // Registeres the display layout info for the specified display(s).
+  void RegisterLayoutForDisplayIdPair(int64 id1,
+                                      int64 id2,
+                                      const DisplayLayout& layout);
+  void RegisterLayoutForDisplayId(int64 id, const DisplayLayout& layout);
 
-  // Returns the display layout used for current secondary display.
-  const DisplayLayout& GetCurrentDisplayLayout() const;
+  // Sets the layout for the current display pair. The |layout| specifies
+  // the locaion of the secondary display relative to the primary.
+  void SetLayoutForCurrentDisplays(const DisplayLayout& layout);
+
+  // Returns the display layout used for current displays.
+  DisplayLayout GetCurrentDisplayLayout() const;
+
+  // Returns the current display pair.
+  DisplayIdPair GetCurrentDisplayIdPair() const;
+
+  // Returns the display layout registered for the given display id |pair|.
+  DisplayLayout GetRegisteredDisplayLayout(const DisplayIdPair& pair) const;
 
   // aura::DisplayObserver overrides:
   virtual void OnDisplayBoundsChanged(
@@ -151,16 +188,53 @@ class ASH_EXPORT DisplayController : public aura::DisplayObserver {
 
   void NotifyDisplayConfigurationChanging();
 
+  void SetLayoutForDisplayIdPair(const DisplayIdPair& display_pair,
+                                 const DisplayLayout& layout);
+
+  void RegisterLayoutForDisplayIdPairInternal(
+      int64 id1,
+      int64 id2,
+      const DisplayLayout& layout,
+      bool override);
+
+  class DisplayChangeLimiter {
+   public:
+    DisplayChangeLimiter();
+
+    // Sets how long the throttling should last.
+    void SetThrottleTimeout(int64 throttle_ms);
+
+    bool IsThrottled() const;
+
+   private:
+    // The time when the throttling ends.
+    base::Time throttle_timeout_;
+
+    DISALLOW_COPY_AND_ASSIGN(DisplayChangeLimiter);
+  };
+
+  // The limiter to throttle how fast a user can
+  // change the display configuration.
+  scoped_ptr<DisplayChangeLimiter> limiter_;
+
   // The mapping from display ID to its root window.
   std::map<int64, aura::RootWindow*> root_windows_;
 
   // The default display layout.
   DisplayLayout default_display_layout_;
 
-  // Per-device display layout.
-  std::map<std::string, DisplayLayout> secondary_layouts_;
+  // Display layout per pair of devices.
+  std::map<DisplayIdPair, DisplayLayout> paired_layouts_;
+
+  // The ID of the display which should be primary when connected.
+  // kInvalidDisplayID if no such preference is specified.
+  int64 desired_primary_display_id_;
 
   ObserverList<Observer> observers_;
+
+  // Store the primary root window temporarily while replacing
+  // display.
+  aura::RootWindow* primary_root_window_for_replace_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayController);
 };

@@ -39,12 +39,11 @@ enum ViewID {
   VIEW_ID_RELOAD_BUTTON,
   VIEW_ID_HOME_BUTTON,
   VIEW_ID_STAR_BUTTON,
-  VIEW_ID_LOCATION_BAR,
   VIEW_ID_APP_MENU,
-  VIEW_ID_AUTOCOMPLETE,
   VIEW_ID_BROWSER_ACTION_TOOLBAR,
   VIEW_ID_FEEDBACK_BUTTON,
   VIEW_ID_OMNIBOX,
+  VIEW_ID_SCRIPT_BUBBLE,
 
   // The Bookmark Bar.
   VIEW_ID_BOOKMARK_BAR,
@@ -71,12 +70,18 @@ enum ViewID {
   // The Download shelf.
   VIEW_ID_DOWNLOAD_SHELF,
 
+// TODO(dbeam): change the zoom decoration to an NSImageView on Mac so IDs work.
+#if !defined(OS_MACOSX)
+  // Zoom button in location bar.
+  VIEW_ID_ZOOM_BUTTON,
+#endif
+
   // Used in chrome/browser/ui/gtk/view_id_util_browsertests.cc
   // If you add new ids, make sure the above test passes.
   VIEW_ID_PREDEFINED_COUNT,
 
   // Plus button on location bar.
-  VIEW_ID_ACTION_BOX_BUTTON
+  VIEW_ID_ACTION_BOX_BUTTON,
 };
 
 #endif  // CHROME_BROWSER_UI_VIEW_IDS_H_

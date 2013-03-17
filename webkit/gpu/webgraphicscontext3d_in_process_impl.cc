@@ -15,9 +15,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/synchronization/lock.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_bindings_skia_in_process.h"
 #include "ui/gl/gl_context.h"
@@ -56,6 +56,8 @@ WebGraphicsContext3DInProcessImpl::WebGraphicsContext3DInProcessImpl(
       have_ext_framebuffer_object_(false),
       have_ext_framebuffer_multisample_(false),
       have_angle_framebuffer_multisample_(false),
+      have_ext_oes_standard_derivatives_(false),
+      have_ext_oes_egl_image_external_(false),
       texture_(0),
       fbo_(0),
       depth_stencil_buffer_(0),
@@ -226,8 +228,16 @@ bool WebGraphicsContext3DInProcessImpl::Initialize(
       strstr(extensions, "GL_EXT_framebuffer_object") != NULL;
   have_ext_framebuffer_multisample_ =
       strstr(extensions, "GL_EXT_framebuffer_multisample") != NULL;
+#if !defined(OS_ANDROID)
+  // Some Android Qualcomm drivers falsely report this ANGLE extension string.
+  // See http://crbug.com/165736
   have_angle_framebuffer_multisample_ =
       strstr(extensions, "GL_ANGLE_framebuffer_multisample") != NULL;
+#endif
+  have_ext_oes_standard_derivatives_ =
+      strstr(extensions, "GL_OES_standard_derivatives") != NULL;
+  have_ext_oes_egl_image_external_ =
+      strstr(extensions, "GL_OES_EGL_image_external") != NULL;
 
   ValidateAttributes();
 
@@ -739,7 +749,10 @@ void WebGraphicsContext3DInProcessImpl::discardFramebufferEXT(
     WGC3Denum target, WGC3Dsizei numAttachments, const WGC3Denum* attachments) {
 }
 
-void WebGraphicsContext3DInProcessImpl::ensureFramebufferCHROMIUM() {
+void WebGraphicsContext3DInProcessImpl::discardBackbufferCHROMIUM() {
+}
+
+void WebGraphicsContext3DInProcessImpl::ensureBackbufferCHROMIUM() {
 }
 
 void WebGraphicsContext3DInProcessImpl::copyTextureToParentTextureCHROMIUM(
@@ -1698,6 +1711,26 @@ void WebGraphicsContext3DInProcessImpl::copyTextureCHROMIUM(
   NOTIMPLEMENTED();
 }
 
+void WebGraphicsContext3DInProcessImpl::bindTexImage2DCHROMIUM(
+    WGC3Denum target, WGC3Dint imageId) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::releaseTexImage2DCHROMIUM(
+    WGC3Denum target, WGC3Dint imageId) {
+  NOTIMPLEMENTED();
+}
+
+void* WebGraphicsContext3DInProcessImpl::mapBufferCHROMIUM(
+    WGC3Denum target, WGC3Denum access) {
+  return 0;
+}
+
+WGC3Dboolean WebGraphicsContext3DInProcessImpl::unmapBufferCHROMIUM(
+    WGC3Denum target) {
+  return false;
+}
+
 GrGLInterface* WebGraphicsContext3DInProcessImpl::onCreateGrGLInterface() {
   return gfx::CreateInProcessSkiaGLBinding();
 }
@@ -1720,6 +1753,9 @@ bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
               &resources.MaxFragmentUniformVectors);
   // Always set to 1 for OpenGL ES.
   resources.MaxDrawBuffers = 1;
+
+  resources.OES_standard_derivatives = have_ext_oes_standard_derivatives_;
+  resources.OES_EGL_image_external = have_ext_oes_egl_image_external_;
 
   fragment_compiler_ = ShConstructCompiler(
       SH_FRAGMENT_SHADER, SH_WEBGL_SPEC,
@@ -1761,7 +1797,11 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
 
   char* source = entry->source.get();
   if (!ShCompile(compiler, &source, 1, SH_OBJECT_CODE)) {
+#if !defined(ANGLE_SH_VERSION) || ANGLE_SH_VERSION < 108
     int logSize = 0;
+#else
+    size_t logSize = 0;
+#endif
     ShGetInfo(compiler, SH_INFO_LOG_LENGTH, &logSize);
     if (logSize > 1) {
       entry->log.reset(new char[logSize]);
@@ -1770,7 +1810,11 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
     return false;
   }
 
+#if !defined(ANGLE_SH_VERSION) || ANGLE_SH_VERSION < 108
   int length = 0;
+#else
+  size_t length = 0;
+#endif
   ShGetInfo(compiler, SH_OBJECT_CODE_LENGTH, &length);
   if (length > 1) {
     entry->translated_source.reset(new char[length]);

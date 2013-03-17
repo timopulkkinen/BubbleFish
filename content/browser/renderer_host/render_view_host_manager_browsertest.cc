@@ -7,6 +7,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "content/common/content_constants_internal.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
@@ -29,21 +30,22 @@
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 
+namespace content {
 namespace {
 
 bool CompareTrees(base::DictionaryValue* first, base::DictionaryValue* second) {
   string16 name1;
   string16 name2;
-  if (!first->GetString(content::kFrameTreeNodeNameKey, &name1) ||
-      !second->GetString(content::kFrameTreeNodeNameKey, &name2))
+  if (!first->GetString(kFrameTreeNodeNameKey, &name1) ||
+      !second->GetString(kFrameTreeNodeNameKey, &name2))
     return false;
   if (name1 != name2)
     return false;
 
   int id1 = 0;
   int id2 = 0;
-  if (!first->GetInteger(content::kFrameTreeNodeIdKey, &id1) ||
-      !second->GetInteger(content::kFrameTreeNodeIdKey, &id2)) {
+  if (!first->GetInteger(kFrameTreeNodeIdKey, &id1) ||
+      !second->GetInteger(kFrameTreeNodeIdKey, &id2)) {
     return false;
   }
   if (id1 != id2)
@@ -51,8 +53,8 @@ bool CompareTrees(base::DictionaryValue* first, base::DictionaryValue* second) {
 
   ListValue* subtree1 = NULL;
   ListValue* subtree2 = NULL;
-  bool result1 = first->GetList(content::kFrameTreeNodeSubtreeKey, &subtree1);
-  bool result2 = second->GetList(content::kFrameTreeNodeSubtreeKey, &subtree2);
+  bool result1 = first->GetList(kFrameTreeNodeSubtreeKey, &subtree1);
+  bool result2 = second->GetList(kFrameTreeNodeSubtreeKey, &subtree2);
   if (!result1 && !result2)
     return true;
   if (!result1 || !result2)
@@ -75,7 +77,7 @@ bool CompareTrees(base::DictionaryValue* first, base::DictionaryValue* second) {
   return true;
 }
 
-base::DictionaryValue* GetTree(content::RenderViewHostImpl* rvh) {
+base::DictionaryValue* GetTree(RenderViewHostImpl* rvh) {
   std::string frame_tree = rvh->frame_tree();
   EXPECT_FALSE(frame_tree.empty());
   base::Value* v = base::JSONReader::Read(frame_tree);
@@ -86,8 +88,6 @@ base::DictionaryValue* GetTree(content::RenderViewHostImpl* rvh) {
 }
 
 } // namespace
-
-namespace content {
 
 class RenderViewHostManagerTest : public ContentBrowserTest {
  public:
@@ -112,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -131,9 +131,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
   // Open a same-site link in a new window.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -150,9 +150,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
 
   // We should have access to the opened window's location.
   success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(testScriptAccessToWindow());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(testScriptAccessToWindow());",
       &success));
   EXPECT_TRUE(success);
 
@@ -164,9 +164,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
 
   // We should no longer have script access to the opened window's location.
   success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(testScriptAccessToWindow());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(testScriptAccessToWindow());",
       &success));
   EXPECT_FALSE(success);
 }
@@ -180,7 +180,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -199,9 +199,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a rel=noreferrer + target=blank link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickNoRefTargetBlankLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickNoRefTargetBlankLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -233,7 +233,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -252,9 +252,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a same-site rel=noreferrer + target=foo link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteNoRefTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteNoRefTargetedLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -286,7 +286,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -305,9 +305,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a target=blank link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickTargetBlankLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickTargetBlankLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -334,7 +334,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -352,9 +352,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // Test clicking a rel=noreferrer link.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickNoRefLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickNoRefLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -380,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -399,9 +399,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -427,9 +427,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
       NOTIFICATION_NAV_ENTRY_COMMITTED,
       Source<NavigationController>(
           &new_shell->web_contents()->GetController()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   navigation_observer.Wait();
@@ -447,12 +447,92 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   WindowedNotificationObserver close_observer(
         NOTIFICATION_WEB_CONTENTS_DESTROYED,
         Source<WebContents>(new_shell->web_contents()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(testCloseWindow());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(testCloseWindow());",
       &success));
   EXPECT_TRUE(success);
   close_observer.Wait();
+}
+
+// Test that setting the opener to null in a window affects cross-process
+// navigations, including those to existing entries.  http://crbug.com/156669.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, DisownOpener) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  NavigateToURL(shell(), test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance for later comparison.
+  scoped_refptr<SiteInstance> orig_site_instance(
+      shell()->web_contents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Test clicking a target=_blank link.
+  ShellAddedObserver new_shell_observer;
+  bool success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetBlankLink());",
+      &success));
+  EXPECT_TRUE(success);
+  Shell* new_shell = new_shell_observer.GetShell();
+
+  // Wait for the navigation in the new tab to finish, if it hasn't.
+  WaitForLoadStop(new_shell->web_contents());
+  EXPECT_EQ("/files/title2.html",
+            new_shell->web_contents()->GetURL().path());
+
+  // Should have the same SiteInstance.
+  scoped_refptr<SiteInstance> blank_site_instance(
+      new_shell->web_contents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, blank_site_instance);
+
+  // Now navigate the new tab to a different site.
+  NavigateToURL(new_shell, https_server.GetURL("files/title1.html"));
+  scoped_refptr<SiteInstance> new_site_instance(
+      new_shell->web_contents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, new_site_instance);
+
+  // Now disown the opener.
+  EXPECT_TRUE(ExecuteScript(new_shell->web_contents(),
+                            "window.opener = null;"));
+
+  // Go back and ensure the opener is still null.
+  {
+    WindowedNotificationObserver back_nav_load_observer(
+        NOTIFICATION_NAV_ENTRY_COMMITTED,
+        Source<NavigationController>(
+            &new_shell->web_contents()->GetController()));
+    new_shell->web_contents()->GetController().GoBack();
+    back_nav_load_observer.Wait();
+  }
+  success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      new_shell->web_contents(),
+      "window.domAutomationController.send(window.opener == null);",
+      &success));
+  EXPECT_TRUE(success);
+
+  // Now navigate forward again (creating a new process) and check opener.
+  NavigateToURL(new_shell, https_server.GetURL("files/title1.html"));
+  success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      new_shell->web_contents(),
+      "window.domAutomationController.send(window.opener == null);",
+      &success));
+  EXPECT_TRUE(success);
 }
 
 // Test for crbug.com/99202.  PostMessage calls should still work after
@@ -471,7 +551,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -497,9 +577,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // First, a named target=foo window.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -516,9 +596,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // Second, a target=_blank window.
   ShellAddedObserver new_shell_observer2;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetBlankLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetBlankLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -542,10 +622,10 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // 2) Fail to post a message from the foo window to the opener if the target
   // origin is wrong.  We won't see an error, but we can check for the right
   // number of received messages below.
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      foo_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(postToOpener('msg',"
-      L"'http://google.com'));",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      foo_contents,
+      "window.domAutomationController.send(postToOpener('msg',"
+      "    'http://google.com'));",
       &success));
   EXPECT_TRUE(success);
   ASSERT_FALSE(opener_manager->GetSwappedOutRenderViewHost(orig_site_instance));
@@ -555,9 +635,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   WindowedNotificationObserver title_observer(
       NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
       Source<WebContents>(foo_contents));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      foo_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(postToOpener('msg','*'));",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      foo_contents,
+      "window.domAutomationController.send(postToOpener('msg','*'));",
       &success));
   EXPECT_TRUE(success);
   ASSERT_FALSE(opener_manager->GetSwappedOutRenderViewHost(orig_site_instance));
@@ -566,14 +646,14 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // We should have received only 1 message in the opener and "foo" tabs,
   // and updated the title.
   int opener_received_messages = 0;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractInt(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(window.receivedMessages);",
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      opener_contents,
+      "window.domAutomationController.send(window.receivedMessages);",
       &opener_received_messages));
   int foo_received_messages = 0;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractInt(
-      foo_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(window.receivedMessages);",
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      foo_contents,
+      "window.domAutomationController.send(window.receivedMessages);",
       &foo_received_messages));
   EXPECT_EQ(1, foo_received_messages);
   EXPECT_EQ(1, opener_received_messages);
@@ -584,9 +664,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   WindowedNotificationObserver title_observer2(
       NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
       Source<WebContents>(foo_contents));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      new_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(postToFoo('msg2'));",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      new_contents,
+      "window.domAutomationController.send(postToFoo('msg2'));",
       &success));
   EXPECT_TRUE(success);
   title_observer2.Wait();
@@ -596,35 +676,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // SiteInstance in the target=_blank window.
   EXPECT_TRUE(new_manager->GetSwappedOutRenderViewHost(foo_site_instance));
 
-  NavigateToURL(new_shell, https_server.GetURL("files/post_message2.html"));
-
-  // 5) Now verify that posting a message from the foo window to a subframe of
-  // the opener window works fine. The opener subframe will reply, causing the
-  // foo window to update its own title.
-  WindowedNotificationObserver title_observer3(
-      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-      Source<WebContents>(new_shell->web_contents()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      foo_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(postToOpenerFrame('msg3','*'));",
-      &success));
-  EXPECT_TRUE(success);
-  title_observer3.Wait();
-  EXPECT_EQ(ASCIIToUTF16("msg3"), new_shell->web_contents()->GetTitle());
-
-  // 6) Lastly, verify that the _blank window can post a message to a subframe
-  // of the foo window. The subframe of foo will set the foo window title and
-  // will reply, setting the _blank window title.
-  WindowedNotificationObserver title_observer4(
-      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-      Source<WebContents>(new_shell2->web_contents()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      new_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(postToFooFrame('msg4'));",
-      &success));
-  EXPECT_TRUE(success);
-  title_observer4.Wait();
-  EXPECT_EQ(ASCIIToUTF16("msg4"), new_shell2->web_contents()->GetTitle());
+  // TODO(nasko): Test subframe targeting of postMessage once
+  // http://crbug.com/153701 is fixed.
 }
 
 // Test for crbug.com/116192.  Navigations to a window's opener should
@@ -636,7 +689,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -656,9 +709,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      orig_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      orig_contents,
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -684,9 +737,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
       NOTIFICATION_NAV_ENTRY_COMMITTED,
       Source<NavigationController>(
           &orig_contents->GetController()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      new_shell->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(navigateOpener());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      new_shell->web_contents(),
+      "window.domAutomationController.send(navigateOpener());",
       &success));
   EXPECT_TRUE(success);
   navigation_observer.Wait();
@@ -707,7 +760,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -726,9 +779,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -774,7 +827,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, ClickLinkAfter204Error) {
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -807,9 +860,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, ClickLinkAfter204Error) {
 
   // Renderer-initiated navigations should work.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickNoRefLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickNoRefLink());",
       &success));
   EXPECT_TRUE(success);
 
@@ -837,7 +890,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, BackForwardNotStale) {
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Visit a page on first site.
@@ -952,7 +1005,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Load a page with links that open in a new window.
@@ -966,9 +1019,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Open a same-site link in a new widnow.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();
@@ -979,10 +1032,11 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
             new_shell->web_contents()->GetURL().path());
 
   RenderViewHost* rvh = new_shell->web_contents()->GetRenderViewHost();
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      rvh, L"",
-      L"window.domAutomationController.send("
-          L"document.webkitVisibilityState == 'visible');",
+
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      rvh,
+      "window.domAutomationController.send("
+      "    document.webkitVisibilityState == 'visible');",
       &success));
   EXPECT_TRUE(success);
 
@@ -990,10 +1044,10 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // tab's existing RenderView, causing it become hidden.
   NavigateToURL(new_shell, https_server.GetURL("files/title1.html"));
 
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      rvh, L"",
-      L"window.domAutomationController.send("
-          L"document.webkitVisibilityState == 'hidden');",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      rvh,
+      "window.domAutomationController.send("
+      "    document.webkitVisibilityState == 'hidden');",
       &success));
   EXPECT_TRUE(success);
 
@@ -1008,16 +1062,15 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
     back_nav_load_observer.Wait();
   }
 
-
   EXPECT_EQ("/files/navigate_opener.html",
             new_shell->web_contents()->GetURL().path());
 
   EXPECT_EQ(rvh, new_shell->web_contents()->GetRenderViewHost());
 
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      rvh, L"",
-      L"window.domAutomationController.send("
-          L"document.webkitVisibilityState == 'visible');",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      rvh,
+      "window.domAutomationController.send("
+      "    document.webkitVisibilityState == 'visible');",
       &success));
   EXPECT_TRUE(success);
 }
@@ -1078,7 +1131,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // Observe the created render_view_host's to make sure they will not leak.
@@ -1090,7 +1143,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
 
   // Let's ensure that when we start with a blank window, navigating away to a
   // view-source URL, we create a new SiteInstance.
-  content::RenderViewHost* blank_rvh = shell()->web_contents()->
+  RenderViewHost* blank_rvh = shell()->web_contents()->
       GetRenderViewHost();
   SiteInstance* blank_site_instance = blank_rvh->GetSiteInstance();
   EXPECT_EQ(shell()->web_contents()->GetURL(), GURL::EmptyGURL());
@@ -1141,13 +1194,15 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
 // swapped out views must have a matching frame hierarchy. The test checks
 // that frame hierarchies are kept in sync through navigations, reloading, and
 // JavaScript manipulation of the frame tree.
-IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, FrameTreeUpdates) {
+//
+// Disable the test until http://crbug.com/153701 is fixed.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, DISABLED_FrameTreeUpdates) {
   // Start two servers to allow using different sites.
   EXPECT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   EXPECT_TRUE(https_server.Start());
 
   GURL frame_tree_url(test_server()->GetURL("files/frame_tree/top.html"));
@@ -1171,11 +1226,11 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, FrameTreeUpdates) {
   RenderViewHostManager* opener_rvhm = static_cast<WebContentsImpl*>(
       opener_contents)->GetRenderManagerForTesting();
   frames = GetTree(opener_rvhm->current_host());
-  EXPECT_FALSE(frames->GetList(content::kFrameTreeNodeSubtreeKey, &subtree));
+  EXPECT_FALSE(frames->GetList(kFrameTreeNodeSubtreeKey, &subtree));
 
   NavigateToURL(shell(), frame_tree_url);
   frames = GetTree(opener_rvhm->current_host());
-  EXPECT_TRUE(frames->GetList(content::kFrameTreeNodeSubtreeKey, &subtree));
+  EXPECT_TRUE(frames->GetList(kFrameTreeNodeSubtreeKey, &subtree));
   EXPECT_TRUE(subtree->GetSize() == 3);
 
   scoped_refptr<SiteInstance> orig_site_instance(
@@ -1183,9 +1238,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, FrameTreeUpdates) {
   EXPECT_TRUE(orig_site_instance != NULL);
 
   ShellAddedObserver shell_observer1;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(openWindow('1-3.html'));",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(openWindow('1-3.html'));",
       &success));
   EXPECT_TRUE(success);
 
@@ -1204,9 +1259,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, FrameTreeUpdates) {
   EXPECT_NE(orig_site_instance, site_instance1);
 
   ShellAddedObserver shell_observer2;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(openWindow('../title2.html'));",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(openWindow('../title2.html'));",
       &success));
   EXPECT_TRUE(success);
 
@@ -1264,30 +1319,30 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, FrameTreeUpdates) {
 
   // Now let's ensure that using JS to add/remove frames results in proper
   // updates.
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(removeFrame());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(removeFrame());",
       &success));
   EXPECT_TRUE(success);
   frames = GetTree(opener_rvhm->current_host());
-  EXPECT_TRUE(frames->GetList(content::kFrameTreeNodeSubtreeKey, &subtree));
+  EXPECT_TRUE(frames->GetList(kFrameTreeNodeSubtreeKey, &subtree));
   EXPECT_EQ(subtree->GetSize(), 2U);
 
   // Create a load observer for the iframe that will be created by the
   // JavaScript code we will execute.
   WindowedNotificationObserver load_observer(
       NOTIFICATION_LOAD_STOP,
-      content::Source<NavigationController>(
+      Source<NavigationController>(
               &opener_contents->GetController()));
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      opener_contents->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(addFrame());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(addFrame());",
       &success));
   EXPECT_TRUE(success);
   load_observer.Wait();
 
   frames = GetTree(opener_rvhm->current_host());
-  EXPECT_TRUE(frames->GetList(content::kFrameTreeNodeSubtreeKey, &subtree));
+  EXPECT_TRUE(frames->GetList(kFrameTreeNodeSubtreeKey, &subtree));
   EXPECT_EQ(subtree->GetSize(), 3U);
 
   EXPECT_TRUE(CompareTrees(
@@ -1316,7 +1371,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   // 1. Load a page that deletes its iframe during unload.
@@ -1330,9 +1385,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   // Open a same-site page in a new window.
   ShellAddedObserver new_shell_observer;
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(openWindow());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(openWindow());",
       &success));
   EXPECT_TRUE(success);
   Shell* new_shell = new_shell_observer.GetShell();

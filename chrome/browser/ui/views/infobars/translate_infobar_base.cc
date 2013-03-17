@@ -6,7 +6,6 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/ui/views/infobars/after_translate_infobar.h"
 #include "chrome/browser/ui/views/infobars/before_translate_infobar.h"
@@ -21,12 +20,11 @@
 // TranslateInfoBarDelegate ---------------------------------------------------
 
 InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
-  InfoBarTabHelper* helper = static_cast<InfoBarTabHelper*>(owner);
-  if (type_ == BEFORE_TRANSLATE)
-    return new BeforeTranslateInfoBar(helper, this);
-  if (type_ == AFTER_TRANSLATE)
-    return new AfterTranslateInfoBar(helper, this);
-  return new TranslateMessageInfoBar(helper, this);
+  if (infobar_type_ == BEFORE_TRANSLATE)
+    return new BeforeTranslateInfoBar(owner, this);
+  if (infobar_type_ == AFTER_TRANSLATE)
+    return new AfterTranslateInfoBar(owner, this);
+  return new TranslateMessageInfoBar(owner, this);
 }
 
 // TranslateInfoBarBase -------------------------------------------------------
@@ -34,7 +32,7 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
 // static
 const int TranslateInfoBarBase::kButtonInLabelSpacing = 5;
 
-TranslateInfoBarBase::TranslateInfoBarBase(InfoBarTabHelper* owner,
+TranslateInfoBarBase::TranslateInfoBarBase(InfoBarService* owner,
                                            TranslateInfoBarDelegate* delegate)
     : InfoBarView(owner, delegate),
       error_background_(GetInfoBarTopColor(InfoBarDelegate::WARNING_TYPE),
@@ -116,7 +114,6 @@ void TranslateInfoBarBase::FadeBackground(gfx::Canvas* canvas,
   // Draw the background into an offscreen buffer with alpha value per animation
   // value, then blend it back into the current canvas.
   canvas->SaveLayerAlpha(static_cast<int>(animation_value * 255));
-  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   background.Paint(canvas, this);
   canvas->Restore();
 }

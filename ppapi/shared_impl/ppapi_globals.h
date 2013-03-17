@@ -10,9 +10,9 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_local.h"  // For testing purposes only.
-#include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
+#include "ppapi/c/ppb_console.h"
 #include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
 
@@ -24,6 +24,7 @@ class MessageLoopProxy;
 namespace ppapi {
 
 class CallbackTracker;
+class MessageLoopShared;
 class ResourceTracker;
 class VarTracker;
 
@@ -35,14 +36,15 @@ class ResourceCreationAPI;
 // Abstract base class
 class PPAPI_SHARED_EXPORT PpapiGlobals {
  public:
+  // Must be created on the main thread.
   PpapiGlobals();
 
   // This constructor is to be used only for making a PpapiGlobal for testing
   // purposes. This avoids setting the global static ppapi_globals_. For unit
   // tests that use this feature, the "test" PpapiGlobals should be constructed
   // using this method. See SetPpapiGlobalsOnThreadForTest for more information.
-  struct ForTest {};
-  PpapiGlobals(ForTest);
+  struct PerThreadForTest {};
+  explicit PpapiGlobals(PerThreadForTest);
 
   virtual ~PpapiGlobals();
 
@@ -62,7 +64,7 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // the same process, e.g. for having 1 thread emulate the "host" and 1 thread
   // emulate the "plugin".
   //
-  // PpapiGlobals object must have been constructed using the "ForTest"
+  // PpapiGlobals object must have been constructed using the "PerThreadForTest"
   // parameter.
   static void SetPpapiGlobalsOnThreadForTest(PpapiGlobals* ptr);
 
@@ -71,12 +73,13 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   virtual VarTracker* GetVarTracker() = 0;
   virtual CallbackTracker* GetCallbackTrackerForInstance(
       PP_Instance instance) = 0;
+
   virtual base::Lock* GetProxyLock() = 0;
 
   // Logs the given string to the JS console. If "source" is empty, the name of
   // the current module will be used, if it can be determined.
   virtual void LogWithSource(PP_Instance instance,
-                             PP_LogLevel_Dev level,
+                             PP_LogLevel level,
                              const std::string& source,
                              const std::string& value) = 0;
 
@@ -89,7 +92,7 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // Note that in the plugin process, the module parameter is ignored since
   // there is only one possible one.
   virtual void BroadcastLogWithSource(PP_Module module,
-                                      PP_LogLevel_Dev level,
+                                      PP_LogLevel level,
                                       const std::string& source,
                                       const std::string& value) = 0;
 
@@ -103,10 +106,14 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // failure.
   virtual PP_Module GetModuleForInstance(PP_Instance instance) = 0;
 
-  // Returns the base::MessageLoopProxy for the main thread. Note that this must
-  // be called on the main thread the first time so that it can initialize
-  // its static data.
+  // Returns the base::MessageLoopProxy for the main thread. This is set in the
+  // constructor, so PpapiGlobals must be created on the main thread.
   base::MessageLoopProxy* GetMainThreadMessageLoop();
+
+  // Return the MessageLoopShared of the current thread, if any. This will
+  // always return NULL on the host side, where PPB_MessageLoop is not
+  // supported.
+  virtual MessageLoopShared* GetCurrentMessageLoop() = 0;
 
   // Returns the command line for the process.
   virtual std::string GetCmdLine() = 0;
@@ -127,7 +134,7 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
 
   static PpapiGlobals* ppapi_globals_;
 
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+  scoped_refptr<base::MessageLoopProxy> main_loop_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiGlobals);
 };

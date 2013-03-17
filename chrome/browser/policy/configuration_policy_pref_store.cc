@@ -9,13 +9,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/prefs/pref_value_map.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/configuration_policy_handler_list.h"
 #include "chrome/browser/policy/policy_error_map.h"
-#include "chrome/browser/prefs/pref_value_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "policy/policy_constants.h"
 
@@ -62,34 +62,35 @@ size_t ConfigurationPolicyPrefStore::NumberOfObservers() const {
 }
 
 bool ConfigurationPolicyPrefStore::IsInitializationComplete() const {
-  return policy_service_->IsInitializationComplete();
+  return policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME);
 }
 
-PrefStore::ReadResult
-ConfigurationPolicyPrefStore::GetValue(const std::string& key,
-                                       const Value** value) const {
+bool ConfigurationPolicyPrefStore::GetValue(const std::string& key,
+                                            const Value** value) const {
   const Value* stored_value = NULL;
   if (!prefs_.get() || !prefs_->GetValue(key, &stored_value))
-    return PrefStore::READ_NO_VALUE;
+    return false;
 
   if (value)
     *value = stored_value;
-  return PrefStore::READ_OK;
+  return true;
 }
 
 void ConfigurationPolicyPrefStore::OnPolicyUpdated(
-    PolicyDomain domain,
-    const std::string& component_id,
+    const PolicyNamespace& ns,
     const PolicyMap& previous,
     const PolicyMap& current) {
-  DCHECK_EQ(POLICY_DOMAIN_CHROME, domain);
-  DCHECK_EQ("", component_id);
+  DCHECK_EQ(POLICY_DOMAIN_CHROME, ns.domain);
+  DCHECK(ns.component_id.empty());
   Refresh();
 }
 
-void ConfigurationPolicyPrefStore::OnPolicyServiceInitialized() {
-  FOR_EACH_OBSERVER(PrefStore::Observer, observers_,
-                    OnInitializationCompleted(true));
+void ConfigurationPolicyPrefStore::OnPolicyServiceInitialized(
+    PolicyDomain domain) {
+  if (domain == POLICY_DOMAIN_CHROME) {
+    FOR_EACH_OBSERVER(PrefStore::Observer, observers_,
+                      OnInitializationCompleted(true));
+  }
 }
 
 // static
@@ -130,8 +131,8 @@ void ConfigurationPolicyPrefStore::Refresh() {
 PrefValueMap* ConfigurationPolicyPrefStore::CreatePreferencesFromPolicies() {
   scoped_ptr<PrefValueMap> prefs(new PrefValueMap);
   PolicyMap filtered_policies;
-  filtered_policies.CopyFrom(
-      policy_service_->GetPolicies(POLICY_DOMAIN_CHROME, ""));
+  filtered_policies.CopyFrom(policy_service_->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())));
   filtered_policies.FilterLevel(level_);
 
   scoped_ptr<PolicyErrorMap> errors(new PolicyErrorMap);

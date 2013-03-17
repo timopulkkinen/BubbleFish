@@ -28,18 +28,33 @@ PRUNE_PATHS = set([
     # Placeholder directory only, not third-party code.
     os.path.join('third_party','adobe'),
 
+    # Build files only, not third-party code.
+    os.path.join('third_party','widevine'),
+
     # Only binaries, used during development.
     os.path.join('third_party','valgrind'),
 
     # Used for development and test, not in the shipping product.
-    os.path.join('third_party','bidichecker'),
+    os.path.join('third_party','bison'),
     os.path.join('third_party','cygwin'),
+    os.path.join('third_party','gnu_binutils'),
     os.path.join('third_party','gold'),
+    os.path.join('third_party','gperf'),
     os.path.join('third_party','lighttpd'),
+    os.path.join('third_party','llvm'),
+    os.path.join('third_party','llvm-build'),
     os.path.join('third_party','mingw-w64'),
+    os.path.join('third_party','nacl_sdk_binaries'),
     os.path.join('third_party','pefile'),
+    os.path.join('third_party','perl'),
+    os.path.join('third_party','psyco_win32'),
+    os.path.join('third_party','pylib'),
     os.path.join('third_party','python_26'),
     os.path.join('third_party','pywebsocket'),
+    os.path.join('third_party','syzygy'),
+
+    # Chromium code in third_party.
+    os.path.join('third_party','fuzzymatch'),
 
     # Stuff pulled in from chrome-internal for official builds/tools.
     os.path.join('third_party', 'clear_cache'),
@@ -116,11 +131,13 @@ SPECIAL_CASES = {
         "Name": "gmock",
         "URL": "http://code.google.com/p/googlemock",
         "License": "BSD",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('testing', 'gtest'): {
         "Name": "gtest",
         "URL": "http://code.google.com/p/googletest",
         "License": "BSD",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('third_party', 'angle'): {
         "Name": "Almost Native Graphics Layer Engine",
@@ -142,7 +159,7 @@ SPECIAL_CASES = {
     },
     os.path.join('third_party', 'lss'): {
         "Name": "linux-syscall-support",
-        "URL": "http://code.google.com/p/lss/",
+        "URL": "http://code.google.com/p/linux-syscall-support/",
         "License": "BSD",
         "License File": "/LICENSE",
     },
@@ -165,16 +182,18 @@ SPECIAL_CASES = {
         "Name": "scons-2.0.1",
         "URL": "http://www.scons.org",
         "License": "MIT",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('third_party', 'trace-viewer'): {
         "Name": "trace-viewer",
         "URL": "http://code.google.com/p/trace-viewer",
         "License": "BSD",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('third_party', 'v8-i18n'): {
         "Name": "Internationalization Library for v8",
         "URL": "http://code.google.com/p/v8-i18n/",
-        "License": "Apache 2.0, BSD and others",
+        "License": "Apache 2.0",
     },
     os.path.join('third_party', 'WebKit'): {
         "Name": "WebKit",
@@ -187,16 +206,19 @@ SPECIAL_CASES = {
         "Name": "webpagereplay",
         "URL": "http://code.google.com/p/web-page-replay",
         "License": "Apache 2.0",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('tools', 'grit'): {
         "Name": "grit",
         "URL": "http://code.google.com/p/grit-i18n",
         "License": "BSD",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('tools', 'gyp'): {
         "Name": "gyp",
         "URL": "http://code.google.com/p/gyp",
         "License": "BSD",
+        "License File": "NOT_SHIPPED",
     },
     os.path.join('v8'): {
         "Name": "V8 JavaScript Engine",
@@ -222,20 +244,20 @@ class LicenseError(Exception):
     fully filled out."""
     pass
 
-def AbsolutePath(path, filename):
+def AbsolutePath(path, filename, root):
     """Convert a path in README.chromium to be absolute based on the source
     root."""
     if filename.startswith('/'):
         # Absolute-looking paths are relative to the source root
         # (which is the directory we're run from).
-        absolute_path = os.path.join(os.getcwd(), filename[1:])
+        absolute_path = os.path.join(root, filename[1:])
     else:
-        absolute_path = os.path.join(path, filename)
+        absolute_path = os.path.join(root, path, filename)
     if os.path.exists(absolute_path):
         return absolute_path
     return None
 
-def ParseDir(path, require_license_file=True):
+def ParseDir(path, root, require_license_file=True):
     """Examine a third_party/foo component and extract its metadata."""
 
     # Parse metadata fields out of README.chromium.
@@ -255,7 +277,7 @@ def ParseDir(path, require_license_file=True):
         metadata.update(SPECIAL_CASES[path])
     else:
         # Try to find README.chromium.
-        readme_path = os.path.join(path, 'README.chromium')
+        readme_path = os.path.join(root, path, 'README.chromium')
         if not os.path.exists(readme_path):
             raise LicenseError("missing README.chromium or licenses.py "
                                "SPECIAL_CASES entry")
@@ -281,7 +303,7 @@ def ParseDir(path, require_license_file=True):
     if metadata["License File"] != NOT_SHIPPED:
         # Check that the license file exists.
         for filename in (metadata["License File"], "COPYING"):
-            license_path = AbsolutePath(path, filename)
+            license_path = AbsolutePath(path, filename, root)
             if license_path is not None:
                 break
 
@@ -294,7 +316,7 @@ def ParseDir(path, require_license_file=True):
         metadata["License File"] = license_path
 
     if "Required Text" in metadata:
-        required_path = AbsolutePath(path, metadata["Required Text"])
+        required_path = AbsolutePath(path, metadata["Required Text"], root)
         if required_path is not None:
             metadata["Required Text"] = required_path
         else:
@@ -303,20 +325,26 @@ def ParseDir(path, require_license_file=True):
     return metadata
 
 
-def ContainsFiles(path):
+def ContainsFiles(path, root):
     """Determines whether any files exist in a directory or in any of its
     subdirectories."""
-    for _, _, files in os.walk(path):
+    for _, _, files in os.walk(os.path.join(root, path)):
         if files:
             return True
     return False
 
 
-def FindThirdPartyDirs(prune_paths):
-    """Find all third_party directories underneath the current directory."""
+def FilterDirsWithFiles(dirs_list, root):
+    # If a directory contains no files, assume it's a DEPS directory for a
+    # project not used by our current configuration and skip it.
+    return [x for x in dirs_list if ContainsFiles(x, root)]
+
+
+def FindThirdPartyDirs(prune_paths, root):
+    """Find all third_party directories underneath the source root."""
     third_party_dirs = []
-    for path, dirs, files in os.walk('.'):
-        path = path[len('./'):]  # Pretty up the path.
+    for path, dirs, files in os.walk(root):
+        path = path[len(root)+1:]  # Pretty up the path.
 
         if path in prune_paths:
             dirs[:] = []
@@ -346,21 +374,23 @@ def FindThirdPartyDirs(prune_paths):
             dirs[:] = []
 
     for dir in ADDITIONAL_PATHS:
-        third_party_dirs.append(dir)
+        if dir not in prune_paths:
+            third_party_dirs.append(dir)
 
-    # If a directory contains no files, assume it's a DEPS directory for a
-    # project not used by our current configuration and skip it.
-    return [x for x in third_party_dirs if ContainsFiles(x)]
+    return third_party_dirs
 
 
-def ScanThirdPartyDirs():
+def ScanThirdPartyDirs(root=None):
     """Scan a list of directories and report on any problems we find."""
-    third_party_dirs = FindThirdPartyDirs(PRUNE_PATHS)
+    if root is None:
+      root = os.getcwd()
+    third_party_dirs = FindThirdPartyDirs(PRUNE_PATHS, root)
+    third_party_dirs = FilterDirsWithFiles(third_party_dirs, root)
 
     errors = []
     for path in sorted(third_party_dirs):
         try:
-            metadata = ParseDir(path)
+            metadata = ParseDir(path, root)
         except LicenseError, e:
             errors.append((path, e.args[0]))
             continue
@@ -372,7 +402,11 @@ def ScanThirdPartyDirs():
 
 
 def GenerateCredits():
-    """Generate about:credits, dumping the result to stdout."""
+    """Generate about:credits."""
+
+    if len(sys.argv) not in (2, 3):
+      print 'usage: licenses.py credits [output_file]'
+      return False
 
     def EvaluateTemplate(template, env, escape=True):
         """Expand a template with variables like {{foo}} using a
@@ -383,21 +417,19 @@ def GenerateCredits():
             template = template.replace('{{%s}}' % key, val)
         return template
 
-    third_party_dirs = FindThirdPartyDirs(PRUNE_PATHS)
+    root = os.path.join(os.path.dirname(__file__), '..')
+    third_party_dirs = FindThirdPartyDirs(PRUNE_PATHS, root)
 
-    entry_template = open('chrome/browser/resources/about_credits_entry.tmpl',
-                          'rb').read()
+    entry_template = open(os.path.join(root, 'chrome', 'browser', 'resources',
+                                       'about_credits_entry.tmpl'), 'rb').read()
     entries = []
     for path in sorted(third_party_dirs):
         try:
-            metadata = ParseDir(path)
+            metadata = ParseDir(path, root)
         except LicenseError:
-            print >>sys.stderr, ("WARNING: licensing info for " + path +
-                                 " is incomplete, skipping.")
+            # TODO(phajdan.jr): Convert to fatal error (http://crbug.com/39240).
             continue
         if metadata['License File'] == NOT_SHIPPED:
-            print >>sys.stderr, ("Path " + path + " marked as " + NOT_SHIPPED +
-                                 ", skipping.")
             continue
         env = {
             'name': metadata['Name'],
@@ -410,11 +442,20 @@ def GenerateCredits():
             env["license_unescaped"] = required_text
         entries.append(EvaluateTemplate(entry_template, env))
 
-    file_template = open('chrome/browser/resources/about_credits.tmpl',
-                         'rb').read()
-    print "<!-- Generated by licenses.py; do not edit. -->"
-    print EvaluateTemplate(file_template, {'entries': '\n'.join(entries)},
-                           escape=False)
+    file_template = open(os.path.join(root, 'chrome', 'browser', 'resources',
+                                      'about_credits.tmpl'), 'rb').read()
+    template_contents = "<!-- Generated by licenses.py; do not edit. -->"
+    template_contents += EvaluateTemplate(file_template,
+                                          {'entries': '\n'.join(entries)},
+                                          escape=False)
+
+    if len(sys.argv) == 3:
+      with open(sys.argv[2], 'w') as output_file:
+        output_file.write(template_contents)
+    elif len(sys.argv) == 2:
+      print template_contents
+
+    return True
 
 
 def main():

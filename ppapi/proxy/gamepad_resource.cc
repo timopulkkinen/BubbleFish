@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "base/bind.h"
 #include "base/threading/platform_thread.h"
 #include "ppapi/proxy/dispatch_reply_message.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -47,11 +48,18 @@ GamepadResource::GamepadResource(Connection connection, PP_Instance instance)
       buffer_(NULL) {
   memset(&last_read_, 0, sizeof(last_read_));
 
-  SendCreateToBrowser(PpapiHostMsg_Gamepad_Create());
-  CallBrowser(PpapiHostMsg_Gamepad_RequestMemory());
+  SendCreate(BROWSER, PpapiHostMsg_Gamepad_Create());
+  Call<PpapiPluginMsg_Gamepad_SendMemory>(
+      BROWSER,
+      PpapiHostMsg_Gamepad_RequestMemory(),
+      base::Bind(&GamepadResource::OnPluginMsgSendMemory, this));
 }
 
 GamepadResource::~GamepadResource() {
+}
+
+thunk::PPB_Gamepad_API* GamepadResource::AsPPB_Gamepad_API() {
+  return this;
 }
 
 void GamepadResource::Sample(PP_GamepadsSampleData* data) {
@@ -91,19 +99,11 @@ void GamepadResource::Sample(PP_GamepadsSampleData* data) {
   memcpy(data, &last_read_, sizeof(PP_GamepadsSampleData));
 }
 
-void GamepadResource::OnReplyReceived(const ResourceMessageReplyParams& params,
-                                      const IPC::Message& msg) {
-  IPC_BEGIN_MESSAGE_MAP(GamepadResource, msg)
-    PPAPI_DISPATCH_RESOURCE_REPLY_0(PpapiPluginMsg_Gamepad_SendMemory,
-                                    OnPluginMsgSendMemory)
-  IPC_END_MESSAGE_MAP()
-}
-
 void GamepadResource::OnPluginMsgSendMemory(
     const ResourceMessageReplyParams& params) {
   // On failure, the handle will be null and the CHECK below will be tripped.
-  base::SharedMemoryHandle handle;
-  params.GetSharedMemoryHandleAtIndex(0, &handle);
+  base::SharedMemoryHandle handle = base::SharedMemory::NULLHandle();
+  params.TakeSharedMemoryHandleAtIndex(0, &handle);
 
   shared_memory_.reset(new base::SharedMemory(handle, true));
   CHECK(shared_memory_->Map(sizeof(ContentGamepadHardwareBuffer)));

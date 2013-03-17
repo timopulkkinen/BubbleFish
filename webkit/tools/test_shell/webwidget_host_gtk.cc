@@ -12,12 +12,12 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_x11.h"
 
@@ -290,7 +290,7 @@ WebWidgetHost* WebWidgetHost::Create(GtkWidget* parent_view,
 }
 
 void WebWidgetHost::UpdatePaintRect(const gfx::Rect& rect) {
-  paint_rect_ = paint_rect_.Union(rect);
+  paint_rect_.Union(rect);
 }
 
 void WebWidgetHost::DidInvalidateRect(const gfx::Rect& damaged_rect) {
@@ -357,7 +357,8 @@ void WebWidgetHost::Paint() {
   if (!canvas_.get()) {
     ResetScrollRect();
     paint_rect_ = client_rect;
-    canvas_.reset(new skia::PlatformCanvas(width, height, true));
+    canvas_.reset(skia::CreatePlatformCanvas(width, height, true, 0,
+                                             skia::RETURN_NULL_ON_FAILURE));
     if (!canvas_.get()) {
       // memory allocation failed, we can't paint.
       LOG(ERROR) << "Failed to allocate memory for " << width << "x" << height;
@@ -377,14 +378,14 @@ void WebWidgetHost::Paint() {
   // to update that area after we're done painting it.
   gfx::Rect total_paint;
   for (int i = 0; i < 2; ++i) {
-    paint_rect_ = client_rect.Intersect(paint_rect_);
+    paint_rect_.Intersect(client_rect);
     if (!paint_rect_.IsEmpty()) {
       gfx::Rect rect(paint_rect_);
       paint_rect_ = gfx::Rect();
 
       DLOG_IF(WARNING, i == 1) << "painting caused additional invalidations";
       PaintRect(rect);
-      total_paint = total_paint.Union(rect);
+      total_paint.Union(rect);
     }
   }
   //DCHECK(paint_rect_.IsEmpty());

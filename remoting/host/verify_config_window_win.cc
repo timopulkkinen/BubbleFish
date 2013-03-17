@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "remoting/host/pin_hash.h"
-#include "remoting/host/win/elevated_controller_resource.h"
+#include "remoting/host/win/core_resource.h"
 #include "remoting/protocol/authentication_method.h"
 
 namespace remoting {
@@ -26,11 +26,11 @@ VerifyConfigWindowWin::VerifyConfigWindowWin(const std::string& email,
 }
 
 void VerifyConfigWindowWin::OnCancel(UINT code, int id, HWND control) {
-  EndDialog(IDCANCEL);
+  EndDialog(ERROR_CANCELLED);
 }
 
 void VerifyConfigWindowWin::OnClose() {
-  EndDialog(IDCANCEL);
+  EndDialog(ERROR_CANCELLED);
 }
 
 LRESULT VerifyConfigWindowWin::OnInitDialog(HWND wparam, LPARAM lparam) {
@@ -68,9 +68,9 @@ LRESULT VerifyConfigWindowWin::OnInitDialog(HWND wparam, LPARAM lparam) {
 
 void VerifyConfigWindowWin::OnOk(UINT code, int id, HWND control) {
   if (VerifyHostSecretHash()) {
-    EndDialog(IDOK);
+    EndDialog(ERROR_SUCCESS);
   } else {
-    EndDialog(IDCANCEL);
+    EndDialog(ERROR_LOGON_FAILURE);
   }
 }
 

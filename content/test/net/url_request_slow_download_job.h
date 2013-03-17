@@ -16,12 +16,15 @@
 #include "base/memory/weak_ptr.h"
 #include "net/url_request/url_request_job.h"
 
+namespace content {
+
 class URLRequestSlowDownloadJob : public net::URLRequestJob {
  public:
   // Test URLs.
   static const char kUnknownSizeUrl[];
   static const char kKnownSizeUrl[];
   static const char kFinishDownloadUrl[];
+  static const char kErrorDownloadUrl[];
 
   // Download sizes.
   static const int kFirstDownloadSize;
@@ -79,19 +82,24 @@ class URLRequestSlowDownloadJob : public net::URLRequestJob {
   // Mark all pending requests to be finished.  We keep track of pending
   // requests in |pending_requests_|.
   static void FinishPendingRequests();
+  static void ErrorPendingRequests();
   typedef std::set<URLRequestSlowDownloadJob*> SlowJobsSet;
   static base::LazyInstance<SlowJobsSet>::Leaky pending_requests_;
 
   void StartAsync();
 
   void set_should_finish_download() { should_finish_download_ = true; }
+  void set_should_error_download() { should_error_download_ = true; }
 
   int bytes_already_sent_;
+  bool should_error_download_;
   bool should_finish_download_;
   scoped_refptr<net::IOBuffer> buffer_;
   int buffer_size_;
 
   base::WeakPtrFactory<URLRequestSlowDownloadJob> weak_factory_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_TEST_NET_URL_REQUEST_SLOW_DOWNLOAD_JOB_H_

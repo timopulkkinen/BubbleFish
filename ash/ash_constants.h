@@ -9,6 +9,8 @@
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 
+typedef unsigned int SkColor;
+
 namespace ash {
 
 // The window is a constrained window and lives therefore entirely within
@@ -27,6 +29,14 @@ ASH_EXPORT extern const int kResizeAreaCornerSize;
 ASH_EXPORT extern const int kResizeOutsideBoundsSize;
 ASH_EXPORT extern const int kResizeOutsideBoundsScaleForTouch;
 ASH_EXPORT extern const int kResizeInsideBoundsSize;
+
+#if defined(OS_CHROMEOS)
+// Background color used for the Chrome OS boot splash screen.
+extern const SkColor kChromeOsBootColor;
+#endif
+
+// The border color of keyboard focus for launcher items and system tray.
+extern const SkColor kFocusBorderColor;
 
 } // namespace ash
 

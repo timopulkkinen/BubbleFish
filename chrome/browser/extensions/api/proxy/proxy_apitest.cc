@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -71,8 +71,7 @@ class ProxySettingsApiTest : public ExtensionApiTest {
 };
 
 // Tests direct connection settings.
-// Disabled due to http://crbug.com/88937.
-IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, DISABLED_ProxyDirectSettings) {
+IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyDirectSettings) {
   ASSERT_TRUE(RunExtensionTestIncognito("proxy/direct")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension);
@@ -102,6 +101,20 @@ IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyPacScript) {
   PrefService* pref_service = browser()->profile()->GetPrefs();
   ValidateSettings(ProxyPrefs::MODE_PAC_SCRIPT, kNoServer, kNoBypass,
                    "http://wpad/windows.pac", pref_service);
+}
+
+// Tests PAC proxy settings.
+IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyPacDataUrl) {
+  ASSERT_TRUE(RunExtensionTest("proxy/pacdataurl")) << message_;
+  const Extension* extension = GetSingleLoadedExtension();
+  ASSERT_TRUE(extension);
+  const char url[] =
+       "data:;base64,ZnVuY3Rpb24gRmluZFByb3h5R"
+       "m9yVVJMKHVybCwgaG9zdCkgewogIGlmIChob3N0ID09ICdmb29iYXIuY29tJykKICAgIHJl"
+       "dHVybiAnUFJPWFkgYmxhY2tob2xlOjgwJzsKICByZXR1cm4gJ0RJUkVDVCc7Cn0=";
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  ValidateSettings(ProxyPrefs::MODE_PAC_SCRIPT, kNoServer, kNoBypass,
+                   url, pref_service);
 }
 
 // Tests PAC proxy settings.

@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/performance_monitor/constants.h"
 
@@ -66,8 +66,7 @@ COMPILE_ASSERT(ARRAYSIZE_UNSAFE(kMetricBounds) == METRIC_NUMBER_OF_METRICS,
 
 }  // namespace
 
-Metric::Metric() {
-  value = 0.0;
+Metric::Metric() : type(METRIC_UNDEFINED), value(0.0) {
 }
 
 Metric::Metric(MetricType metric_type,

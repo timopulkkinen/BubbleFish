@@ -11,17 +11,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/load_time_stats.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/common/content_client.h"
 #include "net/cookies/cookie_store.h"
-#include "net/http/http_util.h"
 
 using content::BrowserThread;
 
@@ -46,15 +40,46 @@ namespace {
 // Factory that creates the main ChromeURLRequestContext.
 class FactoryForMain : public ChromeURLRequestContextFactory {
  public:
-  explicit FactoryForMain(const ProfileIOData* profile_io_data)
-      : profile_io_data_(profile_io_data) {}
+  FactoryForMain(
+      const ProfileIOData* profile_io_data,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler)
+      : profile_io_data_(profile_io_data),
+        blob_protocol_handler_(blob_protocol_handler.Pass()),
+        file_system_protocol_handler_(file_system_protocol_handler.Pass()),
+        developer_protocol_handler_(developer_protocol_handler.Pass()),
+        chrome_protocol_handler_(chrome_protocol_handler.Pass()),
+        chrome_devtools_protocol_handler_(
+            chrome_devtools_protocol_handler.Pass()) {}
 
   virtual ChromeURLRequestContext* Create() OVERRIDE {
+    profile_io_data_->Init(blob_protocol_handler_.Pass(),
+                           file_system_protocol_handler_.Pass(),
+                           developer_protocol_handler_.Pass(),
+                           chrome_protocol_handler_.Pass(),
+                           chrome_devtools_protocol_handler_.Pass());
     return profile_io_data_->GetMainRequestContext();
   }
 
  private:
   const ProfileIOData* const profile_io_data_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler> blob_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      file_system_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      developer_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      chrome_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      chrome_devtools_protocol_handler_;
 };
 
 // Factory that creates the ChromeURLRequestContext for extensions.
@@ -74,15 +99,32 @@ class FactoryForExtensions : public ChromeURLRequestContextFactory {
 // Factory that creates the ChromeURLRequestContext for a given isolated app.
 class FactoryForIsolatedApp : public ChromeURLRequestContextFactory {
  public:
-  FactoryForIsolatedApp(const ProfileIOData* profile_io_data,
-                        const std::string& app_id,
-                        ChromeURLRequestContextGetter* main_context,
-                        scoped_ptr<net::URLRequestJobFactory::Interceptor>
-                            protocol_handler_interceptor)
+  FactoryForIsolatedApp(
+      const ProfileIOData* profile_io_data,
+      const StoragePartitionDescriptor& partition_descriptor,
+      ChromeURLRequestContextGetter* main_context,
+      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+          protocol_handler_interceptor,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          blob_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          file_system_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          developer_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_protocol_handler,
+      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+          chrome_devtools_protocol_handler)
       : profile_io_data_(profile_io_data),
-        app_id_(app_id),
+        partition_descriptor_(partition_descriptor),
         main_request_context_getter_(main_context),
-        protocol_handler_interceptor_(protocol_handler_interceptor.Pass()) {}
+        protocol_handler_interceptor_(protocol_handler_interceptor.Pass()),
+        blob_protocol_handler_(blob_protocol_handler.Pass()),
+        file_system_protocol_handler_(file_system_protocol_handler.Pass()),
+        developer_protocol_handler_(developer_protocol_handler.Pass()),
+        chrome_protocol_handler_(chrome_protocol_handler.Pass()),
+        chrome_devtools_protocol_handler_(
+            chrome_devtools_protocol_handler.Pass()) {}
 
   virtual ChromeURLRequestContext* Create() OVERRIDE {
     // We will copy most of the state from the main request context.
@@ -91,29 +133,43 @@ class FactoryForIsolatedApp : public ChromeURLRequestContextFactory {
     // factory is actually destroyed. Thus it is safe to destructively pass
     // state onwards.
     return profile_io_data_->GetIsolatedAppRequestContext(
-        main_request_context_getter_->GetIOContext(), app_id_,
-        protocol_handler_interceptor_.Pass());
+        main_request_context_getter_->GetURLRequestContext(),
+        partition_descriptor_, protocol_handler_interceptor_.Pass(),
+        blob_protocol_handler_.Pass(), file_system_protocol_handler_.Pass(),
+        developer_protocol_handler_.Pass(), chrome_protocol_handler_.Pass(),
+        chrome_devtools_protocol_handler_.Pass());
   }
 
  private:
   const ProfileIOData* const profile_io_data_;
-  const std::string app_id_;
+  const StoragePartitionDescriptor partition_descriptor_;
   scoped_refptr<ChromeURLRequestContextGetter>
       main_request_context_getter_;
-  scoped_ptr<net::URLRequestJobFactory::Interceptor>
+  scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
       protocol_handler_interceptor_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      blob_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      file_system_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      developer_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      chrome_protocol_handler_;
+  scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      chrome_devtools_protocol_handler_;
 };
 
 // Factory that creates the media ChromeURLRequestContext for a given isolated
 // app.  The media context is based on the corresponding isolated app's context.
 class FactoryForIsolatedMedia : public ChromeURLRequestContextFactory {
  public:
-  FactoryForIsolatedMedia(const ProfileIOData* profile_io_data,
-                          const std::string& app_id,
-                          ChromeURLRequestContextGetter* app_context)
-      : profile_io_data_(profile_io_data),
-        app_id_(app_id),
-        app_context_getter_(app_context) {}
+  FactoryForIsolatedMedia(
+      const ProfileIOData* profile_io_data,
+      const StoragePartitionDescriptor& partition_descriptor,
+      ChromeURLRequestContextGetter* app_context)
+    : profile_io_data_(profile_io_data),
+      partition_descriptor_(partition_descriptor),
+      app_context_getter_(app_context) {}
 
   virtual ChromeURLRequestContext* Create() OVERRIDE {
     // We will copy most of the state from the corresopnding app's
@@ -123,12 +179,12 @@ class FactoryForIsolatedMedia : public ChromeURLRequestContextFactory {
     // |protocol_handler_interceptor|.  This is why the API
     // looks different from FactoryForIsolatedApp's.
     return profile_io_data_->GetIsolatedMediaRequestContext(
-        app_context_getter_->GetIOContext(), app_id_);
+        app_context_getter_->GetURLRequestContext(), partition_descriptor_);
   }
 
  private:
   const ProfileIOData* const profile_io_data_;
-  const std::string app_id_;
+  const StoragePartitionDescriptor partition_descriptor_;
   scoped_refptr<ChromeURLRequestContextGetter> app_context_getter_;
 };
 
@@ -154,22 +210,16 @@ class FactoryForMedia : public ChromeURLRequestContextFactory {
 // ----------------------------------------------------------------------------
 
 ChromeURLRequestContextGetter::ChromeURLRequestContextGetter(
-    Profile* profile,
     ChromeURLRequestContextFactory* factory)
     : factory_(factory) {
   DCHECK(factory);
-  DCHECK(profile);
-  RegisterPrefsObserver(profile);
 }
 
-ChromeURLRequestContextGetter::~ChromeURLRequestContextGetter() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  DCHECK(registrar_.IsEmpty()) << "Probably didn't call CleanupOnUIThread";
-}
+ChromeURLRequestContextGetter::~ChromeURLRequestContextGetter() {}
 
 // Lazily create a ChromeURLRequestContext using our factory.
-net::URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
+ChromeURLRequestContext*
+ChromeURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (!url_request_context_) {
@@ -182,7 +232,7 @@ net::URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
   // after the Profile has already been deleted.
   CHECK(url_request_context_.get());
 
-  return url_request_context_;
+  return url_request_context_.get();
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -193,11 +243,25 @@ ChromeURLRequestContextGetter::GetNetworkTaskRunner() const {
 // static
 ChromeURLRequestContextGetter* ChromeURLRequestContextGetter::CreateOriginal(
     Profile* profile,
-    const ProfileIOData* profile_io_data) {
+    const ProfileIOData* profile_io_data,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   DCHECK(!profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile,
-      new FactoryForMain(profile_io_data));
+      new FactoryForMain(profile_io_data,
+                         blob_protocol_handler.Pass(),
+                         file_system_protocol_handler.Pass(),
+                         developer_protocol_handler.Pass(),
+                         chrome_protocol_handler.Pass(),
+                         chrome_devtools_protocol_handler.Pass()));
 }
 
 // static
@@ -206,7 +270,6 @@ ChromeURLRequestContextGetter::CreateOriginalForMedia(
     Profile* profile, const ProfileIOData* profile_io_data) {
   DCHECK(!profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile,
       new FactoryForMedia(profile_io_data));
 }
 
@@ -216,7 +279,6 @@ ChromeURLRequestContextGetter::CreateOriginalForExtensions(
     Profile* profile, const ProfileIOData* profile_io_data) {
   DCHECK(!profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile,
       new FactoryForExtensions(profile_io_data));
 }
 
@@ -225,16 +287,28 @@ ChromeURLRequestContextGetter*
 ChromeURLRequestContextGetter::CreateOriginalForIsolatedApp(
     Profile* profile,
     const ProfileIOData* profile_io_data,
-    const std::string& app_id,
-    scoped_ptr<net::URLRequestJobFactory::Interceptor>
-        protocol_handler_interceptor) {
+    const StoragePartitionDescriptor& partition_descriptor,
+    scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+        protocol_handler_interceptor,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   DCHECK(!profile->IsOffTheRecord());
   ChromeURLRequestContextGetter* main_context =
       static_cast<ChromeURLRequestContextGetter*>(profile->GetRequestContext());
   return new ChromeURLRequestContextGetter(
-      profile,
-      new FactoryForIsolatedApp(profile_io_data, app_id, main_context,
-                                protocol_handler_interceptor.Pass()));
+      new FactoryForIsolatedApp(profile_io_data, partition_descriptor,
+           main_context, protocol_handler_interceptor.Pass(),
+           blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+           developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+           chrome_devtools_protocol_handler.Pass()));
 }
 
 // static
@@ -243,20 +317,36 @@ ChromeURLRequestContextGetter::CreateOriginalForIsolatedMedia(
     Profile* profile,
     ChromeURLRequestContextGetter* app_context,
     const ProfileIOData* profile_io_data,
-    const std::string& app_id) {
+    const StoragePartitionDescriptor& partition_descriptor) {
   DCHECK(!profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile,
-      new FactoryForIsolatedMedia(profile_io_data, app_id, app_context));
+      new FactoryForIsolatedMedia(
+          profile_io_data, partition_descriptor, app_context));
 }
 
 // static
 ChromeURLRequestContextGetter*
 ChromeURLRequestContextGetter::CreateOffTheRecord(
-    Profile* profile, const ProfileIOData* profile_io_data) {
+    Profile* profile,
+    const ProfileIOData* profile_io_data,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+      developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   DCHECK(profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile, new FactoryForMain(profile_io_data));
+      new FactoryForMain(profile_io_data,
+                         blob_protocol_handler.Pass(),
+                         file_system_protocol_handler.Pass(),
+                         developer_protocol_handler.Pass(),
+                         chrome_protocol_handler.Pass(),
+                         chrome_devtools_protocol_handler.Pass()));
 }
 
 // static
@@ -265,7 +355,7 @@ ChromeURLRequestContextGetter::CreateOffTheRecordForExtensions(
     Profile* profile, const ProfileIOData* profile_io_data) {
   DCHECK(profile->IsOffTheRecord());
   return new ChromeURLRequestContextGetter(
-      profile, new FactoryForExtensions(profile_io_data));
+      new FactoryForExtensions(profile_io_data));
 }
 
 // static
@@ -273,75 +363,28 @@ ChromeURLRequestContextGetter*
 ChromeURLRequestContextGetter::CreateOffTheRecordForIsolatedApp(
     Profile* profile,
     const ProfileIOData* profile_io_data,
-    const std::string& app_id,
-    scoped_ptr<net::URLRequestJobFactory::Interceptor>
-        protocol_handler_interceptor) {
+    const StoragePartitionDescriptor& partition_descriptor,
+    scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+        protocol_handler_interceptor,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
   DCHECK(profile->IsOffTheRecord());
   ChromeURLRequestContextGetter* main_context =
       static_cast<ChromeURLRequestContextGetter*>(profile->GetRequestContext());
   return new ChromeURLRequestContextGetter(
-      profile,
-      new FactoryForIsolatedApp(profile_io_data, app_id, main_context,
-                                protocol_handler_interceptor.Pass()));
-}
-
-void ChromeURLRequestContextGetter::CleanupOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Unregister for pref notifications.
-  DCHECK(!registrar_.IsEmpty()) << "Called more than once!";
-  registrar_.RemoveAll();
-}
-
-// content::NotificationObserver implementation.
-void ChromeURLRequestContextGetter::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (chrome::NOTIFICATION_PREF_CHANGED == type) {
-    std::string* pref_name_in = content::Details<std::string>(details).ptr();
-    PrefService* prefs = content::Source<PrefService>(source).ptr();
-    DCHECK(pref_name_in && prefs);
-    if (*pref_name_in == prefs::kAcceptLanguages) {
-      std::string accept_language =
-          prefs->GetString(prefs::kAcceptLanguages);
-      BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
-          base::Bind(
-              &ChromeURLRequestContextGetter::OnAcceptLanguageChange,
-              this,
-              accept_language));
-    } else if (*pref_name_in == prefs::kDefaultCharset) {
-      std::string default_charset = prefs->GetString(prefs::kDefaultCharset);
-      BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
-          base::Bind(
-              &ChromeURLRequestContextGetter::OnDefaultCharsetChange,
-              this,
-              default_charset));
-    }
-  } else {
-    NOTREACHED();
-  }
-}
-
-void ChromeURLRequestContextGetter::RegisterPrefsObserver(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  registrar_.Init(profile->GetPrefs());
-  registrar_.Add(prefs::kAcceptLanguages, this);
-  registrar_.Add(prefs::kDefaultCharset, this);
-}
-
-void ChromeURLRequestContextGetter::OnAcceptLanguageChange(
-    const std::string& accept_language) {
-  GetIOContext()->OnAcceptLanguageChange(accept_language);
-}
-
-void ChromeURLRequestContextGetter::OnDefaultCharsetChange(
-    const std::string& default_charset) {
-  GetIOContext()->OnDefaultCharsetChange(default_charset);
+      new FactoryForIsolatedApp(profile_io_data, partition_descriptor,
+          main_context, protocol_handler_interceptor.Pass(),
+          blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+          developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+          chrome_devtools_protocol_handler.Pass()));
 }
 
 // ----------------------------------------------------------------------------
@@ -352,7 +395,6 @@ ChromeURLRequestContext::ChromeURLRequestContext(
     ContextType type,
     chrome_browser_net::LoadTimeStats* load_time_stats)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
-      is_incognito_(false),
       load_time_stats_(load_time_stats) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (load_time_stats_)
@@ -369,37 +411,4 @@ void ChromeURLRequestContext::CopyFrom(ChromeURLRequestContext* other) {
   URLRequestContext::CopyFrom(other);
 
   // Copy ChromeURLRequestContext parameters.
-  // ChromeURLDataManagerBackend is unique per context.
-  set_is_incognito(other->is_incognito());
-}
-
-ChromeURLDataManagerBackend*
-ChromeURLRequestContext::chrome_url_data_manager_backend() const {
-    return chrome_url_data_manager_backend_;
-}
-
-void ChromeURLRequestContext::set_chrome_url_data_manager_backend(
-        ChromeURLDataManagerBackend* backend) {
-  DCHECK(backend);
-  chrome_url_data_manager_backend_ = backend;
-}
-
-const std::string& ChromeURLRequestContext::GetUserAgent(
-    const GURL& url) const {
-  return content::GetUserAgent(url);
-}
-
-void ChromeURLRequestContext::OnAcceptLanguageChange(
-    const std::string& accept_language) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  set_accept_language(
-      net::HttpUtil::GenerateAcceptLanguageHeader(accept_language));
-}
-
-void ChromeURLRequestContext::OnDefaultCharsetChange(
-    const std::string& default_charset) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  set_referrer_charset(default_charset);
-  set_accept_charset(
-      net::HttpUtil::GenerateAcceptCharsetHeader(default_charset));
 }

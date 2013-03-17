@@ -25,7 +25,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::Histogram;
+using base::HistogramBase;
 using base::HistogramSamples;
 
 namespace chrome_browser_net {
@@ -81,10 +81,10 @@ using testing::StrEq;
 class HttpPipeliningCompatibilityClientTest : public testing::Test {
  public:
   HttpPipeliningCompatibilityClientTest()
-      : test_server_(
-          net::TestServer::TYPE_HTTP,
-          net::TestServer::kLocalhost,
-          FilePath(FILE_PATH_LITERAL("chrome/test/data/http_pipelining"))),
+      : test_server_(net::TestServer::TYPE_HTTP,
+                     net::TestServer::kLocalhost,
+                     base::FilePath(FILE_PATH_LITERAL(
+                         "chrome/test/data/http_pipelining"))),
         io_thread_(BrowserThread::IO, &message_loop_) {
   }
 
@@ -94,7 +94,7 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
     // TODO(rtenneti): Leaks StatisticsRecorder and will update suppressions.
     base::StatisticsRecorder::Initialize();
     ASSERT_TRUE(test_server_.Start());
-    context_ = new TestURLRequestContextGetter(
+    context_ = new net::TestURLRequestContextGetter(
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
     context_->AddRef();
 
@@ -109,7 +109,7 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
 
   virtual void TearDown() OVERRIDE {
     BrowserThread::ReleaseSoon(BrowserThread::IO, FROM_HERE, context_);
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
     STLDeleteValues(&original_samples_);
   }
 
@@ -204,14 +204,14 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
 
   MessageLoopForIO message_loop_;
   net::TestServer test_server_;
-  TestURLRequestContextGetter* context_;
+  net::TestURLRequestContextGetter* context_;
   content::TestBrowserThread io_thread_;
 
  private:
   scoped_ptr<HistogramSamples> GetHistogram(const char* name) {
     scoped_ptr<HistogramSamples> samples;
-    Histogram* cached_histogram = NULL;
-    Histogram* current_histogram =
+    HistogramBase* cached_histogram = NULL;
+    HistogramBase* current_histogram =
         base::StatisticsRecorder::FindHistogram(name);
     if (ContainsKey(histograms_, name)) {
       cached_histogram = histograms_[name];
@@ -238,12 +238,12 @@ class HttpPipeliningCompatibilityClientTest : public testing::Test {
     return samples.Pass();
   }
 
-  static std::map<std::string, Histogram*> histograms_;
+  static std::map<std::string, HistogramBase*> histograms_;
   std::map<std::string, HistogramSamples*> original_samples_;
 };
 
 // static
-std::map<std::string, Histogram*>
+std::map<std::string, HistogramBase*>
     HttpPipeliningCompatibilityClientTest::histograms_;
 
 TEST_F(HttpPipeliningCompatibilityClientTest, Success) {
@@ -397,7 +397,13 @@ TEST_F(HttpPipeliningCompatibilityClientTest, OldHttpVersion) {
   ExpectRequestHistogramCount(1, 200, 0, FIELD_RESPONSE_CODE);
 }
 
-TEST_F(HttpPipeliningCompatibilityClientTest, MultipleRequests) {
+#if defined(OS_CHROMEOS)
+// http://crbug.com/147903: test fails on ChromeOS
+#define MAYBE_MultipleRequests DISABLED_MultipleRequests
+#else
+#define MAYBE_MultipleRequests MultipleRequests
+#endif
+TEST_F(HttpPipeliningCompatibilityClientTest, MAYBE_MultipleRequests) {
   std::vector<RequestInfo> requests;
 
   RequestInfo info1;
@@ -460,7 +466,13 @@ TEST_F(HttpPipeliningCompatibilityClientTest, StatsIndifferentToOrder) {
   ExpectHistogramCount(1, 1, FIELD_HTTP_1_1);
 }
 
-TEST_F(HttpPipeliningCompatibilityClientTest, StatsBadField) {
+#if defined(OS_CHROMEOS)
+// http://crbug.com/147903: test fails on ChromeOS
+#define MAYBE_StatsBadField DISABLED_StatsBadField
+#else
+#define MAYBE_StatsBadField StatsBadField
+#endif
+TEST_F(HttpPipeliningCompatibilityClientTest, MAYBE_StatsBadField) {
   EXPECT_EQ(internal::PipelineTestRequest::STATUS_CORRUPT_STATS,
             internal::ProcessStatsResponse(
                 "foo:3,were_all_requests_http_1_1:1"));
@@ -526,7 +538,13 @@ TEST_F(HttpPipeliningCompatibilityClientTest, WaitForCanary) {
       1, internal::PipelineTestRequest::STATUS_SUCCESS, 0, FIELD_STATUS);
 }
 
-TEST_F(HttpPipeliningCompatibilityClientTest, CanaryFailure) {
+#if defined(OS_CHROMEOS)
+// http://crbug.com/147903: test fails on ChromeOS
+#define MAYBE_CanaryFailure DISABLED_CanaryFailure
+#else
+#define MAYBE_CanaryFailure CanaryFailure
+#endif
+TEST_F(HttpPipeliningCompatibilityClientTest, MAYBE_CanaryFailure) {
   MockFactory* factory = new MockFactory;
   HttpPipeliningCompatibilityClient client(factory);
 

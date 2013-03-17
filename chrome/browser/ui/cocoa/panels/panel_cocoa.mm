@@ -38,7 +38,8 @@ PanelCocoa::PanelCocoa(Panel* panel, const gfx::Rect& bounds)
       bounds_(bounds),
       always_on_top_(false),
       is_shown_(false),
-      attention_request_id_(0) {
+      attention_request_id_(0),
+      corner_style_(panel::ALL_ROUNDED) {
   controller_ = [[PanelWindowControllerCocoa alloc] initWithPanel:this];
 }
 
@@ -143,7 +144,7 @@ void PanelCocoa::PreventActivationByOS(bool prevent_activation) {
   return;
 }
 
-gfx::NativeWindow PanelCocoa::GetNativePanelHandle() {
+gfx::NativeWindow PanelCocoa::GetNativePanelWindow() {
   return [controller_ window];
 }
 
@@ -157,8 +158,8 @@ void PanelCocoa::UpdatePanelLoadingAnimations(bool should_animate) {
   [controller_ updateThrobber:should_animate];
 }
 
-void PanelCocoa::NotifyPanelOnUserChangedTheme() {
-  NOTIMPLEMENTED();
+void PanelCocoa::PanelWebContentsFocused(content::WebContents* contents) {
+  // Nothing to do.
 }
 
 void PanelCocoa::PanelCut() {
@@ -233,6 +234,16 @@ void PanelCocoa::UpdatePanelMinimizeRestoreButtonVisibility() {
   [controller_ updateTitleBarMinimizeRestoreButtonVisibility];
 }
 
+void PanelCocoa::SetWindowCornerStyle(panel::CornerStyle corner_style) {
+  corner_style_ = corner_style;
+
+  // TODO(dimich): investigate how to support it on Mac.
+}
+
+void PanelCocoa::MinimizePanelBySystem() {
+  NOTIMPLEMENTED();
+}
+
 void PanelCocoa::PanelExpansionStateChanging(
     Panel::ExpansionState old_state, Panel::ExpansionState new_state) {
   [controller_ updateWindowLevel:(new_state != Panel::EXPANDED)];
@@ -290,10 +301,13 @@ class CocoaNativePanelTesting : public NativePanelTesting {
   virtual void FinishDragTitlebar() OVERRIDE;
   virtual bool VerifyDrawingAttention() const OVERRIDE;
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
+  virtual bool VerifyAppIcon() const OVERRIDE;
+  virtual bool VerifySystemMinimizeState() const OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
+  virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
 
  private:
   PanelTitlebarViewCocoa* titlebar() const;
@@ -357,6 +371,16 @@ bool CocoaNativePanelTesting::VerifyActiveState(bool is_active) {
   return false;
 }
 
+bool CocoaNativePanelTesting::VerifyAppIcon() const {
+  // Nothing to do since panel does not show dock icon.
+  return true;
+}
+
+bool CocoaNativePanelTesting::VerifySystemMinimizeState() const {
+  // TODO(jianli): to be implemented.
+  return true;
+}
+
 bool CocoaNativePanelTesting::IsWindowSizeKnown() const {
   return true;
 }
@@ -378,4 +402,8 @@ bool CocoaNativePanelTesting::IsButtonVisible(
       NOTREACHED();
   }
   return false;
+}
+
+panel::CornerStyle CocoaNativePanelTesting::GetWindowCornerStyle() const {
+  return native_panel_window_->corner_style_;
 }

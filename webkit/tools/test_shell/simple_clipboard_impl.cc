@@ -11,11 +11,7 @@
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#if defined(USE_SYSTEM_ZLIB)
-#include <zlib.h>
-#else
 #include "third_party/zlib/zlib.h"
-#endif
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/size.h"
@@ -109,6 +105,11 @@ void SimpleClipboardClient::ReadCustomData(ui::Clipboard::Buffer buffer,
                                            const string16& type,
                                            string16* data) {
   GetClipboard()->ReadCustomData(buffer, type, data);
+}
+
+void SimpleClipboardClient::ReadData(const ui::Clipboard::FormatType& format,
+                                     std::string* data) {
+  GetClipboard()->ReadData(format, data);
 }
 
 webkit_glue::ClipboardClient::WriteContext*

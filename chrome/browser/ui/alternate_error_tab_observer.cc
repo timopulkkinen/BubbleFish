@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -16,7 +17,7 @@
 using content::RenderViewHost;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(AlternateErrorPageTabObserver)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(AlternateErrorPageTabObserver);
 
 AlternateErrorPageTabObserver::AlternateErrorPageTabObserver(
     WebContents* web_contents)
@@ -25,7 +26,11 @@ AlternateErrorPageTabObserver::AlternateErrorPageTabObserver(
   PrefService* prefs = profile_->GetPrefs();
   if (prefs) {
     pref_change_registrar_.Init(prefs);
-    pref_change_registrar_.Add(prefs::kAlternateErrorPagesEnabled, this);
+    pref_change_registrar_.Add(
+        prefs::kAlternateErrorPagesEnabled,
+        base::Bind(&AlternateErrorPageTabObserver::
+                       OnAlternateErrorPagesEnabledChanged,
+                   base::Unretained(this)));
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
@@ -36,9 +41,10 @@ AlternateErrorPageTabObserver::~AlternateErrorPageTabObserver() {
 }
 
 // static
-void AlternateErrorPageTabObserver::RegisterUserPrefs(PrefService* prefs) {
+void AlternateErrorPageTabObserver::RegisterUserPrefs(
+    PrefRegistrySyncable* prefs) {
   prefs->RegisterBooleanPref(prefs::kAlternateErrorPagesEnabled, false,
-                             PrefService::SYNCABLE_PREF);
+                             PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -56,13 +62,7 @@ void AlternateErrorPageTabObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    DCHECK_EQ(profile_->GetPrefs(), content::Source<PrefService>(source).ptr());
-    DCHECK_EQ(std::string(prefs::kAlternateErrorPagesEnabled),
-              *content::Details<std::string>(details).ptr());
-  } else {
-    DCHECK_EQ(chrome::NOTIFICATION_GOOGLE_URL_UPDATED, type);
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_GOOGLE_URL_UPDATED, type);
   UpdateAlternateErrorPageURL(web_contents()->GetRenderViewHost());
 }
 
@@ -83,6 +83,10 @@ GURL AlternateErrorPageTabObserver::GetAlternateErrorPageURL() const {
     url = google_util::AppendGoogleTLDParam(profile_, url);
   }
   return url;
+}
+
+void AlternateErrorPageTabObserver::OnAlternateErrorPagesEnabledChanged() {
+  UpdateAlternateErrorPageURL(web_contents()->GetRenderViewHost());
 }
 
 void AlternateErrorPageTabObserver::UpdateAlternateErrorPageURL(

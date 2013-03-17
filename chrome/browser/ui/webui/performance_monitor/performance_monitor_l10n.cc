@@ -10,16 +10,54 @@
 
 namespace performance_monitor {
 
-// Event-Related
-string16 GetLocalizedStringFromEventCategory(const EventCategory category) {
-  if (category == EVENT_CATEGORY_CHROME) {
-    return l10n_util::GetStringFUTF16(
-        IDS_PERFORMANCE_MONITOR_CHROME_EVENT_CATEGORY,
-        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+// Aggregation-Related
+string16 GetLocalizedStringFromAggregationMethod(
+    const AggregationMethod method) {
+  int string_id = 0;
+  switch (method) {
+    case AGGREGATION_METHOD_NONE:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_NONE_NAME;
+      break;
+    case AGGREGATION_METHOD_MEDIAN:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_MEDIAN_NAME;
+      break;
+    case AGGREGATION_METHOD_MEAN:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_MEAN_NAME;
+      break;
+    default:
+      NOTREACHED();
   }
 
+  return l10n_util::GetStringUTF16(string_id);
+}
+
+string16 GetLocalizedStringForAggregationMethodDescription(
+    const AggregationMethod method) {
+  int string_id = 0;
+  switch (method) {
+    case AGGREGATION_METHOD_NONE:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_NONE_DESCRIPTION;
+      break;
+    case AGGREGATION_METHOD_MEDIAN:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_MEDIAN_DESCRIPTION;
+      break;
+    case AGGREGATION_METHOD_MEAN:
+      string_id = IDS_PERFORMANCE_MONITOR_AGGREGATION_MEAN_DESCRIPTION;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  return l10n_util::GetStringUTF16(string_id);
+}
+
+// Event-Related
+string16 GetLocalizedStringFromEventCategory(const EventCategory category) {
   int string_id = 0;
   switch (category) {
+    case EVENT_CATEGORY_CHROME:
+      string_id = IDS_PRODUCT_NAME;
+      break;
     case EVENT_CATEGORY_EXTENSIONS:
       string_id = IDS_PERFORMANCE_MONITOR_EXTENSIONS_EVENT_CATEGORY;
       break;
@@ -76,14 +114,14 @@ string16 GetLocalizedStringFromEventType(const EventType type) {
     case EVENT_CHROME_UPDATE:
       string_id = IDS_PERFORMANCE_MONITOR_CHROME_UPDATE_EVENT;
       break;
-    case EVENT_RENDERER_FREEZE:
-      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_FREEZE_EVENT;
+    case EVENT_RENDERER_HANG:
+      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_HANG_EVENT;
       break;
     case EVENT_RENDERER_CRASH:
       string_id = IDS_PERFORMANCE_MONITOR_RENDERER_CRASH_EVENT;
       break;
-    case EVENT_KILLED_BY_OS_CRASH:
-      string_id = IDS_PERFORMANCE_MONITOR_KILLED_BY_OS_CRASH_EVENT;
+    case EVENT_RENDERER_KILLED:
+      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_KILLED_EVENT;
       break;
     case EVENT_UNCLEAN_EXIT:
       string_id = IDS_PERFORMANCE_MONITOR_UNCLEAN_EXIT_EVENT;
@@ -120,15 +158,15 @@ string16 GetLocalizedStringForEventTypeDescription(const EventType type) {
       string_id1 = IDS_PERFORMANCE_MONITOR_CHROME_UPDATE_EVENT_DESCRIPTION;
       string_id2 = IDS_SHORT_PRODUCT_NAME;
       break;
-    case EVENT_RENDERER_FREEZE:
-      string_id1 = IDS_PERFORMANCE_MONITOR_RENDERER_FREEZE_EVENT_DESCRIPTION;
+    case EVENT_RENDERER_HANG:
+      string_id1 = IDS_PERFORMANCE_MONITOR_RENDERER_HANG_EVENT_DESCRIPTION;
       break;
     case EVENT_RENDERER_CRASH:
       string_id1 = IDS_PERFORMANCE_MONITOR_RENDERER_CRASH_EVENT_DESCRIPTION;
       string_id2 = IDS_SAD_TAB_TITLE;
       break;
-    case EVENT_KILLED_BY_OS_CRASH:
-      string_id1 = IDS_PERFORMANCE_MONITOR_KILLED_BY_OS_CRASH_EVENT_DESCRIPTION;
+    case EVENT_RENDERER_KILLED:
+      string_id1 = IDS_PERFORMANCE_MONITOR_RENDERER_KILLED_EVENT_DESCRIPTION;
       string_id2 = IDS_KILLED_TAB_TITLE;
       break;
     case EVENT_UNCLEAN_EXIT:
@@ -169,14 +207,14 @@ string16 GetLocalizedStringForEventTypeMouseover(const EventType type) {
     case EVENT_EXTENSION_DISABLE:
       string_id = IDS_PERFORMANCE_MONITOR_EXTENSION_DISABLE_EVENT_MOUSEOVER;
       break;
-    case EVENT_RENDERER_FREEZE:
-      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_FREEZE_EVENT_MOUSEOVER;
+    case EVENT_RENDERER_HANG:
+      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_HANG_EVENT_MOUSEOVER;
       break;
     case EVENT_RENDERER_CRASH:
       string_id = IDS_PERFORMANCE_MONITOR_RENDERER_CRASH_EVENT_MOUSEOVER;
       break;
-    case EVENT_KILLED_BY_OS_CRASH:
-      string_id = IDS_PERFORMANCE_MONITOR_KILLED_BY_OS_CRASH_EVENT_MOUSEOVER;
+    case EVENT_RENDERER_KILLED:
+      string_id = IDS_PERFORMANCE_MONITOR_RENDERER_KILLED_EVENT_MOUSEOVER;
       break;
     case EVENT_UNCLEAN_EXIT:
       string_id = IDS_PERFORMANCE_MONITOR_UNCLEAN_EXIT_EVENT_MOUSEOVER;

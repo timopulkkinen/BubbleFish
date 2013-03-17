@@ -16,8 +16,7 @@
 using base::android::ConvertUTF8ToJavaString;
 using base::android::GetClass;
 using base::android::HasClass;
-using base::android::HasMethod;
-using base::android::GetMethodID;
+using base::android::MethodID;
 using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
@@ -62,12 +61,9 @@ ScopedJavaLocalRef<jobject> SQLiteCursor::NewJavaSqliteCursor(
   }
 
   ScopedJavaLocalRef<jclass> sclass = GetClass(env, kSQLiteCursorClassPath);
-  if (!HasMethod(env, sclass, "<init>", "(I)V")) {
-    LOG(ERROR) << "Can not find " << kSQLiteCursorClassPath << " Constructor";
-    return ScopedJavaLocalRef<jobject>();
-  }
+  jmethodID method_id = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, sclass.obj(), "<init>", "(I)V");
 
-  jmethodID method_id = GetMethodID(env, sclass, "<init>", "(I)V");
   SQLiteCursor* cursor = new SQLiteCursor(column_names, statement, service,
                                           favicon_service);
   ScopedJavaLocalRef<jobject> obj(env,
@@ -214,7 +210,7 @@ bool SQLiteCursor::GetFavicon(history::FaviconID id,
         BrowserThread::UI,
         FROM_HERE,
         base::Bind(&SQLiteCursor::GetFaviconForIDInUIThread,
-                   base::Unretained(this), id, &consumer_,
+                   base::Unretained(this), id,
                    base::Bind(&SQLiteCursor::OnFaviconData,
                               base::Unretained(this))));
 
@@ -237,15 +233,15 @@ bool SQLiteCursor::GetFavicon(history::FaviconID id,
 
 void SQLiteCursor::GetFaviconForIDInUIThread(
     history::FaviconID id,
-    CancelableRequestConsumerBase* consumer,
     const FaviconService::FaviconRawCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  favicon_service_->GetLargestRawFaviconForID(id, consumer, callback);
+  if (!tracker_.get())
+    tracker_.reset(new CancelableTaskTracker());
+  favicon_service_->GetLargestRawFaviconForID(id, callback, tracker_.get());
 }
 
 
 void SQLiteCursor::OnFaviconData(
-    FaviconService::Handle handle,
     const history::FaviconBitmapResult& bitmap_result) {
   favicon_bitmap_result_ = bitmap_result;
   event_.Signal();
@@ -264,7 +260,11 @@ void SQLiteCursor::OnMoved(AndroidHistoryProviderService::Handle handle,
 
 void SQLiteCursor::CancelAllRequests(base::WaitableEvent* finished) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  consumer_.CancelAllRequests();
+
+  // Destruction will cancel all pending tasks.
+  consumer_.reset();
+  tracker_.reset();
+
   if (finished)
     finished->Signal();
 }
@@ -278,6 +278,9 @@ SQLiteCursor::JavaColumnType SQLiteCursor::GetColumnTypeInternal(int column) {
 
 void SQLiteCursor::RunMoveStatementOnUIThread(int pos) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  service_->MoveStatement(statement_, position_, pos, &consumer_,
-                base::Bind(&SQLiteCursor::OnMoved, base::Unretained(this)));
+  if (!consumer_.get())
+    consumer_.reset(new CancelableRequestConsumer());
+  service_->MoveStatement(
+      statement_, position_, pos, consumer_.get(),
+      base::Bind(&SQLiteCursor::OnMoved, base::Unretained(this)));
 }

@@ -7,6 +7,8 @@
 
 #include <X11/Xlib.h>
 
+#include <vector>
+
 // Get rid of a macro from Xlib.h that conflicts with Aura's RootWindow class.
 #undef RootWindow
 
@@ -14,11 +16,11 @@
 #include "base/message_loop.h"
 #include "ui/aura/root_window_host.h"
 #include "ui/base/x/x11_atom_cache.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/gfx/rect.h"
 
 namespace ui {
 class MouseEvent;
-class ViewProp;
 }
 
 namespace aura {
@@ -30,22 +32,14 @@ class TouchEventCalibrate;
 class RootWindowHostLinux : public RootWindowHost,
                             public MessageLoop::Dispatcher {
  public:
-  RootWindowHostLinux(RootWindowHostDelegate* delegate,
-                      const gfx::Rect& bounds);
+  explicit RootWindowHostLinux(const gfx::Rect& bounds);
   virtual ~RootWindowHostLinux();
 
   // Overridden from Dispatcher overrides:
   virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE;
 
- private:
-  bool DispatchEventForRootWindow(const base::NativeEvent& event);
-
-  // Dispatches XI2 events. Note that some events targetted for the X root
-  // window are dispatched to the aura root window (e.g. touch events after
-  // calibration).
-  void DispatchXI2Event(const base::NativeEvent& event);
-
   // RootWindowHost Overrides.
+  virtual void SetDelegate(RootWindowHostDelegate* delegate) OVERRIDE;
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -57,18 +51,31 @@ class RootWindowHostLinux : public RootWindowHost,
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor_type) OVERRIDE;
-  virtual void ShowCursor(bool show) OVERRIDE;
   virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
+  virtual void OnCursorVisibilityChanged(bool show) OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                  const gfx::Point& dest_offset,
+                                  SkCanvas* canvas) OVERRIDE;
   virtual bool GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void PrepareForShutdown() OVERRIDE;
+
+ private:
+  class MouseMoveFilter;
+
+  bool DispatchEventForRootWindow(const base::NativeEvent& event);
+
+  // Dispatches XI2 events. Note that some events targetted for the X root
+  // window are dispatched to the aura root window (e.g. touch events after
+  // calibration).
+  void DispatchXI2Event(const base::NativeEvent& event);
 
   // Returns true if there's an X window manager present... in most cases.  Some
   // window managers (notably, ion3) don't implement enough of ICCCM for us to
@@ -82,6 +89,10 @@ class RootWindowHostLinux : public RootWindowHost,
   // Translates the native mouse location into screen coordinates and and
   // dispatches the event to RootWindowHostDelegate.
   void TranslateAndDispatchMouseEvent(ui::MouseEvent* event);
+
+  // Copies and returns |snapshot_bounds| from |xwindow_|.  Helper method for
+  // CopyAreaToSkCanvas() and GrabSnapshot().
+  scoped_ptr<ui::XScopedImage> GetXImage(const gfx::Rect& snapshot_bounds);
 
   RootWindowHostDelegate* delegate_;
 
@@ -98,12 +109,6 @@ class RootWindowHostLinux : public RootWindowHost,
   // Is the window mapped to the screen?
   bool window_mapped_;
 
-  // Is the cursor currently shown?
-  bool cursor_shown_;
-
-  // The invisible cursor.
-  ::Cursor invisible_cursor_;
-
   // The bounds of |xwindow_|.
   gfx::Rect bounds_;
 
@@ -113,11 +118,11 @@ class RootWindowHostLinux : public RootWindowHost,
   // True if the window should be focused when the window is shown.
   bool focus_when_shown_;
 
-  scoped_array<XID> pointer_barriers_;
-
-  scoped_ptr<ui::ViewProp> prop_;
+  scoped_ptr<XID[]> pointer_barriers_;
 
   scoped_ptr<internal::TouchEventCalibrate> touch_calibrate_;
+
+  scoped_ptr<MouseMoveFilter> mouse_move_filter_;
 
   ui::X11AtomCache atom_cache_;
 

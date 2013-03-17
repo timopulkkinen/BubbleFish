@@ -11,3 +11,11 @@ SVN_URL = 'http://src.chromium.org/chrome'
 VIEWVC_URL = 'http://src.chromium.org/viewvc/chrome'
 SVN_TRUNK_URL = SVN_URL + '/trunk'
 SVN_BRANCH_URL = SVN_URL + '/branches'
+OPEN_ISSUES_CSV_URL = (
+    'http://code.google.com/p/chromium/issues/csv?can=1&'
+    'q=Hotlist%3DKnownIssue%20Feature%3DApps+is%3Aopen')
+CLOSED_ISSUES_CSV_URL = (
+    'http://code.google.com/p/chromium/issues/csv?can=1&'
+    'q=Hotlist%3DKnownIssue+Feature%3DApps+-is%3Aopen')
+EXTENSIONS_SAMPLES = ('http://src.chromium.org/viewvc/chrome/trunk/src/chrome/'
+                      'common/extensions/docs/examples/')

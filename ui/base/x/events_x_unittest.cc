@@ -12,6 +12,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/point.h"
 
 namespace ui {
@@ -110,6 +111,28 @@ TEST(EventsXTest, AvoidExtraEventsOnWheelRelease) {
   EXPECT_EQ(ui::ET_UNKNOWN, ui::EventTypeFromNative(&event));
 
   // TODO(derat): Test XInput code.
+}
+
+TEST(EventsXTest, EnterLeaveEvent) {
+  XEvent event;
+  event.xcrossing.type = EnterNotify;
+  event.xcrossing.x = 10;
+  event.xcrossing.y = 20;
+  event.xcrossing.x_root = 110;
+  event.xcrossing.y_root = 120;
+
+  EXPECT_EQ(ui::ET_MOUSE_ENTERED, ui::EventTypeFromNative(&event));
+  EXPECT_EQ("10,20", ui::EventLocationFromNative(&event).ToString());
+  EXPECT_EQ("110,120", ui::EventSystemLocationFromNative(&event).ToString());
+
+  event.xcrossing.type = LeaveNotify;
+  event.xcrossing.x = 30;
+  event.xcrossing.y = 40;
+  event.xcrossing.x_root = 230;
+  event.xcrossing.y_root = 240;
+  EXPECT_EQ(ui::ET_MOUSE_EXITED, ui::EventTypeFromNative(&event));
+  EXPECT_EQ("30,40", ui::EventLocationFromNative(&event).ToString());
+  EXPECT_EQ("230,240", ui::EventSystemLocationFromNative(&event).ToString());
 }
 
 }  // namespace ui

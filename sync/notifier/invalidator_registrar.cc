@@ -16,6 +16,8 @@ InvalidatorRegistrar::InvalidatorRegistrar()
 
 InvalidatorRegistrar::~InvalidatorRegistrar() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  CHECK(!handlers_.might_have_observers());
+  // |id_to_handler_map_| may be non-empty but that's okay.
 }
 
 void InvalidatorRegistrar::RegisterHandler(InvalidationHandler* handler) {
@@ -88,18 +90,17 @@ ObjectIdSet InvalidatorRegistrar::GetAllRegisteredIds() const {
 }
 
 void InvalidatorRegistrar::DispatchInvalidationsToHandlers(
-    const ObjectIdStateMap& id_state_map,
-    IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(thread_checker_.CalledOnValidThread());
   // If we have no handlers, there's nothing to do.
   if (!handlers_.might_have_observers()) {
     return;
   }
 
-  typedef std::map<InvalidationHandler*, ObjectIdStateMap> DispatchMap;
+  typedef std::map<InvalidationHandler*, ObjectIdInvalidationMap> DispatchMap;
   DispatchMap dispatch_map;
-  for (ObjectIdStateMap::const_iterator it = id_state_map.begin();
-       it != id_state_map.end(); ++it) {
+  for (ObjectIdInvalidationMap::const_iterator it = invalidation_map.begin();
+       it != invalidation_map.end(); ++it) {
     InvalidationHandler* const handler = ObjectIdToHandler(it->first);
     // Filter out invalidations for IDs with no handler.
     if (handler)
@@ -112,12 +113,13 @@ void InvalidatorRegistrar::DispatchInvalidationsToHandlers(
   while ((handler = it.GetNext()) != NULL) {
     DispatchMap::const_iterator dispatch_it = dispatch_map.find(handler);
     if (dispatch_it != dispatch_map.end())
-      handler->OnIncomingInvalidation(dispatch_it->second, source);
+      handler->OnIncomingInvalidation(dispatch_it->second);
   }
 }
 
 void InvalidatorRegistrar::UpdateInvalidatorState(InvalidatorState state) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(1) << "New invalidator state: " << InvalidatorStateToString(state_);
   state_ = state;
   FOR_EACH_OBSERVER(InvalidationHandler, handlers_,
                     OnInvalidatorStateChange(state));

@@ -5,7 +5,7 @@
 #include "content/browser/download/download_net_log_parameters.h"
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
@@ -13,7 +13,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 
-namespace download_net_logs {
+namespace content {
 
 namespace {
 
@@ -22,36 +22,30 @@ static const char* download_type_names[] = {
   "HISTORY_IMPORT",
   "SAVE_PAGE_AS"
 };
-static const char* download_safety_names[] = {
-  "SAFE",
-  "DANGEROUS",
-  "DANGEROUS_BUT_VALIDATED"
-};
 static const char* download_danger_names[] = {
   "NOT_DANGEROUS",
   "DANGEROUS_FILE",
   "DANGEROUS_URL",
   "DANGEROUS_CONTENT",
   "MAYBE_DANGEROUS_CONTENT",
-  "UNCOMMON_CONTENT"
+  "UNCOMMON_CONTENT",
+  "USER_VALIDATED",
+  "DANGEROUS_HOST",
 };
 
 COMPILE_ASSERT(ARRAYSIZE_UNSAFE(download_type_names) == SRC_SAVE_PAGE_AS + 1,
                download_type_enum_has_changed);
-COMPILE_ASSERT(ARRAYSIZE_UNSAFE(download_safety_names) ==
-                  content::DownloadItem::DANGEROUS_BUT_VALIDATED + 1,
-               downloaditem_safety_state_enum_has_changed);
 COMPILE_ASSERT(ARRAYSIZE_UNSAFE(download_danger_names) ==
-                  content::DOWNLOAD_DANGER_TYPE_MAX,
+                  DOWNLOAD_DANGER_TYPE_MAX,
                download_danger_enum_has_changed);
 
 }  // namespace
 
-base::Value* ItemActivatedCallback(
-    const content::DownloadItem* download_item,
+base::Value* ItemActivatedNetLogCallback(
+    const DownloadItem* download_item,
     DownloadType download_type,
     const std::string* file_name,
-    net::NetLog::LogLevel /* log_level */) {
+    net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("type", download_type_names[download_type]);
@@ -61,29 +55,26 @@ base::Value* ItemActivatedCallback(
   dict->SetString("file_name", *file_name);
   dict->SetString("danger_type",
                   download_danger_names[download_item->GetDangerType()]);
-  dict->SetString("safety_state",
-                  download_safety_names[download_item->GetSafetyState()]);
   dict->SetString("start_offset",
                   base::Int64ToString(download_item->GetReceivedBytes()));
+  dict->SetBoolean("has_user_gesture", download_item->HasUserGesture());
 
   return dict;
 }
 
-base::Value* ItemCheckedCallback(
-    content::DownloadDangerType danger_type,
-    content::DownloadItem::SafetyState safety_state,
-    net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemCheckedNetLogCallback(
+    DownloadDangerType danger_type,
+    net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("danger_type", download_danger_names[danger_type]);
-  dict->SetString("safety_state", download_safety_names[safety_state]);
 
   return dict;
 }
 
-base::Value* ItemRenamedCallback(const FilePath* old_filename,
-                                 const FilePath* new_filename,
-                                 net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemRenamedNetLogCallback(const base::FilePath* old_filename,
+                                       const base::FilePath* new_filename,
+                                       net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("old_filename", old_filename->AsUTF8Unsafe());
@@ -92,10 +83,10 @@ base::Value* ItemRenamedCallback(const FilePath* old_filename,
   return dict;
 }
 
-base::Value* ItemInterruptedCallback(content::DownloadInterruptReason reason,
-                                     int64 bytes_so_far,
-                                     const std::string* hash_state,
-                                     net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemInterruptedNetLogCallback(DownloadInterruptReason reason,
+                                           int64 bytes_so_far,
+                                           const std::string* hash_state,
+                                           net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("interrupt_reason", InterruptReasonDebugString(reason));
@@ -106,9 +97,25 @@ base::Value* ItemInterruptedCallback(content::DownloadInterruptReason reason,
   return dict;
 }
 
-base::Value* ItemCompletingCallback(int64 bytes_so_far,
-                                    const std::string* final_hash,
-                                    net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemResumingNetLogCallback(bool user_initiated,
+                                        DownloadInterruptReason reason,
+                                        int64 bytes_so_far,
+                                        const std::string* hash_state,
+                                        net::NetLog::LogLevel log_level) {
+  DictionaryValue* dict = new DictionaryValue();
+
+  dict->SetString("user_initiated", user_initiated ? "true" : "false");
+  dict->SetString("interrupt_reason", InterruptReasonDebugString(reason));
+  dict->SetString("bytes_so_far", base::Int64ToString(bytes_so_far));
+  dict->SetString("hash_state",
+                  base::HexEncode(hash_state->data(), hash_state->size()));
+
+  return dict;
+}
+
+base::Value* ItemCompletingNetLogCallback(int64 bytes_so_far,
+                                          const std::string* final_hash,
+                                          net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("bytes_so_far", base::Int64ToString(bytes_so_far));
@@ -118,8 +125,8 @@ base::Value* ItemCompletingCallback(int64 bytes_so_far,
   return dict;
 }
 
-base::Value* ItemFinishedCallback(bool auto_opened,
-                                  net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemFinishedNetLogCallback(bool auto_opened,
+                                        net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("auto_opened", auto_opened ? "yes" : "no");
@@ -127,9 +134,9 @@ base::Value* ItemFinishedCallback(bool auto_opened,
   return dict;
 }
 
-base::Value* ItemCanceledCallback(int64 bytes_so_far,
-                                  const std::string* hash_state,
-                                  net::NetLog::LogLevel /* log_level */) {
+base::Value* ItemCanceledNetLogCallback(int64 bytes_so_far,
+                                        const std::string* hash_state,
+                                        net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("bytes_so_far", base::Int64ToString(bytes_so_far));
@@ -139,9 +146,9 @@ base::Value* ItemCanceledCallback(int64 bytes_so_far,
   return dict;
 }
 
-base::Value* FileOpenedCallback(const FilePath* file_name,
-                                int64 start_offset,
-                                net::NetLog::LogLevel /* log_level */) {
+base::Value* FileOpenedNetLogCallback(const base::FilePath* file_name,
+                                      int64 start_offset,
+                                      net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("file_name", file_name->AsUTF8Unsafe());
@@ -150,9 +157,9 @@ base::Value* FileOpenedCallback(const FilePath* file_name,
   return dict;
 }
 
-base::Value* FileStreamDrainedCallback(size_t stream_size,
-                                       size_t num_buffers,
-                                       net::NetLog::LogLevel /* log_level */) {
+base::Value* FileStreamDrainedNetLogCallback(size_t stream_size,
+                                             size_t num_buffers,
+                                             net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetInteger("stream_size", static_cast<int>(stream_size));
@@ -161,9 +168,9 @@ base::Value* FileStreamDrainedCallback(size_t stream_size,
   return dict;
 }
 
-base::Value* FileRenamedCallback(const FilePath* old_filename,
-                                 const FilePath* new_filename,
-                                 net::NetLog::LogLevel /* log_level */) {
+base::Value* FileRenamedNetLogCallback(const base::FilePath* old_filename,
+                                       const base::FilePath* new_filename,
+                                       net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("old_filename", old_filename->AsUTF8Unsafe());
@@ -172,9 +179,9 @@ base::Value* FileRenamedCallback(const FilePath* old_filename,
   return dict;
 }
 
-base::Value* FileErrorCallback(const char* operation,
-                               net::Error net_error,
-                               net::NetLog::LogLevel /* log_level */) {
+base::Value* FileErrorNetLogCallback(const char* operation,
+                                     net::Error net_error,
+                                     net::NetLog::LogLevel log_level) {
   DictionaryValue* dict = new DictionaryValue();
 
   dict->SetString("operation", operation);
@@ -183,4 +190,19 @@ base::Value* FileErrorCallback(const char* operation,
   return dict;
 }
 
-}  // namespace download_net_logs
+base::Value* FileInterruptedNetLogCallback(const char* operation,
+                                           int os_error,
+                                           DownloadInterruptReason reason,
+                                           net::NetLog::LogLevel log_level) {
+  DictionaryValue* dict = new DictionaryValue();
+
+  dict->SetString("operation", operation);
+  if (os_error != 0)
+    dict->SetInteger("os_error", os_error);
+  dict->SetString("interrupt_reason", InterruptReasonDebugString(reason));
+
+  return dict;
+}
+
+
+}  // namespace content

@@ -7,13 +7,9 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/test/content_test_suite_base.h"
-
-#if defined(OS_WIN)
-#include "ui/base/win/scoped_ole_initializer.h"
-#endif
 
 namespace base {
 class StatsTable;
@@ -30,19 +26,15 @@ class ChromeTestSuite : public content::ContentTestSuiteBase {
 
   virtual content::ContentClient* CreateClientForInitialization() OVERRIDE;
 
-  void SetBrowserDirectory(const FilePath& browser_dir) {
+  void SetBrowserDirectory(const base::FilePath& browser_dir) {
     browser_dir_ = browser_dir;
   }
 
   // Alternative path to browser binaries.
-  FilePath browser_dir_;
+  base::FilePath browser_dir_;
 
   std::string stats_filename_;
   scoped_ptr<base::StatsTable> stats_table_;
-
-#if defined(OS_WIN)
-  ui::ScopedOleInitializer ole_initializer_;
-#endif
 };
 
 #endif  // CHROME_TEST_BASE_CHROME_TEST_SUITE_H_

@@ -133,11 +133,12 @@ struct BubbleBorder::BorderImages {
 struct BubbleBorder::BorderImages*
     BubbleBorder::border_images_[SHADOW_COUNT] = { NULL };
 
-BubbleBorder::BubbleBorder(ArrowLocation arrow_location, Shadow shadow)
+BubbleBorder::BubbleBorder(ArrowLocation arrow, Shadow shadow, SkColor color)
     : override_arrow_offset_(0),
-      arrow_location_(arrow_location),
+      arrow_location_(arrow),
+      arrow_paint_type_(PAINT_NORMAL),
       alignment_(ALIGN_ARROW_TO_MID_ANCHOR),
-      background_color_(SK_ColorWHITE) {
+      background_color_(color) {
   DCHECK(shadow < SHADOW_COUNT);
   images_ = GetBorderImages(shadow);
 
@@ -164,8 +165,7 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
                                   const gfx::Size& contents_size) const {
   // Desired size is size of contents enlarged by the size of the border images.
   gfx::Size border_size(contents_size);
-  gfx::Insets insets;
-  GetInsets(&insets);
+  gfx::Insets insets = GetInsets();
   border_size.Enlarge(insets.width(), insets.height());
 
   // Ensure the bubble has a minimum size that draws arrows correctly.
@@ -182,7 +182,7 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
   int w = position_relative_to.width();
   int h = position_relative_to.height();
 
-  const int arrow_size = images_->arrow_interior_height + kBorderStrokeSize;
+  const int arrow_size = GetArrowSize();
   const int arrow_offset = GetArrowOffset(border_size);
 
   // Calculate bubble x coordinate.
@@ -269,12 +269,12 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
   return gfx::Rect(x, y, border_size.width(), border_size.height());
 }
 
-void BubbleBorder::GetInsets(gfx::Insets* insets) const {
-  return GetInsetsForArrowLocation(insets, arrow_location());
+gfx::Insets BubbleBorder::GetInsets() const {
+  return GetInsetsForArrowLocation(arrow_location());
 }
 
-void BubbleBorder::GetInsetsForArrowLocation(gfx::Insets* insets,
-                                             ArrowLocation arrow_loc) const {
+gfx::Insets BubbleBorder::GetInsetsForArrowLocation(
+    ArrowLocation arrow_loc) const {
   int top = images_->top.height();
   int bottom = images_->bottom.height();
   int left = images_->left.width();
@@ -309,7 +309,7 @@ void BubbleBorder::GetInsetsForArrowLocation(gfx::Insets* insets,
       // Nothing to do.
       break;
   }
-  insets->Set(top, left, bottom, right);
+  return gfx::Insets(top, left, bottom, right);
 }
 
 int BubbleBorder::GetBorderThickness() const {
@@ -318,6 +318,12 @@ int BubbleBorder::GetBorderThickness() const {
 
 int BubbleBorder::GetBorderCornerRadius() const {
   return images_->corner_radius;
+}
+
+int BubbleBorder::GetArrowSize() const {
+  if (arrow_paint_type_ == PAINT_NONE)
+    return 0;
+  return images_->arrow_interior_height + kBorderStrokeSize;
 }
 
 int BubbleBorder::GetArrowOffset(const gfx::Size& border_size) const {
@@ -367,7 +373,7 @@ BubbleBorder::BorderImages* BubbleBorder::GetBorderImages(Shadow shadow) {
     case SMALL_SHADOW:
       images = new BorderImages(kSmallShadowImages,
                                 arraysize(kSmallShadowImages),
-                                9, 0, 3);
+                                6, 0, 3);
       break;
     case SHADOW_COUNT:
       NOTREACHED();
@@ -379,7 +385,7 @@ BubbleBorder::BorderImages* BubbleBorder::GetBorderImages(Shadow shadow) {
 
 BubbleBorder::~BubbleBorder() {}
 
-void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
+void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
   // Convenience shorthand variables.
   const int tl_width = images_->top_left.width();
   const int tl_height = images_->top_left.height();
@@ -394,8 +400,7 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
   const int bl_width = images_->bottom_left.width();
   const int bl_height = images_->bottom_left.height();
 
-  gfx::Insets insets;
-  GetInsets(&insets);
+  gfx::Insets insets = GetInsets();
   const int top = insets.top() - t_height;
   const int bottom = view.height() - insets.bottom() + b_height;
   const int left = insets.left() - l_width;
@@ -415,10 +420,13 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
     }
   }
 
+  const ArrowLocation arrow_location =
+      arrow_paint_type_ == PAINT_NORMAL ? arrow_location_ : NONE;
+
   // Left edge.
-  if (arrow_location_ == LEFT_TOP ||
-      arrow_location_ == LEFT_CENTER ||
-      arrow_location_ == LEFT_BOTTOM) {
+  if (arrow_location == LEFT_TOP ||
+      arrow_location == LEFT_CENTER ||
+      arrow_location == LEFT_BOTTOM) {
     int start_y = top + tl_height;
     int before_arrow =
         arrow_offset - start_y - images_->left_arrow.height() / 2;
@@ -446,9 +454,9 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
   canvas->DrawImageInt(images_->top_left, left, top);
 
   // Top edge.
-  if (arrow_location_ == TOP_LEFT ||
-      arrow_location_ == TOP_CENTER ||
-      arrow_location_ == TOP_RIGHT) {
+  if (arrow_location == TOP_LEFT ||
+      arrow_location == TOP_CENTER ||
+      arrow_location == TOP_RIGHT) {
     int start_x = left + tl_width;
     int before_arrow = arrow_offset - start_x - images_->top_arrow.width() / 2;
     int after_arrow = width - tl_width - tr_width -
@@ -474,9 +482,9 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
   canvas->DrawImageInt(images_->top_right, right - tr_width, top);
 
   // Right edge.
-  if (arrow_location_ == RIGHT_TOP ||
-      arrow_location_ == RIGHT_CENTER ||
-      arrow_location_ == RIGHT_BOTTOM) {
+  if (arrow_location == RIGHT_TOP ||
+      arrow_location == RIGHT_CENTER ||
+      arrow_location == RIGHT_BOTTOM) {
     int start_y = top + tr_height;
     int before_arrow =
         arrow_offset - start_y - images_->right_arrow.height() / 2;
@@ -506,9 +514,9 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
                        bottom - br_height);
 
   // Bottom edge.
-  if (arrow_location_ == BOTTOM_LEFT ||
-      arrow_location_ == BOTTOM_CENTER ||
-      arrow_location_ == BOTTOM_RIGHT) {
+  if (arrow_location == BOTTOM_LEFT ||
+      arrow_location == BOTTOM_CENTER ||
+      arrow_location == BOTTOM_RIGHT) {
     int start_x = left + bl_width;
     int before_arrow =
         arrow_offset - start_x - images_->bottom_arrow.width() / 2;

@@ -8,10 +8,6 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 
-#if defined(OS_WIN)
-#include "ui/base/win/scoped_ole_initializer.h"
-#endif
-
 class MessageLoopForUI;
 
 namespace ui {
@@ -19,10 +15,11 @@ class InputMethod;
 }
 
 namespace aura {
-class FocusManager;
 class RootWindow;
-namespace shared {
-class RootWindowCaptureClient;
+class TestScreen;
+namespace client {
+class DefaultCaptureClient;
+class FocusClient;
 }
 namespace test {
 class TestActivationClient;
@@ -39,8 +36,8 @@ class AuraTestHelper {
   // Creates and initializes (shows and sizes) the RootWindow for use in tests.
   void SetUp();
 
-  // Clean up objects that are created for tests. This also delete
-  // aura::Env object.
+  // Clean up objects that are created for tests. This also deletes the Env
+  // object.
   void TearDown();
 
   // Flushes message loop.
@@ -56,13 +53,10 @@ class AuraTestHelper {
   scoped_ptr<RootWindow> root_window_;
   scoped_ptr<TestStackingClient> stacking_client_;
   scoped_ptr<TestActivationClient> test_activation_client_;
-  scoped_ptr<shared::RootWindowCaptureClient> root_window_capture_client_;
+  scoped_ptr<client::DefaultCaptureClient> capture_client_;
   scoped_ptr<ui::InputMethod> test_input_method_;
-  scoped_ptr<FocusManager> focus_manager_;
-
-#if defined(OS_WIN)
-  ui::ScopedOleInitializer ole_initializer_;
-#endif
+  scoped_ptr<client::FocusClient> focus_client_;
+  scoped_ptr<TestScreen> test_screen_;
 
   DISALLOW_COPY_AND_ASSIGN(AuraTestHelper);
 };

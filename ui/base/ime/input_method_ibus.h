@@ -12,9 +12,10 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chromeos/dbus/ibus/ibus_input_context_client.h"
+#include "chromeos/ime/ibus_daemon_controller.h"
 #include "ui/base/ime/character_composer.h"
 #include "ui/base/ime/composition_text.h"
-#include "ui/base/ime/ibus_client.h"
 #include "ui/base/ime/input_method_base.h"
 
 namespace dbus {
@@ -29,7 +30,10 @@ class IBusText;
 namespace ui {
 
 // A ui::InputMethod implementation based on IBus.
-class UI_EXPORT InputMethodIBus : public InputMethodBase {
+class UI_EXPORT InputMethodIBus
+    : public InputMethodBase,
+      public chromeos::IBusInputContextHandlerInterface,
+      public chromeos::IBusDaemonController::Observer {
  public:
   explicit InputMethodIBus(internal::InputMethodDelegate* delegate);
   virtual ~InputMethodIBus();
@@ -40,6 +44,7 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   virtual void Init(bool focused) OVERRIDE;
   virtual void DispatchKeyEvent(
       const base::NativeEvent& native_key_event) OVERRIDE;
+  virtual void DispatchFabricatedKeyEvent(const ui::KeyEvent& event) OVERRIDE;
   virtual void OnTextInputTypeChanged(const TextInputClient* client) OVERRIDE;
   virtual void OnCaretBoundsChanged(const TextInputClient* client) OVERRIDE;
   virtual void CancelComposition(const TextInputClient* client) OVERRIDE;
@@ -47,24 +52,30 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
 
-  // Called when the connection with ibus-daemon is established.
-  virtual void OnConnected();
-
-  // Called when the connection with ibus-daemon is shutdowned.
-  virtual void OnDisconnected();
-
-  // Sets |new_client| as a new IBusClient. InputMethodIBus owns the object.
-  // A client has to be set before InputMethodIBus::Init() is called.
-  void set_ibus_client(scoped_ptr<internal::IBusClient> new_client);
-
-  // The caller is not allowed to delete the object.
-  internal::IBusClient* ibus_client() const;
-
  protected:
+  // chromeos::IBusDaemonController::Observer overrides.
+  virtual void OnConnected() OVERRIDE;
+  virtual void OnDisconnected() OVERRIDE;
+
   // Converts |text| into CompositionText.
-  void ExtractCompositionText(const chromeos::ibus::IBusText& text,
+  void ExtractCompositionText(const chromeos::IBusText& text,
                               uint32 cursor_position,
                               CompositionText* out_composition) const;
+
+  // Process a key returned from the input method.
+  virtual void ProcessKeyEventPostIME(const base::NativeEvent& native_key_event,
+                                      uint32 ibus_keycode,
+                                      bool handled);
+
+  // Converts |native_event| to ibus representation.
+  virtual void IBusKeyEventFromNativeKeyEvent(
+      const base::NativeEvent& native_event,
+      uint32* ibus_keyval,
+      uint32* ibus_keycode,
+      uint32* ibus_state);
+
+  // Resets context and abandon all pending results and key events.
+  void ResetContext();
 
  private:
   enum InputContextState {
@@ -96,17 +107,9 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // Asks the client to confirm current composition text.
   void ConfirmCompositionText();
 
-  // Resets context and abandon all pending results and key events.
-  void ResetContext();
-
   // Checks the availability of focused text input client and update focus
   // state.
   void UpdateContextFocusState();
-
-  // Process a key returned from the input method.
-  void ProcessKeyEventPostIME(const base::NativeEvent& native_key_event,
-                              uint32 ibus_keycode,
-                              bool handled);
 
   // Processes a key event that was already filtered by the input method.
   // A VKEY_PROCESSKEY may be dispatched to the focused View.
@@ -141,10 +144,6 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // the focused View.
   void SendFakeProcessKeyEvent(bool pressed) const;
 
-  // Called when a pending key event has finished. The event will be removed
-  // from |pending_key_events_|.
-  void FinishPendingKeyEvent(PendingKeyEvent* pending_key);
-
   // Abandons all pending key events. It usually happends when we lose keyboard
   // focus, the text input type is changed or we are destroyed.
   void AbandonAllPendingKeyEvents();
@@ -159,27 +158,26 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // Returns true if the input context is ready to use.
   bool IsContextReady();
 
-  // Event handlers for IBusInputContext:
-  void OnCommitText(const chromeos::ibus::IBusText& text);
-  void OnForwardKeyEvent(uint32 keyval, uint32 keycode, uint32 status);
-  void OnShowPreeditText();
-  void OnUpdatePreeditText(const chromeos::ibus::IBusText& text,
-                           uint32 cursor_pos,
-                           bool visible);
-  void OnHidePreeditText();
+  // chromeos::IBusInputContextHandlerInterface overrides:
+  virtual void CommitText(const chromeos::IBusText& text) OVERRIDE;
+  virtual void ForwardKeyEvent(uint32 keyval,
+                               uint32 keycode,
+                               uint32 status) OVERRIDE;
+  virtual void ShowPreeditText() OVERRIDE;
+  virtual void HidePreeditText() OVERRIDE;
+  virtual void UpdatePreeditText(const chromeos::IBusText& text,
+                                 uint32 cursor_pos,
+                                 bool visible) OVERRIDE;
 
   void CreateInputContextDone(const dbus::ObjectPath& object_path);
   void CreateInputContextFail();
-  static void ProcessKeyEventDone(PendingKeyEvent* pending_key_event,
-                                  bool is_handled);
-  static void ProcessKeyEventFail(PendingKeyEvent* pending_key_event);
-
-  scoped_ptr<internal::IBusClient> ibus_client_;
+  void ProcessKeyEventDone(uint32 id, XEvent* xevent, uint32 keyval,
+                           bool is_handled);
 
   // All pending key events. Note: we do not own these object, we just save
   // pointers to these object so that we can abandon them when necessary.
   // They will be deleted in ProcessKeyEventDone().
-  std::set<PendingKeyEvent*> pending_key_events_;
+  std::set<uint32> pending_key_events_;
 
   // Represents input context's state.
   InputContextState input_context_state_;
@@ -197,7 +195,8 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // processing result of the pending key event.
   string16 result_text_;
 
-  string16 previous_selected_text_;
+  string16 previous_surrounding_text_;
+  ui::Range previous_selection_range_;
 
   // Indicates if input context is focused or not.
   bool context_focused_;
@@ -211,6 +210,9 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // If it's true then all input method result received before the next key
   // event will be discarded.
   bool suppress_next_result_;
+
+  // The latest id of key event.
+  uint32 current_keyevent_id_;
 
   // An object to compose a character from a sequence of key presses
   // including dead key etc.

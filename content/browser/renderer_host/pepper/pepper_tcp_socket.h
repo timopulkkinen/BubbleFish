@@ -14,12 +14,11 @@
 #include "net/base/completion_callback.h"
 #include "ppapi/c/pp_stdint.h"
 
+struct PP_NetAddress_Private;
+
 namespace ppapi {
 class PPB_X509Certificate_Fields;
 }
-
-class PepperMessageFilter;
-struct PP_NetAddress_Private;
 
 namespace net {
 class DrainableIOBuffer;
@@ -28,6 +27,9 @@ class SingleRequestHostResolver;
 class StreamSocket;
 class X509Certificate;
 }
+
+namespace content {
+class PepperMessageFilter;
 
 // PepperTCPSocket is used by PepperMessageFilter to handle requests from
 // the Pepper TCP socket API (PPB_TCPSocket_Private).
@@ -58,6 +60,7 @@ class PepperTCPSocket {
       const std::vector<std::vector<char> >& untrusted_certs);
   void Read(int32 bytes_to_read);
   void Write(const std::string& data);
+  void SetBoolOption(uint32_t name, bool value);
 
   void SendConnectACKError();
 
@@ -93,6 +96,7 @@ class PepperTCPSocket {
   void SendReadACKError();
   void SendWriteACKError();
   void SendSSLHandshakeACK(bool succeeded);
+  void SendSetBoolOptionACK(bool succeeded);
 
   void OnResolveCompleted(int result);
   void OnConnectCompleted(int result);
@@ -101,6 +105,7 @@ class PepperTCPSocket {
   void OnWriteCompleted(int result);
 
   bool IsConnected() const;
+  bool IsSsl() const;
 
   // Actually does a write from |write_buffer_|; possibly called many times for
   // each |Write()|.
@@ -130,5 +135,7 @@ class PepperTCPSocket {
 
   DISALLOW_COPY_AND_ASSIGN(PepperTCPSocket);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_PEPPER_PEPPER_TCP_SOCKET_H_

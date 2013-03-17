@@ -26,8 +26,8 @@ var lastShareWasCancelled_ = false;
  */
 remoting.tryShare = function() {
   console.log('Attempting to share...');
-  remoting.oauth2.callWithToken(remoting.tryShareWithToken_,
-                                remoting.showErrorMessage);
+  remoting.identity.callWithToken(remoting.tryShareWithToken_,
+                                  remoting.showErrorMessage);
 };
 
 /**
@@ -45,7 +45,7 @@ remoting.tryShareWithToken_ = function(token) {
   remoting.hostSession = new remoting.HostSession();
   remoting.hostSession.createPluginAndConnect(
       document.getElementById('host-plugin-container'),
-      /** @type {string} */(remoting.oauth2.getCachedEmail()),
+      /** @type {string} */(remoting.identity.getCachedEmail()),
       token,
       onNatTraversalPolicyChanged_,
       onHostStateChanged_,
@@ -81,7 +81,7 @@ function onHostStateChanged_(state) {
     accessCodeExpiresIn_ = remoting.hostSession.getAccessCodeLifetime();
     if (accessCodeExpiresIn_ > 0) {  // Check it hasn't expired.
       accessCodeTimerId_ = setInterval(
-          'remoting.decrementAccessCodeTimeout_()', 1000);
+          remoting.decrementAccessCodeTimeout_, 1000);
       timerRunning_ = true;
       updateAccessCodeTimeoutElement_();
       updateTimeoutStyles_();
@@ -97,12 +97,7 @@ function onHostStateChanged_(state) {
     console.log('Host plugin state: CONNECTED');
     var element = document.getElementById('host-shared-message');
     var client = remoting.hostSession.getClient();
-    // The disconnect message depends on whether or not audio is supported.
-    var desktopSharedTag = /*i18n-content*/'MESSAGE_SHARED';
-    if (navigator.userAgent.search('Macintosh') != -1) {
-      desktopSharedTag =/*i18n-content*/'MESSAGE_SHARED_NO_AUDIO';
-    }
-    l10n.localizeElementFromTag(element, desktopSharedTag, client);
+    l10n.localizeElement(element, client);
     remoting.setMode(remoting.AppMode.HOST_SHARED);
     disableTimeoutCountdown_();
 

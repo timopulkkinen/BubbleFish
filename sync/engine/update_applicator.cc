@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 
 #include "base/logging.h"
 #include "sync/engine/syncer_util.h"
-#include "sync/sessions/session_state.h"
 #include "sync/syncable/entry.h"
 #include "sync/syncable/mutable_entry.h"
 #include "sync/syncable/syncable_id.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 
 using std::vector;
 
@@ -26,7 +25,9 @@ UpdateApplicator::UpdateApplicator(Cryptographer* cryptographer,
     : cryptographer_(cryptographer),
       group_filter_(group_filter),
       routing_info_(routes),
-      application_results_() {
+      updates_applied_(0),
+      encryption_conflicts_(0),
+      hierarchy_conflicts_(0) {
 }
 
 UpdateApplicator::~UpdateApplicator() {
@@ -40,18 +41,23 @@ UpdateApplicator::~UpdateApplicator() {
 // making progress, which would indicate that the hierarchy is invalid.
 //
 // The update applicator also has to deal with simple conflicts, which occur
-// when an item is modified on both the server and the local model, and
-// encryption conflicts.  There's not much we can do about them here, so we
-// don't bother re-processing them on subsequent passes.
+// when an item is modified on both the server and the local model.  We remember
+// their IDs so they can be passed to the conflict resolver after all the other
+// applications are complete.
+//
+// Finally, there are encryption conflicts, which can occur when we don't have
+// access to all the Nigori keys.  There's nothing we can do about them here.
 void UpdateApplicator::AttemptApplications(
     syncable::WriteTransaction* trans,
     const std::vector<int64>& handles) {
   std::vector<int64> to_apply = handles;
+
   DVLOG(1) << "UpdateApplicator running over " << to_apply.size() << " items.";
   while (!to_apply.empty()) {
     std::vector<int64> to_reapply;
 
-    for (UpdateIterator i = to_apply.begin(); i != to_apply.end(); ++i) {
+    for (std::vector<int64>::iterator i = to_apply.begin();
+         i != to_apply.end(); ++i) {
       syncable::Entry read_entry(trans, syncable::GET_BY_HANDLE, *i);
       if (SkipUpdate(read_entry)) {
         continue;
@@ -63,16 +69,15 @@ void UpdateApplicator::AttemptApplications(
 
       switch (result) {
         case SUCCESS:
-          application_results_.AddSuccess(entry.Get(ID));
+          updates_applied_++;
           break;
         case CONFLICT_SIMPLE:
-          application_results_.AddSimpleConflict(entry.Get(ID));
+          simple_conflict_ids_.insert(entry.Get(ID));
           break;
         case CONFLICT_ENCRYPTION:
-          application_results_.AddEncryptionConflict(entry.Get(ID));
+          encryption_conflicts_++;
           break;
         case CONFLICT_HIERARCHY:
-          application_results_.AddHierarchyConflict(entry.Get(ID));
           // The decision to classify these as hierarchy conflcits is tentative.
           // If we make any progress this round, we'll clear the hierarchy
           // conflict count and attempt to reapply these updates.
@@ -86,14 +91,13 @@ void UpdateApplicator::AttemptApplications(
 
     if (to_reapply.size() == to_apply.size()) {
       // We made no progress.  Must be stubborn hierarchy conflicts.
-      // Break out early, leaving some updates unapplied.
+      hierarchy_conflicts_ = to_apply.size();
       break;
     }
 
     // We made some progress, so prepare for what might be another iteration.
     // If everything went well, to_reapply will be empty and we'll break out on
     // the while condition.
-    application_results_.ClearHierarchyConflicts();
     to_apply.swap(to_reapply);
     to_reapply.clear();
   }
@@ -116,66 +120,6 @@ bool UpdateApplicator::SkipUpdate(const syncable::Entry& entry) {
     return true;
   }
   return false;
-}
-
-void UpdateApplicator::SaveProgressIntoSessionState(
-    sessions::ConflictProgress* conflict_progress,
-    sessions::UpdateProgress* update_progress) {
-  application_results_.SaveProgress(conflict_progress, update_progress);
-}
-
-UpdateApplicator::ResultTracker::ResultTracker() {
-}
-
-UpdateApplicator::ResultTracker::~ResultTracker() {
-}
-
-void UpdateApplicator::ResultTracker::AddSimpleConflict(syncable::Id id) {
-  conflicting_ids_.insert(id);
-}
-
-void UpdateApplicator::ResultTracker::AddEncryptionConflict(syncable::Id id) {
-  encryption_conflict_ids_.insert(id);
-}
-
-void UpdateApplicator::ResultTracker::AddHierarchyConflict(syncable::Id id) {
-  hierarchy_conflict_ids_.insert(id);
-}
-
-void UpdateApplicator::ResultTracker::AddSuccess(syncable::Id id) {
-  successful_ids_.insert(id);
-}
-
-void UpdateApplicator::ResultTracker::SaveProgress(
-    sessions::ConflictProgress* conflict_progress,
-    sessions::UpdateProgress* update_progress) {
-  std::set<syncable::Id>::const_iterator i;
-  for (i = conflicting_ids_.begin(); i != conflicting_ids_.end(); ++i) {
-    conflict_progress->AddSimpleConflictingItemById(*i);
-    update_progress->AddAppliedUpdate(CONFLICT_SIMPLE, *i);
-  }
-  for (i = encryption_conflict_ids_.begin();
-       i != encryption_conflict_ids_.end(); ++i) {
-    conflict_progress->AddEncryptionConflictingItemById(*i);
-    update_progress->AddAppliedUpdate(CONFLICT_ENCRYPTION, *i);
-  }
-  for (i = hierarchy_conflict_ids_.begin();
-       i != hierarchy_conflict_ids_.end(); ++i) {
-    conflict_progress->AddHierarchyConflictingItemById(*i);
-    update_progress->AddAppliedUpdate(CONFLICT_HIERARCHY, *i);
-  }
-  for (i = successful_ids_.begin(); i != successful_ids_.end(); ++i) {
-    conflict_progress->EraseSimpleConflictingItemById(*i);
-    update_progress->AddAppliedUpdate(SUCCESS, *i);
-  }
-}
-
-void UpdateApplicator::ResultTracker::ClearHierarchyConflicts() {
-  hierarchy_conflict_ids_.clear();
-}
-
-bool UpdateApplicator::ResultTracker::no_conflicts() const {
-  return conflicting_ids_.empty();
 }
 
 }  // namespace syncer

@@ -4,67 +4,102 @@
 
 #include "ash/wm/workspace/workspace.h"
 
-#include <algorithm>
-
+#include "ash/shell_window_ids.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_animations.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/workspace_event_handler.h"
+#include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace/workspace_manager.h"
-#include "base/logging.h"
-#include "ui/aura/client/aura_constants.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/ui_base_types.h"
+#include "ui/views/corewm/visibility_controller.h"
 
 namespace ash {
 namespace internal {
 
-Workspace::Workspace(WorkspaceManager* manager, Type type)
-    : type_(type),
-      workspace_manager_(manager) {
+Workspace::Workspace(WorkspaceManager* manager,
+                     aura::Window* parent,
+                     bool is_maximized)
+    : is_maximized_(is_maximized),
+      workspace_manager_(manager),
+      window_(new aura::Window(NULL)),
+      event_handler_(new WorkspaceEventHandler(window_)),
+      workspace_layout_manager_(NULL) {
+  views::corewm::SetChildWindowVisibilityChangesAnimated(window_);
+  SetWindowVisibilityAnimationTransition(window_, views::corewm::ANIMATE_NONE);
+  window_->set_id(kShellWindowId_WorkspaceContainer);
+  window_->SetName("WorkspaceContainer");
+  window_->Init(ui::LAYER_NOT_DRAWN);
+  // Do this so when animating out windows don't extend beyond the bounds.
+  window_->layer()->SetMasksToBounds(true);
+  window_->Hide();
+  parent->AddChild(window_);
+  window_->SetProperty(internal::kUsesScreenCoordinatesKey, true);
+
+  // The layout-manager cannot be created in the initializer list since it
+  // depends on the window to have been initialized.
+  workspace_layout_manager_ = new WorkspaceLayoutManager(this);
+  window_->SetLayoutManager(workspace_layout_manager_);
 }
 
 Workspace::~Workspace() {
-  workspace_manager_->RemoveWorkspace(this);
+  // ReleaseWindow() should have been invoked before we're deleted.
+  DCHECK(!window_);
 }
 
-// static
-Workspace::Type Workspace::TypeForWindow(aura::Window* window) {
-  if (wm::IsWindowMaximized(window) || wm::IsWindowFullscreen(window))
-    return TYPE_MAXIMIZED;
-  return TYPE_MANAGED;
+aura::Window* Workspace::GetTopmostActivatableWindow() {
+  for (aura::Window::Windows::const_reverse_iterator i =
+           window_->children().rbegin();
+       i != window_->children().rend();
+       ++i) {
+    if (wm::CanActivateWindow(*i))
+      return (*i);
+  }
+  return NULL;
 }
 
-bool Workspace::AddWindowAfter(aura::Window* window, aura::Window* after) {
-  if (!CanAdd(window))
+aura::Window* Workspace::ReleaseWindow() {
+  // Remove the LayoutManager and EventFilter as they refer back to us and/or
+  // WorkspaceManager.
+  window_->SetLayoutManager(NULL);
+  window_->SetEventFilter(NULL);
+  aura::Window* window = window_;
+  window_ = NULL;
+  return window;
+}
+
+bool Workspace::ShouldMoveToPending() const {
+  if (!is_maximized_)
     return false;
-  DCHECK(!Contains(window));
 
-  aura::Window::Windows::iterator i =
-      std::find(windows_.begin(), windows_.end(), after);
-  if (!after || i == windows_.end())
-    windows_.push_back(window);
-  else
-    windows_.insert(++i, window);
-  OnWindowAddedAfter(window, after);
-  return true;
+  bool has_visible_non_maximized_window = false;
+  for (size_t i = 0; i < window_->children().size(); ++i) {
+    aura::Window* child(window_->children()[i]);
+    if (!GetTrackedByWorkspace(child) || !child->TargetVisibility() ||
+        wm::IsWindowMinimized(child))
+      continue;
+    if (WorkspaceManager::IsMaximized(child))
+      return false;
+
+    if (GetTrackedByWorkspace(child) && !GetPersistsAcrossAllWorkspaces(child))
+      has_visible_non_maximized_window = true;
+  }
+  return !has_visible_non_maximized_window;
 }
 
-void Workspace::RemoveWindow(aura::Window* window) {
-  DCHECK(Contains(window));
-  windows_.erase(std::find(windows_.begin(), windows_.end(), window));
-  OnWindowRemoved(window);
-}
-
-bool Workspace::Contains(aura::Window* window) const {
-  return std::find(windows_.begin(), windows_.end(), window) != windows_.end();
-}
-
-void Workspace::Activate() {
-  workspace_manager_->SetActiveWorkspace(this);
-}
-
-void Workspace::SetWindowBounds(aura::Window* window, const gfx::Rect& bounds) {
-  workspace_manager_->SetWindowBounds(window, bounds);
+int Workspace::GetNumMaximizedWindows() const {
+  int count = 0;
+  for (size_t i = 0; i < window_->children().size(); ++i) {
+    aura::Window* child = window_->children()[i];
+    if (GetTrackedByWorkspace(child) &&
+        (WorkspaceManager::IsMaximized(child) ||
+         WorkspaceManager::WillRestoreMaximized(child))) {
+      if (++count == 2)
+        return count;
+    }
+  }
+  return count;
 }
 
 }  // namespace internal

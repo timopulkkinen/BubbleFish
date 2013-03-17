@@ -11,6 +11,9 @@ namespace content {
 // is ready to go.
 static const char kZygoteHelloMessage[] = "ZYGOTE_OK";
 
+// Maximum allowable length for messages sent to the zygote.
+const size_t kZygoteMaxMessageLength = 8192;
+
 // File descriptors initialized by the Zygote Host
 const int kZygoteSocketPairFd = 3;
 const int kZygoteRendererSocketFd = 5;
@@ -32,7 +35,7 @@ enum {
   // Reap a renderer child.
   kZygoteCommandReap = 1,
 
-  // Check what happend to a child process.
+  // Check what happened to a child process.
   kZygoteCommandGetTerminationStatus = 2,
 
   // Read a bitmask of kSandboxLinux*

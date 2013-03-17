@@ -5,15 +5,13 @@
 #include "chrome/browser/ui/views/ash/balloon_view_ash.h"
 
 #include "ash/shell.h"
-#include "ash/system/status_area_widget.h"
 #include "ash/system/web_notification/web_notification_tray.h"
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/icon_messages.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
@@ -23,63 +21,91 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/message_center/message_center.h"
+#include "ui/message_center/message_center_constants.h"
+#include "ui/message_center/notification_types.h"
 #include "webkit/glue/image_resource_fetcher.h"
 
 namespace {
 
-const int kNotificationIconImageSize = 32;
+typedef base::Callback<void(const gfx::ImageSkia&)> SetImageCallback;
 
-ash::WebNotificationTray* GetWebNotificationTray() {
-  return ash::Shell::GetInstance()->
-      status_area_widget()->web_notification_tray();
+const int kPrimaryIconImageSize = 64;
+const int kSecondaryIconImageSize = 15;
+
+// static
+message_center::MessageCenter* GetMessageCenter() {
+  return ash::Shell::GetInstance()->GetWebNotificationTray()->message_center();
 }
 
 }  // namespace
 
-class BalloonViewAsh::IconFetcher : public content::WebContentsObserver {
+// TODO(dharcourt): Delay showing the notification until all images are
+// downloaded, and return an error to the notification creator/API caller
+// instead of showing a partial notification if any image download fails.
+class BalloonViewAsh::ImageDownload
+    : public base::SupportsWeakPtr<ImageDownload> {
  public:
-  IconFetcher(content::WebContents* web_contents,
-              const std::string& notification_id,
-              const GURL& icon_url)
-      : content::WebContentsObserver(web_contents),
-        request_id_(0),
-        notification_id_(notification_id),
-        icon_url_(icon_url) {
-    Observe(web_contents);
-    content::RenderViewHost* host = web_contents->GetRenderViewHost();
-    request_id_ = FaviconUtil::DownloadFavicon(host,
-                                               icon_url,
-                                               kNotificationIconImageSize);
-  }
-
-  // content::WebContentsObserver override.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    bool message_handled = false;   // Allow other handlers to receive these.
-    IPC_BEGIN_MESSAGE_MAP(IconFetcher, message)
-      IPC_MESSAGE_HANDLER(IconHostMsg_DidDownloadFavicon, OnDidDownloadFavicon)
-      IPC_MESSAGE_UNHANDLED(message_handled = false)
-    IPC_END_MESSAGE_MAP()
-    return message_handled;
-  }
-
-  void OnDidDownloadFavicon(int id,
-                            const GURL& image_url,
-                            bool errored,
-                            int requested_size,
-                            const std::vector<SkBitmap>& bitmaps) {
-    if (image_url != icon_url_ || id != request_id_ || bitmaps.empty())
-      return;
-    GetWebNotificationTray()->SetNotificationImage(
-        notification_id_, gfx::ImageSkia(bitmaps[0]));
-  }
+  // Note that the setter callback passed in will not be called if the image
+  // download fails for any reason.
+  ImageDownload(const Notification& notification,
+                const GURL& url,
+                int size,
+                const SetImageCallback& callback);
+  virtual ~ImageDownload();
 
  private:
-  int request_id_;
-  std::string notification_id_;
-  GURL icon_url_;
+  // FaviconHelper callback.
+  virtual void Downloaded(int download_id,
+                          const GURL& image_url,
+                          int requested_size,
+                          const std::vector<SkBitmap>& bitmaps);
 
-  DISALLOW_COPY_AND_ASSIGN(IconFetcher);
+  const GURL& url_;
+  int size_;
+  SetImageCallback callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(ImageDownload);
 };
+
+BalloonViewAsh::ImageDownload::ImageDownload(const Notification& notification,
+                                             const GURL& url,
+                                             int size,
+                                             const SetImageCallback& callback)
+    : url_(url),
+      size_(size),
+      callback_(callback) {
+  content::RenderViewHost* host = notification.GetRenderViewHost();
+  if (!host) {
+    LOG(WARNING) << "Notification needs an image but has no RenderViewHost";
+    return;
+  }
+
+  content::WebContents* contents =
+      content::WebContents::FromRenderViewHost(host);
+  if (!contents) {
+    LOG(WARNING) << "Notification needs an image but has no WebContents";
+    return;
+  }
+
+  contents->DownloadFavicon(url_, size_, base::Bind(&ImageDownload::Downloaded,
+                                                    AsWeakPtr()));
+}
+
+
+BalloonViewAsh::ImageDownload::~ImageDownload() {
+}
+
+void BalloonViewAsh::ImageDownload::Downloaded(
+    int download_id,
+    const GURL& image_url,
+    int requested_size,
+    const std::vector<SkBitmap>& bitmaps) {
+  if (bitmaps.empty())
+    return;
+  gfx::ImageSkia image = gfx::ImageSkia::CreateFrom1xBitmap(bitmaps[0]);
+  callback_.Run(image);
+}
 
 BalloonViewAsh::BalloonViewAsh(BalloonCollection* collection)
     : collection_(collection),
@@ -93,35 +119,37 @@ BalloonViewAsh::~BalloonViewAsh() {
 void BalloonViewAsh::Show(Balloon* balloon) {
   balloon_ = balloon;
   const Notification& notification = balloon_->notification();
-  current_notification_id_ = notification.notification_id();
-  std::string extension_id = GetExtensionId(balloon);
-  GetWebNotificationTray()->AddNotification(current_notification_id_,
-                                            notification.title(),
-                                            notification.body(),
-                                            notification.display_source(),
-                                            extension_id);
-  FetchIcon(notification);
+  notification_id_ = notification.notification_id();
+  GetMessageCenter()->AddNotification(notification.type(),
+                                      notification_id_,
+                                      notification.title(),
+                                      notification.body(),
+                                      notification.display_source(),
+                                      balloon->GetExtensionId(),
+                                      notification.optional_fields());
+  DownloadImages(notification);
 }
 
 void BalloonViewAsh::Update() {
+  std::string previous_notification_id = notification_id_;
   const Notification& notification = balloon_->notification();
-  std::string new_notification_id = notification.notification_id();
-  GetWebNotificationTray()->UpdateNotification(current_notification_id_,
-                                               new_notification_id,
-                                               notification.title(),
-                                               notification.body());
-  current_notification_id_ = new_notification_id;
-  FetchIcon(notification);
+  notification_id_ = notification.notification_id();
+  GetMessageCenter()->UpdateNotification(previous_notification_id,
+                                         notification_id_,
+                                         notification.title(),
+                                         notification.body(),
+                                         notification.optional_fields());
+  DownloadImages(notification);
 }
 
 void BalloonViewAsh::RepositionToBalloon() {
 }
 
 void BalloonViewAsh::Close(bool by_user) {
-  Notification notification(balloon_->notification());  // Copy notification
+  Notification notification(balloon_->notification());
   collection_->OnBalloonClosed(balloon_);  // Deletes balloon.
   notification.Close(by_user);
-  GetWebNotificationTray()->RemoveNotification(notification.notification_id());
+  GetMessageCenter()->RemoveNotification(notification.notification_id());
 }
 
 gfx::Size BalloonViewAsh::GetSize() const {
@@ -132,39 +160,74 @@ BalloonHost* BalloonViewAsh::GetHost() const {
   return NULL;
 }
 
-void BalloonViewAsh::FetchIcon(const Notification& notification) {
-  if (!notification.icon().isNull()) {
-    ash::Shell::GetInstance()->status_area_widget()->
-        web_notification_tray()->SetNotificationImage(
-            notification.notification_id(), notification.icon());
-    return;
-  }
-  if (notification.icon_url().is_empty())
-    return;
-  content::RenderViewHost* rvh = notification.GetRenderViewHost();
-  if (!rvh) {
-    LOG(WARNING) << "Notification has icon url but no RenderViewHost";
-    return;
-  }
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderViewHost(rvh);
-  if (!web_contents) {
-    LOG(WARNING) << "Notification has icon url but no WebContents";
-    return;
-  }
-  icon_fetcher_.reset(new IconFetcher(web_contents,
-                                      notification.notification_id(),
-                                      notification.icon_url()));
+void BalloonViewAsh::SetNotificationIcon(const std::string& notification_id,
+                                         const gfx::ImageSkia& image) {
+  GetMessageCenter()->SetNotificationIcon(notification_id, image);
 }
 
-std::string BalloonViewAsh::GetExtensionId(Balloon* balloon) {
-  ExtensionService* extension_service =
-      balloon_->profile()->GetExtensionService();
-  const GURL& origin = balloon_->notification().origin_url();
-  const extensions::Extension* extension =
-      extension_service->extensions()->GetExtensionOrAppByURL(
-          ExtensionURLInfo(origin));
-  if (extension)
-    return extension->id();
-  return std::string();
+void BalloonViewAsh::SetNotificationImage(const std::string& notification_id,
+                                          const gfx::ImageSkia& image) {
+  GetMessageCenter()->SetNotificationImage(notification_id, image);
+}
+
+void BalloonViewAsh::SetNotificationButtonIcon(
+    const std::string& notification_id,
+    int button_index,
+    const gfx::ImageSkia& image) {
+  GetMessageCenter()->SetNotificationButtonIcon(notification_id, button_index,
+                                                image);
+}
+
+void BalloonViewAsh::DownloadImages(const Notification& notification) {
+  // Cancel any previous downloads.
+  downloads_.clear();
+
+  // Set the notification's primary icon, or start a download for it.
+  if (!notification.icon().isNull()) {
+    SetNotificationIcon(notification_id_, notification.icon());
+  } else if (!notification.icon_url().is_empty()) {
+      downloads_.push_back(linked_ptr<ImageDownload>(new ImageDownload(
+          notification, notification.icon_url(),
+          message_center::kNotificationIconSize,
+          base::Bind(&BalloonViewAsh::SetNotificationIcon,
+                     base::Unretained(this), notification.notification_id()))));
+  }
+
+  const base::DictionaryValue* optional_fields = notification.optional_fields();
+  if (optional_fields) {
+    // Start a download for the notification's image if appropriate.
+    if (optional_fields->HasKey(message_center::kImageUrlKey)) {
+      string16 url;
+      optional_fields->GetString(message_center::kImageUrlKey, &url);
+      if (!url.empty()) {
+        downloads_.push_back(linked_ptr<ImageDownload>(new ImageDownload(
+            notification,
+            GURL(url),
+            message_center::kNotificationPreferredImageSize,
+            base::Bind(&BalloonViewAsh::SetNotificationImage,
+                       base::Unretained(this),
+                       notification.notification_id()))));
+      }
+    }
+
+    // Start a download for the notification's button icons if appropriate.
+    const char* kButtonIconKeys[] = { message_center::kButtonOneIconUrlKey,
+                                      message_center::kButtonTwoIconUrlKey };
+    for (size_t i = 0; i < arraysize(kButtonIconKeys); ++i) {
+      if (optional_fields->HasKey(kButtonIconKeys[i])) {
+        string16 url;
+        optional_fields->GetString(kButtonIconKeys[i], &url);
+        if (!url.empty()) {
+          downloads_.push_back(linked_ptr<ImageDownload>(new ImageDownload(
+              notification,
+              GURL(url),
+              message_center::kNotificationButtonIconSize,
+              base::Bind(&BalloonViewAsh::SetNotificationButtonIcon,
+                         base::Unretained(this),
+                         notification.notification_id(),
+                         i))));
+        }
+      }
+    }
+  }
 }

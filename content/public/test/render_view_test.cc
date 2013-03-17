@@ -12,6 +12,7 @@
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "content/test/mock_render_process.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -19,8 +20,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webkit_glue.h"
@@ -32,7 +33,6 @@ using WebKit::WebScriptController;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
-using content::NativeWebKeyboardEvent;
 
 namespace {
 const int32 kOpenerId = -2;
@@ -44,8 +44,8 @@ const int32 kSurfaceId = 42;
 
 namespace content {
 
-class RendererWebKitPlatformSupportImplNoSandboxImpl :
-    public RendererWebKitPlatformSupportImpl {
+class RendererWebKitPlatformSupportImplNoSandboxImpl
+    : public RendererWebKitPlatformSupportImpl {
  public:
   virtual WebKit::WebSandboxSupport* sandboxSupport() {
     return NULL;
@@ -62,7 +62,7 @@ RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::
     ~RendererWebKitPlatformSupportImplNoSandbox() {
 }
 
-WebKit::WebKitPlatformSupport*
+WebKit::Platform*
     RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::Get() {
   return webkit_platform_support_.get();
 }
@@ -90,6 +90,7 @@ void RenderViewTest::ExecuteJavaScript(const char* js) {
 bool RenderViewTest::ExecuteJavaScriptAndReturnIntValue(
     const string16& script,
     int* int_result) {
+  v8::HandleScope handle_scope;
   v8::Handle<v8::Value> result =
       GetMainFrame()->executeScriptAndReturnValue(WebScriptSource(script));
   if (result.IsEmpty() || !result->IsInt32())
@@ -136,7 +137,7 @@ void RenderViewTest::SetUp() {
   render_thread_->set_new_window_routing_id(kNewWindowRouteId);
 
   command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
-  params_.reset(new content::MainFunctionParams(*command_line_));
+  params_.reset(new MainFunctionParams(*command_line_));
   platform_.reset(new RendererMainPlatformDelegate(*params_));
   platform_->PlatformInitialize();
 
@@ -149,13 +150,19 @@ void RenderViewTest::SetUp() {
   // since we are using a MockRenderThread.
   RenderThreadImpl::RegisterSchemes();
 
+  // This check is needed because when run under content_browsertests,
+  // ResourceBundle isn't initialized (since we have to use a diferent test
+  // suite implementation than for content_unittests). For browser_tests, this
+  // is already initialized.
+  if (!ResourceBundle::HasSharedInstance())
+    ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
+
   mock_process_.reset(new MockRenderProcess);
 
   // This needs to pass the mock render thread to the view.
   RenderViewImpl* view = RenderViewImpl::Create(
-      0,
       kOpenerId,
-      content::RendererPreferences(),
+      RendererPreferences(),
       webkit_glue::WebPreferences(),
       new SharedRenderViewCounter(0),
       kRouteId,
@@ -166,7 +173,6 @@ void RenderViewTest::SetUp() {
       false,
       1,
       WebKit::WebScreenInfo(),
-      NULL,
       AccessibilityModeOff);
   view->AddRef();
   view_ = view;
@@ -187,7 +193,7 @@ void RenderViewTest::TearDown() {
   // After telling the view to close and resetting mock_process_ we may get
   // some new tasks which need to be processed before shutting down WebKit
   // (http://crbug.com/21508).
-  msg_loop_.RunAllPending();
+  msg_loop_.RunUntilIdle();
 
   WebKit::shutdown();
 
@@ -204,20 +210,14 @@ void RenderViewTest::SendNativeKeyEvent(
 
 void RenderViewTest::SendWebKeyboardEvent(
     const WebKit::WebKeyboardEvent& key_event) {
-  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
-  input_message->WriteData(reinterpret_cast<const char*>(&key_event),
-                           sizeof(WebKit::WebKeyboardEvent));
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->OnMessageReceived(*input_message);
+  impl->OnMessageReceived(ViewMsg_HandleInputEvent(0, &key_event, false));
 }
 
 void RenderViewTest::SendWebMouseEvent(
     const WebKit::WebMouseEvent& mouse_event) {
-  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
-  input_message->WriteData(reinterpret_cast<const char*>(&mouse_event),
-                           sizeof(WebKit::WebMouseEvent));
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->OnMessageReceived(*input_message);
+  impl->OnMessageReceived(ViewMsg_HandleInputEvent(0, &mouse_event, false));
 }
 
 const char* const kGetCoordinatesScript =
@@ -275,10 +275,8 @@ bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
   mouse_event.x = bounds.CenterPoint().x();
   mouse_event.y = bounds.CenterPoint().y();
   mouse_event.clickCount = 1;
-  ViewMsg_HandleInputEvent input_event(0);
-  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
-  input_message->WriteData(reinterpret_cast<const char*>(&mouse_event),
-                           sizeof(WebMouseEvent));
+  scoped_ptr<IPC::Message> input_message(
+      new ViewMsg_HandleInputEvent(0, &mouse_event, false));
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->OnMessageReceived(*input_message);
   return true;
@@ -313,7 +311,7 @@ void RenderViewTest::Resize(gfx::Size new_size,
                             gfx::Rect resizer_rect,
                             bool is_fullscreen) {
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(
-      0, new_size, resizer_rect, is_fullscreen));
+      0, new_size, new_size, resizer_rect, is_fullscreen));
   OnMessageReceived(*resize_message);
 }
 
@@ -348,7 +346,7 @@ void RenderViewTest::GoToOffset(int offset,
 
   ViewMsg_Navigate_Params navigate_params;
   navigate_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  navigate_params.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  navigate_params.transition = PAGE_TRANSITION_FORWARD_BACK;
   navigate_params.current_history_list_length = history_list_length;
   navigate_params.current_history_list_offset = impl->history_list_offset();
   navigate_params.pending_history_list_offset = pending_offset;

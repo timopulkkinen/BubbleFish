@@ -9,7 +9,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/aura/aura_switches.h"
 #include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/root_window.h"
@@ -45,7 +44,7 @@ class NativeWidgetAuraTest : public testing::Test {
     root_window()->SetHostSize(gfx::Size(640, 480));
   }
   virtual void TearDown() OVERRIDE {
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
     aura_test_helper_->TearDown();
   }
 
@@ -172,6 +171,7 @@ TEST_F(NativeWidgetAuraTest, ShowMaximizedDoesntBounceAround) {
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = NULL;
+  params.context = root_window();
   params.show_state = ui::SHOW_STATE_MAXIMIZED;
   params.bounds = gfx::Rect(10, 10, 100, 200);
   widget->Init(params);
@@ -183,6 +183,7 @@ TEST_F(NativeWidgetAuraTest, GetClientAreaScreenBounds) {
   // Create a widget.
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.context = root_window();
   params.bounds.SetRect(10, 20, 300, 400);
   scoped_ptr<Widget> widget(new Widget());
   widget->Init(params);
@@ -216,11 +217,10 @@ class GestureTrackingView : public views::View {
   }
 
   // View overrides:
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE {
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
     got_gesture_event_ = true;
-    return consume_gesture_event_ ? ui::ER_CONSUMED :
-        ui::ER_UNHANDLED;
+    if (consume_gesture_event_)
+      event->StopPropagation();
   }
 
  private:
@@ -248,6 +248,7 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
   scoped_ptr<TestWidget> widget(new TestWidget());
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.context = root_window();
   params.bounds = gfx::Rect(0, 0, 100, 200);
   widget->Init(params);
   widget->SetContentsView(view);
@@ -283,6 +284,7 @@ TEST_F(NativeWidgetAuraTest, ReleaseCaptureOnTouchRelease) {
   scoped_ptr<TestWidget> widget(new TestWidget());
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.context = root_window();
   params.bounds = gfx::Rect(0, 0, 100, 200);
   widget->Init(params);
   widget->SetContentsView(view);
@@ -319,6 +321,7 @@ TEST_F(NativeWidgetAuraTest, PreferViewLayersToChildWindows) {
   Widget::InitParams parent_params(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   parent_params.ownership =
       views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  parent_params.context = root_window();
   parent->Init(parent_params);
   parent->SetContentsView(parent_root);
   parent->SetBounds(gfx::Rect(0, 0, 400, 400));

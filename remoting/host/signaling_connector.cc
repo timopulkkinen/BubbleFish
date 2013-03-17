@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "google_apis/gaia/gaia_urls.h"
+#include "google_apis/google_api_keys.h"
 #include "net/url_request/url_fetcher.h"
-#include "remoting/host/chromoting_host_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "remoting/host/dns_blackhole_checker.h"
-#include "remoting/host/url_request_context.h"
 
 namespace remoting {
 
@@ -26,20 +27,18 @@ const int kTokenUpdateTimeBeforeExpirySeconds = 60;
 
 SignalingConnector::OAuthCredentials::OAuthCredentials(
     const std::string& login_value,
-    const std::string& refresh_token_value,
-    const OAuthClientInfo& client_info_value)
+    const std::string& refresh_token_value)
     : login(login_value),
-      refresh_token(refresh_token_value),
-      client_info(client_info_value) {
+      refresh_token(refresh_token_value) {
 }
 
 SignalingConnector::SignalingConnector(
     XmppSignalStrategy* signal_strategy,
-    ChromotingHostContext* context,
+    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
     scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker,
     const base::Closure& auth_failed_callback)
     : signal_strategy_(signal_strategy),
-      context_(context),
+      url_request_context_getter_(url_request_context_getter),
       auth_failed_callback_(auth_failed_callback),
       dns_blackhole_checker_(dns_blackhole_checker.Pass()),
       reconnect_attempts_(0),
@@ -61,8 +60,9 @@ SignalingConnector::~SignalingConnector() {
 void SignalingConnector::EnableOAuth(
     scoped_ptr<OAuthCredentials> oauth_credentials) {
   oauth_credentials_ = oauth_credentials.Pass();
-  gaia_oauth_client_.reset(new GaiaOAuthClient(
-      OAuthProviderInfo::GetDefault(), context_->url_request_context_getter()));
+  gaia_oauth_client_.reset(
+      new gaia::GaiaOAuthClient(GaiaUrls::GetInstance()->oauth2_token_url(),
+                                url_request_context_getter_));
 }
 
 void SignalingConnector::OnSignalStrategyStateChange(
@@ -94,7 +94,8 @@ bool SignalingConnector::OnSignalStrategyIncomingStanza(
 void SignalingConnector::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(CalledOnValidThread());
-  if (type != net::NetworkChangeNotifier::CONNECTION_NONE) {
+  if (type != net::NetworkChangeNotifier::CONNECTION_NONE &&
+      signal_strategy_->GetState() == SignalStrategy::DISCONNECTED) {
     LOG(INFO) << "Network state changed to online.";
     ResetAndTryReconnect();
   }
@@ -102,16 +103,37 @@ void SignalingConnector::OnConnectionTypeChanged(
 
 void SignalingConnector::OnIPAddressChanged() {
   DCHECK(CalledOnValidThread());
-  LOG(INFO) << "IP address has changed.";
-  ResetAndTryReconnect();
+  if (signal_strategy_->GetState() == SignalStrategy::DISCONNECTED) {
+    LOG(INFO) << "IP address has changed.";
+    ResetAndTryReconnect();
+  }
 }
 
-void SignalingConnector::OnRefreshTokenResponse(const std::string& user_email,
-                                                const std::string& access_token,
-                                                int expires_seconds) {
+void SignalingConnector::OnGetTokensResponse(const std::string& user_email,
+                                             const std::string& access_token,
+                                             int expires_seconds) {
+  NOTREACHED();
+}
+
+void SignalingConnector::OnRefreshTokenResponse(
+    const std::string& access_token,
+    int expires_seconds) {
   DCHECK(CalledOnValidThread());
   DCHECK(oauth_credentials_.get());
   LOG(INFO) << "Received OAuth token.";
+
+  oauth_access_token_ = access_token;
+  auth_token_expiry_time_ = base::Time::Now() +
+      base::TimeDelta::FromSeconds(expires_seconds) -
+      base::TimeDelta::FromSeconds(kTokenUpdateTimeBeforeExpirySeconds);
+
+  gaia_oauth_client_->GetUserInfo(access_token, 1, this);
+}
+
+void SignalingConnector::OnGetUserInfoResponse(const std::string& user_email) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(oauth_credentials_.get());
+  LOG(INFO) << "Received user info.";
 
   if (user_email != oauth_credentials_->login) {
     LOG(ERROR) << "OAuth token and email address do not refer to "
@@ -120,14 +142,12 @@ void SignalingConnector::OnRefreshTokenResponse(const std::string& user_email,
     return;
   }
 
-  refreshing_oauth_token_ = false;
-  auth_token_expiry_time_ = base::Time::Now() +
-      base::TimeDelta::FromSeconds(expires_seconds) -
-      base::TimeDelta::FromSeconds(kTokenUpdateTimeBeforeExpirySeconds);
   signal_strategy_->SetAuthInfo(oauth_credentials_->login,
-                                access_token, "oauth2");
+                                oauth_access_token_, "oauth2");
+  refreshing_oauth_token_ = false;
 
-  // Now that we've got the new token, try to connect using it.
+  // Now that we've refreshed the token and verified that it's for the correct
+  // user account, try to connect using the new token.
   DCHECK_EQ(signal_strategy_->GetState(), SignalStrategy::DISCONNECTED);
   signal_strategy_->Connect();
 }
@@ -210,10 +230,17 @@ void SignalingConnector::RefreshOAuthToken() {
   LOG(INFO) << "Refreshing OAuth token.";
   DCHECK(!refreshing_oauth_token_);
 
+  gaia::OAuthClientInfo client_info = {
+      google_apis::GetOAuth2ClientID(google_apis::CLIENT_REMOTING),
+      google_apis::GetOAuth2ClientSecret(google_apis::CLIENT_REMOTING),
+      // Redirect URL is only used when getting tokens from auth code. It
+      // is not required when getting access tokens.
+      ""
+  };
+
   refreshing_oauth_token_ = true;
   gaia_oauth_client_->RefreshToken(
-      oauth_credentials_->client_info,
-      oauth_credentials_->refresh_token, this);
+      client_info, oauth_credentials_->refresh_token, 1, this);
 }
 
 }  // namespace remoting

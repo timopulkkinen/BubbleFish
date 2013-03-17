@@ -7,26 +7,30 @@
 
 namespace remoting {
 
-// Known host exit codes. Please keep this enum in sync with:
-// remoting/host/installer/mac/PrivilegedHelperTools/org.chromium.chromoting.me2me.sh
-// and remoting/tools/me2me_virtual_host.py.
+// Known host exit codes. The exit codes indicating permanent errors must be in
+// sync with:
+//  - remoting/host/installer/mac/PrivilegedHelperTools/
+//      org.chromium.chromoting.me2me.sh
+//  - remoting/tools/me2me_virtual_host.py.
 enum HostExitCodes {
   // Error codes that don't indicate a permanent error condition.
   kSuccessExitCode = 0,
   kReservedForX11ExitCode = 1,
-  kHostInitializationFailed = 7,
+  kInitializationFailed = 2,
+  kUsageExitCode = 3,
 
   // Error codes that do indicate a permanent error condition.
-  kInvalidHostConfigurationExitCode = 2,
-  kInvalidHostIdExitCode = 3,
-  kInvalidOauthCredentialsExitCode = 4,
-  kInvalidHostDomainExitCode = 5,
-  kLoginScreenNotSupportedExitCode = 6,
+  kInvalidHostConfigurationExitCode = 100,
+  kInvalidHostIdExitCode = 101,
+  kInvalidOauthCredentialsExitCode = 102,
+  kInvalidHostDomainExitCode = 103,
+  kLoginScreenNotSupportedExitCode = 104,
+  kUsernameMismatchExitCode = 105,
 
   // The range of the exit codes that should be interpreted as a permanent error
   // condition.
   kMinPermanentErrorExitCode = kInvalidHostConfigurationExitCode,
-  kMaxPermanentErrorExitCode = kLoginScreenNotSupportedExitCode
+  kMaxPermanentErrorExitCode = kUsernameMismatchExitCode
 };
 
 }  // namespace remoting

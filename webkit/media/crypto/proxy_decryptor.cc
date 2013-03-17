@@ -4,17 +4,12 @@
 
 #include "webkit/media/crypto/proxy_decryptor.h"
 
-#include <algorithm>
-
 #include "base/bind.h"
-#include "base/location.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/message_loop_proxy.h"
-#include "media/base/decoder_buffer.h"
-#include "media/base/decryptor_client.h"
 #include "media/crypto/aes_decryptor.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/media/crypto/key_systems.h"
 #include "webkit/media/crypto/ppapi_decryptor.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -27,7 +22,10 @@
 
 namespace webkit_media {
 
-static scoped_refptr<webkit::ppapi::PluginInstance> CreatePluginInstance(
+// Returns the PluginInstance associated with the Helper Plugin.
+// If a non-NULL pointer is returned, the caller must call closeHelperPlugin()
+// when the Helper Plugin is no longer needed.
+static scoped_refptr<webkit::ppapi::PluginInstance> CreateHelperPlugin(
     const std::string& plugin_type,
     WebKit::WebMediaPlayerClient* web_media_player_client,
     WebKit::WebFrame* web_frame) {
@@ -46,52 +44,92 @@ static scoped_refptr<webkit::ppapi::PluginInstance> CreatePluginInstance(
   return ppapi_plugin->instance();
 }
 
-// TODO(xhwang): Simplify this function. This is mostly caused by the fact that
-// we need to copy a scoped_array<uint8>.
-static void FireNeedKey(media::DecryptorClient* client,
-                        const scoped_refptr<media::DecoderBuffer>& encrypted) {
-  DCHECK(client);
-  DCHECK(encrypted);
-  DCHECK(encrypted->GetDecryptConfig());
-  std::string key_id = encrypted->GetDecryptConfig()->key_id();
-  scoped_array<uint8> key_id_array(new uint8[key_id.size()]);
-  memcpy(key_id_array.get(), key_id.data(), key_id.size());
-  client->NeedKey("", "", key_id_array.Pass(), key_id.size());
+static void DestroyHelperPlugin(
+    WebKit::WebMediaPlayerClient* web_media_player_client) {
+  web_media_player_client->closeHelperPlugin();
 }
 
 ProxyDecryptor::ProxyDecryptor(
-    media::DecryptorClient* decryptor_client,
     WebKit::WebMediaPlayerClient* web_media_player_client,
-    WebKit::WebFrame* web_frame)
-    : client_(decryptor_client),
-      web_media_player_client_(web_media_player_client),
+    WebKit::WebFrame* web_frame,
+    const media::KeyAddedCB& key_added_cb,
+    const media::KeyErrorCB& key_error_cb,
+    const media::KeyMessageCB& key_message_cb,
+    const media::NeedKeyCB& need_key_cb)
+    : web_media_player_client_(web_media_player_client),
       web_frame_(web_frame),
-      stopped_(false) {
+      did_create_helper_plugin_(false),
+      key_added_cb_(key_added_cb),
+      key_error_cb_(key_error_cb),
+      key_message_cb_(key_message_cb),
+      need_key_cb_(need_key_cb),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 ProxyDecryptor::~ProxyDecryptor() {
+  // Destroy the decryptor explicitly before destroying the plugin.
+  {
+    base::AutoLock auto_lock(lock_);
+    decryptor_.reset();
+  }
+
+  if (did_create_helper_plugin_)
+    DestroyHelperPlugin(web_media_player_client_);
+
+  web_media_player_client_ = NULL;  // We should be done using it now.
+}
+
+// TODO(xhwang): Support multiple decryptor notification request (e.g. from
+// video and audio decoders). The current implementation is okay for the current
+// media pipeline since we initialize audio and video decoders in sequence.
+// But ProxyDecryptor should not depend on media pipeline's implementation
+// detail.
+void ProxyDecryptor::SetDecryptorReadyCB(
+     const media::DecryptorReadyCB& decryptor_ready_cb) {
+  base::AutoLock auto_lock(lock_);
+
+  // Cancels the previous decryptor request.
+  if (decryptor_ready_cb.is_null()) {
+    if (!decryptor_ready_cb_.is_null())
+      base::ResetAndReturn(&decryptor_ready_cb_).Run(NULL);
+    return;
+  }
+
+  // Normal decryptor request.
+  DCHECK(decryptor_ready_cb_.is_null());
+  if (decryptor_) {
+    decryptor_ready_cb.Run(decryptor_.get());
+    return;
+  }
+  decryptor_ready_cb_ = decryptor_ready_cb;
 }
 
 bool ProxyDecryptor::GenerateKeyRequest(const std::string& key_system,
+                                        const std::string& type,
                                         const uint8* init_data,
                                         int init_data_length) {
   // We do not support run-time switching of decryptors. GenerateKeyRequest()
   // only creates a new decryptor when |decryptor_| is not initialized.
   DVLOG(1) << "GenerateKeyRequest: key_system = " << key_system;
-  if (!decryptor_.get()) {
-    base::AutoLock auto_lock(lock_);
+
+  base::AutoLock auto_lock(lock_);
+
+  if (!decryptor_) {
     decryptor_ = CreateDecryptor(key_system);
+    if (!decryptor_) {
+      key_error_cb_.Run(key_system, "", media::Decryptor::kUnknownError, 0);
+      return false;
+    }
   }
 
-  if (!decryptor_.get()) {
-    client_->KeyError(key_system, "", media::Decryptor::kUnknownError, 0);
-    return false;
-  }
-
-  if(!decryptor_->GenerateKeyRequest(key_system, init_data, init_data_length)) {
+  if (!decryptor_->GenerateKeyRequest(key_system, type,
+                                      init_data, init_data_length)) {
     decryptor_.reset();
     return false;
   }
+
+  if (!decryptor_ready_cb_.is_null())
+    base::ResetAndReturn(&decryptor_ready_cb_).Run(decryptor_.get());
 
   return true;
 }
@@ -105,23 +143,8 @@ void ProxyDecryptor::AddKey(const std::string& key_system,
   DVLOG(1) << "AddKey()";
 
   // WebMediaPlayerImpl ensures GenerateKeyRequest() has been called.
-  DCHECK(decryptor_.get());
   decryptor_->AddKey(key_system, key, key_length, init_data, init_data_length,
                      session_id);
-
-  std::vector<base::Closure> closures_to_run;
-  {
-    base::AutoLock auto_lock(lock_);
-    std::swap(pending_decrypt_closures_, closures_to_run);
-  }
-
-  // Fire all pending callbacks here because only the |decryptor_| knows if the
-  // pending buffers can be decrypted or not.
-  for (std::vector<base::Closure>::iterator iter = closures_to_run.begin();
-       iter != closures_to_run.end();
-       ++iter) {
-    iter->Run();
-  }
 }
 
 void ProxyDecryptor::CancelKeyRequest(const std::string& key_system,
@@ -129,87 +152,40 @@ void ProxyDecryptor::CancelKeyRequest(const std::string& key_system,
   DVLOG(1) << "CancelKeyRequest()";
 
   // WebMediaPlayerImpl ensures GenerateKeyRequest() has been called.
-  DCHECK(decryptor_.get());
   decryptor_->CancelKeyRequest(key_system, session_id);
-}
-
-void ProxyDecryptor::Decrypt(
-    const scoped_refptr<media::DecoderBuffer>& encrypted,
-    const DecryptCB& decrypt_cb) {
-  // This is safe as we do not replace/delete an existing decryptor at run-time.
-  media::Decryptor* decryptor = NULL;
-  {
-    base::AutoLock auto_lock(lock_);
-    if (stopped_) {
-      DVLOG(1) << "Decrypt(): fire decrypt callbacks with kError.";
-      decrypt_cb.Run(kError, NULL);
-      return;
-    }
-    decryptor = decryptor_.get();
-    if (!decryptor) {
-      DVLOG(1) << "ProxyDecryptor::Decrypt(): decryptor not initialized.";
-      pending_decrypt_closures_.push_back(
-          base::Bind(&ProxyDecryptor::DecryptOnMessageLoop,
-                     base::Unretained(this),
-                     base::MessageLoopProxy::current(), encrypted,
-                     decrypt_cb));
-      // TODO(xhwang): The same NeedKey may be fired here and multiple times in
-      // OnBufferDecrypted(). While the spec says only one NeedKey should be
-      // fired. Leave them as is since the spec about this may change.
-      FireNeedKey(client_, encrypted);
-      return;
-    }
-  }
-
-  decryptor->Decrypt(encrypted, base::Bind(
-      &ProxyDecryptor::OnBufferDecrypted, base::Unretained(this),
-      base::MessageLoopProxy::current(), encrypted, decrypt_cb));
-}
-
-void ProxyDecryptor::CancelDecrypt() {
-  DVLOG(1) << "Stop()";
-
-  std::vector<base::Closure> closures_to_run;
-  {
-    base::AutoLock auto_lock(lock_);
-    if (decryptor_.get())
-      decryptor_->CancelDecrypt();
-    stopped_ = true;
-    std::swap(pending_decrypt_closures_, closures_to_run);
-  }
-
-  for (std::vector<base::Closure>::iterator iter = closures_to_run.begin();
-       iter != closures_to_run.end();
-       ++iter) {
-    iter->Run();
-  }
 }
 
 scoped_ptr<media::Decryptor> ProxyDecryptor::CreatePpapiDecryptor(
     const std::string& key_system) {
-  DCHECK(client_);
   DCHECK(web_media_player_client_);
   DCHECK(web_frame_);
 
   std::string plugin_type = GetPluginType(key_system);
   DCHECK(!plugin_type.empty());
   const scoped_refptr<webkit::ppapi::PluginInstance>& plugin_instance =
-    CreatePluginInstance(plugin_type, web_media_player_client_, web_frame_);
-  if (!plugin_instance) {
-    DVLOG(1) << "PpapiDecryptor: plugin instance creation failed.";
+      CreateHelperPlugin(plugin_type, web_media_player_client_, web_frame_);
+  did_create_helper_plugin_ = plugin_instance != NULL;
+  if (!did_create_helper_plugin_) {
+    DVLOG(1) << "ProxyDecryptor: plugin instance creation failed.";
     return scoped_ptr<media::Decryptor>();
   }
 
-  return scoped_ptr<media::Decryptor>(new PpapiDecryptor(client_,
-                                                         plugin_instance));
+  return scoped_ptr<media::Decryptor>(new PpapiDecryptor(
+      plugin_instance,
+      base::Bind(&ProxyDecryptor::KeyAdded, weak_ptr_factory_.GetWeakPtr()),
+      base::Bind(&ProxyDecryptor::KeyError, weak_ptr_factory_.GetWeakPtr()),
+      base::Bind(&ProxyDecryptor::KeyMessage, weak_ptr_factory_.GetWeakPtr()),
+      base::Bind(&ProxyDecryptor::NeedKey, weak_ptr_factory_.GetWeakPtr())));
 }
 
 scoped_ptr<media::Decryptor> ProxyDecryptor::CreateDecryptor(
     const std::string& key_system) {
-  DCHECK(client_);
-
   if (CanUseAesDecryptor(key_system))
-    return scoped_ptr<media::Decryptor>(new media::AesDecryptor(client_));
+    return scoped_ptr<media::Decryptor>(new media::AesDecryptor(
+        base::Bind(&ProxyDecryptor::KeyAdded, weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&ProxyDecryptor::KeyError, weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&ProxyDecryptor::KeyMessage, weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&ProxyDecryptor::NeedKey, weak_ptr_factory_.GetWeakPtr())));
 
   // We only support AesDecryptor and PpapiDecryptor. So if we cannot
   // use the AesDecryptor, then we'll try to create a PpapiDecryptor for given
@@ -217,62 +193,32 @@ scoped_ptr<media::Decryptor> ProxyDecryptor::CreateDecryptor(
   return CreatePpapiDecryptor(key_system);
 }
 
-void ProxyDecryptor::DecryptOnMessageLoop(
-    const scoped_refptr<base::MessageLoopProxy>& message_loop_proxy,
-    const scoped_refptr<media::DecoderBuffer>& encrypted,
-    const media::Decryptor::DecryptCB& decrypt_cb) {
-  DCHECK(decryptor_.get());
-
-  if (!message_loop_proxy->BelongsToCurrentThread()) {
-    message_loop_proxy->PostTask(FROM_HERE, base::Bind(
-        &ProxyDecryptor::DecryptOnMessageLoop, base::Unretained(this),
-        message_loop_proxy, encrypted, decrypt_cb));
-    return;
-  }
-
-  {
-    base::AutoLock auto_lock(lock_);
-    if (stopped_) {
-      DVLOG(1) << "DecryptOnMessageLoop(): fire decrypt callbacks with kError.";
-      decrypt_cb.Run(kError, NULL);
-      return;
-    }
-  }
-
-  decryptor_->Decrypt(encrypted, base::Bind(
-      &ProxyDecryptor::OnBufferDecrypted, base::Unretained(this),
-      message_loop_proxy, encrypted, decrypt_cb));
+void ProxyDecryptor::KeyAdded(const std::string& key_system,
+                              const std::string& session_id) {
+  key_added_cb_.Run(key_system, session_id);
 }
 
-void ProxyDecryptor::OnBufferDecrypted(
-    const scoped_refptr<base::MessageLoopProxy>& message_loop_proxy,
-    const scoped_refptr<media::DecoderBuffer>& encrypted,
-    const media::Decryptor::DecryptCB& decrypt_cb,
-    media::Decryptor::Status status,
-    const scoped_refptr<media::DecoderBuffer>& decrypted) {
-  if (status == media::Decryptor::kSuccess ||
-      status == media::Decryptor::kError) {
-    decrypt_cb.Run(status, decrypted);
-    return;
-  }
+void ProxyDecryptor::KeyError(const std::string& key_system,
+                              const std::string& session_id,
+                              media::Decryptor::KeyError error_code,
+                              int system_code) {
+  key_error_cb_.Run(key_system, session_id, error_code, system_code);
+}
 
-  DCHECK_EQ(status, media::Decryptor::kNoKey);
-  DVLOG(1) << "OnBufferDecrypted(): kNoKey fired";
-  {
-    base::AutoLock auto_lock(lock_);
-    if (stopped_) {
-      DVLOG(1) << "OnBufferDecrypted(): fire decrypt callbacks with kError.";
-      decrypt_cb.Run(kError, NULL);
-      return;
-    }
-    pending_decrypt_closures_.push_back(base::Bind(
-        &ProxyDecryptor::DecryptOnMessageLoop, base::Unretained(this),
-        message_loop_proxy, encrypted, decrypt_cb));
-  }
-  // TODO(xhwang): The same NeedKey may be fired multiple times here and also
-  // in Decrypt(). While the spec says only one NeedKey should be fired. Leave
-  // them as is since the spec about this may change.
-  FireNeedKey(client_, encrypted);
+void ProxyDecryptor::KeyMessage(const std::string& key_system,
+                                const std::string& session_id,
+                                const std::string& message,
+                                const std::string& default_url) {
+  key_message_cb_.Run(key_system, session_id, message, default_url);
+}
+
+void ProxyDecryptor::NeedKey(const std::string& key_system,
+                             const std::string& session_id,
+                             const std::string& type,
+                             scoped_array<uint8> init_data,
+                             int init_data_size) {
+  need_key_cb_.Run(key_system, session_id, type,
+                   init_data.Pass(), init_data_size);
 }
 
 }  // namespace webkit_media

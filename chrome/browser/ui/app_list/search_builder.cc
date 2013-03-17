@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,22 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
-#include "chrome/browser/event_disposition.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_list/app_list_controller.h"
+#include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -30,11 +32,13 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_result.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/window_open_disposition.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/memory/ref_counted.h"
@@ -171,11 +175,12 @@ class ExtensionAppResult : public SearchBuilderResult,
 
  private:
   void LoadExtensionIcon(const extensions::Extension* extension) {
-    const gfx::ImageSkia default_icon = profile()->GetExtensionService()->
+    const gfx::ImageSkia default_icon = extensions::OmniboxAPI::Get(profile())->
         GetOmniboxPopupIcon(extension->id()).AsImageSkia();
     icon_.reset(new extensions::IconImage(
+        profile(),
         extension,
-        extension->icons(),
+        extensions::IconsInfo::GetIcons(extension),
         extension_misc::EXTENSION_ICON_SMALL,
         default_icon,
         this));
@@ -253,6 +258,7 @@ class ContactResult : public SearchBuilderResult,
  protected:
   // Overridden from SearchBuilderResult:
   virtual void UpdateIcon() OVERRIDE {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     const contacts::Contact* contact = GetContact();
     if (contact && contact->has_raw_untrusted_photo()) {
       photo_decoder_ =
@@ -260,7 +266,9 @@ class ContactResult : public SearchBuilderResult,
               this,
               contact->raw_untrusted_photo(),
               ImageDecoder::DEFAULT_CODEC);
-      photo_decoder_->Start();
+      scoped_refptr<base::MessageLoopProxy> task_runner =
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
+      photo_decoder_->Start(task_runner);
     } else {
       SetIcon(
           *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -273,7 +281,7 @@ class ContactResult : public SearchBuilderResult,
   virtual void OnImageDecoded(const ImageDecoder* decoder,
                               const SkBitmap& decoded_image) OVERRIDE {
     DCHECK_EQ(decoder, photo_decoder_);
-    SetIcon(decoded_image);
+    SetIcon(gfx::ImageSkia::CreateFrom1xBitmap(decoded_image));
   }
 
   virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE {
@@ -295,7 +303,7 @@ SearchBuilder::SearchBuilder(
     Profile* profile,
     app_list::SearchBoxModel* search_box,
     app_list::AppListModel::SearchResults* results,
-    AppListController* list_controller)
+    AppListControllerDelegate* list_controller)
     : profile_(profile),
       search_box_(search_box),
       results_(results),
@@ -304,14 +312,22 @@ SearchBuilder::SearchBuilder(
       l10n_util::GetStringUTF16(IDS_SEARCH_BOX_HINT));
   search_box_->SetIcon(*ui::ResourceBundle::GetSharedInstance().
       GetImageSkiaNamed(IDR_OMNIBOX_SEARCH));
+  search_box_->SetUserIconEnabled(list_controller->ShouldShowUserIcon());
+  search_box_->SetUserIcon(*ui::ResourceBundle::GetSharedInstance().
+      GetImageSkiaNamed(IDR_APP_LIST_USER_INDICATOR));
+  search_box_->SetUserIconTooltip(UTF8ToUTF16(profile_->GetProfileName()));
 
-  // TODO(xiyuan): Consider requesting fewer providers in the non-apps-only
-  // case.
-  int providers =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          app_list::switches::kAppListShowAppsOnly) ?
-      AutocompleteProvider::TYPE_EXTENSION_APP :
-      AutocompleteClassifier::kDefaultOmniboxProviders;
+  int providers = AutocompleteProvider::TYPE_EXTENSION_APP;
+  bool apps_only = true;
+#if defined(OS_CHROMEOS)
+  apps_only = CommandLine::ForCurrentProcess()->HasSwitch(
+      app_list::switches::kAppListShowAppsOnly);
+#endif
+  if (!apps_only) {
+    // TODO(xiyuan): Consider requesting fewer providers in the non-apps-only
+    // case.
+    providers |= AutocompleteClassifier::kDefaultOmniboxProviders;
+  }
 #if defined(OS_CHROMEOS)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableContacts))
     providers |= AutocompleteProvider::TYPE_CONTACT;
@@ -326,8 +342,9 @@ void SearchBuilder::StartSearch() {
   // Omnibox features such as keyword selection/accepting and instant query
   // are not implemented.
   // TODO(xiyuan): Figure out the features that need to support here.
-  controller_->Start(search_box_->text(), string16(), false, false, true,
-      AutocompleteInput::ALL_MATCHES);
+  controller_->Start(AutocompleteInput(search_box_->text(), string16::npos,
+                                       string16(), false, false, true,
+                                       AutocompleteInput::ALL_MATCHES));
 }
 
 void SearchBuilder::StopSearch() {
@@ -349,7 +366,7 @@ void SearchBuilder::OpenResult(const app_list::SearchResult& result,
     if (extension) {
       content::RecordAction(
           content::UserMetricsAction("AppList_ClickOnAppFromSearch"));
-      list_controller_->ActivateApp(profile_, extension->id(), event_flags);
+      list_controller_->ActivateApp(profile_, extension, event_flags);
     }
 #if defined(OS_CHROMEOS)
   } else if (match.type == AutocompleteMatch::CONTACT) {
@@ -361,7 +378,7 @@ void SearchBuilder::OpenResult(const app_list::SearchResult& result,
     chrome::NavigateParams params(profile_,
                                   match.destination_url,
                                   match.transition);
-    params.disposition = chrome::DispositionFromEventFlags(event_flags);
+    params.disposition = ui::DispositionFromEventFlags(event_flags);
     chrome::Navigate(&params);
   }
 }

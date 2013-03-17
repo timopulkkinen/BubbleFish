@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_PLUGINS_PLUGIN_OBSERVER_H_
 #define CHROME_BROWSER_PLUGINS_PLUGIN_OBSERVER_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include <map>
@@ -16,6 +17,7 @@
 class GURL;
 class InfoBarDelegate;
 class PluginFinder;
+class PluginMetadata;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 class PluginInstaller;
@@ -27,22 +29,24 @@ class WebContents;
 }
 
 class PluginObserver : public content::WebContentsObserver,
-                       public WebContentsUserData<PluginObserver> {
+                       public content::WebContentsUserData<PluginObserver> {
  public:
   virtual ~PluginObserver();
 
   // content::WebContentsObserver implementation.
-  virtual void PluginCrashed(const FilePath& plugin_path) OVERRIDE;
+  virtual void PluginCrashed(const base::FilePath& plugin_path,
+                             base::ProcessId plugin_pid) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   explicit PluginObserver(content::WebContents* web_contents);
-  friend class WebContentsUserData<PluginObserver>;
+  friend class content::WebContentsUserData<PluginObserver>;
 
   class PluginPlaceholderHost;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-  void InstallMissingPlugin(PluginInstaller* installer);
+  void InstallMissingPlugin(PluginInstaller* installer,
+                            const PluginMetadata* plugin_metadata);
 #endif
 
   // Message handlers:
@@ -56,7 +60,8 @@ class PluginObserver : public content::WebContentsObserver,
   void OnRemovePluginPlaceholderHost(int placeholder_id);
 #endif
   void OnOpenAboutPlugins();
-  void OnCouldNotLoadPlugin(const FilePath& plugin_path);
+  void OnCouldNotLoadPlugin(const base::FilePath& plugin_path);
+  void OnNPAPINotSupported(const std::string& identifier);
 
   base::WeakPtrFactory<PluginObserver> weak_ptr_factory_;
 

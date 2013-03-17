@@ -11,11 +11,13 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
+namespace content {
+
 // Constructs a PepperPluginInfo from a WebPluginInfo. Returns false if
 // the operation is not possible, in particular the WebPluginInfo::type
 // must be one of the pepper types.
 bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
-                          content::PepperPluginInfo* pepper_info);
+                          PepperPluginInfo* pepper_info);
 
 // This class holds references to all of the known pepper plugin modules.
 //
@@ -36,7 +38,7 @@ class PepperPluginRegistry
   // plugin list every time it is called. Generally, code in the registry should
   // be using the cached plugin_list_ instead.
   CONTENT_EXPORT static void ComputeList(
-      std::vector<content::PepperPluginInfo>* plugins);
+      std::vector<PepperPluginInfo>* plugins);
 
   // Loads the (native) libraries but does not initialize them (i.e., does not
   // call PPP_InitializeModule). This is needed by the zygote on Linux to get
@@ -47,20 +49,20 @@ class PepperPluginRegistry
   // return value will be NULL if there is no such plugin.
   //
   // The returned pointer is owned by the PluginRegistry.
-  const content::PepperPluginInfo* GetInfoForPlugin(
-      const webkit::WebPluginInfo& info);
+  const PepperPluginInfo* GetInfoForPlugin(const webkit::WebPluginInfo& info);
 
   // Returns an existing loaded module for the given path. It will search for
   // both preloaded in-process or currently active (non crashed) out-of-process
   // plugins matching the given name. Returns NULL if the plugin hasn't been
   // loaded.
-  webkit::ppapi::PluginModule* GetLiveModule(const FilePath& path);
+  webkit::ppapi::PluginModule* GetLiveModule(const base::FilePath& path);
 
   // Notifies the registry that a new non-preloaded module has been created.
   // This is normally called for out-of-process plugins. Once this is called,
   // the module is available to be returned by GetModule(). The module will
   // automatically unregister itself by calling PluginModuleDestroyed().
-  void AddLiveModule(const FilePath& path, webkit::ppapi::PluginModule* module);
+  void AddLiveModule(const base::FilePath& path,
+                     webkit::ppapi::PluginModule* module);
 
   // ModuleLifetime implementation.
   virtual void PluginModuleDead(
@@ -70,11 +72,12 @@ class PepperPluginRegistry
   PepperPluginRegistry();
 
   // All known pepper plugins.
-  std::vector<content::PepperPluginInfo> plugin_list_;
+  std::vector<PepperPluginInfo> plugin_list_;
 
   // Plugins that have been preloaded so they can be executed in-process in
   // the renderer (the sandbox prevents on-demand loading).
-  typedef std::map<FilePath, scoped_refptr<webkit::ppapi::PluginModule> >
+  typedef std::map<base::FilePath,
+                   scoped_refptr<webkit::ppapi::PluginModule> >
       OwningModuleMap;
   OwningModuleMap preloaded_modules_;
 
@@ -84,10 +87,13 @@ class PepperPluginRegistry
   // non-crashed modules. If an out-of-process module crashes, it may
   // continue as long as there are WebKit references to it, but it will not
   // appear in this list.
-  typedef std::map<FilePath, webkit::ppapi::PluginModule*> NonOwningModuleMap;
+  typedef std::map<base::FilePath, webkit::ppapi::PluginModule*>
+      NonOwningModuleMap;
   NonOwningModuleMap live_modules_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginRegistry);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_PEPPER_PLUGIN_REGISTRY_H_

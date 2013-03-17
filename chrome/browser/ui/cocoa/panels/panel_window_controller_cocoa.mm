@@ -15,8 +15,6 @@
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/themes/theme_service_factory.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
@@ -29,9 +27,9 @@
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
 #include "chrome/browser/ui/panels/panel_bounds_animation.h"
+#include "chrome/browser/ui/panels/panel_collection.h"
 #include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -96,6 +94,17 @@ const double kWidthOfMouseResizeArea = 4.0;
       [app previousKeyWindow] == self ||
       [[app windows] count] == static_cast<NSUInteger>([controller numPanels]);
 }
+
+// Ignore key events if window cannot become key window to fix problem
+// where keyboard input is still going into a minimized panel even though
+// the app has been deactivated in -[PanelWindowControllerCocoa deactivate:].
+- (void)sendEvent:(NSEvent*)anEvent {
+  NSEventType eventType = [anEvent type];
+  if ((eventType == NSKeyDown || eventType == NSKeyUp) &&
+      ![self canBecomeKeyWindow])
+    return;
+  [super sendEvent:anEvent];
+}
 @end
 
 // Transparent view covering the whole panel in order to intercept mouse
@@ -158,25 +167,39 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 
   NSPoint point = [self convertPoint:pointInWindow fromView:nil];
   BOOL flipped = [self isFlipped];
-  if (NSMouseInRect(point, leftCursorRect_, flipped))
-    return panel::RESIZE_LEFT;
-  if (NSMouseInRect(point, rightCursorRect_, flipped))
-    return panel::RESIZE_RIGHT;
-  if (NSMouseInRect(point, topCursorRect_, flipped))
-    return panel::RESIZE_TOP;
-  if (NSMouseInRect(point, topLeftCursorRect_, flipped))
-    return panel::RESIZE_TOP_LEFT;
-  if (NSMouseInRect(point, topRightCursorRect_, flipped))
-    return panel::RESIZE_TOP_RIGHT;
 
-  // Bottom edge is not always resizable.
-  if (panel::RESIZABLE_ALL_SIDES == resizability) {
-    if (NSMouseInRect(point, bottomCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM;
-    if (NSMouseInRect(point, bottomLeftCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM_LEFT;
-    if (NSMouseInRect(point, bottomRightCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM_RIGHT;
+  if ((resizability & panel::RESIZABLE_TOP_LEFT) &&
+      NSMouseInRect(point, topLeftCursorRect_, flipped)) {
+    return panel::RESIZE_TOP_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_TOP_RIGHT) &&
+      NSMouseInRect(point, topRightCursorRect_, flipped)) {
+    return panel::RESIZE_TOP_RIGHT;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM_LEFT) &&
+      NSMouseInRect(point, bottomLeftCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM_RIGHT) &&
+      NSMouseInRect(point, bottomRightCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM_RIGHT;
+  }
+
+  if ((resizability & panel::RESIZABLE_LEFT) &&
+      NSMouseInRect(point, leftCursorRect_, flipped)) {
+    return panel::RESIZE_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_RIGHT) &&
+      NSMouseInRect(point, rightCursorRect_, flipped)) {
+    return panel::RESIZE_RIGHT;
+  }
+  if ((resizability & panel::RESIZABLE_TOP) &&
+      NSMouseInRect(point, topCursorRect_, flipped)) {
+    return panel::RESIZE_TOP;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM) &&
+      NSMouseInRect(point, bottomCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM;
   }
 
   return panel::RESIZE_NONE;
@@ -224,7 +247,7 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   // the cursor will flicker. Disable cursor rects and grab the current cursor
   // so we can set it on mouseDragged: events to avoid flicker.
   [[self window] disableCursorRects];
-  dragCursor_.reset([NSCursor currentCursor], base::scoped_policy::RETAIN);
+  dragCursor_.reset([[NSCursor currentCursor] retain]);
 }
 
 - (void)cleanupAfterDrag {
@@ -267,54 +290,68 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   NSRect bounds = [self bounds];
 
   // Left vertical edge.
-  leftCursorRect_ = NSMakeRect(NSMinX(bounds),
-                               NSMinY(bounds) + kWidthOfMouseResizeArea,
-                               kWidthOfMouseResizeArea,
-                               NSHeight(bounds) - 2 * kWidthOfMouseResizeArea);
-  [self addCursorRect:leftCursorRect_ cursor:eastWestCursor_];
+  if (resizability & panel::RESIZABLE_LEFT) {
+    leftCursorRect_ = NSMakeRect(
+        NSMinX(bounds),
+        NSMinY(bounds) + kWidthOfMouseResizeArea,
+        kWidthOfMouseResizeArea,
+        NSHeight(bounds) - 2 * kWidthOfMouseResizeArea);
+    [self addCursorRect:leftCursorRect_ cursor:eastWestCursor_];
+  }
 
   // Right vertical edge.
-  rightCursorRect_ = leftCursorRect_;
-  rightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
-  [self addCursorRect:rightCursorRect_ cursor:eastWestCursor_];
+  if (resizability & panel::RESIZABLE_RIGHT) {
+    rightCursorRect_ = leftCursorRect_;
+    rightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
+    [self addCursorRect:rightCursorRect_ cursor:eastWestCursor_];
+  }
 
   // Top horizontal edge.
-  topCursorRect_ = NSMakeRect(NSMinX(bounds) + kWidthOfMouseResizeArea,
-                              NSMaxY(bounds) - kWidthOfMouseResizeArea,
-                              NSWidth(bounds) - 2 * kWidthOfMouseResizeArea,
-                              kWidthOfMouseResizeArea);
-  [self addCursorRect:topCursorRect_ cursor:northSouthCursor_];
+  if (resizability & panel::RESIZABLE_TOP) {
+    topCursorRect_ = NSMakeRect(NSMinX(bounds) + kWidthOfMouseResizeArea,
+                                NSMaxY(bounds) - kWidthOfMouseResizeArea,
+                                NSWidth(bounds) - 2 * kWidthOfMouseResizeArea,
+                                kWidthOfMouseResizeArea);
+    [self addCursorRect:topCursorRect_ cursor:northSouthCursor_];
+  }
 
   // Top left corner.
-  topLeftCursorRect_ = NSMakeRect(NSMinX(bounds),
-                                  NSMaxY(bounds) - kWidthOfMouseResizeArea,
-                                  kWidthOfMouseResizeArea,
-                                  NSMaxY(bounds));
-  [self addCursorRect:topLeftCursorRect_ cursor:northWestSouthEastCursor_];
+  if (resizability & panel::RESIZABLE_TOP_LEFT) {
+    topLeftCursorRect_ = NSMakeRect(NSMinX(bounds),
+                                    NSMaxY(bounds) - kWidthOfMouseResizeArea,
+                                    kWidthOfMouseResizeArea,
+                                    NSMaxY(bounds));
+    [self addCursorRect:topLeftCursorRect_ cursor:northWestSouthEastCursor_];
+  }
 
   // Top right corner.
-  topRightCursorRect_ = topLeftCursorRect_;
-  topRightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
-  [self addCursorRect:topRightCursorRect_ cursor:northEastSouthWestCursor_];
-
-  // Bottom edge is not always resizable.
-  if (panel::RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM == resizability)
-    return;
+  if (resizability & panel::RESIZABLE_TOP_RIGHT) {
+    topRightCursorRect_ = topLeftCursorRect_;
+    topRightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
+    [self addCursorRect:topRightCursorRect_ cursor:northEastSouthWestCursor_];
+  }
 
   // Bottom horizontal edge.
-  bottomCursorRect_ = topCursorRect_;
-  bottomCursorRect_.origin.y = NSMinY(bounds);
-  [self addCursorRect:bottomCursorRect_ cursor:northSouthCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM) {
+    bottomCursorRect_ = topCursorRect_;
+    bottomCursorRect_.origin.y = NSMinY(bounds);
+    [self addCursorRect:bottomCursorRect_ cursor:northSouthCursor_];
+  }
 
   // Bottom right corner.
-  bottomRightCursorRect_ = topRightCursorRect_;
-  bottomRightCursorRect_.origin.y = NSMinY(bounds);
-  [self addCursorRect:bottomRightCursorRect_ cursor:northWestSouthEastCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM_RIGHT) {
+    bottomRightCursorRect_ = topRightCursorRect_;
+    bottomRightCursorRect_.origin.y = NSMinY(bounds);
+    [self addCursorRect:bottomRightCursorRect_
+                 cursor:northWestSouthEastCursor_];
+  }
 
   // Bottom left corner.
-  bottomLeftCursorRect_ = bottomRightCursorRect_;
-  bottomLeftCursorRect_.origin.x = NSMinX(bounds);
-  [self addCursorRect:bottomLeftCursorRect_ cursor:northEastSouthWestCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM_LEFT) {
+    bottomLeftCursorRect_ = bottomRightCursorRect_;
+    bottomLeftCursorRect_.origin.x = NSMinX(bounds);
+    [self addCursorRect:bottomLeftCursorRect_ cursor:northEastSouthWestCursor_];
+  }
 }
 @end
 
@@ -349,23 +386,6 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
         [[TabContentsController alloc] initWithContents:nil]);
   }
   return self;
-}
-
-- (ui::ThemeProvider*)themeProvider {
-  return ThemeServiceFactory::GetForProfile(
-      windowShim_->panel()->profile());
-}
-
-- (ThemedWindowStyle)themedWindowStyle {
-  ThemedWindowStyle style = THEMED_POPUP;
-  if (windowShim_->panel()->profile()->IsOffTheRecord())
-    style |= THEMED_INCOGNITO;
-  return style;
-}
-
-- (NSPoint)themePatternPhase {
-  NSView* windowView = [[[self window] contentView] superview];
-  return [BrowserWindowUtils themePatternPhaseFor:windowView withTabStrip:nil];
 }
 
 - (void)awakeFromNib {
@@ -511,8 +531,8 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 
 - (void)updateTitleBarMinimizeRestoreButtonVisibility {
   Panel* panel = windowShim_->panel();
-  [titlebar_view_ setMinimizeButtonVisibility:panel->CanMinimize()];
-  [titlebar_view_ setRestoreButtonVisibility:panel->CanRestore()];
+  [titlebar_view_ setMinimizeButtonVisibility:panel->CanShowMinimizeButton()];
+  [titlebar_view_ setRestoreButtonVisibility:panel->CanShowRestoreButton()];
 }
 
 - (void)webContentsInserted:(WebContents*)contents {
@@ -531,49 +551,32 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 }
 
 // Called to validate menu and toolbar items when this window is key. All the
-// items we care about have been set with the |-commandDispatch:| or
-// |-commandDispatchUsingKeyModifiers:| actions and a target of FirstResponder
-// in IB. If it's not one of those, let it continue up the responder chain to be
-// handled elsewhere.
+// items we care about have been set with the |-commandDispatch:|
+// action and a target of FirstResponder in IB.
+// Delegate to the NSApp delegate if Panel does not care about the command or
+// shortcut, to make sure the global items in Chrome main app menu still work.
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
-  SEL action = [item action];
-  BOOL enable = NO;
-  if (action == @selector(commandDispatch:) ||
-      action == @selector(commandDispatchUsingKeyModifiers:)) {
+  if ([item action] == @selector(commandDispatch:)) {
     NSInteger tag = [item tag];
     CommandUpdater* command_updater = windowShim_->panel()->command_updater();
-    if (command_updater->SupportsCommand(tag)) {
-      enable = command_updater->IsCommandEnabled(tag);
-      // Special handling for the contents of the Text Encoding submenu. On
-      // Mac OS, instead of enabling/disabling the top-level menu item, we
-      // enable/disable the submenu's contents (per Apple's HIG).
-      EncodingMenuController encoding_controller;
-      if (encoding_controller.DoesCommandBelongToEncodingMenu(tag)) {
-        enable &= command_updater->IsCommandEnabled(IDC_ENCODING_MENU) ?
-            YES : NO;
-      }
-    }
+    if (command_updater->SupportsCommand(tag))
+      return command_updater->IsCommandEnabled(tag);
+    else
+      return [[NSApp delegate] validateUserInterfaceItem:item];
   }
-  return enable;
+  return NO;
 }
 
 // Called when the user picks a menu or toolbar item when this window is key.
-// Calls through to the panel object to execute the command.
+// Calls through to the panel object to execute the command or delegates up.
 - (void)commandDispatch:(id)sender {
   DCHECK(sender);
-  windowShim_->panel()->ExecuteCommandIfEnabled([sender tag]);
-}
-
-// Same as |-commandDispatch:|, but executes commands using a disposition
-// determined by the key flags.
-- (void)commandDispatchUsingKeyModifiers:(id)sender {
-  DCHECK(sender);
-  NSEvent* event = [NSApp currentEvent];
-  WindowOpenDisposition disposition =
-      event_utils::WindowOpenDispositionFromNSEventWithFlags(
-          event, [event modifierFlags]);
-  windowShim_->panel()->ExecuteCommandWithDisposition(
-      [sender tag], disposition);
+  NSInteger tag = [sender tag];
+  CommandUpdater* command_updater = windowShim_->panel()->command_updater();
+  if (command_updater->SupportsCommand(tag))
+    windowShim_->panel()->ExecuteCommandIfEnabled(tag);
+  else
+    [[NSApp delegate] commandDispatch:sender];
 }
 
 // Handler for the custom Close button.
@@ -806,19 +809,13 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   if ([NSApp isActive] && ([NSApp keyWindow] == [self window]))
     return;
 
-  // We need to deactivate the controls (in the "WebView"). To do this, get the
-  // selected WebContents's RenderWidgetHostView and tell it to deactivate.
-  if (WebContents* contents = [contentsController_ webContents]) {
-    if (content::RenderWidgetHostView* rwhv =
-        contents->GetRenderWidgetHostView())
-      rwhv->SetActive(false);
-  }
-
-  windowShim_->panel()->OnActiveStateChanged(false);
+  [self onWindowDidResignKey];
 }
 
 - (void)activate {
-  AutoReset<BOOL> pin(&activationRequestedByPanel_, true);
+  // Activate the window. -|windowDidBecomeKey:| will be called when
+  // window becomes active.
+  base::AutoReset<BOOL> pin(&activationRequestedByPanel_, true);
   [BrowserWindowUtils activateWindowForController:self];
 }
 
@@ -829,8 +826,19 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   // Cocoa does not support deactivating a window, so we deactivate the app.
   [NSApp deactivate];
 
-  // Deactivating the app does not trigger windowDidResignKey so the panel
-  // doesn't know it's active status has changed. Let the window know.
+  // Deactivating the app does not trigger windowDidResignKey. Do it manually.
+  [self onWindowDidResignKey];
+}
+
+- (void)onWindowDidResignKey {
+  // We need to deactivate the controls (in the "WebView"). To do this, get the
+  // selected WebContents's RenderWidgetHostView and tell it to deactivate.
+  if (WebContents* contents = [contentsController_ webContents]) {
+    if (content::RenderWidgetHostView* rwhv =
+        contents->GetRenderWidgetHostView())
+      rwhv->SetActive(false);
+  }
+
   windowShim_->panel()->OnActiveStateChanged(false);
 }
 

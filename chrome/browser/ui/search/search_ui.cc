@@ -4,33 +4,12 @@
 
 #include "chrome/browser/ui/search/search_ui.h"
 
-#include "ui/gfx/font.h"
-
 namespace chrome {
 namespace search {
 
-const SkColor kNTPBackgroundColor = SkColorSetRGB(0xF5, 0xF5, 0xF5);
-const SkColor kNTPPlaceholderTextColor = SkColorSetRGB(0xBB, 0xBB, 0xBB);
-const SkColor kOmniboxBackgroundColor = SkColorSetARGB(0x80, 0xFF, 0xFF, 0xFF);
-const SkColor kResultsSeparatorColor = SkColorSetRGB(0xD9, 0xD9, 0xD9);
-const SkColor kSearchBackgroundColor = SK_ColorWHITE;
-const SkColor kSuggestBackgroundColor = SkColorSetRGB(0xEF, 0xEF, 0xEF);
-
-const int kOmniboxFontSize = 16;
-const int kLogoYPosition = 130;
-const int kLogoBottomGap = 24;
-const int kNTPOmniboxHeight = 44;
-const int kOmniboxBottomGap = 4;
-const int kSearchResultsHeight = 122;
-
-gfx::Font GetNTPOmniboxFont(const gfx::Font& font) {
-  const int kNTPOmniboxFontSize = 18;
-  return font.DeriveFont(kNTPOmniboxFontSize - font.GetFontSize());
+SkColor GetBookmarkBarNoThemeSeparatorColor() {
+  return SkColorSetARGB(25, 0, 0, 0);  // 10% black
 }
 
-int GetNTPOmniboxHeight(const gfx::Font& font) {
-  return std::max(GetNTPOmniboxFont(font).GetHeight(), kNTPOmniboxHeight);
-}
-
-} //  namespace search
-} //  namespace chrome
+}  // namespace search
+}  // namespace chrome

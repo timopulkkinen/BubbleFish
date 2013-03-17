@@ -12,7 +12,7 @@
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/worker_pool.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -35,13 +35,18 @@
 #include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
 using extensions::Extension;
 
+namespace performance_monitor {
+
 namespace {
+
 const uint32 kAccessFlags = base::kProcessAccessDuplicateHandle |
                             base::kProcessAccessQueryInformation |
                             base::kProcessAccessTerminate |
@@ -62,9 +67,30 @@ bool StringToTime(std::string time, base::Time* output) {
   return true;
 }
 
-}  // namespace
+// Try to get the URL for the RenderViewHost if the host does not correspond to
+// an incognito profile (we don't store URLs from incognito sessions). Returns
+// true if url has been populated, and false otherwise.
+bool MaybeGetURLFromRenderView(const content::RenderViewHost* view,
+                               std::string* url) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderViewHost(view);
 
-namespace performance_monitor {
+  if (Profile::FromBrowserContext(
+          web_contents->GetBrowserContext())->IsOffTheRecord()) {
+    return false;
+  }
+
+  *url = web_contents->GetURL().spec();
+  return true;
+}
+
+// Takes ownership of and deletes |database| on the background thread, so as to
+// avoid destruction in the middle of an operation.
+void DeleteDatabaseOnBackgroundThread(Database* database) {
+  delete database;
+}
+
+}  // namespace
 
 bool PerformanceMonitor::initialized_ = false;
 
@@ -77,9 +103,13 @@ PerformanceMonitor::PerformanceMonitor() : database_(NULL),
 }
 
 PerformanceMonitor::~PerformanceMonitor() {
+  BrowserThread::PostBlockingPoolSequencedTask(
+      Database::kDatabaseSequenceToken,
+      FROM_HERE,
+      base::Bind(&DeleteDatabaseOnBackgroundThread, database_.release()));
 }
 
-bool PerformanceMonitor::SetDatabasePath(const FilePath& path) {
+bool PerformanceMonitor::SetDatabasePath(const base::FilePath& path) {
   if (!database_.get()) {
     database_path_ = path;
     return true;
@@ -207,7 +237,7 @@ void PerformanceMonitor::CheckForUncleanExits() {
 
   for (std::vector<Profile*>::const_iterator iter = profiles.begin();
        iter != profiles.end(); ++iter) {
-    if (!(*iter)->DidLastSessionExitCleanly()) {
+    if ((*iter)->GetLastSessionExitType() == Profile::EXIT_CRASHED) {
       BrowserThread::PostBlockingPoolSequencedTask(
           Database::kDatabaseSequenceToken,
           FROM_HERE,
@@ -271,14 +301,14 @@ void PerformanceMonitor::AddEvent(scoped_ptr<Event> event) {
       FROM_HERE,
       base::Bind(&PerformanceMonitor::AddEventOnBackgroundThread,
                  base::Unretained(this),
-                 base::Passed(event.Pass())));
+                 base::Passed(&event)));
 }
 
 void PerformanceMonitor::AddEventOnBackgroundThread(scoped_ptr<Event> event) {
   database_->AddEvent(*event.get());
 }
 
-void PerformanceMonitor::AddMetricOnBackgroundThread(Metric metric) {
+void PerformanceMonitor::AddMetricOnBackgroundThread(const Metric& metric) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   database_->AddMetric(metric);
 }
@@ -379,17 +409,15 @@ void PerformanceMonitor::UpdateLiveProfiles() {
   scoped_ptr<std::set<std::string> > active_profiles(
       new std::set<std::string>());
 
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
-    active_profiles->insert((*iter)->profile()->GetDebugName());
-  }
+  for (chrome::BrowserIterator it; !it.done(); it.Next())
+    active_profiles->insert(it->profile()->GetDebugName());
 
   BrowserThread::PostBlockingPoolSequencedTask(
       Database::kDatabaseSequenceToken,
       FROM_HERE,
       base::Bind(&PerformanceMonitor::UpdateLiveProfilesHelper,
                  base::Unretained(this),
-                 base::Passed(active_profiles.Pass()),
+                 base::Passed(&active_profiles),
                  time));
 }
 
@@ -432,7 +460,7 @@ void PerformanceMonitor::CallInsertIOData() {
 }
 
 void PerformanceMonitor::InsertIOData(
-    PerformanceDataForIOThread performance_data_for_io_thread) {
+    const PerformanceDataForIOThread& performance_data_for_io_thread) {
   CHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   database_->AddMetric(
       Metric(METRIC_NETWORK_BYTES_READ,
@@ -477,11 +505,14 @@ void PerformanceMonitor::Observe(int type,
     case chrome::NOTIFICATION_CRX_INSTALLER_DONE: {
       const extensions::CrxInstaller* installer =
           content::Source<extensions::CrxInstaller>(source).ptr();
+      const extensions::Extension* extension =
+          content::Details<Extension>(details).ptr();
 
-      // Check if the reason for the install was due to an extension update.
-      if (installer->install_cause() == extension_misc::INSTALL_CAUSE_UPDATE) {
-        AddExtensionEvent(EVENT_EXTENSION_UPDATE,
-                          content::Details<Extension>(details).ptr());
+      // Check if the reason for the install was due to a successful
+      // extension update. |extension| is NULL in case of install failure.
+      if (extension &&
+          installer->install_cause() == extension_misc::INSTALL_CAUSE_UPDATE) {
+        AddExtensionEvent(EVENT_EXTENSION_UPDATE, extension);
       }
       break;
     }
@@ -491,20 +522,28 @@ void PerformanceMonitor::Observe(int type,
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_HANG: {
-      content::WebContents* contents =
-          content::Source<content::WebContents>(source).ptr();
-      AddEvent(util::CreateRendererFreezeEvent(base::Time::Now(),
-                                               contents->GetURL().spec()));
+      std::string url;
+      content::RenderWidgetHost* widget =
+          content::Source<content::RenderWidgetHost>(source).ptr();
+      if (widget->IsRenderView()) {
+        content::RenderViewHost* view = content::RenderViewHost::From(widget);
+        MaybeGetURLFromRenderView(view, &url);
+      }
+      AddEvent(util::CreateRendererFailureEvent(base::Time::Now(),
+                                                EVENT_RENDERER_HANG,
+                                                url));
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-      AddCrashEvent(*content::Details<
-          content::RenderProcessHost::RendererClosedDetails>(details).ptr());
+      AddRendererClosedEvent(
+          content::Source<content::RenderProcessHost>(source).ptr(),
+          *content::Details<content::RenderProcessHost::RendererClosedDetails>(
+              details).ptr());
       break;
     }
     case chrome::NOTIFICATION_PROFILE_ADDED: {
       Profile* profile = content::Source<Profile>(source).ptr();
-      if (!profile->DidLastSessionExitCleanly()) {
+      if (profile->GetLastSessionExitType() == Profile::EXIT_CRASHED) {
         BrowserThread::PostBlockingPoolSequencedTask(
             Database::kDatabaseSequenceToken,
             FROM_HERE,
@@ -556,7 +595,8 @@ void PerformanceMonitor::AddExtensionEvent(EventType type,
                                       extension->description()));
 }
 
-void PerformanceMonitor::AddCrashEvent(
+void PerformanceMonitor::AddRendererClosedEvent(
+    content::RenderProcessHost* host,
     const content::RenderProcessHost::RendererClosedDetails& details) {
   // We only care if this is an invalid termination.
   if (details.status == base::TERMINATION_STATUS_NORMAL_TERMINATION ||
@@ -566,9 +606,36 @@ void PerformanceMonitor::AddCrashEvent(
   // Determine the type of crash.
   EventType type =
       details.status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ?
-      EVENT_KILLED_BY_OS_CRASH : EVENT_RENDERER_CRASH;
+      EVENT_RENDERER_KILLED : EVENT_RENDERER_CRASH;
 
-  AddEvent(util::CreateCrashEvent(base::Time::Now(), type));
+  content::RenderProcessHost::RenderWidgetHostsIterator iter =
+      host->GetRenderWidgetHostsIterator();
+
+  // A RenderProcessHost may contain multiple render views - for each valid
+  // render view, extract the url, and append it to the string, comma-separating
+  // the entries.
+  std::string url_list;
+  for (; !iter.IsAtEnd(); iter.Advance()) {
+    const content::RenderWidgetHost* widget = iter.GetCurrentValue();
+    DCHECK(widget);
+    if (!widget || !widget->IsRenderView())
+      continue;
+
+    content::RenderViewHost* view =
+        content::RenderViewHost::From(
+            const_cast<content::RenderWidgetHost*>(widget));
+
+    std::string url;
+    if (!MaybeGetURLFromRenderView(view, &url))
+      continue;
+
+    if (!url_list.empty())
+      url_list += ", ";
+
+    url_list += url;
+  }
+
+  AddEvent(util::CreateRendererFailureEvent(base::Time::Now(), type, url_list));
 }
 
 }  // namespace performance_monitor

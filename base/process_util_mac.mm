@@ -28,12 +28,13 @@
 #include <string>
 
 #include "base/debug/debugger.h"
-#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_mach_port.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_local.h"
@@ -446,13 +447,10 @@ double ProcessMetrics::GetCPUUsage() {
   if (time_delta == 0)
     return 0;
 
-  // We add time_delta / 2 so the result is rounded.
-  double cpu = static_cast<double>((system_time_delta * 100.0) / time_delta);
-
   last_system_time_ = task_time;
   last_time_ = time;
 
-  return cpu;
+  return static_cast<double>(system_time_delta * 100.0) / time_delta;
 }
 
 mach_port_t ProcessMetrics::TaskForPid(ProcessHandle process) const {
@@ -468,7 +466,7 @@ mach_port_t ProcessMetrics::TaskForPid(ProcessHandle process) const {
 
 // Bytes committed by the system.
 size_t GetSystemCommitCharge() {
-  host_name_port_t host = mach_host_self();
+  base::mac::ScopedMachPort host(mach_host_self());
   mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
   vm_statistics_data_t data;
   kern_return_t kr = host_statistics(host, HOST_VM_INFO,
@@ -566,7 +564,7 @@ class ScopedClearErrno {
 };
 
 // Combines ThreadLocalBoolean with AutoReset.  It would be convenient
-// to compose ThreadLocalPointer<bool> with AutoReset<bool>, but that
+// to compose ThreadLocalPointer<bool> with base::AutoReset<bool>, but that
 // would require allocating some storage for the bool.
 class ThreadLocalBooleanAutoReset {
  public:
@@ -589,6 +587,8 @@ class ThreadLocalBooleanAutoReset {
 base::LazyInstance<ThreadLocalBoolean>::Leaky
     g_unchecked_malloc = LAZY_INSTANCE_INITIALIZER;
 
+// NOTE(shess): This is called when the malloc library noticed that the heap
+// is fubar.  Avoid calls which will re-enter the malloc library.
 void CrMallocErrorBreak() {
   g_original_malloc_error_break();
 
@@ -601,8 +601,18 @@ void CrMallocErrorBreak() {
     return;
 
   // A unit test checks this error message, so it needs to be in release builds.
-  PLOG(ERROR) <<
-      "Terminating process due to a potential for future heap corruption";
+  char buf[1024] =
+      "Terminating process due to a potential for future heap corruption: "
+      "errno=";
+  char errnobuf[] = {
+    '0' + ((errno / 100) % 10),
+    '0' + ((errno / 10) % 10),
+    '0' + (errno % 10),
+    '\000'
+  };
+  COMPILE_ASSERT(ELAST <= 999, errno_too_large_to_encode);
+  strlcat(buf, errnobuf, sizeof(buf));
+  RAW_LOG(ERROR, buf);
 
   // Crash by writing to NULL+errno to allow analyzing errno from
   // crash dump info (setting a breakpad key would re-enter the malloc
@@ -622,6 +632,12 @@ void EnableTerminationOnHeapCorruption() {
   // by AddressSanitizer.
   return;
 #endif
+
+  // Only override once, otherwise CrMallocErrorBreak() will recurse
+  // to itself.
+  if (g_original_malloc_error_break)
+    return;
+
   malloc_error_break_t malloc_error_break = LookUpMallocErrorBreak();
   if (!malloc_error_break) {
     DLOG(WARNING) << "Could not find malloc_error_break";
@@ -802,8 +818,7 @@ void oom_killer_new() {
 // === Core Foundation CFAllocators ===
 
 bool CanGetContextForCFAllocator() {
-  return !base::mac::
-      IsOSDangerouslyLaterThanMountainLionForUseByCFAllocatorReplacement();
+  return !base::mac::IsOSLaterThanMountainLion_DontCallThis();
 }
 
 CFAllocatorContext* ContextForCFAllocator(CFAllocatorRef allocator) {
@@ -1189,14 +1204,14 @@ void WaitForChildToDie(pid_t child, int timeout) {
       // Keep track of the elapsed time to be able to restart kevent if it's
       // interrupted.
       TimeDelta remaining_delta = TimeDelta::FromSeconds(timeout);
-      Time deadline = Time::Now() + remaining_delta;
+      TimeTicks deadline = TimeTicks::Now() + remaining_delta;
       result = -1;
       struct kevent event = {0};
       while (remaining_delta.InMilliseconds() > 0) {
         const struct timespec remaining_timespec = remaining_delta.ToTimeSpec();
         result = kevent(kq, NULL, 0, &event, 1, &remaining_timespec);
         if (result == -1 && errno == EINTR) {
-          remaining_delta = deadline - Time::Now();
+          remaining_delta = deadline - TimeTicks::Now();
           result = 0;
         } else {
           break;

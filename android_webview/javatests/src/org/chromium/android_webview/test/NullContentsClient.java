@@ -5,8 +5,15 @@
 package org.chromium.android_webview.test;
 
 import android.content.Context;
+import android.graphics.Picture;
+import android.net.http.SslError;
+import android.os.Message;
 import android.view.KeyEvent;
+import android.view.View;
 import android.webkit.ConsoleMessage;
+import android.webkit.GeolocationPermissions;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwHttpAuthHandler;
@@ -20,12 +27,20 @@ import org.chromium.android_webview.JsResultReceiver;
  */
 class NullContentsClient extends AwContentsClient {
     @Override
-    public boolean shouldOverrideUrlLoading(String url) {
+    public boolean shouldIgnoreNavigation(String url) {
         return false;
     }
 
     @Override
     public void onUnhandledKeyEvent(KeyEvent event) {
+    }
+
+    @Override
+    public void getVisitedHistory(ValueCallback<String[]> callback) {
+    }
+
+    @Override
+    public void doUpdateVisitedHistory(String url, boolean isReload) {
     }
 
     @Override
@@ -38,6 +53,10 @@ class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void onLoadResource(String url) {
+    }
+
+    @Override
     public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
         return false;
     }
@@ -45,6 +64,24 @@ class NullContentsClient extends AwContentsClient {
     @Override
     public void onReceivedHttpAuthRequest(AwHttpAuthHandler handler, String host, String realm) {
         handler.cancel();
+    }
+
+    @Override
+    public void onReceivedSslError(ValueCallback<Boolean> callback, SslError error) {
+        callback.onReceiveValue(false);
+    }
+
+    @Override
+    public void onReceivedLoginRequest(String realm, String account, String args) {
+    }
+
+    @Override
+    public void onGeolocationPermissionsShowPrompt(String origin,
+            GeolocationPermissions.Callback callback) {
+    }
+
+    @Override
+    public void onGeolocationPermissionsHidePrompt() {
     }
 
     @Override
@@ -70,6 +107,10 @@ class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void onNewPicture(Picture picture) {
+    }
+
+    @Override
     public void onPageStarted(String url) {
     }
 
@@ -79,5 +120,40 @@ class NullContentsClient extends AwContentsClient {
 
     @Override
     public void onReceivedError(int errorCode, String description, String failingUrl) {
+    }
+
+    @Override
+    public void onFormResubmission(Message dontResend, Message resend) {
+        dontResend.sendToTarget();
+    }
+
+    @Override
+    public void onDownloadStart(String url,
+                                String userAgent,
+                                String contentDisposition,
+                                String mimeType,
+                                long contentLength) {
+    }
+
+    @Override
+    public boolean onCreateWindow(boolean isDialog, boolean isUserGesture) {
+        return false;
+    }
+
+    @Override
+    public void onCloseWindow() {
+    }
+
+    @Override
+    public void onRequestFocus() {
+    }
+
+    @Override
+    public void onShowCustomView(View view,
+           int requestedOrientation, WebChromeClient.CustomViewCallback callback) {
+    }
+
+    @Override
+    public void onScaleChangedScaled(float oldScale, float newScale) {
     }
 }

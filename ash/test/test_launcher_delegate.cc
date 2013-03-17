@@ -5,6 +5,7 @@
 #include "ash/test/test_launcher_delegate.h"
 
 #include "ash/launcher/launcher_model.h"
+#include "ash/launcher/launcher_util.h"
 #include "ash/wm/window_util.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_resources.h"
@@ -59,15 +60,13 @@ void TestLauncherDelegate::OnWillRemoveWindow(aura::Window* window) {
   }
 }
 
-void TestLauncherDelegate::CreateNewTab() {
-}
-
-void TestLauncherDelegate::CreateNewWindow() {
+void TestLauncherDelegate::OnBrowserShortcutClicked(int event_flags) {
 }
 
 void TestLauncherDelegate::ItemClicked(const ash::LauncherItem& item,
-                                       int event_flags) {
+                                       const ui::Event& event) {
   aura::Window* window = GetWindowByID(item.id);
+  launcher::MoveToEventRootIfPanel(window, event);
   window->Show();
   ash::wm::ActivateWindow(window);
 }
@@ -77,15 +76,18 @@ int TestLauncherDelegate::GetBrowserShortcutResourceId() {
 }
 
 string16 TestLauncherDelegate::GetTitle(const ash::LauncherItem& item) {
-  return GetWindowByID(item.id)->title();
+  aura::Window* window = GetWindowByID(item.id);
+  return window ? window->title() : string16();
 }
 
 ui::MenuModel* TestLauncherDelegate::CreateContextMenu(
-    const ash::LauncherItem& item) {
+    const ash::LauncherItem& item,
+    aura::RootWindow* root) {
   return NULL;
 }
 
-ui::MenuModel* TestLauncherDelegate::CreateContextMenuForLauncher() {
+ash::LauncherMenuModel* TestLauncherDelegate::CreateApplicationMenu(
+    const ash::LauncherItem& item) {
   return NULL;
 }
 

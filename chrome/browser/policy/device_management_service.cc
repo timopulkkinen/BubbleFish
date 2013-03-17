@@ -13,6 +13,7 @@
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/basic_http_user_agent_settings.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -52,6 +53,9 @@ const char kPostContentType[] = "application/protobuf";
 const char kServiceTokenAuthHeader[] = "Authorization: GoogleLogin auth=";
 const char kDMTokenAuthHeader[] = "Authorization: GoogleDMToken token=";
 
+// Number of times to retry on ERR_NETWORK_CHANGED errors.
+const int kMaxNetworkChangedRetries = 3;
+
 // HTTP Error Codes of the DM Server with their concrete meanings in the context
 // of the DM Server communication.
 const int kSuccess = 200;
@@ -59,14 +63,14 @@ const int kInvalidArgument = 400;
 const int kInvalidAuthCookieOrDMToken = 401;
 const int kMissingLicenses = 402;
 const int kDeviceManagementNotAllowed = 403;
-const int kInvalidURL = 404; // This error is not coming from the GFE.
+const int kInvalidURL = 404;  // This error is not coming from the GFE.
 const int kInvalidSerialNumber = 405;
 const int kDeviceIdConflict = 409;
 const int kDeviceNotFound = 410;
 const int kPendingApproval = 412;
 const int kInternalServerError = 500;
 const int kServiceUnavailable = 503;
-const int kPolicyNotFound = 902; // This error is not sent as HTTP status code.
+const int kPolicyNotFound = 902;  // This error is not sent as HTTP status code.
 
 #if defined(OS_CHROMEOS)
 // Machine info keys.
@@ -89,9 +93,36 @@ bool IsProxyError(const net::URLRequestStatus status) {
   return false;
 }
 
-bool IsProtobufMimeType(const net::URLFetcher* source) {
-  return source->GetResponseHeaders()->HasHeaderValue(
+bool IsProtobufMimeType(const net::URLFetcher* fetcher) {
+  return fetcher->GetResponseHeaders()->HasHeaderValue(
       "content-type", "application/x-protobuffer");
+}
+
+bool FailedWithProxy(const net::URLFetcher* fetcher) {
+  if ((fetcher->GetLoadFlags() & net::LOAD_BYPASS_PROXY) != 0) {
+    // The request didn't use a proxy.
+    return false;
+  }
+
+  if (!fetcher->GetStatus().is_success() &&
+      IsProxyError(fetcher->GetStatus())) {
+    LOG(WARNING) << "Proxy failed while contacting dmserver.";
+    return true;
+  }
+
+  if (fetcher->GetStatus().is_success() &&
+      fetcher->GetResponseCode() == kSuccess &&
+      fetcher->WasFetchedViaProxy() &&
+      !IsProtobufMimeType(fetcher)) {
+    // The proxy server can be misconfigured but pointing to an existing
+    // server that replies to requests. Try to recover if a successful
+    // request that went through a proxy returns an unexpected mime type.
+    LOG(WARNING) << "Got bad mime-type in response from dmserver that was "
+                 << "fetched via a proxy.";
+    return true;
+  }
+
+  return false;
 }
 
 const char* UserAffiliationToString(UserAffiliation affiliation) {
@@ -139,7 +170,7 @@ const std::string& GetPlatformString() {
     return platform;
 
   std::string os_name(base::SysInfo::OperatingSystemName());
-  std::string os_hardware(base::SysInfo::CPUArchitecture());
+  std::string os_hardware(base::SysInfo::OperatingSystemArchitecture());
 
 #if defined(OS_CHROMEOS)
   chromeos::system::StatisticsProvider* provider =
@@ -185,12 +216,13 @@ class DeviceManagementRequestContext : public net::URLRequestContext {
   virtual ~DeviceManagementRequestContext();
 
  private:
-  // Overridden from net::URLRequestContext:
-  virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
+  BasicHttpUserAgentSettings basic_http_user_agent_settings_;
 };
 
 DeviceManagementRequestContext::DeviceManagementRequestContext(
-    net::URLRequestContext* base_context) {
+    net::URLRequestContext* base_context)
+    // Use sane Accept-Language and Accept-Charset values for our purposes.
+    : basic_http_user_agent_settings_("*", "*") {
   // Share resolver, proxy service and ssl bits with the baseline context. This
   // is important so we don't make redundant requests (e.g. when resolving proxy
   // auto configuration).
@@ -207,18 +239,11 @@ DeviceManagementRequestContext::DeviceManagementRequestContext(
   // No cookies, please.
   set_cookie_store(new net::CookieMonster(NULL, NULL));
 
-  // Initialize these to sane values for our purposes.
-  set_accept_language("*");
-  set_accept_charset("*");
+  set_http_user_agent_settings(&basic_http_user_agent_settings_);
 }
 
 DeviceManagementRequestContext::~DeviceManagementRequestContext() {
   delete http_transaction_factory();
-}
-
-const std::string& DeviceManagementRequestContext::GetUserAgent(
-    const GURL& url) const {
-  return content::GetUserAgent(url);
 }
 
 // Request context holder.
@@ -280,6 +305,14 @@ class DeviceManagementRequestJobImpl : public DeviceManagementRequestJob {
   // Configures the fetcher, setting up payload and headers.
   void ConfigureRequest(net::URLFetcher* fetcher);
 
+  // Returns true if this job should be retried. |fetcher| has just completed,
+  // and can be inspected to determine if the request failed and should be
+  // retried.
+  bool ShouldRetry(const net::URLFetcher* fetcher);
+
+  // Invoked right before retrying this job.
+  void PrepareRetry();
+
  protected:
   // DeviceManagementRequestJob:
   virtual void Run() OVERRIDE;
@@ -291,6 +324,12 @@ class DeviceManagementRequestJobImpl : public DeviceManagementRequestJob {
   // Pointer to the service this job is associated with.
   DeviceManagementService* service_;
 
+  // Whether the BYPASS_PROXY flag should be set by ConfigureRequest().
+  bool bypass_proxy_;
+
+  // Number of times that this job has been retried due to ERR_NETWORK_CHANGED.
+  int retries_count_;
+
   DISALLOW_COPY_AND_ASSIGN(DeviceManagementRequestJobImpl);
 };
 
@@ -298,7 +337,9 @@ DeviceManagementRequestJobImpl::DeviceManagementRequestJobImpl(
     JobType type,
     DeviceManagementService* service)
     : DeviceManagementRequestJob(type),
-      service_(service) {}
+      service_(service),
+      bypass_proxy_(false),
+      retries_count_(0) {}
 
 DeviceManagementRequestJobImpl::~DeviceManagementRequestJobImpl() {
   service_->RemoveJob(this);
@@ -340,7 +381,7 @@ void DeviceManagementRequestJobImpl::HandleResponse(
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID);
       return;
     case kMissingLicenses:
-      ReportError(DM_STATUS_MISSING_LICENSES);
+      ReportError(DM_STATUS_SERVICE_MISSING_LICENSES);
       return;
     case kDeviceManagementNotAllowed:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED);
@@ -394,6 +435,10 @@ GURL DeviceManagementRequestJobImpl::GetURL(
 
 void DeviceManagementRequestJobImpl::ConfigureRequest(
     net::URLFetcher* fetcher) {
+  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                        net::LOAD_DO_NOT_SAVE_COOKIES |
+                        net::LOAD_DISABLE_CACHE |
+                        (bypass_proxy_ ? net::LOAD_BYPASS_PROXY : 0));
   std::string payload;
   CHECK(request_.SerializeToString(&payload));
   fetcher->SetUploadData(kPostContentType, payload);
@@ -403,6 +448,35 @@ void DeviceManagementRequestJobImpl::ConfigureRequest(
   if (!dm_token_.empty())
     extra_headers += kDMTokenAuthHeader + dm_token_ + "\n";
   fetcher->SetExtraRequestHeaders(extra_headers);
+}
+
+bool DeviceManagementRequestJobImpl::ShouldRetry(
+    const net::URLFetcher* fetcher) {
+  if (FailedWithProxy(fetcher) && !bypass_proxy_) {
+    // Retry the job if it failed due to a broken proxy, by bypassing the
+    // proxy on the next try.
+    bypass_proxy_ = true;
+    return true;
+  }
+
+  // Early device policy fetches on ChromeOS and Auto-Enrollment checks are
+  // often interrupted during ChromeOS startup when network change notifications
+  // are sent. Allowing the fetcher to retry once after that is enough to
+  // recover; allow it to retry up to 3 times just in case.
+  if (fetcher->GetStatus().error() == net::ERR_NETWORK_CHANGED &&
+      retries_count_ < kMaxNetworkChangedRetries) {
+    ++retries_count_;
+    return true;
+  }
+
+  // The request didn't fail, or the limit of retry attempts has been reached;
+  // forward the result to the job owner.
+  return false;
+}
+
+void DeviceManagementRequestJobImpl::PrepareRetry() {
+  if (!retry_callback_.is_null())
+    retry_callback_.Run(this);
 }
 
 void DeviceManagementRequestJobImpl::ReportError(DeviceManagementStatus code) {
@@ -446,6 +520,11 @@ DeviceManagementRequestJob::DeviceManagementRequestJob(JobType type) {
   AddParameter(dm_protocol::kParamPlatform, GetPlatformString());
 }
 
+void DeviceManagementRequestJob::SetRetryCallback(
+    const RetryCallback& retry_callback) {
+  retry_callback_ = retry_callback;
+}
+
 void DeviceManagementRequestJob::Start(const Callback& callback) {
   callback_ = callback;
   Run();
@@ -455,6 +534,9 @@ void DeviceManagementRequestJob::AddParameter(const std::string& name,
                                               const std::string& value) {
   query_params_.push_back(std::make_pair(name, value));
 }
+
+// A random value that other fetchers won't likely use.
+const int DeviceManagementService::kURLFetcherID = 0xde71ce1d;
 
 DeviceManagementService::~DeviceManagementService() {
   // All running jobs should have been cancelled by now.
@@ -486,7 +568,7 @@ void DeviceManagementService::Initialize() {
   initialized_ = true;
 
   while (!queued_jobs_.empty()) {
-    StartJob(queued_jobs_.front(), false);
+    StartJob(queued_jobs_.front());
     queued_jobs_.pop_front();
   }
 }
@@ -508,14 +590,9 @@ DeviceManagementService::DeviceManagementService(
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
-void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job,
-                                       bool bypass_proxy) {
+void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job) {
   net::URLFetcher* fetcher = net::URLFetcher::Create(
-      0, job->GetURL(server_url_), net::URLFetcher::POST, this);
-  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
-                        net::LOAD_DO_NOT_SAVE_COOKIES |
-                        net::LOAD_DISABLE_CACHE |
-                        (bypass_proxy ? net::LOAD_BYPASS_PROXY : 0));
+      kURLFetcherID, job->GetURL(server_url_), net::URLFetcher::POST, this);
   fetcher->SetRequestContext(request_context_getter_.get());
   job->ConfigureRequest(fetcher);
   pending_jobs_[fetcher] = job;
@@ -533,31 +610,10 @@ void DeviceManagementService::OnURLFetchComplete(
   DeviceManagementRequestJobImpl* job = entry->second;
   pending_jobs_.erase(entry);
 
-  // Retry the job if it failed due to a broken proxy, by bypassing the
-  // proxy on the next try. Don't retry if this URLFetcher already bypassed
-  // the proxy.
-  bool retry = false;
-  if ((source->GetLoadFlags() & net::LOAD_BYPASS_PROXY) == 0) {
-    if (!source->GetStatus().is_success() &&
-        IsProxyError(source->GetStatus())) {
-      LOG(WARNING) << "Proxy failed while contacting dmserver.";
-      retry = true;
-    } else if (source->GetStatus().is_success() &&
-               source->GetResponseCode() == kSuccess &&
-               source->WasFetchedViaProxy() &&
-               !IsProtobufMimeType(source)) {
-      // The proxy server can be misconfigured but pointing to an existing
-      // server that replies to requests. Try to recover if a successful
-      // request that went through a proxy returns an unexpected mime type.
-      LOG(WARNING) << "Got bad mime-type in response from dmserver that was "
-                   << "fetched via a proxy.";
-      retry = true;
-    }
-  }
-
-  if (retry) {
-    LOG(WARNING) << "Retrying dmserver request without using a proxy.";
-    StartJob(job, true);
+  if (job->ShouldRetry(source)) {
+    VLOG(1) << "Retrying dmserver request.";
+    job->PrepareRetry();
+    StartJob(job);
   } else {
     std::string data;
     source->GetResponseAsString(&data);
@@ -569,7 +625,7 @@ void DeviceManagementService::OnURLFetchComplete(
 
 void DeviceManagementService::AddJob(DeviceManagementRequestJobImpl* job) {
   if (initialized_)
-    StartJob(job, false);
+    StartJob(job);
   else
     queued_jobs_.push_back(job);
 }

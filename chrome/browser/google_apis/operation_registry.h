@@ -9,12 +9,15 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/id_map.h"
 #include "base/observer_list.h"
 #include "base/time.h"
+#include "chrome/browser/google_apis/gdata_errorcode.h"
 
-namespace gdata {
+namespace google_apis {
+
+class OperationRegistryObserver;
 
 // Unique ID to identify each operation.
 typedef int32 OperationID;
@@ -44,7 +47,7 @@ std::string OperationTransferStateToString(OperationTransferState state);
 
 // Structure that packs progress information of each operation.
 struct OperationProgressStatus {
-  OperationProgressStatus(OperationType type, const FilePath& file_path);
+  OperationProgressStatus(OperationType type, const base::FilePath& file_path);
   // For debugging
   std::string DebugString() const;
 
@@ -53,7 +56,7 @@ struct OperationProgressStatus {
   // Type of the operation: upload/download.
   OperationType operation_type;
   // GData path of the file dealt with the current operation.
-  FilePath file_path;
+  base::FilePath file_path;
   // Current state of the transfer;
   OperationTransferState transfer_state;
   // The time when the operation is initiated.
@@ -66,24 +69,12 @@ struct OperationProgressStatus {
 };
 typedef std::vector<OperationProgressStatus> OperationProgressStatusList;
 
-
 // This class tracks all the in-flight GData operation objects and manage their
 // lifetime.
 class OperationRegistry {
  public:
   OperationRegistry();
   ~OperationRegistry();
-
-  // Observer interface for listening changes in the active set of operations.
-  class Observer {
-   public:
-    // Called when a GData operation started, made some progress, or finished.
-    virtual void OnProgressUpdate(const OperationProgressStatusList& list) = 0;
-    // Called when GData authentication failed.
-    virtual void OnAuthenticationFailed() {}
-   protected:
-    virtual ~Observer() {}
-  };
 
   // Base class for operations that this registry class can maintain.
   // NotifyStart() passes the ownership of the Operation object to the registry.
@@ -94,7 +85,7 @@ class OperationRegistry {
     explicit Operation(OperationRegistry* registry);
     Operation(OperationRegistry* registry,
               OperationType type,
-              const FilePath& file_path);
+              const base::FilePath& file_path);
     virtual ~Operation();
 
     // Cancels the ongoing operation. NotifyFinish() is called and the Operation
@@ -120,8 +111,6 @@ class OperationRegistry {
     // that it removes the existing "suspend" operation.
     void NotifySuspend();
     void NotifyResume();
-    // Notifies that authentication has failed.
-    void NotifyAuthFailed();
 
    private:
     // Does the cancellation.
@@ -136,15 +125,15 @@ class OperationRegistry {
 
   // Cancels ongoing operation for a given virtual |file_path|. Returns true if
   // the operation was found and canceled.
-  bool CancelForFilePath(const FilePath& file_path);
+  bool CancelForFilePath(const base::FilePath& file_path);
 
   // Obtains the list of currently active operations.
   OperationProgressStatusList GetProgressStatusList();
 
   // Sets an observer. The registry do NOT own observers; before destruction
   // they need to be removed from the registry.
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
+  void AddObserver(OperationRegistryObserver* observer);
+  void RemoveObserver(OperationRegistryObserver* observer);
 
   // Disables the notification suppression for testing purpose.
   void DisableNotificationFrequencyControlForTest();
@@ -160,7 +149,6 @@ class OperationRegistry {
   void OnOperationSuspend(OperationID operation);
   void OnOperationResume(Operation* operation,
                          OperationProgressStatus* new_status);
-  void OnOperationAuthFailed();
 
   bool IsFileTransferOperation(const Operation* operation) const;
 
@@ -171,15 +159,28 @@ class OperationRegistry {
   // not too high by ShouldNotifyStatusNow.
   void NotifyStatusToObservers();
 
+  // Cancels the specified operation.
+  void CancelOperation(Operation* operation);
+
   typedef IDMap<Operation, IDMapOwnPointer> OperationIDMap;
   OperationIDMap in_flight_operations_;
-  ObserverList<Observer> observer_list_;
+  ObserverList<OperationRegistryObserver> observer_list_;
   base::Time last_notification_;
   bool do_notification_frequency_control_;
 
   DISALLOW_COPY_AND_ASSIGN(OperationRegistry);
 };
 
-}  // namespace gdata
+// Observer interface for listening changes in the active set of operations.
+class OperationRegistryObserver {
+ public:
+  // Called when a GData operation started, made some progress, or finished.
+  virtual void OnProgressUpdate(const OperationProgressStatusList& list) {}
+
+ protected:
+  virtual ~OperationRegistryObserver() {}
+};
+
+}  // namespace google_apis
 
 #endif  // CHROME_BROWSER_GOOGLE_APIS_OPERATION_REGISTRY_H_

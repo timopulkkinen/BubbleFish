@@ -12,15 +12,19 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
-#include "chrome/browser/common/url_database/url_database.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/autocomplete/history_url_provider.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/in_memory_url_index.h"
+#include "chrome/browser/history/url_database.h"
 #include "chrome/browser/history/url_index_private_data.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -74,6 +78,12 @@ struct TestURLInfo {
   {"http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice",
    "Dogs & Cats & Mice & Other Animals", 1, 1, 0},
   {"https://monkeytrap.org/", "", 3, 1, 0},
+  {"http://popularsitewithpathonly.com/moo",
+   "popularsitewithpathonly.com/moo", 50, 50, 0},
+  {"http://popularsitewithroot.com/", "popularsitewithroot.com", 50, 50, 0},
+  {"http://testsearch.com/?q=thequery", "Test Search Engine", 10, 10, 0},
+  {"http://testsearch.com/", "Test Search Engine", 9, 9, 0},
+  {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0}
 };
 
 class HistoryQuickProviderTest : public testing::Test,
@@ -100,8 +110,12 @@ class HistoryQuickProviderTest : public testing::Test,
     std::set<std::string> matches_;
   };
 
-  void SetUp();
-  void TearDown();
+  static ProfileKeyedService* CreateTemplateURLService(Profile* profile) {
+    return new TemplateURLService(profile);
+  }
+
+  virtual void SetUp();
+  virtual void TearDown();
 
   virtual void GetTestData(size_t* data_count, TestURLInfo** test_data);
 
@@ -142,6 +156,8 @@ void HistoryQuickProviderTest::SetUp() {
                                            Profile::EXPLICIT_ACCESS);
   EXPECT_TRUE(history_service_);
   provider_ = new HistoryQuickProvider(this, profile_.get());
+  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+      profile_.get(), &HistoryQuickProviderTest::CreateTemplateURLService);
   FillData();
 }
 
@@ -150,6 +166,9 @@ void HistoryQuickProviderTest::TearDown() {
 }
 
 bool HistoryQuickProviderTest::UpdateURL(const history::URLRow& row) {
+  history::URLDatabase* db = history_service_->InMemoryDatabase();
+  DCHECK(db);
+  EXPECT_NE(db->AddURL(row), 0);
   history::InMemoryURLIndex* index = provider_->GetIndex();
   DCHECK(index);
   history::URLIndexPrivateData* private_data = index->private_data();
@@ -207,8 +226,8 @@ void HistoryQuickProviderTest::RunTest(const string16 text,
                                        bool can_inline_top_result,
                                        string16 expected_fill_into_edit) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
-  MessageLoop::current()->RunAllPending();
-  AutocompleteInput input(text, string16(), false, false, true,
+  MessageLoop::current()->RunUntilIdle();
+  AutocompleteInput input(text, string16::npos, string16(), false, false, true,
                           AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
@@ -306,8 +325,6 @@ TEST_F(HistoryQuickProviderTest, MultiMatch) {
 TEST_F(HistoryQuickProviderTest, StartRelativeMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://xyzabcdefghijklmnopqrstuvw.com/a");
-  expected_urls.push_back("http://abcxyzdefghijklmnopqrstuvw.com/a");
-  expected_urls.push_back("http://abcdefxyzghijklmnopqrstuvw.com/a");
   RunTest(ASCIIToUTF16("xyz"), expected_urls, true,
           ASCIIToUTF16("xyzabcdefghijklmnopqrstuvw.com/a"));
 }
@@ -315,8 +332,8 @@ TEST_F(HistoryQuickProviderTest, StartRelativeMatch) {
 TEST_F(HistoryQuickProviderTest, PrefixOnlyMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://foo.com/");
+  expected_urls.push_back("http://popularsitewithroot.com/");
   expected_urls.push_back("http://slashdot.org/favorite_page.html");
-  expected_urls.push_back("http://foo.com/dir/another/");
   RunTest(ASCIIToUTF16("http://"), expected_urls, true,
           ASCIIToUTF16("http://foo.com"));
 }
@@ -324,7 +341,7 @@ TEST_F(HistoryQuickProviderTest, PrefixOnlyMatch) {
 TEST_F(HistoryQuickProviderTest, EncodingMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://spaces.com/path%20with%20spaces/foo.html");
-  RunTest(ASCIIToUTF16("path%20with%20spaces"), expected_urls, false,
+  RunTest(ASCIIToUTF16("path with spaces"), expected_urls, false,
           ASCIIToUTF16("CANNOT AUTOCOMPLETE"));
 }
 
@@ -359,8 +376,13 @@ TEST_F(HistoryQuickProviderTest, EncodingLimitMatch) {
   std::vector<std::string> expected_urls;
   std::string url(
       "http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice");
-  expected_urls.push_back(url);
+  // First check that a mid-word match yield no results.
   RunTest(ASCIIToUTF16("ice"), expected_urls, false,
+          ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
+  // Then check that we get results when the match is at a word start
+  // that is present because of an encoded separate (%20 = space).
+  expected_urls.push_back(url);
+  RunTest(ASCIIToUTF16("Mice"), expected_urls, false,
           ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
   // Verify that the matches' ACMatchClassifications offsets are in range.
   ACMatchClassifications content(ac_matches_[0].contents_class);
@@ -439,6 +461,96 @@ TEST_F(HistoryQuickProviderTest, DeleteMatch) {
   expected_urls.clear();
   RunTest(ASCIIToUTF16("slashdot"), expected_urls, true,
           ASCIIToUTF16("NONE EXPECTED"));
+}
+
+TEST_F(HistoryQuickProviderTest, PreventBeatingURLWhatYouTypedMatch) {
+  std::vector<std::string> expected_urls;
+
+  expected_urls.clear();
+  expected_urls.push_back("http://popularsitewithroot.com/");
+  // If the user enters a hostname (no path) that he/she has visited
+  // before, we should make sure that all HistoryQuickProvider results
+  // have scores less than what HistoryURLProvider will assign the
+  // URL-what-you-typed match.
+  RunTest(ASCIIToUTF16("popularsitewithroot.com"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithroot.com"));
+  EXPECT_LT(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForBestInlineableResult);
+
+  // Check that if the user didn't quite enter the full hostname, this
+  // hostname would've normally scored above the URL-what-you-typed match.
+  RunTest(ASCIIToUTF16("popularsitewithroot.c"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithroot.com"));
+  EXPECT_GE(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForWhatYouTypedResult);
+
+  expected_urls.clear();
+  expected_urls.push_back("http://popularsitewithpathonly.com/moo");
+  // If the user enters a hostname of a host that he/she has visited
+  // but never visited the root page of, we should make sure that all
+  // HistoryQuickProvider results have scores less than what the
+  // HistoryURLProvider will assign the URL-what-you-typed match.
+  RunTest(ASCIIToUTF16("popularsitewithpathonly.com"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
+  EXPECT_LT(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForWhatYouTypedResult);
+
+  // Verify the same thing happens if the user adds a / to end of the
+  // hostname.
+  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
+  EXPECT_LT(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForWhatYouTypedResult);
+
+
+  // Check that if the user didn't quite enter the full hostname, this
+  // page would've normally scored above the URL-what-you-typed match.
+  RunTest(ASCIIToUTF16("popularsitewithpathonly.co"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
+  EXPECT_GE(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForWhatYouTypedResult);
+
+  // If the user enters a hostname + path that he/she has not visited
+  // before (but visited other things on the host), we can allow
+  // inline autocompletions.
+  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/mo"), expected_urls, true,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
+  EXPECT_GE(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForWhatYouTypedResult);
+
+  // If the user enters a hostname + path that he/she has visited
+  // before, we should make sure that all HistoryQuickProvider results
+  // have scores less than what the HistoryURLProvider will assign
+  // the URL-what-you-typed match.
+  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/moo"),
+          expected_urls, true,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
+  EXPECT_LT(ac_matches_[0].relevance,
+            HistoryURLProvider::kScoreForBestInlineableResult);
+}
+
+TEST_F(HistoryQuickProviderTest, CullSearchResults) {
+  // Set up a default search engine.
+  TemplateURLData data;
+  data.SetKeyword(ASCIIToUTF16("TestEngine"));
+  data.SetURL("http://testsearch.com/?q={searchTerms}");
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_.get());
+  TemplateURL* template_url = new TemplateURL(profile_.get(), data);
+  template_url_service->Add(template_url);
+  template_url_service->SetDefaultSearchProvider(template_url);
+  template_url_service->Load();
+
+  // A search results page should not be returned when typing a query.
+  std::vector<std::string> expected_urls;
+  expected_urls.push_back("http://anotherengine.com/?q=thequery");
+  RunTest(ASCIIToUTF16("thequery"), expected_urls, false, string16());
+
+  // A search results page should not be returned when typing the engine URL.
+  expected_urls.clear();
+  expected_urls.push_back("http://testsearch.com/");
+  RunTest(ASCIIToUTF16("testsearch"), expected_urls, true,
+          ASCIIToUTF16("testsearch.com"));
 }
 
 // HQPOrderingTest -------------------------------------------------------------

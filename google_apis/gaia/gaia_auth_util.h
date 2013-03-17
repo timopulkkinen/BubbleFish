@@ -7,6 +7,8 @@
 
 #include <string>
 
+class GURL;
+
 namespace gaia {
 
 // Perform basic canonicalization of |email_address|, taking into account that
@@ -23,8 +25,14 @@ std::string CanonicalizeDomain(const std::string& domain);
 // adding gmail.com if no domain is present.
 std::string SanitizeEmail(const std::string& email_address);
 
+// Returns true if the two specified email addresses are the same.  Both
+// addresses are first sanitized and then canoncialized before comparing.
+bool AreEmailsSame(const std::string& email1, const std::string& email2);
+
 // Extract the domain part from the canonical form of the given email.
 std::string ExtractDomainName(const std::string& email);
+
+bool IsGaiaSignonRealm(const GURL& url);
 
 }  // namespace gaia
 

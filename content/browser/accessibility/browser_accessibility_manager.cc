@@ -9,7 +9,7 @@
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/common/accessibility_messages.h"
 
-using content::AccessibilityNodeData;
+namespace content {
 
 BrowserAccessibility* BrowserAccessibilityFactory::Create() {
   return BrowserAccessibility::Create();
@@ -135,18 +135,12 @@ void BrowserAccessibilityManager::GotMouseDown() {
   NotifyAccessibilityEvent(AccessibilityNotificationFocusChanged, focus_);
 }
 
-bool BrowserAccessibilityManager::IsOSKAllowed() {
-  return osk_state_ == OSK_ALLOWED_WITHIN_FOCUSED_OBJECT ||
-         osk_state_ == OSK_ALLOWED;
-}
+bool BrowserAccessibilityManager::IsOSKAllowed(const gfx::Rect& bounds) {
+  if (!delegate_ || !delegate_->HasFocus())
+    return false;
 
-bool BrowserAccessibilityManager::ShouldRestrictOSKToControlBounds() {
-  AccessibilityMode mode =
-      BrowserAccessibilityStateImpl::GetInstance()->GetAccessibilityMode();
-  if (mode == AccessibilityModeEditableTextOnly)
-    return osk_state_ == OSK_ALLOWED_WITHIN_FOCUSED_OBJECT;
-  else
-    return true;
+  gfx::Point touch_point = delegate_->GetLastTouchEventLocation();
+  return bounds.Contains(touch_point);
 }
 
 void BrowserAccessibilityManager::Remove(int32 child_id, int32 renderer_id) {
@@ -362,7 +356,8 @@ BrowserAccessibility* BrowserAccessibilityManager::CreateAccessibilityTree(
   // and any children. If not, that means we have a serious bug somewhere,
   // like the same child is reachable from two places in the same tree.
   if (instance && (instance->parent() != NULL || instance->child_count() > 0)) {
-    NOTREACHED();
+    // TODO(dmazzoni): investigate this: http://crbug.com/161726
+    LOG(WARNING) << "Reusing node that wasn't detached from parent";
     instance = NULL;
   }
 
@@ -406,3 +401,5 @@ BrowserAccessibility* BrowserAccessibilityManager::CreateAccessibilityTree(
 
   return instance;
 }
+
+}  // namespace content

@@ -6,15 +6,17 @@
 
 #include <vector>
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
 #include "ash/system/tray/tray_notification_view.h"
-#include "ash/system/tray/tray_views.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "base/logging.h"
 #include "base/timer.h"
@@ -37,14 +39,14 @@ namespace tray {
 class IMEDefaultView : public TrayItemMore {
  public:
   explicit IMEDefaultView(SystemTrayItem* owner)
-      : TrayItemMore(owner) {
+      : TrayItemMore(owner, true) {
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
 
     SetImage(bundle.GetImageNamed(
         IDR_AURA_UBER_TRAY_IME).ToImageSkia());
 
     IMEInfo info;
-    Shell::GetInstance()->tray_delegate()->GetCurrentIME(&info);
+    Shell::GetInstance()->system_tray_delegate()->GetCurrentIME(&info);
     UpdateLabel(info);
   }
 
@@ -63,8 +65,9 @@ class IMEDetailedView : public TrayDetailsView,
                         public ViewClickListener {
  public:
   IMEDetailedView(SystemTrayItem* owner, user::LoginStatus login)
-      : login_(login) {
-    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+      : TrayDetailsView(owner),
+        login_(login) {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     IMEInfoList list;
     delegate->GetAvailableIMEList(&list);
     IMEPropertyInfoList property_list;
@@ -99,7 +102,6 @@ class IMEDetailedView : public TrayDetailsView,
     CreateScrollableList();
     for (size_t i = 0; i < list.size(); i++) {
       HoverHighlightView* container = new HoverHighlightView(this);
-      container->set_fixed_height(kTrayPopupItemHeight);
       container->AddLabel(list[i].name,
           list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
       scroll_content()->AddChildView(container);
@@ -111,7 +113,6 @@ class IMEDetailedView : public TrayDetailsView,
     property_map_.clear();
     for (size_t i = 0; i < property_list.size(); i++) {
       HoverHighlightView* container = new HoverHighlightView(this);
-      container->set_fixed_height(kTrayPopupItemHeight);
       container->AddLabel(
           property_list[i].name,
           property_list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
@@ -125,7 +126,6 @@ class IMEDetailedView : public TrayDetailsView,
 
   void AppendSettings() {
     HoverHighlightView* container = new HoverHighlightView(this);
-    container->set_fixed_height(kTrayPopupItemHeight);
     container->AddLabel(ui::ResourceBundle::GetSharedInstance().
         GetLocalizedString(IDS_ASH_STATUS_TRAY_IME_SETTINGS),
         gfx::Font::NORMAL);
@@ -134,10 +134,10 @@ class IMEDetailedView : public TrayDetailsView,
   }
 
   // Overridden from ViewClickListener.
-  virtual void ClickedOn(views::View* sender) OVERRIDE {
-    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+  virtual void OnViewClicked(views::View* sender) OVERRIDE {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     if (sender == footer()->content()) {
-      Shell::GetInstance()->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
+      owner()->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
     } else if (sender == settings_) {
       delegate->ShowIMESettings();
     } else {
@@ -170,8 +170,8 @@ class IMEDetailedView : public TrayDetailsView,
 
 class IMENotificationView : public TrayNotificationView {
  public:
-  explicit IMENotificationView(TrayIME* tray)
-      : TrayNotificationView(tray, IDR_AURA_UBER_TRAY_IME) {
+  explicit IMENotificationView(TrayIME* owner)
+      : TrayNotificationView(owner, IDR_AURA_UBER_TRAY_IME) {
     InitView(GetLabel());
   }
 
@@ -201,25 +201,28 @@ class IMENotificationView : public TrayNotificationView {
 
   // Overridden from TrayNotificationView.
   virtual void OnClickAction() OVERRIDE {
-    tray()->PopupDetailedView(0, true);
+    owner()->PopupDetailedView(0, true);
   }
 
  private:
   void Close() {
-    tray()->HideNotificationView();
+    owner()->HideNotificationView();
   }
 
   views::Label* GetLabel() {
-    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     IMEInfo current;
     delegate->GetCurrentIME(&current);
 
     // TODO(zork): Use IDS_ASH_STATUS_TRAY_THIRD_PARTY_IME_TURNED_ON_BUBBLE for
     // third party IMEs
-    return new views::Label(
+    views::Label* label = new views::Label(
         l10n_util::GetStringFUTF16(
             IDS_ASH_STATUS_TRAY_IME_TURNED_ON_BUBBLE,
             current.medium_name));
+    label->SetMultiLine(true);
+    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    return label;
   }
 
 
@@ -232,15 +235,18 @@ class IMENotificationView : public TrayNotificationView {
 
 }  // namespace tray
 
-TrayIME::TrayIME()
-    : tray_label_(NULL),
+TrayIME::TrayIME(SystemTray* system_tray)
+    : SystemTrayItem(system_tray),
+      tray_label_(NULL),
       default_(NULL),
       detailed_(NULL),
       notification_(NULL),
       message_shown_(false) {
+  Shell::GetInstance()->system_tray_notifier()->AddIMEObserver(this);
 }
 
 TrayIME::~TrayIME() {
+  Shell::GetInstance()->system_tray_notifier()->RemoveIMEObserver(this);
 }
 
 void TrayIME::UpdateTrayLabel(const IMEInfo& current, size_t count) {
@@ -251,22 +257,21 @@ void TrayIME::UpdateTrayLabel(const IMEInfo& current, size_t count) {
       tray_label_->label()->SetText(current.short_name);
     }
     tray_label_->SetVisible(count > 1);
-    SetTrayLabelItemBorder(tray_label_,
-        ash::Shell::GetInstance()->system_tray()->shelf_alignment());
+    SetTrayLabelItemBorder(tray_label_, system_tray()->shelf_alignment());
     tray_label_->Layout();
   }
 }
 
 views::View* TrayIME::CreateTrayView(user::LoginStatus status) {
   CHECK(tray_label_ == NULL);
-  tray_label_ = new TrayItemView;
+  tray_label_ = new TrayItemView(this);
   tray_label_->CreateLabel();
   SetupLabelForTray(tray_label_->label());
   return tray_label_;
 }
 
 views::View* TrayIME::CreateDefaultView(user::LoginStatus status) {
-  SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+  SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
   IMEInfoList list;
   IMEPropertyInfoList property_list;
   delegate->GetAvailableIMEList(&list);
@@ -315,7 +320,7 @@ void TrayIME::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
 }
 
 void TrayIME::OnIMERefresh(bool show_message) {
-  SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+  SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
   IMEInfoList list;
   IMEInfo current;
   IMEPropertyInfoList property_list;
@@ -335,7 +340,8 @@ void TrayIME::OnIMERefresh(bool show_message) {
     // refreshed.
     if (notification_) {
       notification_->UpdateLabel();
-    } else if (!Shell::GetInstance()->shelf()->IsVisible() || !message_shown_) {
+    } else if (!Shell::GetPrimaryRootWindowController()->shelf()->IsVisible() ||
+               !message_shown_) {
       ShowNotificationView();
       message_shown_ = true;
     }

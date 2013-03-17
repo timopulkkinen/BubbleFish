@@ -3,17 +3,18 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/browser_event_router.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -21,7 +22,8 @@
 #include "net/test/test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-using extensions::Extension;
+namespace extensions {
+namespace {
 
 class ScriptBadgeApiTest : public ExtensionApiTest {
  public:
@@ -30,7 +32,7 @@ class ScriptBadgeApiTest : public ExtensionApiTest {
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableScriptBadges);
+    command_line->AppendSwitchASCII(switches::kScriptBadges, "1");
   }
 
  private:
@@ -42,15 +44,17 @@ IN_PROC_BROWSER_TEST_F(ScriptBadgeApiTest, Basics) {
   ASSERT_TRUE(RunExtensionTest("script_badge/basics")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
-  ExtensionAction* script_badge = extension->script_badge();
+  ExtensionAction* script_badge =
+      ExtensionActionManager::Get(browser()->profile())->
+      GetScriptBadge(*extension);
   ASSERT_TRUE(script_badge);
   const extensions::LocationBarController* location_bar_controller =
       extensions::TabHelper::FromWebContents(
-          chrome::GetActiveWebContents(browser()))->
+          browser()->tab_strip_model()->GetActiveWebContents())->
               location_bar_controller();
 
   const int tab_id = SessionID::IdForTab(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
   EXPECT_EQ(GURL(extension->GetResourceURL("default_popup.html")),
             script_badge->GetPopupUrl(tab_id));
 
@@ -73,7 +77,8 @@ IN_PROC_BROWSER_TEST_F(ScriptBadgeApiTest, Basics) {
   {
     // Simulate the script badge being clicked.
     ResultCatcher catcher;
-    ExtensionService* service = browser()->profile()->GetExtensionService();
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
     service->browser_event_router()->ScriptBadgeExecuted(
         browser()->profile(), *script_badge, tab_id);
     EXPECT_TRUE(catcher.GetNextResult());
@@ -90,3 +95,6 @@ IN_PROC_BROWSER_TEST_F(ScriptBadgeApiTest, Basics) {
   EXPECT_THAT(location_bar_controller->GetCurrentActions(),
               testing::ElementsAre(script_badge));
 }
+
+}  // namespace
+}  // namespace extensions

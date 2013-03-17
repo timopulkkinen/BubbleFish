@@ -5,35 +5,35 @@
 #ifndef WEBKIT_FILEAPI_SYNCABLE_FILE_CHANGE_H_
 #define WEBKIT_FILEAPI_SYNCABLE_FILE_CHANGE_H_
 
+#include <deque>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "base/files/file_path.h"
+#include "webkit/fileapi/file_system_url.h"
+#include "webkit/fileapi/syncable/sync_file_type.h"
+#include "webkit/storage/webkit_storage_export.h"
 
-namespace fileapi {
+namespace sync_file_system {
 
-class FILEAPI_EXPORT FileChange {
+class WEBKIT_STORAGE_EXPORT FileChange {
  public:
   enum ChangeType {
     FILE_CHANGE_ADD_OR_UPDATE,
     FILE_CHANGE_DELETE,
   };
 
-  enum FileType {
-    FILE_TYPE_DIRECTORY,
-    FILE_TYPE_FILE,
-  };
-
-  FileChange(ChangeType change, FileType file_type);
+  FileChange(ChangeType change, SyncFileType file_type);
 
   bool IsAddOrUpdate() const { return change_ == FILE_CHANGE_ADD_OR_UPDATE; }
   bool IsDelete() const { return change_ == FILE_CHANGE_DELETE; }
 
-  bool IsFile() const { return file_type_ == FILE_TYPE_FILE; }
+  bool IsFile() const { return file_type_ == SYNC_FILE_TYPE_FILE; }
+  bool IsDirectory() const { return file_type_ == SYNC_FILE_TYPE_DIRECTORY; }
+  bool IsTypeUnknown() const { return !IsFile() && !IsDirectory(); }
 
   ChangeType change() const { return change_; }
-  FileType file_type() const { return file_type_; }
+  SyncFileType file_type() const { return file_type_; }
 
   std::string DebugString() const;
 
@@ -44,11 +44,13 @@ class FILEAPI_EXPORT FileChange {
 
  private:
   ChangeType change_;
-  FileType file_type_;
+  SyncFileType file_type_;
 };
 
-class FILEAPI_EXPORT FileChangeList {
+class WEBKIT_STORAGE_EXPORT FileChangeList {
  public:
+  typedef std::deque<FileChange> List;
+
   FileChangeList();
   ~FileChangeList();
 
@@ -58,14 +60,17 @@ class FILEAPI_EXPORT FileChangeList {
   size_t size() const { return list_.size(); }
   bool empty() const { return list_.empty(); }
   void clear() { list_.clear(); }
-  const std::vector<FileChange>& list() const { return list_; }
+  const List& list() const { return list_; }
+  const FileChange& front() const { return list_.front(); }
+
+  FileChangeList PopAndGetNewList() const;
 
   std::string DebugString() const;
 
  private:
-  std::vector<FileChange> list_;
+  List list_;
 };
 
-}  // namespace fileapi
+}  // namespace sync_file_system
 
 #endif  // WEBKIT_FILEAPI_SYNCABLE_FILE_CHANGE_H_

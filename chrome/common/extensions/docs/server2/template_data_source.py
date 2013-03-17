@@ -5,9 +5,13 @@
 import logging
 
 from docs_server_utils import FormatKey
-from file_system import FileNotFoundError
 import compiled_file_system as compiled_fs
+from file_system import FileNotFoundError
 from third_party.handlebar import Handlebar
+import url_constants
+
+# Increment this if there are changes to the data stored about templates.
+_VERSION = 1
 
 EXTENSIONS_URL = '/chrome/extensions'
 
@@ -45,7 +49,10 @@ class TemplateDataSource(object):
                  api_list_data_source_factory,
                  intro_data_source_factory,
                  samples_data_source_factory,
+                 known_issues_data_source,
+                 sidenav_data_source_factory,
                  cache_factory,
+                 ref_resolver_factory,
                  public_template_path,
                  private_template_path):
       self._branch_info = _MakeChannelDict(channel_name)
@@ -53,11 +60,18 @@ class TemplateDataSource(object):
       self._api_list_data_source_factory = api_list_data_source_factory
       self._intro_data_source_factory = intro_data_source_factory
       self._samples_data_source_factory = samples_data_source_factory
-      self._cache = cache_factory.Create(Handlebar, compiled_fs.HANDLEBAR)
+      self._known_issues_data_source = known_issues_data_source
+      self._sidenav_data_source_factory = sidenav_data_source_factory
+      self._cache = cache_factory.Create(self._CreateTemplate,
+                                         compiled_fs.HANDLEBAR,
+                                         version=_VERSION)
+      self._ref_resolver = ref_resolver_factory.Create()
       self._public_template_path = public_template_path
       self._private_template_path = private_template_path
-      self._static_resources = (
-          (('/' + channel_name) if channel_name != 'local' else '') + '/static')
+      self._static_resources = '/%s/static' % channel_name
+
+    def _CreateTemplate(self, template_name, text):
+      return Handlebar(self._ref_resolver.ResolveAllLinks(text))
 
     def Create(self, request, path):
       """Returns a new TemplateDataSource bound to |request|.
@@ -71,6 +85,8 @@ class TemplateDataSource(object):
           self._api_list_data_source_factory.Create(),
           self._intro_data_source_factory.Create(),
           self._samples_data_source_factory.Create(request),
+          self._known_issues_data_source,
+          self._sidenav_data_source_factory.Create(path),
           self._cache,
           self._public_template_path,
           self._private_template_path,
@@ -83,6 +99,8 @@ class TemplateDataSource(object):
                api_list_data_source,
                intro_data_source,
                samples_data_source,
+               known_issues_data_source,
+               sidenav_data_source,
                cache,
                public_template_path,
                private_template_path,
@@ -93,6 +111,8 @@ class TemplateDataSource(object):
     self._intro_data_source = intro_data_source
     self._samples_data_source = samples_data_source
     self._api_data_source = api_data_source
+    self._known_issues_data_source = known_issues_data_source
+    self._sidenav_data_source = sidenav_data_source
     self._cache = cache
     self._public_template_path = public_template_path
     self._private_template_path = private_template_path
@@ -113,11 +133,15 @@ class TemplateDataSource(object):
       'apis': self._api_data_source,
       'branchInfo': self._branch_info,
       'intros': self._intro_data_source,
+      'known_issues': self._known_issues_data_source,
+      'sidenavs': self._sidenav_data_source,
       'partials': self,
       'samples': self._samples_data_source,
       'static': self._static_resources,
       'apps_title': 'Apps',
       'extensions_title': 'Extensions',
+      'apps_samples_url': url_constants.GITHUB_BASE,
+      'extensions_samples_url': url_constants.EXTENSIONS_SAMPLES,
       'true': True,
       'false': False
     })
@@ -125,9 +149,6 @@ class TemplateDataSource(object):
       logging.error('Handlebar error(s) rendering %s:\n%s' %
           (template_name, '  \n'.join(render_data.errors)))
     return render_data.text
-
-  def __getitem__(self, key):
-    return self.get(key)
 
   def get(self, key):
     return self.GetTemplate(self._private_template_path, key)

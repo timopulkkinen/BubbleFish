@@ -5,7 +5,7 @@
 #ifndef WEBKIT_DOM_STORAGE_DOM_STORAGE_AREA_H_
 #define WEBKIT_DOM_STORAGE_DOM_STORAGE_AREA_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -13,6 +13,7 @@
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/dom_storage/dom_storage_types.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace dom_storage {
 
@@ -24,17 +25,17 @@ class SessionStorageDatabase;
 // Container for a per-origin Map of key/value pairs potentially
 // backed by storage on disk and lazily commits changes to disk.
 // See class comments for DomStorageContext for a larger overview.
-class DomStorageArea
+class WEBKIT_STORAGE_EXPORT DomStorageArea
     : public base::RefCountedThreadSafe<DomStorageArea> {
 
  public:
-  static const FilePath::CharType kDatabaseFileExtension[];
-  static FilePath DatabaseFileNameFromOrigin(const GURL& origin);
-  static GURL OriginFromDatabaseFileName(const FilePath& file_name);
+  static const base::FilePath::CharType kDatabaseFileExtension[];
+  static base::FilePath DatabaseFileNameFromOrigin(const GURL& origin);
+  static GURL OriginFromDatabaseFileName(const base::FilePath& file_name);
 
   // Local storage. Backed on disk if directory is nonempty.
   DomStorageArea(const GURL& origin,
-                 const FilePath& directory,
+                 const base::FilePath& directory,
                  DomStorageTaskRunner* task_runner);
 
   // Session storage. Backed on disk if |session_storage_backing| is not NULL.
@@ -57,6 +58,7 @@ class DomStorageArea
                NullableString16* old_value);
   bool RemoveItem(const string16& key, string16* old_value);
   bool Clear();
+  void FastClear();
 
   DomStorageArea* ShallowCopy(
       int64 destination_namespace_id,
@@ -117,7 +119,7 @@ class DomStorageArea
   int64 namespace_id_;
   std::string persistent_namespace_id_;
   GURL origin_;
-  FilePath directory_;
+  base::FilePath directory_;
   scoped_refptr<DomStorageTaskRunner> task_runner_;
   scoped_refptr<DomStorageMap> map_;
   scoped_ptr<DomStorageDatabaseAdapter> backing_;

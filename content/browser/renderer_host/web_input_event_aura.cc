@@ -4,8 +4,10 @@
 
 #include "content/browser/renderer_host/web_input_event_aura.h"
 
+#include "content/browser/renderer_host/ui_events_helper.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 
 namespace content {
 
@@ -18,23 +20,19 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromNativeEvent(
     base::NativeEvent native_event);
 WebKit::WebGestureEvent MakeWebGestureEventFromNativeEvent(
     base::NativeEvent native_event);
-WebKit::WebTouchPoint* UpdateWebTouchEventFromNativeEvent(
-    base::NativeEvent native_event, WebKit::WebTouchEvent* web_event);
 #else
-WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event);
-WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
-    ui::MouseWheelEvent* event);
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
     ui::ScrollEvent* event);
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
     ui::KeyEvent* event);
 WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
-    ui::GestureEvent* event);
-WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
     ui::ScrollEvent* event);
-WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
-    ui::TouchEvent* event, WebKit::WebTouchEvent* web_event);
 #endif
+
+WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(
+    ui::MouseEvent* event);
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    ui::MouseWheelEvent* event);
 
 // General approach:
 //
@@ -60,14 +58,17 @@ WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
 //
 
 WebKit::WebMouseEvent MakeWebMouseEvent(ui::MouseEvent* event) {
-#if defined(OS_WIN)
   // Construct an untranslated event from the platform event data.
   WebKit::WebMouseEvent webkit_event =
-      MakeUntranslatedWebMouseEventFromNativeEvent(event->native_event());
+#if defined(OS_WIN)
+  // On Windows we have WM_ events comming from desktop and pure aura
+  // events comming from metro mode.
+  event->native_event().message ?
+      MakeUntranslatedWebMouseEventFromNativeEvent(event->native_event()) :
+      MakeWebMouseEventFromAuraEvent(event);
 #else
-  WebKit::WebMouseEvent webkit_event = MakeWebMouseEventFromAuraEvent(event);
+  MakeWebMouseEventFromAuraEvent(event);
 #endif
-
   // Replace the event's coordinate fields with translated position data from
   // |event|.
   webkit_event.windowX = webkit_event.x = event->x();
@@ -83,8 +84,9 @@ WebKit::WebMouseEvent MakeWebMouseEvent(ui::MouseEvent* event) {
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(ui::MouseWheelEvent* event) {
 #if defined(OS_WIN)
   // Construct an untranslated event from the platform event data.
-  WebKit::WebMouseWheelEvent webkit_event =
-      MakeUntranslatedWebMouseWheelEventFromNativeEvent(event->native_event());
+  WebKit::WebMouseWheelEvent webkit_event = event->native_event().message ?
+      MakeUntranslatedWebMouseWheelEventFromNativeEvent(event->native_event()) :
+      MakeWebMouseWheelEventFromAuraEvent(event);
 #else
   WebKit::WebMouseWheelEvent webkit_event =
       MakeWebMouseWheelEventFromAuraEvent(event);
@@ -142,9 +144,12 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEvent(ui::KeyEvent* event) {
 WebKit::WebGestureEvent MakeWebGestureEvent(ui::GestureEvent* event) {
   WebKit::WebGestureEvent gesture_event;
 #if defined(OS_WIN)
-  gesture_event = MakeWebGestureEventFromNativeEvent(event->native_event());
+  if (event->HasNativeEvent())
+    gesture_event = MakeWebGestureEventFromNativeEvent(event->native_event());
+  else
+    gesture_event = MakeWebGestureEventFromUIEvent(*event);
 #else
-  gesture_event = MakeWebGestureEventFromAuraEvent(event);
+  gesture_event = MakeWebGestureEventFromUIEvent(*event);
 #endif
 
   gesture_event.x = event->x();
@@ -181,16 +186,58 @@ WebKit::WebGestureEvent MakeWebGestureEventFlingCancel() {
 
   // All other fields are ignored on a GestureFlingCancel event.
   gesture_event.type = WebKit::WebInputEvent::GestureFlingCancel;
+  gesture_event.sourceDevice = WebKit::WebGestureEvent::Touchpad;
   return gesture_event;
 }
 
-WebKit::WebTouchPoint* UpdateWebTouchEvent(ui::TouchEvent* event,
-                                           WebKit::WebTouchEvent* web_event) {
-#if defined(OS_WIN)
-  return UpdateWebTouchEventFromNativeEvent(event->native_event(), web_event);
-#else
-  return UpdateWebTouchEventFromAuraEvent(event, web_event);
-#endif
+WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event) {
+  WebKit::WebMouseEvent webkit_event;
+
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  if (event->flags() & ui::EF_LEFT_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  if (event->flags() & ui::EF_MIDDLE_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonMiddle;
+  if (event->flags() & ui::EF_RIGHT_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonRight;
+
+  switch (event->type()) {
+    case ui::ET_MOUSE_PRESSED:
+      webkit_event.type = WebKit::WebInputEvent::MouseDown;
+      webkit_event.clickCount = event->GetClickCount();
+      break;
+    case ui::ET_MOUSE_RELEASED:
+      webkit_event.type = WebKit::WebInputEvent::MouseUp;
+      break;
+    case ui::ET_MOUSE_ENTERED:
+    case ui::ET_MOUSE_EXITED:
+    case ui::ET_MOUSE_MOVED:
+    case ui::ET_MOUSE_DRAGGED:
+      webkit_event.type = WebKit::WebInputEvent::MouseMove;
+      break;
+    default:
+      NOTIMPLEMENTED() << "Received unexpected event: " << event->type();
+      break;
+  }
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    ui::MouseWheelEvent* event) {
+  WebKit::WebMouseWheelEvent webkit_event;
+
+  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.deltaY = event->offset();
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
+
+  return webkit_event;
 }
 
 }  // namespace content

@@ -9,14 +9,15 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/platform_file.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -26,8 +27,8 @@
 #include "content/public/common/file_chooser_params.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
-#include "ui/base/dialogs/selected_file_info.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/shell_dialogs/selected_file_info.h"
 
 using content::BrowserThread;
 using content::FileChooserParams;
@@ -69,7 +70,7 @@ void NotifyRenderViewHost(RenderViewHost* render_view_host,
 
 // Converts a list of FilePaths to a list of ui::SelectedFileInfo.
 std::vector<ui::SelectedFileInfo> FilePathListToSelectedFileInfoList(
-    const std::vector<FilePath>& paths) {
+    const std::vector<base::FilePath>& paths) {
   std::vector<ui::SelectedFileInfo> selected_files;
   for (size_t i = 0; i < paths.size(); ++i) {
     selected_files.push_back(
@@ -86,7 +87,7 @@ struct FileSelectHelper::ActiveDirectoryEnumeration {
   scoped_ptr<DirectoryListerDispatchDelegate> delegate_;
   scoped_ptr<net::DirectoryLister> lister_;
   RenderViewHost* rvh_;
-  std::vector<FilePath> results_;
+  std::vector<base::FilePath> results_;
 };
 
 FileSelectHelper::FileSelectHelper(Profile* profile)
@@ -124,7 +125,7 @@ void FileSelectHelper::DirectoryListerDispatchDelegate::OnListDone(int error) {
   parent_->OnListDone(id_, error);
 }
 
-void FileSelectHelper::FileSelected(const FilePath& path,
+void FileSelectHelper::FileSelected(const base::FilePath& path,
                                     int index, void* params) {
   FileSelectedWithExtraInfo(ui::SelectedFileInfo(path, path), index, params);
 }
@@ -138,7 +139,7 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
 
   profile_->set_last_selected_directory(file.file_path.DirName());
 
-  const FilePath& path = file.local_path;
+  const base::FilePath& path = file.local_path;
   if (dialog_type_ == ui::SelectFileDialog::SELECT_FOLDER) {
     StartNewEnumeration(path, kFileSelectEnumerationId, render_view_host_);
     return;
@@ -152,8 +153,9 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
   RunFileChooserEnd();
 }
 
-void FileSelectHelper::MultiFilesSelected(const std::vector<FilePath>& files,
-                                          void* params) {
+void FileSelectHelper::MultiFilesSelected(
+    const std::vector<base::FilePath>& files,
+    void* params) {
   std::vector<ui::SelectedFileInfo> selected_files =
       FilePathListToSelectedFileInfoList(files);
 
@@ -188,7 +190,7 @@ void FileSelectHelper::FileSelectionCanceled(void* params) {
   RunFileChooserEnd();
 }
 
-void FileSelectHelper::StartNewEnumeration(const FilePath& path,
+void FileSelectHelper::StartNewEnumeration(const base::FilePath& path,
                                            int request_id,
                                            RenderViewHost* render_view_host) {
   scoped_ptr<ActiveDirectoryEnumeration> entry(new ActiveDirectoryEnumeration);
@@ -250,7 +252,7 @@ FileSelectHelper::GetFileTypesFromAcceptType(
     const std::vector<string16>& accept_types) {
   scoped_ptr<ui::SelectFileDialog::FileTypeInfo> base_file_type(
       new ui::SelectFileDialog::FileTypeInfo());
-  base_file_type->support_gdata = true;
+  base_file_type->support_drive = true;
   if (accept_types.empty())
     return base_file_type.Pass();
 
@@ -259,7 +261,8 @@ FileSelectHelper::GetFileTypesFromAcceptType(
       new ui::SelectFileDialog::FileTypeInfo(*base_file_type));
   file_type->include_all_files = true;
   file_type->extensions.resize(1);
-  std::vector<FilePath::StringType>* extensions = &file_type->extensions.back();
+  std::vector<base::FilePath::StringType>* extensions =
+      &file_type->extensions.back();
 
   // Find the corresponding extensions.
   int valid_type_count = 0;
@@ -273,7 +276,7 @@ FileSelectHelper::GetFileTypesFromAcceptType(
     if (ascii_type[0] == '.') {
       // If the type starts with a period it is assumed to be a file extension
       // so we just have to add it to the list.
-      FilePath::StringType ext(ascii_type.begin(), ascii_type.end());
+      base::FilePath::StringType ext(ascii_type.begin(), ascii_type.end());
       extensions->push_back(ext.substr(1));
     } else {
       if (ascii_type == "image/*")
@@ -326,7 +329,7 @@ void FileSelectHelper::RunFileChooser(content::WebContents* tab,
 // static
 void FileSelectHelper::EnumerateDirectory(content::WebContents* tab,
                                           int request_id,
-                                          const FilePath& path) {
+                                          const base::FilePath& path) {
   Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
   // FileSelectHelper will keep itself alive until it sends the result message.
   scoped_refptr<FileSelectHelper> file_select_helper(
@@ -402,7 +405,7 @@ void FileSelectHelper::RunFileChooserOnUIThread(
       NOTREACHED();
   }
 
-  FilePath default_file_name = params.default_file_name.IsAbsolute() ?
+  base::FilePath default_file_name = params.default_file_name.IsAbsolute() ?
       params.default_file_name :
       profile_->last_selected_directory().Append(params.default_file_name);
 
@@ -444,7 +447,7 @@ void FileSelectHelper::RunFileChooserEnd() {
 
 void FileSelectHelper::EnumerateDirectory(int request_id,
                                           RenderViewHost* render_view_host,
-                                          const FilePath& path) {
+                                          const base::FilePath& path) {
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this

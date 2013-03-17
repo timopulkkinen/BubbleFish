@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/test/test_utils.h"
@@ -109,25 +110,11 @@ DownloadTestObserver::~DownloadTestObserver() {
 
 void DownloadTestObserver::Init() {
   download_manager_->AddObserver(this);
-  // Regenerate DownloadItem observers.  If there are any download items
-  // in our final state, note them in |finished_downloads_|
-  // (done by |OnDownloadUpdated()|).
   std::vector<DownloadItem*> downloads;
   download_manager_->GetAllDownloads(&downloads);
-
   for (std::vector<DownloadItem*>::iterator it = downloads.begin();
        it != downloads.end(); ++it) {
-    OnDownloadUpdated(*it);  // Safe to call multiple times; checks state.
-
-    DownloadSet::const_iterator finished_it(finished_downloads_.find(*it));
-    DownloadSet::iterator observed_it(downloads_observed_.find(*it));
-
-    // If it isn't finished and we're aren't observing it, start.
-    if (finished_it == finished_downloads_.end() &&
-        observed_it == downloads_observed_.end()) {
-      (*it)->AddObserver(this);
-      downloads_observed_.insert(*it);
-    }
+    OnDownloadCreated(download_manager_, *it);
   }
   finished_downloads_at_construction_ = finished_downloads_.size();
   states_observed_.clear();
@@ -146,6 +133,21 @@ bool DownloadTestObserver::IsFinished() const {
           wait_count_);
 }
 
+void DownloadTestObserver::OnDownloadCreated(
+    DownloadManager* manager,
+    DownloadItem* item) {
+  // NOTE: This method is called both by DownloadManager when a download is
+  // created as well as in DownloadTestObserver::Init() for downloads that
+  // existed before |this| was created.
+  OnDownloadUpdated(item);
+  DownloadSet::const_iterator finished_it(finished_downloads_.find(item));
+  // If it isn't finished, start observing it.
+  if (finished_it == finished_downloads_.end()) {
+    item->AddObserver(this);
+    downloads_observed_.insert(item);
+  }
+}
+
 void DownloadTestObserver::OnDownloadDestroyed(DownloadItem* download) {
   // Stop observing.  Do not do anything with it, as it is about to be gone.
   DownloadSet::iterator it = downloads_observed_.find(download);
@@ -156,7 +158,7 @@ void DownloadTestObserver::OnDownloadDestroyed(DownloadItem* download) {
 
 void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
   // Real UI code gets the user's response after returning from the observer.
-  if (download->GetSafetyState() == DownloadItem::DANGEROUS &&
+  if (download->IsDangerous() &&
       !ContainsKey(dangerous_downloads_seen_, download->GetId())) {
     dangerous_downloads_seen_.insert(download->GetId());
 
@@ -186,6 +188,9 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
         ADD_FAILURE() << "Unexpected dangerous download item.";
         break;
 
+      case ON_DANGEROUS_DOWNLOAD_IGNORE:
+        break;
+
       default:
         NOTREACHED();
     }
@@ -193,20 +198,6 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
 
   if (IsDownloadInFinalState(download))
     DownloadInFinalState(download);
-}
-
-void DownloadTestObserver::OnDownloadCreated(
-    DownloadManager* manager, DownloadItem* item) {
-  OnDownloadUpdated(item);
-  DownloadSet::const_iterator finished_it(finished_downloads_.find(item));
-  DownloadSet::iterator observed_it(downloads_observed_.find(item));
-
-  // If it isn't finished and we're aren't observing it, start.
-  if (finished_it == finished_downloads_.end() &&
-      observed_it == downloads_observed_.end()) {
-    item->AddObserver(this);
-    downloads_observed_.insert(item);
-  }
 }
 
 size_t DownloadTestObserver::NumDangerousDownloadsSeen() const {
@@ -297,11 +288,15 @@ DownloadTestFlushObserver::DownloadTestFlushObserver(
 void DownloadTestFlushObserver::WaitForFlush() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   download_manager_->AddObserver(this);
+  // The wait condition may have been met before WaitForFlush() was called.
+  CheckDownloadsInProgress(true);
+  BrowserThread::GetBlockingPool()->FlushForTesting();
   RunMessageLoop();
 }
 
-void DownloadTestFlushObserver::ModelChanged(DownloadManager* manager) {
-  // Model has changed, so there may be more DownloadItems to observe.
+void DownloadTestFlushObserver::OnDownloadCreated(
+    DownloadManager* manager,
+    DownloadItem* item) {
   CheckDownloadsInProgress(true);
 }
 
@@ -389,7 +384,7 @@ void DownloadTestFlushObserver::PingIOThread(int cycle) {
 }
 
 DownloadTestItemCreationObserver::DownloadTestItemCreationObserver()
-    : download_id_(DownloadId::Invalid()),
+    : download_id_(DownloadId::Invalid().local()),
       error_(net::OK),
       called_back_count_(0),
       waiting_(false) {
@@ -409,10 +404,12 @@ void DownloadTestItemCreationObserver::WaitForDownloadItemCreation() {
 }
 
 void DownloadTestItemCreationObserver::DownloadItemCreationCallback(
-    DownloadId download_id, net::Error error) {
+    DownloadItem* item,
+    net::Error error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  download_id_ = download_id;
+  if (item)
+    download_id_ = item->GetId();
   error_ = error;
   ++called_back_count_;
   DCHECK_EQ(1u, called_back_count_);

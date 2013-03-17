@@ -11,17 +11,18 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/storage/webkit_storage_export.h"
 
-class FilePath;
 class NullableString16;
 
 namespace base {
+class FilePath;
 class Time;
 }
 
@@ -36,6 +37,8 @@ class DomStorageNamespace;
 class DomStorageSession;
 class DomStorageTaskRunner;
 class SessionStorageDatabase;
+struct LocalStorageUsageInfo;
+struct SessionStorageUsageInfo;
 
 // The Context is the root of an object containment hierachy for
 // Namespaces and Areas related to the owning profile.
@@ -56,18 +59,9 @@ class SessionStorageDatabase;
 // Classes intended to be used by an embedder are DomStorageContext,
 // DomStorageHost, and DomStorageSession. The other classes are for
 // internal consumption.
-class DomStorageContext
+class WEBKIT_STORAGE_EXPORT DomStorageContext
     : public base::RefCountedThreadSafe<DomStorageContext> {
  public:
-  struct UsageInfo {
-    GURL origin;
-    size_t data_size;
-    base::Time last_modified;
-
-    UsageInfo();
-    ~UsageInfo();
-  };
-
   // An interface for observing Local and Session Storage events on the
   // background thread.
   class EventObserver {
@@ -92,26 +86,29 @@ class DomStorageContext
   };
 
   DomStorageContext(
-      const FilePath& localstorage_directory,  // empty for incognito profiles
-      const FilePath& sessionstorage_directory,  // empty for incognito profiles
+      const base::FilePath& localstorage_directory,  // empty for incognito profiles
+      const base::FilePath& sessionstorage_directory,  // empty for incognito profiles
       quota::SpecialStoragePolicy* special_storage_policy,
       DomStorageTaskRunner* task_runner);
 
   // Returns the directory path for localStorage, or an empty directory, if
   // there is no backing on disk.
-  const FilePath& localstorage_directory() { return localstorage_directory_; }
+  const base::FilePath& localstorage_directory() { return localstorage_directory_; }
 
   // Returns the directory path for sessionStorage, or an empty directory, if
   // there is no backing on disk.
-  const FilePath& sessionstorage_directory() {
+  const base::FilePath& sessionstorage_directory() {
     return sessionstorage_directory_;
   }
 
   DomStorageTaskRunner* task_runner() const { return task_runner_; }
   DomStorageNamespace* GetStorageNamespace(int64 namespace_id);
 
-  void GetUsageInfo(std::vector<UsageInfo>* infos, bool include_file_info);
-  void DeleteOrigin(const GURL& origin);
+  void GetLocalStorageUsage(std::vector<LocalStorageUsageInfo>* infos,
+                            bool include_file_info);
+  void GetSessionStorageUsage(std::vector<SessionStorageUsageInfo>* infos);
+  void DeleteLocalStorage(const GURL& origin);
+  void DeleteSessionStorage(const SessionStorageUsageInfo& usage_info);
   void PurgeMemory();
 
   // Used by content settings to alter the behavior around
@@ -193,12 +190,12 @@ class DomStorageContext
   StorageNamespaceMap namespaces_;
 
   // Where localstorage data is stored, maybe empty for the incognito use case.
-  FilePath localstorage_directory_;
+  base::FilePath localstorage_directory_;
 
   // Where sessionstorage data is stored, maybe empty for the incognito use
   // case. Always empty until the file-backed session storage feature is
   // implemented.
-  FilePath sessionstorage_directory_;
+  base::FilePath sessionstorage_directory_;
 
   // Used to schedule sequenced background tasks.
   scoped_refptr<DomStorageTaskRunner> task_runner_;
@@ -222,6 +219,10 @@ class DomStorageContext
   // Persistent namespace IDs to protect from gradual deletion (they will
   // be needed for session restore).
   std::set<std::string> protected_persistent_session_ids_;
+
+  // Mapping between persistent namespace IDs and namespace IDs for
+  // sessionStorage.
+  std::map<std::string, int64> persistent_namespace_id_to_namespace_id_;
 };
 
 }  // namespace dom_storage

@@ -107,12 +107,11 @@
           },
           'dependencies': [
             'installer_util_strings',
-            'common_constants',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-            '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+            '<(DEPTH)/chrome/common_constants.gyp:common_constants',
             '<(DEPTH)/content/content.gyp:content_common',
             '<(DEPTH)/courgette/courgette.gyp:courgette_lib',
             '<(DEPTH)/crypto/crypto.gyp:crypto',
@@ -136,6 +135,8 @@
             'installer/util/compat_checks.h',
             'installer/util/delete_after_reboot_helper.cc',
             'installer/util/delete_after_reboot_helper.h',
+            'installer/util/eula_util.cc',
+            'installer/util/eula_util.h',
             'installer/util/google_chrome_distribution.cc',
             'installer/util/google_chrome_distribution.h',
             'installer/util/html_dialog.h',
@@ -164,7 +165,13 @@
               'dependencies': ['<(DEPTH)/content/content.gyp:content_common'],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
+      ],
+    }],
+    ['OS=="win" and target_arch=="ia32"', {
+      'targets': [
         {
           'target_name': 'installer_util_nacl_win64',
           'type': 'static_library',
@@ -196,9 +203,9 @@
           'target_name': 'installer_util',
           'type': 'static_library',
           'dependencies': [
-            'common_constants',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+            '<(DEPTH)/chrome/common_constants.gyp:common_constants',
           ],
           'sources': [
             'installer/util/master_preferences.cc',

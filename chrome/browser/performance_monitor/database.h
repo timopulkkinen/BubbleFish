@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_PERFORMANCE_MONITOR_DATABASE_H_
 #define CHROME_BROWSER_PERFORMANCE_MONITOR_DATABASE_H_
 
-#include <vector>
 #include <set>
 #include <string>
+#include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
@@ -117,7 +117,7 @@ class Database {
 
   virtual ~Database();
 
-  static scoped_ptr<Database> Create(FilePath path);
+  static scoped_ptr<Database> Create(base::FilePath path);
 
   // A "state" value is anything that can only have one value at a time, and
   // usually describes the state of the browser eg. version.
@@ -190,25 +190,26 @@ class Database {
   }
 
   // Query given |metric_type| and |activity|.
-  MetricVector GetStatsForActivityAndMetric(const std::string& activity,
-                                            MetricType metric_type,
-                                            const base::Time& start,
-                                            const base::Time& end);
+  scoped_ptr<MetricVector> GetStatsForActivityAndMetric(
+      const std::string& activity,
+      MetricType metric_type,
+      const base::Time& start,
+      const base::Time& end);
 
-  MetricVector GetStatsForActivityAndMetric(MetricType metric_type,
-                                            const base::Time& start,
-                                            const base::Time& end) {
+  scoped_ptr<MetricVector> GetStatsForActivityAndMetric(
+      MetricType metric_type, const base::Time& start, const base::Time& end) {
     return GetStatsForActivityAndMetric(kProcessChromeAggregate, metric_type,
                                         start, end);
   }
 
-  MetricVector GetStatsForActivityAndMetric(const std::string& activity,
-                                            MetricType metric_type) {
+  scoped_ptr<MetricVector> GetStatsForActivityAndMetric(
+      const std::string& activity, MetricType metric_type) {
     return GetStatsForActivityAndMetric(activity, metric_type, base::Time(),
                                         clock_->GetTime());
   }
 
-  MetricVector GetStatsForActivityAndMetric(MetricType metric_type) {
+  scoped_ptr<MetricVector> GetStatsForActivityAndMetric(
+      MetricType metric_type) {
     return GetStatsForActivityAndMetric(kProcessChromeAggregate, metric_type,
                                         base::Time(), clock_->GetTime());
   }
@@ -228,7 +229,7 @@ class Database {
   std::vector<TimeRange> GetActiveIntervals(const base::Time& start,
                                             const base::Time& end);
 
-  FilePath path() const { return path_; }
+  base::FilePath path() const { return path_; }
 
   void set_clock(scoped_ptr<Clock> clock) {
     clock_ = clock.Pass();
@@ -248,7 +249,7 @@ class Database {
     virtual base::Time GetTime() OVERRIDE;
   };
 
-  explicit Database(const FilePath& path);
+  explicit Database(const base::FilePath& path);
 
   void InitDBs();
 
@@ -277,7 +278,7 @@ class Database {
   MaxValueMap max_value_map_;
 
   // The directory where all the databases will reside.
-  FilePath path_;
+  base::FilePath path_;
 
   // The key for the beginning of the active interval.
   std::string start_time_key_;

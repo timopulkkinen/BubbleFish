@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,16 +22,16 @@
 #include <string>
 #include <vector>
 
-#include "base/time.h"
+#include "sync/base/sync_export.h"
 #include "sync/engine/sync_engine_event.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/engine/traffic_recorder.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/protocol/sync.pb.h"
 #include "sync/sessions/debug_info_getter.h"
 
 namespace syncer {
 
-class ConflictResolver;
 class ExtensionsActivityMonitor;
 class ServerConnectionManager;
 class ThrottledDataTypeTracker;
@@ -44,10 +44,9 @@ class Directory;
 static const int kDefaultMaxCommitBatchSize = 25;
 
 namespace sessions {
-class ScopedSessionContextConflictResolver;
 class TestScopedSessionEventListener;
 
-class SyncSessionContext {
+class SYNC_EXPORT_PRIVATE SyncSessionContext {
  public:
   SyncSessionContext(ServerConnectionManager* connection_manager,
                      syncable::Directory* directory,
@@ -57,11 +56,11 @@ class SyncSessionContext {
                      const std::vector<SyncEngineEventListener*>& listeners,
                      DebugInfoGetter* debug_info_getter,
                      TrafficRecorder* traffic_recorder,
-                     bool keystore_encryption_enabled);
+                     bool keystore_encryption_enabled,
+                     const std::string& invalidator_client_id);
 
   ~SyncSessionContext();
 
-  ConflictResolver* resolver() { return resolver_; }
   ServerConnectionManager* connection_manager() {
     return connection_manager_;
   }
@@ -124,15 +123,23 @@ class SyncSessionContext {
     return keystore_encryption_enabled_;
   }
 
+  void set_hierarchy_conflict_detected(bool value) {
+    client_status_.set_hierarchy_conflict_detected(value);
+  }
+
+  const sync_pb::ClientStatus& client_status() const {
+    return client_status_;
+  }
+
+  const std::string& invalidator_client_id() const {
+    return invalidator_client_id_;
+  }
+
  private:
   // Rather than force clients to set and null-out various context members, we
   // extend our encapsulation boundary to scoped helpers that take care of this
   // once they are allocated. See definitions of these below.
-  friend class ScopedSessionContextConflictResolver;
   friend class TestScopedSessionEventListener;
-
-  // This is installed by Syncer objects when needed and may be NULL.
-  ConflictResolver* resolver_;
 
   ObserverList<SyncEngineEventListener> listeners_;
 
@@ -168,35 +175,21 @@ class SyncSessionContext {
 
   TrafficRecorder* traffic_recorder_;
 
+  // Satus information to be sent up to the server.
+  sync_pb::ClientStatus client_status_;
+
   // Temporary variable while keystore encryption is behind a flag. True if
   // we should attempt performing keystore encryption related work, false if
   // the experiment is not enabled.
   bool keystore_encryption_enabled_;
 
+  // This is a copy of the identifier the that the invalidations client used to
+  // register itself with the invalidations server during startup.  We need to
+  // provide this to the sync server when we make changes to enable it to
+  // prevent us from receiving notifications of changes we make ourselves.
+  const std::string invalidator_client_id_;
+
   DISALLOW_COPY_AND_ASSIGN(SyncSessionContext);
-};
-
-// Installs a ConflictResolver to a given session context for the lifetime of
-// the ScopedSessionContextConflictResolver.  There should never be more than
-// one ConflictResolver in the system, so it is an error to use this if the
-// context already has a resolver.
-class ScopedSessionContextConflictResolver {
- public:
-  // Note: |context| and |resolver| should outlive |this|.
-  ScopedSessionContextConflictResolver(SyncSessionContext* context,
-                                       ConflictResolver* resolver)
-      : context_(context), resolver_(resolver) {
-    DCHECK(NULL == context->resolver_);
-    context->resolver_ = resolver;
-  }
-  ~ScopedSessionContextConflictResolver() {
-    context_->resolver_ = NULL;
-  }
-
- private:
-  SyncSessionContext* context_;
-  ConflictResolver* resolver_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedSessionContextConflictResolver);
 };
 
 }  // namespace sessions

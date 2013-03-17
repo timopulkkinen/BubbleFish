@@ -6,7 +6,7 @@
 #define CONTENT_BROWSER_STORAGE_PARTITION_IMPL_H_
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
@@ -19,14 +19,8 @@ class StoragePartitionImpl : public StoragePartition {
  public:
   virtual ~StoragePartitionImpl();
 
-  // TODO(ajwong): Break the direct dependency on |context|. We only
-  // need 3 pieces of info from it.
-  static StoragePartitionImpl* Create(BrowserContext* context,
-                                      const std::string& partition_id,
-                                      const FilePath& profile_path);
-
   // StoragePartition interface.
-  virtual FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() OVERRIDE;
   virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaURLRequestContext() OVERRIDE;
   virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
@@ -35,12 +29,27 @@ class StoragePartitionImpl : public StoragePartition {
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
   virtual DOMStorageContextImpl* GetDOMStorageContext() OVERRIDE;
   virtual IndexedDBContextImpl* GetIndexedDBContext() OVERRIDE;
+  virtual void AsyncClearDataForOrigin(
+      uint32 storage_mask,
+      const GURL& storage_origin,
+      net::URLRequestContextGetter* request_context_getter) OVERRIDE;
+  virtual void AsyncClearData(uint32 storage_mask) OVERRIDE;
 
  private:
   friend class StoragePartitionImplMap;
 
+  // The |partition_path| is the absolute path to the root of this
+  // StoragePartition's on-disk storage.
+  //
+  // If |in_memory| is true, the |partition_path| is (ab)used as a way of
+  // distinguishing different in-memory partitions, but nothing is persisted
+  // on to disk.
+  static StoragePartitionImpl* Create(BrowserContext* context,
+                                      bool in_memory,
+                                      const base::FilePath& profile_path);
+
   StoragePartitionImpl(
-      const FilePath& partition_path,
+      const base::FilePath& partition_path,
       quota::QuotaManager* quota_manager,
       ChromeAppCacheService* appcache_service,
       fileapi::FileSystemContext* filesystem_context,
@@ -64,7 +73,7 @@ class StoragePartitionImpl : public StoragePartition {
   void SetMediaURLRequestContext(
       net::URLRequestContextGetter* media_url_request_context);
 
-  FilePath partition_path_;
+  base::FilePath partition_path_;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_;
   scoped_refptr<net::URLRequestContextGetter> media_url_request_context_;
   scoped_refptr<quota::QuotaManager> quota_manager_;

@@ -3,21 +3,46 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'conditions': [
+      ['inside_chromium_build==0', {
+        'webkit_src_dir': '../../../../..',
+      },{
+        'webkit_src_dir': '../../third_party/WebKit',
+      }],
+      ['OS == "android" or OS == "ios"', {
+        # Android and iOS don't use ffmpeg.
+        'use_ffmpeg%': 0,
+      }, {  # 'OS != "android" and OS != "ios"'
+        'use_ffmpeg%': 1,
+      }],
+    ],
+    # Set |use_fake_video_decoder| to 1 to ignore input frames in |clearkeycdm|,
+    # and produce video frames filled with a solid color instead.
+    'use_fake_video_decoder%': 0,
+    # Set |use_libvpx| to 1 to use libvpx for VP8 decoding in |clearkeycdm|.
+    'use_libvpx%': 0,
+  },
   'targets': [
     {
       'target_name': 'webkit_media',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
+      'include_dirs': [
+        '<(SHARED_INTERMEDIATE_DIR)',  # Needed by key_systems.cc.
+      ],
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/media/media.gyp:shared_memory_support',
         '<(DEPTH)/media/media.gyp:yuv_convert',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
+        '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
       ],
       'sources': [
         'android/audio_decoder_android.cc',
-        'android/media_metadata_android.cc',
-        'android/media_metadata_android.h',
         'android/media_player_bridge_manager_impl.cc',
         'android/media_player_bridge_manager_impl.h',
         'android/stream_texture_factory_android.h',
@@ -49,28 +74,30 @@
         'crypto/proxy_decryptor.h',
         'filter_helpers.cc',
         'filter_helpers.h',
+        'media_stream_audio_renderer.cc',
+        'media_stream_audio_renderer.h',
         'media_stream_client.h',
         'preload.h',
         'simple_video_frame_provider.cc',
         'simple_video_frame_provider.h',
-        'skcanvas_video_renderer.cc',
-        'skcanvas_video_renderer.h',
         'video_frame_provider.cc',
         'video_frame_provider.h',
+        'webaudiosourceprovider_impl.cc',
+        'webaudiosourceprovider_impl.h',
         'webmediaplayer_delegate.h',
         'webmediaplayer_impl.cc',
         'webmediaplayer_impl.h',
         'webmediaplayer_ms.cc',
         'webmediaplayer_ms.h',
-        'webmediaplayer_proxy.cc',
-        'webmediaplayer_proxy.h',
+        'webmediaplayer_params.cc',
+        'webmediaplayer_params.h',
         'webmediaplayer_util.cc',
         'webmediaplayer_util.h',
         'webvideoframe_impl.cc',
         'webvideoframe_impl.h',
       ],
       'conditions': [
-        ['inside_chromium_build==0', {
+        ['inside_chromium_build == 0', {
           'dependencies': [
             '<(DEPTH)/webkit/support/setup_third_party.gyp:third_party_headers',
           ],
@@ -95,22 +122,78 @@
           ],
         }],
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       'target_name': 'clearkeycdm',
-      'type': 'shared_library',
+      'type': 'none',
+      # TODO(tomfinegan): Simplify this by unconditionally including all the
+      # decoders, and changing clearkeycdm to select which decoder to use
+      # based on environment variables.
+      'conditions': [
+        ['use_fake_video_decoder == 1' , {
+          'defines': ['CLEAR_KEY_CDM_USE_FAKE_VIDEO_DECODER'],
+          'sources': [
+            'crypto/ppapi/fake_cdm_video_decoder.cc',
+            'crypto/ppapi/fake_cdm_video_decoder.h',
+          ],
+        }],
+        ['use_ffmpeg == 1'  , {
+          'defines': ['CLEAR_KEY_CDM_USE_FFMPEG_DECODER'],
+          'dependencies': [
+            '<(DEPTH)/third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'crypto/ppapi/ffmpeg_cdm_audio_decoder.cc',
+            'crypto/ppapi/ffmpeg_cdm_audio_decoder.h',
+          ],
+        }],
+        ['use_ffmpeg == 1 and use_fake_video_decoder == 0'  , {
+          'sources': [
+            'crypto/ppapi/ffmpeg_cdm_video_decoder.cc',
+            'crypto/ppapi/ffmpeg_cdm_video_decoder.h',
+          ],
+        }],
+        ['use_libvpx == 1 and use_fake_video_decoder == 0' , {
+          'defines': ['CLEAR_KEY_CDM_USE_LIBVPX_DECODER'],
+          'dependencies': [
+            '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
+          ],
+          'sources': [
+            'crypto/ppapi/libvpx_cdm_video_decoder.cc',
+            'crypto/ppapi/libvpx_cdm_video_decoder.h',
+          ],
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'type': 'loadable_module',  # Must be in PRODUCT_DIR for ASAN bots.
+        }, {  # 'os_posix != 1 or OS == "mac"'
+          'type': 'shared_library',
+        }],
+        ['OS == "mac"', {
+          'xcode_settings': {
+            'DYLIB_INSTALL_NAME_BASE': '@loader_path',
+          },
+        }]
+      ],
       'defines': ['CDM_IMPLEMENTATION'],
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
-        '<(DEPTH)/media/media.gyp:media'
+        '<(DEPTH)/media/media.gyp:media',
+        # Include the following for media::AudioBus.
+        '<(DEPTH)/media/media.gyp:shared_memory_support',
       ],
       'sources': [
+        'crypto/ppapi/cdm_video_decoder.cc',
+        'crypto/ppapi/cdm_video_decoder.h',
         'crypto/ppapi/clear_key_cdm.cc',
         'crypto/ppapi/clear_key_cdm.h',
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
-      'target_name': 'clearkeycdmplugin',
+      'target_name': 'clearkeycdmadapter',
       'type': 'none',
       'dependencies': [
         '<(DEPTH)/ppapi/ppapi.gyp:ppapi_cpp',
@@ -118,21 +201,26 @@
       ],
       'sources': [
         'crypto/ppapi/cdm_wrapper.cc',
-        'crypto/ppapi/content_decryption_module.h',
+        'crypto/ppapi/cdm/content_decryption_module.h',
         'crypto/ppapi/linked_ptr.h',
       ],
       'conditions': [
-        ['os_posix==1 and OS!="mac"', {
+        ['os_posix == 1 and OS != "mac"', {
           'cflags': ['-fvisibility=hidden'],
           'type': 'loadable_module',
-          # -gstabs, used in the official builds, causes an ICE. Simply remove
-          # it.
-          'cflags!': ['-gstabs'],
+          # Allow the plugin wrapper to find the CDM in the same directory.
+          'ldflags': ['-Wl,-rpath=\$$ORIGIN'],
+          'libraries': [
+            # Built by clearkeycdm.
+            '<(PRODUCT_DIR)/libclearkeycdm.so',
+          ],
         }],
-        ['OS=="win"', {
+        ['OS == "win"', {
           'type': 'shared_library',
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         }],
-        ['OS=="mac"', {
+        ['OS == "mac"', {
           'type': 'loadable_module',
           'mac_bundle': 1,
           'product_extension': 'plugin',
@@ -143,6 +231,15 @@
               '-Wl,-exported_symbol,_PPP_InitializeModule',
               '-Wl,-exported_symbol,_PPP_ShutdownModule'
             ]},
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)/clearkeycdmadapter.plugin/Contents/MacOS/',
+              'files': [
+                '<(PRODUCT_DIR)/libclearkeycdm.dylib',
+                '<(PRODUCT_DIR)/ffmpegsumo.so'
+              ]
+            }
+          ]
         }],
       ],
     }

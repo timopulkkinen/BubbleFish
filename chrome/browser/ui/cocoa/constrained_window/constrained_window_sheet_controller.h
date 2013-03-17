@@ -11,10 +11,12 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/scoped_nsobject.h"
 
+@protocol ConstrainedWindowSheet;
+
 // This class manages multiple tab modal sheets for a single parent window. Each
 // tab can have a single sheet and only the active tab's sheet will be visible.
 // A tab in this case is the |parentView| passed to |-showSheet:forParentView:|.
-@interface ConstrainedWindowSheetController : NSObject <NSAnimationDelegate> {
+@interface ConstrainedWindowSheetController : NSObject {
  @private
   scoped_nsobject<NSMutableArray> sheets_;
   scoped_nsobject<NSWindow> parentWindow_;
@@ -28,31 +30,34 @@
 
 // Find a controller that's managing the given sheet. If no such controller
 // exists then nil is returned.
-+ (ConstrainedWindowSheetController*)controllerForSheet:(NSWindow*)sheet;
++ (ConstrainedWindowSheetController*)
+    controllerForSheet:(id<ConstrainedWindowSheet>)sheet;
+
+// Find the sheet attached to the given overlay window.
++ (id<ConstrainedWindowSheet>)sheetForOverlayWindow:(NSWindow*)overlayWindow;
 
 // Shows the given sheet over |parentView|. If |parentView| is not the active
 // view then the sheet is not shown until the |parentView| becomes active.
-- (void)showSheet:(NSWindow*)sheet
+- (void)showSheet:(id<ConstrainedWindowSheet>)sheet
     forParentView:(NSView*)parentView;
 
-// Closes the given sheet. If the parent view of the sheet is currently active
-// then an asynchronous animation will be run and the sheet will be closed
-// at the end of the animation.
-- (void)closeSheet:(NSWindow*)sheet;
+// Calculates the position of the sheet for the given window size.
+- (NSPoint)originForSheet:(id<ConstrainedWindowSheet>)sheet
+           withWindowSize:(NSSize)size;
+
+// Closes the given sheet.
+- (void)closeSheet:(id<ConstrainedWindowSheet>)sheet;
 
 // Make |parentView| the current active view. If |parentView| has an attached
 // sheet then the sheet is made visible.
 - (void)parentViewDidBecomeActive:(NSView*)parentView;
 
+// Run a pulse animation for the given sheet. This does nothing if the sheet
+// is not visible.
+- (void)pulseSheet:(id<ConstrainedWindowSheet>)sheet;
+
 // Gets the number of sheets attached to the controller's window.
 - (int)sheetCount;
-
-@end
-
-@interface ConstrainedWindowSheetController (TestAPI)
-
-// Testing only API. End any pending animation for the given sheet.
-- (void)endAnimationForSheet:(NSWindow*)sheet;
 
 @end
 

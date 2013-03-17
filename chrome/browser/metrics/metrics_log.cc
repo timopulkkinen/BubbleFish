@@ -4,6 +4,7 @@
 
 #include "chrome/browser/metrics/metrics_log.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -12,9 +13,11 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/profiler/alternate_timer.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time.h"
@@ -26,8 +29,8 @@
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
@@ -45,6 +48,10 @@
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
+
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
 #if defined(OS_WIN)
@@ -56,17 +63,18 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 using content::GpuDataManager;
 using metrics::OmniboxEventProto;
+using metrics::PerfDataProto;
 using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
 using tracked_objects::ProcessDataSnapshot;
-typedef chrome_variations::SelectedGroupId SelectedGroupId;
+typedef chrome_variations::ActiveGroupId ActiveGroupId;
 typedef SystemProfileProto::GoogleUpdate::ProductInfo ProductInfo;
 
 namespace {
 
 // Returns the date at which the current metrics client ID was created as
-// a string containing milliseconds since the epoch, or "0" if none was found.
-std::string GetInstallDate(PrefService* pref) {
+// a string containing seconds since the epoch, or "0" if none was found.
+std::string GetMetricsEnabledDate(PrefService* pref) {
   if (!pref) {
     NOTREACHED();
     return "0";
@@ -123,6 +131,8 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
     case AutocompleteMatch::CONTACT:
       return OmniboxEventProto::Suggestion::CONTACT;
+    case AutocompleteMatch::BOOKMARK_TITLE:
+      return OmniboxEventProto::Suggestion::BOOKMARK_TITLE;
     default:
       NOTREACHED();
       return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
@@ -193,9 +203,9 @@ void SetPluginInfo(const webkit::WebPluginInfo& plugin_info,
     plugin->set_is_disabled(!plugin_prefs->IsPluginEnabled(plugin_info));
 }
 
-void WriteFieldTrials(const std::vector<SelectedGroupId>& field_trial_ids,
+void WriteFieldTrials(const std::vector<ActiveGroupId>& field_trial_ids,
                       SystemProfileProto* system_profile) {
-  for (std::vector<SelectedGroupId>::const_iterator it =
+  for (std::vector<ActiveGroupId>::const_iterator it =
        field_trial_ids.begin(); it != field_trial_ids.end(); ++it) {
     SystemProfileProto::FieldTrial* field_trial =
         system_profile->add_field_trial();
@@ -219,9 +229,9 @@ void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
                                  &ignored, &birth_thread_name_hash);
     MetricsLogBase::CreateHashes(it->death_thread_name,
                                  &ignored, &exec_thread_name_hash);
-    MetricsLogBase::CreateHashes(it->birth.location.function_name,
-                                 &ignored, &source_file_name_hash);
     MetricsLogBase::CreateHashes(it->birth.location.file_name,
+                                 &ignored, &source_file_name_hash);
+    MetricsLogBase::CreateHashes(it->birth.location.function_name,
                                  &ignored, &source_function_name_hash);
 
     const tracked_objects::DeathDataSnapshot& death_data = it->death_data;
@@ -257,6 +267,44 @@ void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
 }
 #endif
 
+#if defined(OS_WIN)
+struct ScreenDPIInformation{
+  double max_dpi_x;
+  double max_dpi_y;
+};
+
+// Called once for each connected monitor.
+BOOL CALLBACK GetMonitorDPICallback(HMONITOR, HDC hdc, LPRECT, LPARAM dwData) {
+  const double kMillimetersPerInch = 25.4;
+  ScreenDPIInformation* screen_info =
+      reinterpret_cast<ScreenDPIInformation*>(dwData);
+  // Size of screen, in mm.
+  DWORD size_x = GetDeviceCaps(hdc, HORZSIZE);
+  DWORD size_y = GetDeviceCaps(hdc, VERTSIZE);
+  double dpi_x = (size_x > 0) ?
+      GetDeviceCaps(hdc, HORZRES) / (size_x / kMillimetersPerInch) : 0;
+  double dpi_y = (size_y > 0) ?
+      GetDeviceCaps(hdc, VERTRES) / (size_y / kMillimetersPerInch) : 0;
+  screen_info->max_dpi_x = std::max(dpi_x, screen_info->max_dpi_x);
+  screen_info->max_dpi_y = std::max(dpi_y, screen_info->max_dpi_y);
+  return TRUE;
+}
+
+void WriteScreenDPIInformationProto(SystemProfileProto::Hardware* hardware) {
+  HDC desktop_dc = GetDC(NULL);
+  if (desktop_dc) {
+    ScreenDPIInformation si = {0,0};
+    if (EnumDisplayMonitors(desktop_dc, NULL, GetMonitorDPICallback,
+            reinterpret_cast<LPARAM>(&si))) {
+      hardware->set_max_dpi_x(si.max_dpi_x);
+      hardware->set_max_dpi_y(si.max_dpi_y);
+    }
+    ReleaseDC(GetDesktopWindow(), desktop_dc);
+  }
+}
+
+#endif  // defined(OS_WIN)
+
 }  // namespace
 
 GoogleUpdateMetrics::GoogleUpdateMetrics() : is_system_install(false) {}
@@ -272,8 +320,8 @@ MetricsLog::MetricsLog(const std::string& client_id, int session_id)
 MetricsLog::~MetricsLog() {}
 
 // static
-void MetricsLog::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterListPref(prefs::kStabilityPluginStats);
+void MetricsLog::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterListPref(prefs::kStabilityPluginStats);
 }
 
 // static
@@ -334,7 +382,6 @@ void MetricsLog::RecordIncrementalStabilityElements(
     OPEN_ELEMENT_FOR_SCOPE("stability");  // Minimal set of stability elements.
     WriteRequiredStabilityAttributes(pref);
     WriteRealtimeStabilityAttributes(pref);
-
     WritePluginStabilityElements(plugin_list, pref);
   }
 }
@@ -344,20 +391,22 @@ PrefService* MetricsLog::GetPrefService() {
 }
 
 gfx::Size MetricsLog::GetScreenSize() const {
-  return gfx::Screen::GetPrimaryDisplay().GetSizeInPixel();
+  return gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().GetSizeInPixel();
 }
 
 float MetricsLog::GetScreenDeviceScaleFactor() const {
-  return gfx::Screen::GetPrimaryDisplay().device_scale_factor();
+  return gfx::Screen::GetNativeScreen()->
+      GetPrimaryDisplay().device_scale_factor();
 }
 
 int MetricsLog::GetScreenCount() const {
-  return gfx::Screen::GetNumDisplays();
+  // TODO(scottmg): NativeScreen maybe wrong. http://crbug.com/133312
+  return gfx::Screen::GetNativeScreen()->GetNumDisplays();
 }
 
 void MetricsLog::GetFieldTrialIds(
-    std::vector<SelectedGroupId>* field_trial_ids) const {
-  chrome_variations::GetFieldTrialSelectedGroupIds(field_trial_ids);
+    std::vector<ActiveGroupId>* field_trial_ids) const {
+  chrome_variations::GetFieldTrialActiveGroupIds(field_trial_ids);
 }
 
 void MetricsLog::WriteStabilityElement(
@@ -425,6 +474,8 @@ void MetricsLog::WritePluginStabilityElements(
     return;
 
   OPEN_ELEMENT_FOR_SCOPE("plugins");
+
+#if defined(ENABLE_PLUGINS)
   SystemProfileProto::Stability* stability =
       uma_proto()->mutable_system_profile()->mutable_stability();
   PluginPrefs* plugin_prefs = GetPluginPrefs();
@@ -497,6 +548,7 @@ void MetricsLog::WritePluginStabilityElements(
     plugin_stability->set_crash_count(crashes);
     plugin_stability->set_loading_error_count(loading_errors);
   }
+#endif  // defined(ENABLE_PLUGINS)
 
   pref->ClearPref(prefs::kStabilityPluginStats);
 }
@@ -596,9 +648,10 @@ void MetricsLog::WritePluginList(
     bool write_as_xml) {
   DCHECK(!locked());
 
-  PluginPrefs* plugin_prefs = GetPluginPrefs();
-
   OPEN_ELEMENT_FOR_SCOPE("plugins");
+
+#if defined(ENABLE_PLUGINS)
+  PluginPrefs* plugin_prefs = GetPluginPrefs();
   SystemProfileProto* system_profile = uma_proto()->mutable_system_profile();
   for (std::vector<webkit::WebPluginInfo>::const_iterator iter =
            plugin_list.begin();
@@ -630,13 +683,14 @@ void MetricsLog::WritePluginList(
       SetPluginInfo(*iter, plugin_prefs, plugin);
     }
   }
+#endif  // defined(ENABLE_PLUGINS)
 }
 
 void MetricsLog::WriteInstallElement() {
   // Write the XML version.
   // We'll write the protobuf version in RecordEnvironmentProto().
   OPEN_ELEMENT_FOR_SCOPE("install");
-  WriteAttribute("installdate", GetInstallDate(GetPrefService()));
+  WriteAttribute("installdate", GetMetricsEnabledDate(GetPrefService()));
   WriteIntAttribute("buildid", 0);  // We're using appversion instead.
 }
 
@@ -664,7 +718,7 @@ void MetricsLog::RecordEnvironment(
     // Write the XML version.
     // We'll write the protobuf version in RecordEnvironmentProto().
     OPEN_ELEMENT_FOR_SCOPE("cpu");
-    WriteAttribute("arch", base::SysInfo::CPUArchitecture());
+    WriteAttribute("arch", base::SysInfo::OperatingSystemArchitecture());
   }
 
   {
@@ -709,28 +763,17 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("bookmarks");
-    int num_bookmarks_on_bookmark_bar =
-        pref->GetInteger(prefs::kNumBookmarksOnBookmarkBar);
-    int num_folders_on_bookmark_bar =
-        pref->GetInteger(prefs::kNumFoldersOnBookmarkBar);
-    int num_bookmarks_in_other_bookmarks_folder =
-        pref->GetInteger(prefs::kNumBookmarksInOtherBookmarkFolder);
-    int num_folders_in_other_bookmarks_folder =
-        pref->GetInteger(prefs::kNumFoldersInOtherBookmarkFolder);
     {
       OPEN_ELEMENT_FOR_SCOPE("bookmarklocation");
       WriteAttribute("name", "full-tree");
-      WriteIntAttribute("foldercount",
-          num_folders_on_bookmark_bar + num_folders_in_other_bookmarks_folder);
-      WriteIntAttribute("itemcount",
-          num_bookmarks_on_bookmark_bar +
-          num_bookmarks_in_other_bookmarks_folder);
+      WriteIntAttribute("foldercount", 0);
+      WriteIntAttribute("itemcount", 0);
     }
     {
       OPEN_ELEMENT_FOR_SCOPE("bookmarklocation");
       WriteAttribute("name", "toolbar");
-      WriteIntAttribute("foldercount", num_folders_on_bookmark_bar);
-      WriteIntAttribute("itemcount", num_bookmarks_on_bookmark_bar);
+      WriteIntAttribute("foldercount", 0);
+      WriteIntAttribute("itemcount", 0);
     }
   }
 
@@ -749,21 +792,36 @@ void MetricsLog::RecordEnvironmentProto(
     const std::vector<webkit::WebPluginInfo>& plugin_list,
     const GoogleUpdateMetrics& google_update_metrics) {
   SystemProfileProto* system_profile = uma_proto()->mutable_system_profile();
-  int install_date;
-  bool success = base::StringToInt(GetInstallDate(GetPrefService()),
-                                   &install_date);
+
+  std::string brand_code;
+  if (google_util::GetBrand(&brand_code))
+    system_profile->set_brand_code(brand_code);
+
+  int enabled_date;
+  bool success = base::StringToInt(GetMetricsEnabledDate(GetPrefService()),
+                                   &enabled_date);
   DCHECK(success);
-  system_profile->set_install_date(install_date);
+  system_profile->set_uma_enabled_date(enabled_date);
 
   system_profile->set_application_locale(
       content::GetContentClient()->browser()->GetApplicationLocale());
 
   SystemProfileProto::Hardware* hardware = system_profile->mutable_hardware();
-  hardware->set_cpu_architecture(base::SysInfo::CPUArchitecture());
+  hardware->set_cpu_architecture(base::SysInfo::OperatingSystemArchitecture());
   hardware->set_system_ram_mb(base::SysInfo::AmountOfPhysicalMemoryMB());
 #if defined(OS_WIN)
   hardware->set_dll_base(reinterpret_cast<uint64>(&__ImageBase));
 #endif
+
+  SystemProfileProto::Network* network = system_profile->mutable_network();
+  network->set_connection_type_is_ambiguous(
+      network_observer_.connection_type_is_ambiguous());
+  network->set_connection_type(network_observer_.connection_type());
+  network->set_wifi_phy_layer_protocol_is_ambiguous(
+      network_observer_.wifi_phy_layer_protocol_is_ambiguous());
+  network->set_wifi_phy_layer_protocol(
+      network_observer_.wifi_phy_layer_protocol());
+  network_observer_.Reset();
 
   SystemProfileProto::OS* os = system_profile->mutable_os();
   std::string os_name = base::SysInfo::OperatingSystemName();
@@ -778,6 +836,10 @@ void MetricsLog::RecordEnvironmentProto(
 #endif
   os->set_name(os_name);
   os->set_version(base::SysInfo::OperatingSystemVersion());
+#if defined(OS_ANDROID)
+  os->set_fingerprint(
+      base::android::BuildInfo::GetInstance()->android_build_fp());
+#endif
 
   const content::GPUInfo& gpu_info =
       GpuDataManager::GetInstance()->GetGPUInfo();
@@ -791,6 +853,8 @@ void MetricsLog::RecordEnvironmentProto(
   gpu_performance->set_graphics_score(gpu_info.performance_stats.graphics);
   gpu_performance->set_gaming_score(gpu_info.performance_stats.gaming);
   gpu_performance->set_overall_score(gpu_info.performance_stats.overall);
+  gpu->set_gl_vendor(gpu_info.gl_vendor);
+  gpu->set_gl_renderer(gpu_info.gl_renderer);
 
   const gfx::Size display_size = GetScreenSize();
   hardware->set_primary_screen_width(display_size.width());
@@ -798,14 +862,24 @@ void MetricsLog::RecordEnvironmentProto(
   hardware->set_primary_screen_scale_factor(GetScreenDeviceScaleFactor());
   hardware->set_screen_count(GetScreenCount());
 
+#if defined(OS_WIN)
+  WriteScreenDPIInformationProto(hardware);
+#endif
+
   WriteGoogleUpdateProto(google_update_metrics);
 
   bool write_as_xml = false;
   WritePluginList(plugin_list, write_as_xml);
 
-  std::vector<SelectedGroupId> field_trial_ids;
+  std::vector<ActiveGroupId> field_trial_ids;
   GetFieldTrialIds(&field_trial_ids);
   WriteFieldTrials(field_trial_ids, system_profile);
+
+#if defined(OS_CHROMEOS)
+  PerfDataProto perf_data_proto;
+  if (perf_provider_.GetPerfData(&perf_data_proto))
+    uma_proto()->add_perf_data()->Swap(&perf_data_proto);
+#endif
 }
 
 void MetricsLog::RecordProfilerData(
@@ -836,14 +910,12 @@ void MetricsLog::RecordProfilerData(
 void MetricsLog::WriteAllProfilesMetrics(
     const DictionaryValue& all_profiles_metrics) {
   const std::string profile_prefix(prefs::kProfilePrefix);
-  for (DictionaryValue::key_iterator i = all_profiles_metrics.begin_keys();
-       i != all_profiles_metrics.end_keys(); ++i) {
-    const std::string& key_name = *i;
-    if (key_name.compare(0, profile_prefix.size(), profile_prefix) == 0) {
+  for (DictionaryValue::Iterator i(all_profiles_metrics); !i.IsAtEnd();
+       i.Advance()) {
+    if (i.key().compare(0, profile_prefix.size(), profile_prefix) == 0) {
       const DictionaryValue* profile;
-      if (all_profiles_metrics.GetDictionaryWithoutPathExpansion(key_name,
-                                                                 &profile))
-        WriteProfileMetrics(key_name.substr(profile_prefix.size()), *profile);
+      if (i.value().GetAsDictionary(&profile))
+        WriteProfileMetrics(i.key().substr(profile_prefix.size()), *profile);
     }
   }
 }
@@ -852,46 +924,43 @@ void MetricsLog::WriteProfileMetrics(const std::string& profileidhash,
                                      const DictionaryValue& profile_metrics) {
   OPEN_ELEMENT_FOR_SCOPE("userprofile");
   WriteAttribute("profileidhash", profileidhash);
-  for (DictionaryValue::key_iterator i = profile_metrics.begin_keys();
-       i != profile_metrics.end_keys(); ++i) {
-    const Value* value;
-    if (profile_metrics.GetWithoutPathExpansion(*i, &value)) {
-      DCHECK(*i != "id");
-      switch (value->GetType()) {
-        case Value::TYPE_STRING: {
-          std::string string_value;
-          if (value->GetAsString(&string_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteAttribute("value", string_value);
-          }
-          break;
+  for (DictionaryValue::Iterator i(profile_metrics); !i.IsAtEnd();
+       i.Advance()) {
+    DCHECK_NE(i.key(), "id");
+    switch (i.value().GetType()) {
+      case Value::TYPE_STRING: {
+        std::string string_value;
+        if (i.value().GetAsString(&string_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteAttribute("value", string_value);
         }
-
-        case Value::TYPE_BOOLEAN: {
-          bool bool_value;
-          if (value->GetAsBoolean(&bool_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteIntAttribute("value", bool_value ? 1 : 0);
-          }
-          break;
-        }
-
-        case Value::TYPE_INTEGER: {
-          int int_value;
-          if (value->GetAsInteger(&int_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteIntAttribute("value", int_value);
-          }
-          break;
-        }
-
-        default:
-          NOTREACHED();
-          break;
+        break;
       }
+
+      case Value::TYPE_BOOLEAN: {
+        bool bool_value;
+        if (i.value().GetAsBoolean(&bool_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteIntAttribute("value", bool_value ? 1 : 0);
+        }
+        break;
+      }
+
+      case Value::TYPE_INTEGER: {
+        int int_value;
+        if (i.value().GetAsInteger(&int_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteIntAttribute("value", int_value);
+        }
+        break;
+      }
+
+      default:
+        NOTREACHED();
+        break;
     }
   }
 }
@@ -921,7 +990,8 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
     WriteIntAttribute("numterms", num_terms);
     WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
     WriteIntAttribute("completedlength",
-                      static_cast<int>(log.inline_autocompleted_length));
+                      log.completed_length != string16::npos ?
+                      static_cast<int>(log.completed_length) : 0);
     if (log.elapsed_time_since_user_first_modified_omnibox !=
         base::TimeDelta::FromMilliseconds(-1)) {
       // Only upload the typing duration if it is set/valid.
@@ -957,13 +1027,16 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
   omnibox_event->set_just_deleted_text(log.just_deleted_text);
   omnibox_event->set_num_typed_terms(num_terms);
   omnibox_event->set_selected_index(log.selected_index);
-  omnibox_event->set_completed_length(log.inline_autocompleted_length);
+  if (log.completed_length != string16::npos)
+    omnibox_event->set_completed_length(log.completed_length);
   if (log.elapsed_time_since_user_first_modified_omnibox !=
       base::TimeDelta::FromMilliseconds(-1)) {
     // Only upload the typing duration if it is set/valid.
     omnibox_event->set_typing_duration_ms(
         log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
   }
+  omnibox_event->set_duration_since_last_default_match_update_ms(
+      log.elapsed_time_since_last_change_to_default_match.InMilliseconds());
   omnibox_event->set_current_page_classification(
       log.current_page_classification);
   omnibox_event->set_input_type(AsOmniboxEventInputType(log.input_type));

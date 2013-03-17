@@ -39,11 +39,25 @@
 // Unit tests don't need time-consuming asynchronous animations.
 @interface BookmarkBarControllerTestable : BookmarkBarController {
 }
+
 @end
+
 @implementation BookmarkBarControllerTestable
-- (BOOL)animationEnabled {
-  return NO;
+
+- (id)initWithBrowser:(Browser*)browser
+         initialWidth:(CGFloat)initialWidth
+             delegate:(id<BookmarkBarControllerDelegate>)delegate
+       resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  if ((self = [super initWithBrowser:browser
+                        initialWidth:initialWidth
+                            delegate:delegate
+                      resizeDelegate:resizeDelegate])) {
+    [self setStateAnimationsEnabled:NO];
+    [self setInnerContentAnimationsEnabled:NO];
+  }
+  return self;
 }
+
 @end
 
 // Just like a BookmarkBarController but openURL: is stubbed out.
@@ -191,30 +205,35 @@ class FakeTheme : public ui::ThemeProvider {
   FakeTheme(NSColor* color) : color_(color) {}
   scoped_nsobject<NSColor> color_;
 
-  virtual SkBitmap* GetBitmapNamed(int id) const { return NULL; }
-  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const { return NULL; }
-  virtual SkColor GetColor(int id) const { return SkColor(); }
-  virtual bool GetDisplayProperty(int id, int* result) const { return false; }
-  virtual bool ShouldUseNativeFrame() const { return false; }
-  virtual bool HasCustomImage(int id) const { return false; }
-  virtual base::RefCountedMemory* GetRawData(
-      int id,
-      ui::ScaleFactor scale_factor) const {
+  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE {
     return NULL;
   }
-  virtual NSImage* GetNSImageNamed(int id, bool allow_default) const {
+  virtual SkColor GetColor(int id) const OVERRIDE { return SkColor(); }
+  virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE {
+    return false;
+  }
+  virtual bool ShouldUseNativeFrame() const OVERRIDE { return false; }
+  virtual bool HasCustomImage(int id) const OVERRIDE { return false; }
+  virtual base::RefCountedMemory* GetRawData(
+      int id,
+      ui::ScaleFactor scale_factor) const OVERRIDE {
+    return NULL;
+  }
+  virtual NSImage* GetNSImageNamed(int id, bool allow_default) const OVERRIDE {
     return nil;
   }
-  virtual NSColor* GetNSImageColorNamed(int id, bool allow_default) const {
+  virtual NSColor* GetNSImageColorNamed(
+      int id,
+      bool allow_default) const OVERRIDE {
     return nil;
   }
-  virtual NSColor* GetNSColor(int id, bool allow_default) const {
+  virtual NSColor* GetNSColor(int id, bool allow_default) const OVERRIDE {
     return color_.get();
   }
-  virtual NSColor* GetNSColorTint(int id, bool allow_default) const {
+  virtual NSColor* GetNSColorTint(int id, bool allow_default) const OVERRIDE {
     return nil;
   }
-  virtual NSGradient* GetNSGradient(int id) const {
+  virtual NSGradient* GetNSGradient(int id) const OVERRIDE {
     return nil;
   }
 };
@@ -279,7 +298,7 @@ class BookmarkBarControllerTestBase : public CocoaProfileTest {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(profile());
 
-    FilePath extension_dir;
+    base::FilePath extension_dir;
     static_cast<extensions::TestExtensionSystem*>(
         extensions::ExtensionSystem::Get(profile()))->
         CreateExtensionService(
@@ -308,9 +327,8 @@ class BookmarkBarControllerTestBase : public CocoaProfileTest {
       [contentView addSubview:parent_view_];
 
     // Make sure it's open so certain things aren't no-ops.
-    [bar updateAndShowNormalBar:YES
-                showDetachedBar:NO
-                  withAnimation:NO];
+    [bar updateState:BookmarkBar::SHOW
+          changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
   }
 };
 
@@ -366,11 +384,10 @@ class BookmarkBarControllerTest : public BookmarkBarControllerTestBase {
 };
 
 TEST_F(BookmarkBarControllerTest, ShowWhenShowBookmarkBarTrue) {
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:NO
-                 withAnimation:NO];
-  EXPECT_TRUE([bar_ isInState:bookmarks::kShowingState]);
-  EXPECT_FALSE([bar_ isInState:bookmarks::kDetachedState]);
+  [bar_ updateState:BookmarkBar::SHOW
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_TRUE([bar_ isInState:BookmarkBar::SHOW]);
+  EXPECT_FALSE([bar_ isInState:BookmarkBar::DETACHED]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
   EXPECT_FALSE([[bar_ view] isHidden]);
@@ -379,11 +396,10 @@ TEST_F(BookmarkBarControllerTest, ShowWhenShowBookmarkBarTrue) {
 }
 
 TEST_F(BookmarkBarControllerTest, HideWhenShowBookmarkBarFalse) {
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:NO
-                 withAnimation:NO];
-  EXPECT_FALSE([bar_ isInState:bookmarks::kShowingState]);
-  EXPECT_FALSE([bar_ isInState:bookmarks::kDetachedState]);
+  [bar_ updateState:BookmarkBar::HIDDEN
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_FALSE([bar_ isInState:BookmarkBar::SHOW]);
+  EXPECT_FALSE([bar_ isInState:BookmarkBar::DETACHED]);
   EXPECT_FALSE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
   EXPECT_TRUE([[bar_ view] isHidden]);
@@ -393,11 +409,10 @@ TEST_F(BookmarkBarControllerTest, HideWhenShowBookmarkBarFalse) {
 
 TEST_F(BookmarkBarControllerTest, HideWhenShowBookmarkBarTrueButDisabled) {
   [bar_ setBookmarkBarEnabled:NO];
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:NO
-                 withAnimation:NO];
-  EXPECT_TRUE([bar_ isInState:bookmarks::kShowingState]);
-  EXPECT_FALSE([bar_ isInState:bookmarks::kDetachedState]);
+  [bar_ updateState:BookmarkBar::SHOW
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_TRUE([bar_ isInState:BookmarkBar::SHOW]);
+  EXPECT_FALSE([bar_ isInState:BookmarkBar::DETACHED]);
   EXPECT_FALSE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
   EXPECT_TRUE([[bar_ view] isHidden]);
@@ -406,11 +421,10 @@ TEST_F(BookmarkBarControllerTest, HideWhenShowBookmarkBarTrueButDisabled) {
 }
 
 TEST_F(BookmarkBarControllerTest, ShowOnNewTabPage) {
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:YES
-                 withAnimation:NO];
-  EXPECT_FALSE([bar_ isInState:bookmarks::kShowingState]);
-  EXPECT_TRUE([bar_ isInState:bookmarks::kDetachedState]);
+  [bar_ updateState:BookmarkBar::DETACHED
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_FALSE([bar_ isInState:BookmarkBar::SHOW]);
+  EXPECT_TRUE([bar_ isInState:BookmarkBar::DETACHED]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
   EXPECT_FALSE([[bar_ view] isHidden]);
@@ -450,63 +464,54 @@ TEST_F(BookmarkBarControllerTest, ShowOnNewTabPage) {
   }
 }
 
-// Test whether |-updateAndShowNormalBar:...| sets states as we expect. Make
+// Test whether |-updateState:...| sets currentState as expected. Make
 // sure things don't crash.
 TEST_F(BookmarkBarControllerTest, StateChanges) {
   // First, go in one-at-a-time cycle.
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:NO
-                 withAnimation:NO];
-  EXPECT_EQ(bookmarks::kHiddenState, [bar_ visualState]);
+  [bar_ updateState:BookmarkBar::HIDDEN
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ currentState]);
   EXPECT_FALSE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:NO
-                 withAnimation:NO];
-  EXPECT_EQ(bookmarks::kShowingState, [bar_ visualState]);
+
+  [bar_ updateState:BookmarkBar::SHOW
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:YES
-                 withAnimation:NO];
-  EXPECT_EQ(bookmarks::kShowingState, [bar_ visualState]);
-  EXPECT_TRUE([bar_ isVisible]);
-  EXPECT_FALSE([bar_ isAnimationRunning]);
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:YES
-                 withAnimation:NO];
-  EXPECT_EQ(bookmarks::kDetachedState, [bar_ visualState]);
+
+  [bar_ updateState:BookmarkBar::DETACHED
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+  EXPECT_EQ(BookmarkBar::DETACHED, [bar_ currentState]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
 
   // Now try some "jumps".
   for (int i = 0; i < 2; i++) {
-    [bar_ updateAndShowNormalBar:NO
-                 showDetachedBar:NO
-                   withAnimation:NO];
-    EXPECT_EQ(bookmarks::kHiddenState, [bar_ visualState]);
+  [bar_ updateState:BookmarkBar::HIDDEN
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+    EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ currentState]);
     EXPECT_FALSE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
-    [bar_ updateAndShowNormalBar:YES
-                 showDetachedBar:YES
-                   withAnimation:NO];
-    EXPECT_EQ(bookmarks::kShowingState, [bar_ visualState]);
+
+    [bar_ updateState:BookmarkBar::SHOW
+           changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+    EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
   }
 
   // Now try some "jumps".
   for (int i = 0; i < 2; i++) {
-    [bar_ updateAndShowNormalBar:YES
-                 showDetachedBar:NO
-                   withAnimation:NO];
-    EXPECT_EQ(bookmarks::kShowingState, [bar_ visualState]);
+    [bar_ updateState:BookmarkBar::SHOW
+           changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+    EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
-    [bar_ updateAndShowNormalBar:NO
-                 showDetachedBar:YES
-                   withAnimation:NO];
-    EXPECT_EQ(bookmarks::kDetachedState, [bar_ visualState]);
+
+    [bar_ updateState:BookmarkBar::DETACHED
+           changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
+    EXPECT_EQ(BookmarkBar::DETACHED, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
   }
@@ -568,7 +573,6 @@ TEST_F(BookmarkBarControllerTest, NoItemContainerGoesAway) {
 // Confirm off the side button only enabled when reasonable.
 TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  [bar_ setIgnoreAnimations:YES];
 
   [bar_ loaded:model];
   EXPECT_TRUE([bar_ offTheSideButtonIsHidden]);
@@ -618,7 +622,6 @@ TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
 // in this area to reproduce the crash.
 TEST_F(BookmarkBarControllerTest, DeleteFromOffTheSideWhileItIsOpen) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  [bar_ setIgnoreAnimations:YES];
   [bar_ loaded:model];
 
   // Add a lot of bookmarks (per the bug).
@@ -665,24 +668,16 @@ TEST_F(BookmarkBarControllerTest, DeleteFromOffTheSideWhileItIsOpen) {
 // Test whether |-dragShouldLockBarVisibility| returns NO iff the bar is
 // detached.
 TEST_F(BookmarkBarControllerTest, TestDragShouldLockBarVisibility) {
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:NO
-                 withAnimation:NO];
+  [bar_ updateState:BookmarkBar::HIDDEN
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
   EXPECT_TRUE([bar_ dragShouldLockBarVisibility]);
 
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:NO
-                 withAnimation:NO];
+  [bar_ updateState:BookmarkBar::SHOW
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
   EXPECT_TRUE([bar_ dragShouldLockBarVisibility]);
 
-  [bar_ updateAndShowNormalBar:YES
-               showDetachedBar:YES
-                 withAnimation:NO];
-  EXPECT_TRUE([bar_ dragShouldLockBarVisibility]);
-
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:YES
-                 withAnimation:NO];
+  [bar_ updateState:BookmarkBar::DETACHED
+         changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
   EXPECT_FALSE([bar_ dragShouldLockBarVisibility]);
 }
 
@@ -1589,6 +1584,7 @@ TEST_F(BookmarkBarControllerTest, NodeDeletedWhileContextMenuIsOpen) {
 
 TEST_F(BookmarkBarControllerTest, CloseFolderOnAnimate) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  [bar_ setStateAnimationsEnabled:YES];
   const BookmarkNode* parent = model->bookmark_bar_node();
   const BookmarkNode* folder = model->AddFolder(parent,
                                                 parent->child_count(),
@@ -1610,9 +1606,8 @@ TEST_F(BookmarkBarControllerTest, CloseFolderOnAnimate) {
   EXPECT_TRUE([bar_ isVisible]);
 
   // Hide the bookmark bar.
-  [bar_ updateAndShowNormalBar:NO
-               showDetachedBar:YES
-                 withAnimation:YES];
+  [bar_ updateState:BookmarkBar::DETACHED
+         changeType:BookmarkBar::ANIMATE_STATE_CHANGE];
   EXPECT_TRUE([bar_ isAnimationRunning]);
 
   // Now that we've closed the bookmark bar (with animation) the folder menu
@@ -1691,6 +1686,30 @@ TEST_F(BookmarkBarControllerTest, ShrinkOrHideView) {
   EXPECT_FALSE([view isHidden]);
   [bar_ shrinkOrHideView:view forMaxX:29.0];
   EXPECT_TRUE([view isHidden]);
+}
+
+TEST_F(BookmarkBarControllerTest, LastBookmarkResizeBehavior) {
+  BookmarkModel& model(*BookmarkModelFactory::GetForProfile(profile()));
+  const BookmarkNode* root = model.bookmark_bar_node();
+  const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+  [bar_ frameDidChange];
+
+  CGFloat viewWidths[] = { 123.0, 151.0, 152.0, 153.0, 154.0, 155.0, 200.0,
+                           155.0, 154.0, 153.0, 152.0, 151.0 };
+  BOOL offTheSideButtonIsHiddenResults[] = { NO, NO, NO, YES, YES, YES, YES,
+                                             YES, YES, YES, NO, NO, NO };
+  int displayedButtonCountResults[] = { 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 2, 2, 1 };
+
+  for (unsigned int i = 0; i < sizeof(viewWidths) / sizeof(viewWidths[0]);
+       ++i) {
+    NSRect frame = [[bar_ view] frame];
+    frame.size.width = viewWidths[i] + bookmarks::kBookmarkRightMargin;
+    [[bar_ view] setFrame:frame];
+    EXPECT_EQ(offTheSideButtonIsHiddenResults[i],
+              [bar_ offTheSideButtonIsHidden]);
+    EXPECT_EQ(displayedButtonCountResults[i], [bar_ displayedButtonCount]);
+  }
 }
 
 class BookmarkBarControllerOpenAllTest : public BookmarkBarControllerTest {
@@ -2112,19 +2131,21 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   BookmarkButton* targetButton = [bar_ buttonWithTitleEqualTo:@"1b"];
   ASSERT_TRUE(targetButton);
   NSPoint targetPoint = [targetButton left];
-  const CGFloat xDelta = 0.5 * bookmarks::kBookmarkHorizontalPadding;
+  CGFloat leftMarginIndicatorPosition = bookmarks::kBookmarkLeftMargin - 0.5 *
+                                        bookmarks::kBookmarkHorizontalPadding;
   const CGFloat baseOffset = targetPoint.x;
-  CGFloat expected = xDelta;
+  CGFloat expected = leftMarginIndicatorPosition;
   CGFloat actual = [bar_ indicatorPosForDragToPoint:targetPoint];
   EXPECT_CGFLOAT_EQ(expected, actual);
   targetButton = [bar_ buttonWithTitleEqualTo:@"2f"];
   actual = [bar_ indicatorPosForDragToPoint:[targetButton right]];
   targetButton = [bar_ buttonWithTitleEqualTo:@"3b"];
-  expected = [targetButton left].x - baseOffset + xDelta;
+  expected = [targetButton left].x - baseOffset + leftMarginIndicatorPosition;
   EXPECT_CGFLOAT_EQ(expected, actual);
   targetButton = [bar_ buttonWithTitleEqualTo:@"4b"];
   targetPoint = [targetButton right];
   targetPoint.x += 100;  // Somewhere off to the right.
+  CGFloat xDelta = 0.5 * bookmarks::kBookmarkHorizontalPadding;
   expected = NSMaxX([targetButton frame]) + xDelta;
   actual = [bar_ indicatorPosForDragToPoint:targetPoint];
   EXPECT_CGFLOAT_EQ(expected, actual);

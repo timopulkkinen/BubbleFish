@@ -134,8 +134,8 @@ gfx::Size SubmenuView::GetPreferredSize() {
       continue;
     if (child->id() == MenuItemView::kMenuItemViewID) {
       MenuItemView* menu = static_cast<MenuItemView*>(child);
-      MenuItemView::MenuItemDimensions dimensions =
-          menu->GetPreferredDimensions();
+      const MenuItemView::MenuItemDimensions& dimensions =
+          menu->GetDimensions();
       max_simple_width = std::max(
           max_simple_width, dimensions.standard_width);
       max_accelerator_width_ =
@@ -152,7 +152,7 @@ gfx::Size SubmenuView::GetPreferredSize() {
   }
   if (max_accelerator_width_ > 0) {
     max_accelerator_width_ +=
-        MenuConfig::instance().label_to_accelerator_padding;
+        GetMenuItem()->GetMenuConfig().label_to_accelerator_padding;
   }
   gfx::Insets insets = GetInsets();
   return gfx::Size(
@@ -234,8 +234,12 @@ bool SubmenuView::OnMouseWheel(const ui::MouseWheelEvent& e) {
       (GetMenuItemAt(i)->y() == vis_bounds.y()) ? i : i - 1);
 
   // If the first item isn't entirely visible, make it visible, otherwise make
-  // the next/previous one entirely visible.
+  // the next/previous one entirely visible. If enough wasn't scrolled to show
+  // any new rows, then just scroll the amount so that smooth scrolling using
+  // the trackpad is possible.
   int delta = abs(e.offset() / ui::MouseWheelEvent::kWheelDelta);
+  if (delta == 0)
+    return OnScroll(0, e.offset());
   for (bool scroll_up = (e.offset() > 0); delta != 0; --delta) {
     int scroll_target;
     if (scroll_up) {
@@ -260,30 +264,34 @@ bool SubmenuView::OnMouseWheel(const ui::MouseWheelEvent& e) {
   return true;
 }
 
-ui::EventResult SubmenuView::OnGestureEvent(const ui::GestureEvent& e) {
-  ui::EventResult to_return = ui::ER_CONSUMED;
-  switch (e.type()) {
+void SubmenuView::OnGestureEvent(ui::GestureEvent* event) {
+  bool handled = true;
+  switch (event->type()) {
     case ui::ET_GESTURE_SCROLL_BEGIN:
       scroll_animator_->Stop();
       break;
     case ui::ET_GESTURE_SCROLL_UPDATE:
-      OnScroll(0, e.details().scroll_y());
+      handled = OnScroll(0, event->details().scroll_y());
       break;
     case ui::ET_GESTURE_SCROLL_END:
       break;
     case ui::ET_SCROLL_FLING_START:
-      if (e.details().velocity_y() != 0.0f)
-        scroll_animator_->Start(0, e.details().velocity_y());
+      if (event->details().velocity_y() != 0.0f)
+        scroll_animator_->Start(0, event->details().velocity_y());
       break;
     case ui::ET_GESTURE_TAP_DOWN:
     case ui::ET_SCROLL_FLING_CANCEL:
-      scroll_animator_->Stop();
+      if (scroll_animator_->is_scrolling())
+        scroll_animator_->Stop();
+      else
+        handled = false;
       break;
     default:
-      to_return = ui::ER_UNHANDLED;
+      handled = false;
       break;
   }
-  return to_return;
+  if (handled)
+    event->SetHandled();
 }
 
 bool SubmenuView::IsShowing() {
@@ -299,8 +307,9 @@ void SubmenuView::ShowAt(Widget* parent,
     host_ = new MenuHost(this);
     // Force construction of the scroll view container.
     GetScrollViewContainer();
-    // Make sure the first row is visible.
-    ScrollRectToVisible(gfx::Rect(gfx::Size(1, 1)));
+    // Force a layout since our preferred size may not have changed but our
+    // content may have.
+    InvalidateLayout();
     host_->InitMenuHost(parent, bounds, scroll_view_container_, do_capture);
   }
 
@@ -338,6 +347,8 @@ void SubmenuView::Close() {
 void SubmenuView::Hide() {
   if (host_)
     host_->HideMenuHost();
+  if (scroll_animator_->is_scrolling())
+    scroll_animator_->Stop();
 }
 
 void SubmenuView::ReleaseCapture() {
@@ -439,17 +450,20 @@ gfx::Rect SubmenuView::CalculateDropIndicatorBounds(
   }
 }
 
-void SubmenuView::OnScroll(float dx, float dy) {
+bool SubmenuView::OnScroll(float dx, float dy) {
   const gfx::Rect& vis_bounds = GetVisibleBounds();
   const gfx::Rect& full_bounds = bounds();
   int x = vis_bounds.x();
   int y = vis_bounds.y() - static_cast<int>(dy);
   // clamp y to [0, full_height - vis_height)
-  y = std::max(y, 0);
   y = std::min(y, full_bounds.height() - vis_bounds.height() - 1);
+  y = std::max(y, 0);
   gfx::Rect new_vis_bounds(x, y, vis_bounds.width(), vis_bounds.height());
-  if (new_vis_bounds != vis_bounds)
+  if (new_vis_bounds != vis_bounds) {
     ScrollRectToVisible(new_vis_bounds);
+    return true;
+  }
+  return false;
 }
 
 }  // namespace views

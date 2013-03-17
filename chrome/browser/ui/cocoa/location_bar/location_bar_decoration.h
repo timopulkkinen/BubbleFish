@@ -9,6 +9,8 @@
 
 #import "base/basictypes.h"
 
+class ButtonDecoration;
+
 // Base class for decorations at the left and right of the location
 // bar.  For instance, the location icon.
 
@@ -32,8 +34,9 @@ class LocationBarDecoration {
 
   // Decorations can change their size to fit the available space.
   // Returns the width the decoration will use in the space allotted,
-  // or |kOmittedWidth| if it should be omitted.
-  virtual CGFloat GetWidthForSpace(CGFloat width);
+  // or |kOmittedWidth| if it should be omitted. |text_width| is the width of
+  // the omnibox text, which which can be greater than |width|.
+  virtual CGFloat GetWidthForSpace(CGFloat width, CGFloat text_width);
 
   // Draw the decoration in the frame provided.  The frame will be
   // generated from an earlier call to |GetWidthForSpace()|.
@@ -80,9 +83,20 @@ class LocationBarDecoration {
   // Called to get the right-click menu, return |nil| for no menu.
   virtual NSMenu* GetMenu();
 
+  // Returns the current |LocationBarDecoration| as a |ButtonDecoration|, if it
+  // inherits from that class (i.e. if it needs to act as a button).
+  virtual ButtonDecoration* AsButtonDecoration();
+
+  // Returns true if this is a separator.
+  virtual bool IsSeparator() const;
+
   // Width returned by |GetWidthForSpace()| when the item should be
   // omitted for this width;
   static const CGFloat kOmittedWidth;
+
+  // How far to inset the text area from the top and bottom. This vertically
+  // centers the text.
+  static const CGFloat kTextYInset;
 
  private:
   bool visible_;

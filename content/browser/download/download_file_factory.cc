@@ -5,26 +5,29 @@
 #include "content/browser/download/download_file_factory.h"
 
 #include "content/browser/download/download_file_impl.h"
-#include "content/browser/power_save_blocker.h"
+#include "content/public/browser/power_save_blocker.h"
 
 namespace content {
 
 DownloadFileFactory::~DownloadFileFactory() {}
 
 DownloadFile* DownloadFileFactory::CreateFile(
-    DownloadCreateInfo* info,
-    scoped_ptr<content::ByteStreamReader> stream,
-    DownloadManager* download_manager,
+    scoped_ptr<DownloadSaveInfo> save_info,
+    const base::FilePath& default_downloads_directory,
+    const GURL& url,
+    const GURL& referrer_url,
     bool calculate_hash,
-    const net::BoundNetLog& bound_net_log) {
+    scoped_ptr<ByteStreamReader> stream,
+    const net::BoundNetLog& bound_net_log,
+    base::WeakPtr<DownloadDestinationObserver> observer) {
+  scoped_ptr<PowerSaveBlocker> psb(
+      PowerSaveBlocker::Create(
+          PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+          "Download in progress"));
   return new DownloadFileImpl(
-      info, stream.Pass(), new DownloadRequestHandle(info->request_handle),
-      download_manager, calculate_hash,
-      scoped_ptr<content::PowerSaveBlocker>(
-          new content::PowerSaveBlocker(
-              content::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-              "Download in progress")).Pass(),
-      bound_net_log);
+      save_info.Pass(), default_downloads_directory, url, referrer_url,
+      calculate_hash, stream.Pass(), bound_net_log,
+      psb.Pass(), observer);
 }
 
 }  // namespace content

@@ -18,6 +18,14 @@ void BoundBoolSetFromScopedPtr(bool* var, scoped_ptr<bool> val) {
   *var = *val;
 }
 
+void BoundBoolSetFromScopedPtrMalloc(bool* var, scoped_ptr_malloc<bool> val) {
+  *var = val;
+}
+
+void BoundBoolSetFromScopedArray(bool* var, scoped_array<bool> val) {
+  *var = val[0];
+}
+
 void BoundBoolSetFromConstRef(bool* var, const bool& val) {
   *var = val;
 }
@@ -59,12 +67,75 @@ TEST_F(BindToLoopTest, Bool) {
   EXPECT_TRUE(bool_var);
 }
 
-TEST_F(BindToLoopTest, ScopedPtrBool) {
+TEST_F(BindToLoopTest, BoundScopedPtrBool) {
   bool bool_val = false;
   scoped_ptr<bool> scoped_ptr_bool(new bool(true));
   base::Closure cb = BindToLoop(proxy_, base::Bind(
       &BoundBoolSetFromScopedPtr, &bool_val, base::Passed(&scoped_ptr_bool)));
   cb.Run();
+  EXPECT_FALSE(bool_val);
+  loop_.RunUntilIdle();
+  EXPECT_TRUE(bool_val);
+}
+
+TEST_F(BindToLoopTest, PassedScopedPtrBool) {
+  bool bool_val = false;
+  scoped_ptr<bool> scoped_ptr_bool(new bool(true));
+  base::Callback<void(scoped_ptr<bool>)> cb = BindToLoop(proxy_, base::Bind(
+      &BoundBoolSetFromScopedPtr, &bool_val));
+  cb.Run(scoped_ptr_bool.Pass());
+  EXPECT_FALSE(bool_val);
+  loop_.RunUntilIdle();
+  EXPECT_TRUE(bool_val);
+}
+
+TEST_F(BindToLoopTest, BoundScopedArrayBool) {
+  bool bool_val = false;
+  scoped_array<bool> scoped_array_bool(new bool[1]);
+  scoped_array_bool[0] = true;
+  base::Closure cb = BindToLoop(proxy_, base::Bind(
+      &BoundBoolSetFromScopedArray, &bool_val,
+      base::Passed(&scoped_array_bool)));
+  cb.Run();
+  EXPECT_FALSE(bool_val);
+  loop_.RunUntilIdle();
+  EXPECT_TRUE(bool_val);
+}
+
+TEST_F(BindToLoopTest, PassedScopedArrayBool) {
+  bool bool_val = false;
+  scoped_array<bool> scoped_array_bool(new bool[1]);
+  scoped_array_bool[0] = true;
+  base::Callback<void(scoped_array<bool>)> cb = BindToLoop(proxy_, base::Bind(
+      &BoundBoolSetFromScopedArray, &bool_val));
+  cb.Run(scoped_array_bool.Pass());
+  EXPECT_FALSE(bool_val);
+  loop_.RunUntilIdle();
+  EXPECT_TRUE(bool_val);
+}
+
+TEST_F(BindToLoopTest, BoundScopedPtrMallocBool) {
+  bool bool_val = false;
+  scoped_ptr_malloc<bool> scoped_ptr_malloc_bool(
+      static_cast<bool*>(malloc(sizeof(bool))));
+  *scoped_ptr_malloc_bool = true;
+  base::Closure cb = BindToLoop(proxy_, base::Bind(
+      &BoundBoolSetFromScopedPtrMalloc, &bool_val,
+      base::Passed(&scoped_ptr_malloc_bool)));
+  cb.Run();
+  EXPECT_FALSE(bool_val);
+  loop_.RunUntilIdle();
+  EXPECT_TRUE(bool_val);
+}
+
+TEST_F(BindToLoopTest, PassedScopedPtrMallocBool) {
+  bool bool_val = false;
+  scoped_ptr_malloc<bool> scoped_ptr_malloc_bool(
+      static_cast<bool*>(malloc(sizeof(bool))));
+  *scoped_ptr_malloc_bool = true;
+  base::Callback<void(scoped_ptr_malloc<bool>)> cb = BindToLoop(
+      proxy_, base::Bind(&BoundBoolSetFromScopedPtrMalloc, &bool_val));
+  cb.Run(scoped_ptr_malloc_bool.Pass());
   EXPECT_FALSE(bool_val);
   loop_.RunUntilIdle();
   EXPECT_TRUE(bool_val);

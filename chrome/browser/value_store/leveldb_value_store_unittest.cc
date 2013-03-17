@@ -9,8 +9,8 @@
 
 namespace {
 
-ValueStore* Param(const FilePath& file_path) {
-  return LeveldbValueStore::Create(file_path);
+ValueStore* Param(const base::FilePath& file_path) {
+  return new LeveldbValueStore(file_path);
 }
 
 }  // namespace

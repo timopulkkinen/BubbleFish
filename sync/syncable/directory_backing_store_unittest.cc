@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
+#include "sync/base/sync_export.h"
+#include "sync/internal_api/public/base/node_ordinal.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/syncable/directory_backing_store.h"
@@ -26,7 +28,7 @@
 namespace syncer {
 namespace syncable {
 
-extern const int32 kCurrentDBVersion;
+SYNC_EXPORT_PRIVATE extern const int32 kCurrentDBVersion;
 
 class MigrationTest : public testing::TestWithParam<int> {
  public:
@@ -39,15 +41,16 @@ class MigrationTest : public testing::TestWithParam<int> {
     return "nick@chromium.org";
   }
 
-  FilePath GetDatabasePath() {
+  base::FilePath GetDatabasePath() {
     return temp_dir_.path().Append(Directory::kSyncDatabaseFilename);
   }
 
   static bool LoadAndIgnoreReturnedData(DirectoryBackingStore *dbs) {
     MetahandlesIndex metas;
+    JournalIndex  delete_journals;;
     STLElementDeleter<MetahandlesIndex> index_deleter(&metas);
     Directory::KernelLoadInfo kernel_load_info;
-    return dbs->Load(&metas, &kernel_load_info) == OPENED;
+    return dbs->Load(&metas, &delete_journals, &kernel_load_info) == OPENED;
   }
 
   void SetUpVersion67Database(sql::Connection* connection);
@@ -63,9 +66,15 @@ class MigrationTest : public testing::TestWithParam<int> {
   void SetUpVersion77Database(sql::Connection* connection);
   void SetUpVersion78Database(sql::Connection* connection);
   void SetUpVersion79Database(sql::Connection* connection);
+  void SetUpVersion80Database(sql::Connection* connection);
+  void SetUpVersion81Database(sql::Connection* connection);
+  void SetUpVersion82Database(sql::Connection* connection);
+  void SetUpVersion83Database(sql::Connection* connection);
+  void SetUpVersion84Database(sql::Connection* connection);
+  void SetUpVersion85Database(sql::Connection* connection);
 
   void SetUpCurrentDatabaseAndCheckVersion(sql::Connection* connection) {
-    SetUpVersion77Database(connection);  // Prepopulates data.
+    SetUpVersion85Database(connection);  // Prepopulates data.
     scoped_ptr<TestDirectoryBackingStore> dbs(
         new TestDirectoryBackingStore(GetUsername(), connection));
 
@@ -75,7 +84,7 @@ class MigrationTest : public testing::TestWithParam<int> {
   }
 
  private:
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
 };
 
 class DirectoryBackingStoreTest : public MigrationTest {};
@@ -113,10 +122,12 @@ class DirectoryBackingStoreTest : public MigrationTest {};
 
 // Generated via:
 //
-// ruby -ane '$F[1].sub!("LEGACY_", ""); $F[2] = Integer($F[2].sub!("LL", "")) / 10000 - 11644473600000; print "#{$F[0]} #{$F[1]} #{$F[2]}LL\n"'
+// ruby -ane '$F[1].sub!("LEGACY_", ""); $F[2] = Integer($F[2].sub!("LL", "")) /
+//    10000 - 11644473600000; print "#{$F[0]} #{$F[1]} #{$F[2]}LL"'
 //
 // Magic numbers taken from
-// http://stackoverflow.com/questions/5398557/java-library-for-dealing-with-win32-filetime .
+// http://stackoverflow.com/questions/5398557/
+//    java-library-for-dealing-with-win32-filetime .
 
 // Now we store them in Java format (ms since the Unix epoch).
 #define META_PROTO_TIMES_1 1263522064032LL
@@ -1635,7 +1646,7 @@ void MigrationTest::SetUpVersion79Database(sql::Connection* connection) {
   ASSERT_TRUE(connection->BeginTransaction());
   ASSERT_TRUE(connection->Execute(
       "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
-      "INSERT INTO 'share_version' VALUES('nick@chromium.org',78);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',79);"
       "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
           "itial_sync_ended BOOLEAN default 0);"
       "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1);"
@@ -1722,6 +1733,696 @@ void MigrationTest::SetUpVersion79Database(sql::Connection* connection) {
           "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
           "-131078,'9010788312004066376x-6609234393368420856x',NULL);"
           ));
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+void MigrationTest::SetUpVersion80Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',80);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,server_po"
+          "sition_in_parent bigint default 0,local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ");"
+      "INSERT INTO 'metas' VALUES(1,-1,0,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+      "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL);"
+      "INSERT INTO 'metas' VALUES(2,669,669,-2097152,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL);"
+      "INSERT INTO 'metas' VALUES(4,681,681,-3145728,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL);"
+      "INSERT INTO 'metas' VALUES(5,677,677,1048576,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL);"
+      "INSERT INTO 'metas' VALUES(6,694,694,-4194304,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL);"
+      "INSERT INTO 'metas' VALUES(7,663,663,1048576,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL);"
+      "INSERT INTO 'metas' VALUES(8,664,664,1048576,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL);"
+      "INSERT INTO 'metas' VALUES(9,665,665,1048576,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL);"
+      "INSERT INTO 'metas' VALUES(10,666,666,2097152,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL);"
+      "INSERT INTO 'metas' VALUES(11,683,683,-1048576,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL);"
+      "INSERT INTO 'metas' VALUES(12,685,685,0,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL);"
+      "INSERT INTO 'metas' VALUES(13,687,687,-917504,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL);"
+      "INSERT INTO 'metas' VALUES(14,692,692,1048576,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"
+          ));
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+
+// Helper definitions to create the version 81 DB tables.
+namespace {
+
+const int V80_ROW_COUNT = 13;
+const int64 V80_POSITIONS[V80_ROW_COUNT] = {
+  0,
+  -2097152,
+  -3145728,
+  1048576,
+  -4194304,
+  1048576,
+  1048576,
+  1048576,
+  2097152,
+  -1048576,
+  0,
+  -917504,
+  1048576
+};
+
+std::string V81_Ordinal(int n) {
+  return Int64ToNodeOrdinal(V80_POSITIONS[n]).ToInternalValue();
+}
+
+} //namespace
+
+// Unlike the earlier versions, the rows for version 81 are generated
+// programmatically to accurately handle unprintable characters for the
+// server_ordinal_in_parent field.
+void MigrationTest::SetUpVersion81Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',81);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"));
+
+      const char* insert_stmts[V80_ROW_COUNT] = {
+      "INSERT INTO 'metas' VALUES(1,-1,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+          "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL,?);",
+      "INSERT INTO 'metas' VALUES(2,669,669,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL,?);",
+      "INSERT INTO 'metas' VALUES(4,681,681,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL,?);",
+      "INSERT INTO 'metas' VALUES(5,677,677,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL,?);",
+      "INSERT INTO 'metas' VALUES(6,694,694,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL,?);",
+      "INSERT INTO 'metas' VALUES(7,663,663,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL,?);",
+      "INSERT INTO 'metas' VALUES(8,664,664,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(9,665,665,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(10,666,666,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(11,683,683,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL,?);",
+      "INSERT INTO 'metas' VALUES(12,685,685,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(13,687,687,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL,?);",
+      "INSERT INTO 'metas' VALUES(14,692,692,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL,?);" };
+
+  for (int i = 0; i < V80_ROW_COUNT; i++) {
+    sql::Statement s(connection->GetUniqueStatement(insert_stmts[i]));
+    std::string ord = V81_Ordinal(i);
+    s.BindBlob(0, ord.data(), ord.length());
+    ASSERT_TRUE(s.Run());
+    s.Reset(true);
+  }
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+void MigrationTest::SetUpVersion82Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',82);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0, transaction_version BIGINT "
+          "default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1, 1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"));
+
+      const char* insert_stmts[V80_ROW_COUNT] = {
+      "INSERT INTO 'metas' VALUES(1,-1,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+          "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL,?);",
+      "INSERT INTO 'metas' VALUES(2,669,669,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL,?);",
+      "INSERT INTO 'metas' VALUES(4,681,681,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL,?);",
+      "INSERT INTO 'metas' VALUES(5,677,677,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL,?);",
+      "INSERT INTO 'metas' VALUES(6,694,694,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL,?);",
+      "INSERT INTO 'metas' VALUES(7,663,663,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL,?);",
+      "INSERT INTO 'metas' VALUES(8,664,664,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(9,665,665,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(10,666,666,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(11,683,683,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL,?);",
+      "INSERT INTO 'metas' VALUES(12,685,685,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL,?);",
+      "INSERT INTO 'metas' VALUES(13,687,687,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL,?);",
+      "INSERT INTO 'metas' VALUES(14,692,692,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL,?);" };
+
+  for (int i = 0; i < V80_ROW_COUNT; i++) {
+    sql::Statement s(connection->GetUniqueStatement(insert_stmts[i]));
+    std::string ord = V81_Ordinal(i);
+    s.BindBlob(0, ord.data(), ord.length());
+    ASSERT_TRUE(s.Run());
+    s.Reset(true);
+  }
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+void MigrationTest::SetUpVersion83Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',83);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0, transaction_version BIGINT "
+          "default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1, 1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob, transaction_version bigint default "
+          "0);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"));
+
+      const char* insert_stmts[V80_ROW_COUNT] = {
+      "INSERT INTO 'metas' VALUES(1,-1,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+          "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(2,669,669,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(4,681,681,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(5,677,677,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL,?,0);",
+      "INSERT INTO 'metas' VALUES(6,694,694,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(7,663,663,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL,?,0);"
+          "",
+      "INSERT INTO 'metas' VALUES(8,664,664,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(9,665,665,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(10,666,666,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(11,683,683,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(12,685,685,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(13,687,687,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(14,692,692,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL,?,0);" };
+
+  for (int i = 0; i < V80_ROW_COUNT; i++) {
+    sql::Statement s(connection->GetUniqueStatement(insert_stmts[i]));
+    std::string ord = V81_Ordinal(i);
+    s.BindBlob(0, ord.data(), ord.length());
+    ASSERT_TRUE(s.Run());
+    s.Reset(true);
+  }
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+void MigrationTest::SetUpVersion84Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',84);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0, transaction_version BIGINT "
+          "default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1, 1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob, transaction_version bigint default "
+          "0);"
+      "CREATE TABLE 'deleted_metas'"
+          "(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob, transaction_version bigint default "
+          "0);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"));
+
+      const char* insert_stmts[V80_ROW_COUNT] = {
+      "INSERT INTO 'metas' VALUES(1,-1,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+          "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(2,669,669,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(4,681,681,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(5,677,677,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL,?,0);",
+      "INSERT INTO 'metas' VALUES(6,694,694,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(7,663,663,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL,?,0);"
+          "",
+      "INSERT INTO 'metas' VALUES(8,664,664,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(9,665,665,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(10,666,666,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(11,683,683,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(12,685,685,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(13,687,687,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(14,692,692,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL,?,0);" };
+
+  for (int i = 0; i < V80_ROW_COUNT; i++) {
+    sql::Statement s(connection->GetUniqueStatement(insert_stmts[i]));
+    std::string ord = V81_Ordinal(i);
+    s.BindBlob(0, ord.data(), ord.length());
+    ASSERT_TRUE(s.Run());
+    s.Reset(true);
+  }
+  ASSERT_TRUE(connection->CommitTransaction());
+}
+
+void MigrationTest::SetUpVersion85Database(sql::Connection* connection) {
+  ASSERT_TRUE(connection->is_open());
+  ASSERT_TRUE(connection->BeginTransaction());
+  ASSERT_TRUE(connection->Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',85);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, "
+          "transaction_version BIGINT default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605', 1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob, transaction_version bigint default "
+          "0);"
+      "CREATE TABLE 'deleted_metas'"
+          "(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,         "
+          "local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob, base_server_specifics BLOB"
+          ", server_ordinal_in_parent blob, transaction_version bigint default "
+          "0);"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB, bag_of_chips "
+          "blob);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,"
+          "-131078,'9010788312004066376x-6609234393368420856x',NULL, NULL);"));
+
+      const char* insert_stmts[V80_ROW_COUNT] = {
+      "INSERT INTO 'metas' VALUES(1,-1,0,0," META_PROTO_TIMES_VALS(1) ",'r','"
+          "r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(2,669,669,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(4,681,681,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(5,677,677,7,"
+          META_PROTO_TIMES_VALS(5) ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_"
+          "5',0,0,1,0,0,1,'Google','Google',NULL,NULL,X'C28810220A16687474703A2"
+          "F2F7777772E676F6F676C652E636F6D2F12084147415347415347',X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084147464447415347',N"
+          "ULL,?,0);",
+      "INSERT INTO 'metas' VALUES(6,694,694,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ",NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(7,663,663,0,"
+          META_PROTO_TIMES_VALS(7) ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Goog"
+          "le Chrome','Google Chrome','google_chrome',NULL,NULL,NULL,NULL,?,0);"
+          "",
+      "INSERT INTO 'metas' VALUES(8,664,664,0,"
+          META_PROTO_TIMES_VALS(8) ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1"
+          ",1,0,'Bookmarks','Bookmarks','google_chrome_bookmarks',NULL,X'C28810"
+          "00',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(9,665,665,1,"
+          META_PROTO_TIMES_VALS(9) ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0"
+          ",0,0,1,1,0,'Bookmark Bar','Bookmark Bar','bookmark_bar',NULL,X'C2881"
+          "000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(10,666,666,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(11,683,683,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(12,685,685,9,"
+          META_PROTO_TIMES_VALS(12) ",'s_ID_12','s_ID_6','s_ID_6','s_ID_13','s_"
+          "ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookmarks',NULL,NULL,X'C"
+          "2881000',X'C2881000',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(13,687,687,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346',NULL,?,0);",
+      "INSERT INTO 'metas' VALUES(14,692,692,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259',NULL,?,0);" };
+
+  for (int i = 0; i < V80_ROW_COUNT; i++) {
+    sql::Statement s(connection->GetUniqueStatement(insert_stmts[i]));
+    std::string ord = V81_Ordinal(i);
+    s.BindBlob(0, ord.data(), ord.length());
+    ASSERT_TRUE(s.Run());
+    s.Reset(true);
+  }
   ASSERT_TRUE(connection->CommitTransaction());
 }
 
@@ -2047,10 +2748,12 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion78To79) {
 
   // Ensure the next_id has been incremented.
   MetahandlesIndex entry_bucket;
+  JournalIndex  delete_journals;;
   STLElementDeleter<MetahandlesIndex> deleter(&entry_bucket);
   Directory::KernelLoadInfo load_info;
 
-  ASSERT_TRUE(dbs->Load(&entry_bucket, &load_info));
+  s.Clear();
+  ASSERT_TRUE(dbs->Load(&entry_bucket, &delete_journals, &load_info));
   EXPECT_LE(load_info.kernel_info.next_id, kInitialNextId - 65536);
 }
 
@@ -2068,15 +2771,130 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion79To80) {
 
   // Ensure the bag_of_chips has been set.
   MetahandlesIndex entry_bucket;
+  JournalIndex  delete_journals;;
   STLElementDeleter<MetahandlesIndex> deleter(&entry_bucket);
   Directory::KernelLoadInfo load_info;
 
-  ASSERT_TRUE(dbs->Load(&entry_bucket, &load_info));
+  ASSERT_TRUE(dbs->Load(&entry_bucket, &delete_journals, &load_info));
   // Check that the initial value is the serialization of an empty ChipBag.
   sync_pb::ChipBag chip_bag;
   std::string serialized_chip_bag;
   ASSERT_TRUE(chip_bag.SerializeToString(&serialized_chip_bag));
   EXPECT_EQ(serialized_chip_bag, load_info.kernel_info.bag_of_chips);
+}
+
+TEST_F(DirectoryBackingStoreTest, MigrateVersion80To81) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion80Database(&connection);
+
+  sql::Statement s(connection.GetUniqueStatement(
+      "SELECT metahandle, server_position_in_parent "
+      "FROM metas WHERE unique_server_tag = 'google_chrome'"));
+  ASSERT_TRUE(s.Step());
+  ASSERT_EQ(sql::COLUMN_TYPE_INTEGER, s.ColumnType(1));
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_TRUE(dbs->MigrateVersion80To81());
+  ASSERT_EQ(81, dbs->GetVersion());
+
+  // Test that ordinal values are preserved correctly.
+  sql::Statement new_s(connection.GetUniqueStatement(
+      "SELECT metahandle, server_ordinal_in_parent "
+      "FROM metas WHERE unique_server_tag = 'google_chrome'"));
+  ASSERT_TRUE(new_s.Step());
+  ASSERT_EQ(sql::COLUMN_TYPE_BLOB, new_s.ColumnType(1));
+
+  std::string expected_ordinal = Int64ToNodeOrdinal(1048576).ToInternalValue();
+  std::string actual_ordinal;
+  new_s.ColumnBlobAsString(1, &actual_ordinal);
+  ASSERT_EQ(expected_ordinal, actual_ordinal);
+}
+
+TEST_F(DirectoryBackingStoreTest, DetectInvalidOrdinal) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion81Database(&connection);
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_EQ(81, dbs->GetVersion());
+
+  // Insert row with bad ordinal.
+  const int64 now = TimeToProtoTime(base::Time::Now());
+  sql::Statement s(connection.GetUniqueStatement(
+      "INSERT INTO metas "
+      "( id, metahandle, is_dir, ctime, mtime, server_ordinal_in_parent) "
+      "VALUES( \"c-invalid\", 9999, 1, ?, ?, \" \")"));
+  s.BindInt64(0, now);
+  s.BindInt64(1, now);
+  ASSERT_TRUE(s.Run());
+
+  // Trying to unpack this entry should signal that the DB is corrupted.
+  MetahandlesIndex entry_bucket;
+  JournalIndex  delete_journals;;
+  STLElementDeleter<MetahandlesIndex> deleter(&entry_bucket);
+  Directory::KernelLoadInfo kernel_load_info;
+  ASSERT_EQ(FAILED_DATABASE_CORRUPT,
+            dbs->Load(&entry_bucket, &delete_journals, &kernel_load_info));
+}
+
+TEST_F(DirectoryBackingStoreTest, MigrateVersion81To82) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion81Database(&connection);
+  ASSERT_FALSE(connection.DoesColumnExist("models", "transaction_version"));
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_FALSE(dbs->needs_column_refresh_);
+  ASSERT_TRUE(dbs->MigrateVersion81To82());
+  ASSERT_EQ(82, dbs->GetVersion());
+  ASSERT_FALSE(dbs->needs_column_refresh_);
+
+  ASSERT_TRUE(connection.DoesColumnExist("models", "transaction_version"));
+}
+
+TEST_F(DirectoryBackingStoreTest, MigrateVersion82To83) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion82Database(&connection);
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "transaction_version"));
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_TRUE(dbs->MigrateVersion82To83());
+  ASSERT_EQ(83, dbs->GetVersion());
+
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "transaction_version"));
+}
+
+TEST_F(DirectoryBackingStoreTest, MigrateVersion83To84) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion83Database(&connection);
+  ASSERT_FALSE(connection.DoesTableExist("deleted_metas"));
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_TRUE(dbs->MigrateVersion83To84());
+  ASSERT_EQ(84, dbs->GetVersion());
+
+  ASSERT_TRUE(connection.DoesTableExist("deleted_metas"));
+}
+
+TEST_F(DirectoryBackingStoreTest, MigrateVersion84To85) {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.OpenInMemory());
+  SetUpVersion84Database(&connection);
+  ASSERT_TRUE(connection.DoesColumnExist("models", "initial_sync_ended"));
+
+  scoped_ptr<TestDirectoryBackingStore> dbs(
+      new TestDirectoryBackingStore(GetUsername(), &connection));
+  ASSERT_TRUE(dbs->MigrateVersion84To85());
+  ASSERT_EQ(85, dbs->GetVersion());
+  ASSERT_FALSE(connection.DoesColumnExist("models", "initial_sync_ended"));
 }
 
 TEST_P(MigrationTest, ToCurrentVersion) {
@@ -2122,6 +2940,21 @@ TEST_P(MigrationTest, ToCurrentVersion) {
     case 79:
       SetUpVersion79Database(&connection);
       break;
+    case 80:
+      SetUpVersion80Database(&connection);
+      break;
+    case 81:
+      SetUpVersion81Database(&connection);
+      break;
+    case 82:
+      SetUpVersion82Database(&connection);
+      break;
+    case 83:
+      SetUpVersion83Database(&connection);
+      break;
+    case 84:
+      SetUpVersion84Database(&connection);
+      break;
     default:
       // If you see this error, it may mean that you've increased the
       // database version number but you haven't finished adding unit tests
@@ -2144,12 +2977,13 @@ TEST_P(MigrationTest, ToCurrentVersion) {
 
   syncable::Directory::KernelLoadInfo dir_info;
   MetahandlesIndex index;
+  JournalIndex  delete_journals;;
   STLElementDeleter<MetahandlesIndex> index_deleter(&index);
 
   {
     scoped_ptr<TestDirectoryBackingStore> dbs(
         new TestDirectoryBackingStore(GetUsername(), &connection));
-    ASSERT_EQ(OPENED, dbs->Load(&index, &dir_info));
+    ASSERT_EQ(OPENED, dbs->Load(&index, &delete_journals, &dir_info));
     ASSERT_FALSE(dbs->needs_column_refresh_);
     ASSERT_EQ(kCurrentDBVersion, dbs->GetVersion());
   }
@@ -2200,6 +3034,18 @@ TEST_P(MigrationTest, ToCurrentVersion) {
 
   // Column added in version 78.
   ASSERT_TRUE(connection.DoesColumnExist("metas", "base_server_specifics"));
+
+  // Column added in version 82.
+  ASSERT_TRUE(connection.DoesColumnExist("models", "transaction_version"));
+
+  // Column added in version 83.
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "transaction_version"));
+
+  // Table added in version 84.
+  ASSERT_TRUE(connection.DoesTableExist("deleted_metas"));
+
+  // Column removed in version 85.
+  ASSERT_FALSE(connection.DoesColumnExist("models", "initial_sync_ended"));
 
   // Check download_progress state (v75 migration)
   ASSERT_EQ(694,
@@ -2326,10 +3172,12 @@ INSTANTIATE_TEST_CASE_P(DirectoryBackingStore, MigrationTest,
                         testing::Range(67, kCurrentDBVersion));
 
 TEST_F(DirectoryBackingStoreTest, ModelTypeIds) {
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
     std::string model_id =
-        TestDirectoryBackingStore::ModelTypeEnumToModelId(ModelTypeFromInt(i));
-    EXPECT_EQ(i,
+        TestDirectoryBackingStore::ModelTypeEnumToModelId(iter.Get());
+    EXPECT_EQ(iter.Get(),
         TestDirectoryBackingStore::ModelIdToModelTypeEnum(model_id.data(),
                                                           model_id.size()));
   }
@@ -2340,7 +3188,7 @@ namespace {
 class OnDiskDirectoryBackingStoreForTest : public OnDiskDirectoryBackingStore {
  public:
   OnDiskDirectoryBackingStoreForTest(const std::string& dir_name,
-                                     const FilePath& backing_filepath);
+                                     const base::FilePath& backing_filepath);
   virtual ~OnDiskDirectoryBackingStoreForTest();
   bool DidFailFirstOpenAttempt();
 
@@ -2353,7 +3201,7 @@ class OnDiskDirectoryBackingStoreForTest : public OnDiskDirectoryBackingStore {
 
 OnDiskDirectoryBackingStoreForTest::OnDiskDirectoryBackingStoreForTest(
     const std::string& dir_name,
-    const FilePath& backing_filepath) :
+    const base::FilePath& backing_filepath) :
   OnDiskDirectoryBackingStore(dir_name, backing_filepath),
   first_open_failed_(false) { }
 
@@ -2409,16 +3257,18 @@ TEST_F(DirectoryBackingStoreTest, DeleteEntries) {
   scoped_ptr<TestDirectoryBackingStore> dbs(
       new TestDirectoryBackingStore(GetUsername(), &connection));
   MetahandlesIndex index;
+  JournalIndex  delete_journals;
   Directory::KernelLoadInfo kernel_load_info;
   STLElementDeleter<MetahandlesIndex> index_deleter(&index);
 
-  dbs->Load(&index, &kernel_load_info);
+  dbs->Load(&index, &delete_journals, &kernel_load_info);
   size_t initial_size = index.size();
   ASSERT_LT(0U, initial_size) << "Test requires entries to delete.";
   int64 first_to_die = (*index.begin())->ref(META_HANDLE);
   MetahandleSet to_delete;
   to_delete.insert(first_to_die);
-  EXPECT_TRUE(dbs->DeleteEntries(to_delete));
+  EXPECT_TRUE(dbs->DeleteEntries(TestDirectoryBackingStore::METAS_TABLE,
+                                 to_delete));
 
   STLDeleteElements(&index);
   dbs->LoadEntries(&index);
@@ -2440,7 +3290,8 @@ TEST_F(DirectoryBackingStoreTest, DeleteEntries) {
     to_delete.insert((*it)->ref(META_HANDLE));
   }
 
-  EXPECT_TRUE(dbs->DeleteEntries(to_delete));
+  EXPECT_TRUE(dbs->DeleteEntries(TestDirectoryBackingStore::METAS_TABLE,
+                                 to_delete));
 
   STLDeleteElements(&index);
   dbs->LoadEntries(&index);

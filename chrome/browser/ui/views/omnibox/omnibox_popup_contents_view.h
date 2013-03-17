@@ -11,9 +11,9 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view_model.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font.h"
 #include "ui/views/view.h"
-#include "webkit/glue/window_open_disposition.h"
 
 struct AutocompleteMatch;
 class OmniboxEditModel;
@@ -35,8 +35,7 @@ class OmniboxPopupContentsView : public views::View,
   static OmniboxPopupView* Create(const gfx::Font& font,
                                   OmniboxView* omnibox_view,
                                   OmniboxEditModel* edit_model,
-                                  views::View* location_bar,
-                                  views::View* popup_parent_view);
+                                  views::View* location_bar);
 
   // Returns the bounds the popup should be shown at. This is the display bounds
   // and includes offsets for the dropshadow which this view's border renders.
@@ -71,8 +70,9 @@ class OmniboxPopupContentsView : public views::View,
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
  protected:
   OmniboxPopupContentsView(const gfx::Font& font,
@@ -85,11 +85,9 @@ class OmniboxPopupContentsView : public views::View,
 
   // Calculates the height needed to show all the results in the model.
   virtual int CalculatePopupHeight();
-  virtual OmniboxResultView* CreateResultView(
-      OmniboxResultViewModel* model,
-      int model_index,
-      const gfx::Font& font,
-      const gfx::Font& bold_font);
+  virtual OmniboxResultView* CreateResultView(OmniboxResultViewModel* model,
+                                              int model_index,
+                                              const gfx::Font& font);
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
@@ -145,6 +143,8 @@ class OmniboxPopupContentsView : public views::View,
   // Returns the target bounds given the specified content height.
   gfx::Rect CalculateTargetBounds(int h);
 
+  OmniboxResultView* result_view_at(size_t i);
+
   // The popup that contains this view.  We create this, but it deletes itself
   // when its window is destroyed.  This is a WeakPtr because it's possible for
   // the OS to destroy the window and thus delete this object before we're
@@ -162,12 +162,8 @@ class OmniboxPopupContentsView : public views::View,
   // Our border, which can compute our desired bounds.
   const views::BubbleBorder* bubble_border_;
 
-  // The font that we should use for result rows. This is based on the font used
-  // by the edit that created us.
-  gfx::Font result_font_;
-
-  // The font used for portions that match the input.
-  gfx::Font result_bold_font_;
+  // The font used for result rows, based on the omnibox font.
+  gfx::Font font_;
 
   // If the user cancels a dragging action (i.e. by pressing ESC), we don't have
   // a convenient way to release mouse capture. Instead we use this flag to

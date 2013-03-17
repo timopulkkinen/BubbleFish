@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler_delegate.h"
 #include "chrome/browser/sync/invalidation_frontend.h"
 #include "chrome/common/extensions/extension.h"
@@ -19,9 +19,6 @@ namespace extensions {
 namespace {
 
 const int kNumberOfSubchannels = 4;
-// TODO(dcheng): This is hardcoded for now since the svn export is not done yet.
-// Once it's done, use ipc::invalidation::ObjectSource::CHROME_PUSH_MESSAGING.
-const int kSourceId = 1030;
 
 // Chrome push messaging object IDs currently have the following format:
 // <format type>/<GAIA ID>/<extension ID>/<subchannel>
@@ -35,7 +32,7 @@ syncer::ObjectIdSet ExtensionIdToObjectIds(const std::string& extension_id) {
     name += "/";
     name += base::IntToString(i);
     object_ids.insert(invalidation::ObjectId(
-        kSourceId,
+        ipc::invalidation::ObjectSource::CHROME_PUSH_MESSAGING,
         name));
   }
   return object_ids;
@@ -45,7 +42,8 @@ syncer::ObjectIdSet ExtensionIdToObjectIds(const std::string& extension_id) {
 bool ObjectIdToExtensionAndSubchannel(const invalidation::ObjectId& object_id,
                                       std::string* extension_id,
                                       int* subchannel) {
-  if (object_id.source() != kSourceId) {
+  if (object_id.source() !=
+      ipc::invalidation::ObjectSource::CHROME_PUSH_MESSAGING) {
     DLOG(WARNING) << "Invalid source: " << object_id.source();
     return false;
   }
@@ -81,14 +79,11 @@ bool ObjectIdToExtensionAndSubchannel(const invalidation::ObjectId& object_id,
 
 PushMessagingInvalidationHandler::PushMessagingInvalidationHandler(
     InvalidationFrontend* service,
-    PushMessagingInvalidationHandlerDelegate* delegate,
-    const std::set<std::string>& extension_ids)
+    PushMessagingInvalidationHandlerDelegate* delegate)
     : service_(service),
-      registered_extensions_(extension_ids),
       delegate_(delegate) {
   DCHECK(service_);
   service_->RegisterInvalidationHandler(this);
-  UpdateRegistrations();
 }
 
 PushMessagingInvalidationHandler::~PushMessagingInvalidationHandler() {
@@ -119,11 +114,10 @@ void PushMessagingInvalidationHandler::OnInvalidatorStateChange(
 }
 
 void PushMessagingInvalidationHandler::OnIncomingInvalidation(
-    const syncer::ObjectIdStateMap& id_state_map,
-    syncer::IncomingInvalidationSource source) {
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  for (syncer::ObjectIdStateMap::const_iterator it = id_state_map.begin();
-       it != id_state_map.end(); ++it) {
+  for (syncer::ObjectIdInvalidationMap::const_iterator it =
+           invalidation_map.begin(); it != invalidation_map.end(); ++it) {
     std::string extension_id;
     int subchannel;
     if (ObjectIdToExtensionAndSubchannel(it->first,
@@ -131,6 +125,7 @@ void PushMessagingInvalidationHandler::OnIncomingInvalidation(
                                          &subchannel)) {
       delegate_->OnMessage(extension_id, subchannel, it->second.payload);
     }
+    service_->AcknowledgeInvalidation(it->first, it->second.ack_handle);
   }
 }
 

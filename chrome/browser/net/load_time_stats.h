@@ -14,13 +14,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "net/base/network_delegate.h"
 
 namespace base {
-class Histogram;
+class HistogramBase;
 }
 
 namespace net {
@@ -111,7 +111,8 @@ class LoadTimeStats {
 
   TabLoadStatsMap tab_load_stats_;
   RequestStatsMap request_stats_;
-  std::vector<base::Histogram*> histograms_[REQUEST_STATUS_MAX][HISTOGRAM_MAX];
+  std::vector<base::HistogramBase*>
+      histograms_[REQUEST_STATUS_MAX][HISTOGRAM_MAX];
   base::hash_set<const net::URLRequestContext*> main_request_contexts_;
 
   DISALLOW_COPY_AND_ASSIGN(LoadTimeStats);
@@ -121,23 +122,25 @@ class LoadTimeStats {
 // spinner starts or stops for it, and whenever a renderer is no longer used.
 class LoadTimeStatsTabHelper
     : public content::WebContentsObserver,
-      public WebContentsUserData<LoadTimeStatsTabHelper> {
+      public content::WebContentsUserData<LoadTimeStatsTabHelper> {
  public:
   virtual ~LoadTimeStatsTabHelper();
 
   // content::WebContentsObserver implementation
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStopLoading(
       content::RenderViewHost* render_view_host) OVERRIDE;
 
  private:
   explicit LoadTimeStatsTabHelper(content::WebContents* web_contents);
-  friend class WebContentsUserData<LoadTimeStatsTabHelper>;
+  friend class content::WebContentsUserData<LoadTimeStatsTabHelper>;
 
   // Calls into LoadTimeStats to notify that a reportable event has occurred
   // for the tab being observed.

@@ -7,8 +7,10 @@
 #include "content/common/view_messages.h"
 #include "content/common/webmessageportchannel_impl.h"
 #include "content/common/worker_messages.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerClient.h"
+
+namespace content {
 
 WebSharedWorkerProxy::WebSharedWorkerProxy(ChildThread* child_thread,
                                            unsigned long long document_id,
@@ -180,3 +182,5 @@ void WebSharedWorkerProxy::OnWorkerCreated() {
     connect_listener_->connected();
   }
 }
+
+}  // namespace content

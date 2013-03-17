@@ -52,19 +52,15 @@ class GdkCursorCache {
   DISALLOW_COPY_AND_ASSIGN(GdkCursorCache);
 };
 
-void FreePixels(guchar* pixels, gpointer data) {
-  free(data);
-}
-
 }  // namespace
 
 namespace gfx {
 
-static void CommonInitFromCommandLine(
-    const CommandLine& command_line, void (*init_func)(gint*, gchar***)) {
+static void CommonInitFromCommandLine(const CommandLine& command_line,
+                                      void (*init_func)(gint*, gchar***)) {
   const std::vector<std::string>& args = command_line.argv();
   int argc = args.size();
-  scoped_array<char *> argv(new char *[argc + 1]);
+  scoped_ptr<char *[]> argv(new char *[argc + 1]);
   for (size_t i = 0; i < args.size(); ++i) {
     // TODO(piman@google.com): can gtk_init modify argv? Just being safe
     // here.
@@ -95,11 +91,16 @@ GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap& bitmap) {
 
   int width = bitmap.width();
   int height = bitmap.height();
-  int stride = bitmap.rowBytes();
+
+  GdkPixbuf* pixbuf = gdk_pixbuf_new(
+      GDK_COLORSPACE_RGB,  // The only colorspace gtk supports.
+      TRUE,  // There is an alpha channel.
+      8,
+      width, height);
 
   // SkBitmaps are premultiplied, we need to unpremultiply them.
   const int kBytesPerPixel = 4;
-  uint8* divided = static_cast<uint8*>(malloc(height * stride));
+  uint8* divided = gdk_pixbuf_get_pixels(pixbuf);
 
   for (int y = 0, i = 0; y < height; y++) {
     for (int x = 0; x < width; x++) {
@@ -121,15 +122,6 @@ GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap& bitmap) {
       i += kBytesPerPixel;
     }
   }
-
-  // This pixbuf takes ownership of our malloc()ed data and will
-  // free it for us when it is destroyed.
-  GdkPixbuf* pixbuf = gdk_pixbuf_new_from_data(
-      divided,
-      GDK_COLORSPACE_RGB,  // The only colorspace gtk supports.
-      true,  // There is an alpha channel.
-      8,
-      width, height, stride, &FreePixels, divided);
 
   return pixbuf;
 }

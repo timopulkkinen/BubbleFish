@@ -17,7 +17,6 @@
 #include "content/public/common/renderer_preferences.h"
 #include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_content_browser_client.h"
-#include "third_party/skia/include/core/SkColor.h"
 
 namespace content {
 
@@ -55,7 +54,7 @@ GtkWidget* CreateMenuBar(Shell* shell) {
 
 }  // namespace
 
-void Shell::PlatformInitialize() {
+void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 }
 
 void Shell::PlatformCleanUp() {
@@ -63,6 +62,9 @@ void Shell::PlatformCleanUp() {
 }
 
 void Shell::PlatformEnableUIControl(UIControl control, bool is_enabled) {
+  if (headless_)
+    return;
+
   GtkToolItem* item = NULL;
   switch (control) {
     case BACK_BUTTON:
@@ -82,10 +84,16 @@ void Shell::PlatformEnableUIControl(UIControl control, bool is_enabled) {
 }
 
 void Shell::PlatformSetAddressBarURL(const GURL& url) {
+  if (headless_)
+    return;
+
   gtk_entry_set_text(GTK_ENTRY(url_edit_view_), url.spec().c_str());
 }
 
 void Shell::PlatformSetIsLoading(bool loading) {
+  if (headless_)
+    return;
+
   if (loading)
     gtk_spinner_start(GTK_SPINNER(spinner_));
   else
@@ -93,6 +101,11 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
+  SizeTo(width, height);
+
+  if (headless_)
+    return;
+
   window_ = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
   gtk_window_set_title(window_, "Content Shell");
   g_signal_connect(G_OBJECT(window_), "destroy",
@@ -183,34 +196,22 @@ void Shell::PlatformCreateWindow(int width, int height) {
 
   gtk_container_add(GTK_CONTAINER(window_), vbox_);
   gtk_widget_show_all(GTK_WIDGET(window_));
-
-  SizeTo(width, height);
 }
 
 void Shell::PlatformSetContents() {
+  if (headless_)
+    return;
+
   WebContentsView* content_view = web_contents_->GetView();
   gtk_container_add(GTK_CONTAINER(vbox_), content_view->GetNativeView());
-
-  // As an additional requirement on Linux, we must set the colors for the
-  // render widgets in webkit.
-  content::RendererPreferences* prefs =
-      web_contents_->GetMutableRendererPrefs();
-  prefs->focus_ring_color = SkColorSetARGB(255, 229, 151, 0);
-  prefs->thumb_active_color = SkColorSetRGB(244, 244, 244);
-  prefs->thumb_inactive_color = SkColorSetRGB(234, 234, 234);
-  prefs->track_color = SkColorSetRGB(211, 211, 211);
-
-  prefs->active_selection_bg_color = SkColorSetRGB(30, 144, 255);
-  prefs->active_selection_fg_color = SK_ColorWHITE;
-  prefs->inactive_selection_bg_color = SkColorSetRGB(200, 200, 200);
-  prefs->inactive_selection_fg_color = SkColorSetRGB(50, 50, 50);
 }
 
 void Shell::SizeTo(int width, int height) {
   content_width_ = width;
   content_height_ = height;
   if (web_contents_.get()) {
-    gtk_widget_set_size_request(web_contents_->GetNativeView(), width, height);
+    gtk_widget_set_size_request(web_contents_->GetView()->GetNativeView(),
+                                width, height);
   }
 }
 
@@ -219,6 +220,11 @@ void Shell::PlatformResizeSubViews() {
 }
 
 void Shell::Close() {
+  if (headless_) {
+    delete this;
+    return;
+  }
+
   gtk_widget_destroy(GTK_WIDGET(window_));
 }
 
@@ -271,7 +277,7 @@ gboolean Shell::OnNewWindowKeyPressed(GtkAccelGroup* accel_group,
                          GURL(),
                          NULL,
                          MSG_ROUTING_NONE,
-                         NULL);
+                         gfx::Size());
   return TRUE;
 }
 
@@ -284,6 +290,9 @@ gboolean Shell::OnHighlightURLView(GtkAccelGroup* accel_group,
 }
 
 void Shell::PlatformSetTitle(const string16& title) {
+  if (headless_)
+    return;
+
   std::string title_utf8 = UTF16ToUTF8(title);
   gtk_window_set_title(GTK_WINDOW(window_), title_utf8.c_str());
 }

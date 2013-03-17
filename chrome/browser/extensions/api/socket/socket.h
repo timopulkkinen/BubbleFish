@@ -93,8 +93,7 @@ class Socket : public ApiResource {
                                         int* port);
 
  protected:
-  Socket(const std::string& owner_extension_id_,
-         ApiResourceEventNotifier* event_notifier);
+  explicit Socket(const std::string& owner_extension_id_);
 
   void WriteData();
   virtual int WriteImpl(net::IOBuffer* io_buffer,
@@ -103,7 +102,6 @@ class Socket : public ApiResource {
   virtual void OnWriteComplete(int result);
 
   const std::string address_;
-  int port_;
   bool is_connected_;
 
  private:

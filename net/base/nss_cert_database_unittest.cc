@@ -8,8 +8,8 @@
 
 #include <algorithm>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -26,6 +26,7 @@
 #include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/base/nss_cert_database.h"
+#include "net/base/test_data_directory.h"
 #include "net/base/x509_certificate.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertificateDB.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -38,20 +39,10 @@
 
 namespace net {
 
-// TODO(mattm): when https://bugzilla.mozilla.org/show_bug.cgi?id=588269 is
-// fixed, switch back to using a separate userdb for each test.
-// (When doing so, remember to add some standalone tests of DeleteCert since it
-// won't be tested by TearDown anymore.)
 class CertDatabaseNSSTest : public testing::Test {
  public:
-  static void SetUpTestCase() {
-    ASSERT_TRUE(crypto::OpenTestNSSDB());
-    // There is no matching TearDownTestCase call to close the test NSS DB
-    // because that would leave NSS in a potentially broken state for further
-    // tests, due to https://bugzilla.mozilla.org/show_bug.cgi?id=588269
-  }
-
   virtual void SetUp() {
+    ASSERT_TRUE(test_nssdb_.is_open());
     cert_db_ = NSSCertDatabase::GetInstance();
     slot_ = cert_db_->GetPublicModule();
 
@@ -68,7 +59,7 @@ class CertDatabaseNSSTest : public testing::Test {
     // Run the message loop to process any observer callbacks (e.g. for the
     // ClientSocketFactory singleton) so that the scoped ref ptrs created in
     // NSSCertDatabase::NotifyObservers* get released.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     EXPECT_EQ(0U, ListCertsInSlot(slot_->os_module_handle()).size());
   }
@@ -76,7 +67,7 @@ class CertDatabaseNSSTest : public testing::Test {
  protected:
   static std::string ReadTestFile(const std::string& name) {
     std::string result;
-    FilePath cert_path = GetTestCertsDirectory().AppendASCII(name);
+    base::FilePath cert_path = GetTestCertsDirectory().AppendASCII(name);
     EXPECT_TRUE(file_util::ReadFileToString(cert_path, &result));
     return result;
   }
@@ -129,6 +120,8 @@ class CertDatabaseNSSTest : public testing::Test {
     }
     return ok;
   }
+
+  crypto::ScopedTestNSSDB test_nssdb_;
 };
 
 TEST_F(CertDatabaseNSSTest, ListCerts) {

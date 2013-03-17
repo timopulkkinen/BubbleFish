@@ -6,7 +6,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -34,7 +34,7 @@ class SearchProviderTest : public InProcessBrowserTest {
  protected:
   SearchProviderTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ASSERT_TRUE(test_server()->Start());
 
     // Map all hosts to our local server.
@@ -61,7 +61,8 @@ class SearchProviderTest : public InProcessBrowserTest {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
     // Bundle up information needed to verify the result.
-    content::WebContents* tab = chrome::GetActiveWebContents(browser);
+    content::WebContents* tab =
+        browser->tab_strip_model()->GetActiveWebContents();
     return IsSearchProviderTestData(tab, host, test_url);
   }
 
@@ -82,8 +83,15 @@ class SearchProviderTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SearchProviderTest);
 };
 
-// If this flakes on Windows, use http://crbug.com/62777
-IN_PROC_BROWSER_TEST_F(SearchProviderTest, TestIsSearchProviderInstalled) {
+#if defined(OS_WIN)
+// This is flaking on XP. See http://crbug.com/159530
+#define MAYBE_TestIsSearchProviderInstalled \
+    DISABLED_TestIsSearchProviderInstalled
+#else
+#define MAYBE_TestIsSearchProviderInstalled TestIsSearchProviderInstalled
+#endif
+IN_PROC_BROWSER_TEST_F(SearchProviderTest,
+                       MAYBE_TestIsSearchProviderInstalled) {
   // Use the default search provider, other installed search provider, and
   // one not installed as well. (Note that yahoo isn't tested because the
   // its host name varies a lot for different locales unlike Google and Bing,

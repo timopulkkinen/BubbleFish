@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
@@ -17,10 +17,13 @@
 #include "net/url_request/url_request_status.h"
 #include "testing/platform_test.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util.h"
+#include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_writer_delegate.h"
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/sandbox_file_stream_writer.h"
+#include "webkit/quota/quota_manager.h"
 
 namespace fileapi {
 
@@ -127,7 +130,7 @@ class FileWriterDelegateTest : public PlatformTest {
   scoped_ptr<Result> result_;
   LocalFileSystemTestOriginHelper test_helper_;
 
-  ScopedTempDir dir_;
+  base::ScopedTempDir dir_;
 
   static const char* content_;
 };
@@ -196,8 +199,8 @@ net::URLRequestJob* FileWriterDelegateTest::Factory(
 
 void FileWriterDelegateTest::SetUp() {
   ASSERT_TRUE(dir_.CreateUniqueTempDir());
-  FilePath base_dir = dir_.path().AppendASCII("filesystem");
-  test_helper_.SetUp(base_dir, NULL);
+  base::FilePath base_dir = dir_.path().AppendASCII("filesystem");
+  test_helper_.SetUp(base_dir);
 
   scoped_ptr<FileSystemOperationContext> context(
       test_helper_.NewOperationContext());
@@ -220,9 +223,11 @@ void FileWriterDelegateTest::TearDown() {
 // FileWriterDelegateTest.WriteSuccessWithoutQuotaLimit is flaky on windows
 // http://crbug.com/130401
 #if defined(OS_WIN)
-#define MAYBE_WriteSuccessWithoutQuotaLimit DISABLED_WriteSuccessWithoutQuotaLimit
+#define MAYBE_WriteSuccessWithoutQuotaLimit \
+    DISABLED_WriteSuccessWithoutQuotaLimit
 #else
-#define MAYBE_WriteSuccessWithoutQuotaLimit WriteSuccessWithoutQuotaLimit
+#define MAYBE_WriteSuccessWithoutQuotaLimit \
+    WriteSuccessWithoutQuotaLimit
 #endif
 TEST_F(FileWriterDelegateTest, MAYBE_WriteSuccessWithoutQuotaLimit) {
   const GURL kBlobURL("blob:nolimit");

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/id_map.h"
 #include "base/process.h"
 #include "ipc/ipc_listener.h"
@@ -18,11 +18,13 @@
 #include "webkit/fileapi/file_system_types.h"
 
 namespace base {
+class FilePath;
 struct PlatformFileInfo;
 }
 
-class FilePath;
 class GURL;
+
+namespace content {
 
 // Dispatches and sends file system related messages sent to/from a child
 // process from/to the main browser process.  There is one instance
@@ -89,9 +91,14 @@ class FileSystemDispatcher : public IPC::Listener {
   // raw PlatformFile returned from OpenFile.
   bool NotifyCloseFile(const GURL& file_path);
 
-  bool CreateSnapshotFile(const GURL& blod_url,
-                          const GURL& file_path,
+  bool CreateSnapshotFile(const GURL& file_path,
                           fileapi::FileSystemCallbackDispatcher* dispatcher);
+
+  bool CreateSnapshotFile_Deprecated(
+      const GURL& blod_url,
+      const GURL& file_path,
+      fileapi::FileSystemCallbackDispatcher* dispatcher);
+
  private:
   // Message handlers.
   void OnDidOpenFileSystem(int request_id,
@@ -100,7 +107,10 @@ class FileSystemDispatcher : public IPC::Listener {
   void OnDidSucceed(int request_id);
   void OnDidReadMetadata(int request_id,
                          const base::PlatformFileInfo& file_info,
-                         const FilePath& platform_path);
+                         const base::FilePath& platform_path);
+  void OnDidCreateSnapshotFile(int request_id,
+                               const base::PlatformFileInfo& file_info,
+                               const base::FilePath& platform_path);
   void OnDidReadDirectory(
       int request_id,
       const std::vector<base::FileUtilProxy::Entry>& entries,
@@ -115,5 +125,7 @@ class FileSystemDispatcher : public IPC::Listener {
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemDispatcher);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_FILEAPI_FILE_SYSTEM_DISPATCHER_H_

@@ -45,12 +45,12 @@ const char* GetBaseVersionString(BaseVersion base_version) {
 }
 
 const char* GetInt64FieldString(Int64Field int64_field) {
-  ASSERT_ENUM_BOUNDS(SERVER_VERSION, LOCAL_EXTERNAL_ID,
+  ASSERT_ENUM_BOUNDS(SERVER_VERSION, TRANSACTION_VERSION,
                      BASE_VERSION + 1, INT64_FIELDS_END - 1);
   switch (int64_field) {
     ENUM_CASE(SERVER_VERSION);
-    ENUM_CASE(SERVER_POSITION_IN_PARENT);
     ENUM_CASE(LOCAL_EXTERNAL_ID);
+    ENUM_CASE(TRANSACTION_VERSION);
     case INT64_FIELDS_END: break;
   }
   NOTREACHED();
@@ -58,8 +58,8 @@ const char* GetInt64FieldString(Int64Field int64_field) {
 }
 
 const char* GetTimeFieldString(TimeField time_field) {
-  ASSERT_ENUM_BOUNDS(SERVER_VERSION, LOCAL_EXTERNAL_ID,
-                     BASE_VERSION + 1, INT64_FIELDS_END - 1);
+  ASSERT_ENUM_BOUNDS(MTIME, SERVER_CTIME,
+                     TIME_FIELDS_BEGIN, TIME_FIELDS_END - 1);
   switch (time_field) {
     ENUM_CASE(MTIME);
     ENUM_CASE(SERVER_MTIME);
@@ -143,6 +143,17 @@ const char* GetProtoFieldString(ProtoField proto_field) {
     ENUM_CASE(SERVER_SPECIFICS);
     ENUM_CASE(BASE_SERVER_SPECIFICS);
     case PROTO_FIELDS_END: break;
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* GetOrdinalFieldString(OrdinalField ordinal_field) {
+  ASSERT_ENUM_BOUNDS(SERVER_ORDINAL_IN_PARENT, SERVER_ORDINAL_IN_PARENT,
+                     ORDINAL_FIELDS_BEGIN, ORDINAL_FIELDS_END - 1);
+  switch(ordinal_field) {
+    ENUM_CASE(SERVER_ORDINAL_IN_PARENT);
+    case ORDINAL_FIELDS_END: break;
   }
   NOTREACHED();
   return "";

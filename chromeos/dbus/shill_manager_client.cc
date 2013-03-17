@@ -8,6 +8,7 @@
 #include "base/chromeos/chromeos_version.h"
 #include "base/message_loop.h"
 #include "base/values.h"
+#include "chromeos/dbus/shill_manager_client_stub.h"
 #include "chromeos/dbus/shill_property_changed_observer.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -82,6 +83,13 @@ class ShillManagerClientImpl : public ShillManagerClient {
     return helper_.CallDictionaryValueMethodAndBlock(&method_call);
   }
 
+  virtual void GetNetworksForGeolocation(
+      const DictionaryValueCallback& callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
+                                 shill::kGetNetworksForGeolocation);
+    helper_.CallDictionaryValueMethod(&method_call, callback);
+  }
+
   virtual void SetProperty(const std::string& name,
                            const base::Value& value,
                            const base::Closure& callback,
@@ -136,16 +144,16 @@ class ShillManagerClientImpl : public ShillManagerClient {
 
   virtual void ConfigureService(
       const base::DictionaryValue& properties,
-      const base::Closure& callback,
+      const ObjectPathCallback& callback,
       const ErrorCallback& error_callback) OVERRIDE {
     DCHECK(AreServicePropertiesValid(properties));
     dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
                                  flimflam::kConfigureServiceFunction);
     dbus::MessageWriter writer(&method_call);
     AppendServicePropertiesDictionary(&writer, properties);
-    helper_.CallVoidMethodWithErrorCallback(&method_call,
-                                            callback,
-                                            error_callback);
+    helper_.CallObjectPathMethodWithErrorCallback(&method_call,
+                                                  callback,
+                                                  error_callback);
   }
 
   virtual void GetService(
@@ -161,113 +169,80 @@ class ShillManagerClientImpl : public ShillManagerClient {
                                                   error_callback);
   }
 
+  virtual void VerifyDestination(const std::string& certificate,
+                                 const std::string& public_key,
+                                 const std::string& nonce,
+                                 const std::string& signed_data,
+                                 const std::string& device_serial,
+                                 const BooleanCallback& callback,
+                                 const ErrorCallback& error_callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
+                                 shill::kVerifyDestinationFunction);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(certificate);
+    writer.AppendString(public_key);
+    writer.AppendString(nonce);
+    writer.AppendString(signed_data);
+    writer.AppendString(device_serial);
+    helper_.CallBooleanMethodWithErrorCallback(&method_call,
+                                               callback,
+                                               error_callback);
+  }
+
+  virtual void VerifyAndEncryptCredentials(
+      const std::string& certificate,
+      const std::string& public_key,
+      const std::string& nonce,
+      const std::string& signed_data,
+      const std::string& device_serial,
+      const std::string& service_path,
+      const StringCallback& callback,
+      const ErrorCallback& error_callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
+                                 shill::kVerifyAndEncryptCredentialsFunction);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(certificate);
+    writer.AppendString(public_key);
+    writer.AppendString(nonce);
+    writer.AppendString(signed_data);
+    writer.AppendString(device_serial);
+    writer.AppendObjectPath(dbus::ObjectPath(service_path));
+    helper_.CallStringMethodWithErrorCallback(&method_call,
+                                              callback,
+                                              error_callback);
+  }
+
+  virtual void VerifyAndEncryptData(const std::string& certificate,
+                                 const std::string& public_key,
+                                 const std::string& nonce,
+                                 const std::string& signed_data,
+                                 const std::string& device_serial,
+                                 const std::string& data,
+                                 const StringCallback& callback,
+                                 const ErrorCallback& error_callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
+                                 shill::kVerifyAndEncryptDataFunction);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(certificate);
+    writer.AppendString(public_key);
+    writer.AppendString(nonce);
+    writer.AppendString(signed_data);
+    writer.AppendString(device_serial);
+    writer.AppendString(data);
+    helper_.CallStringMethodWithErrorCallback(&method_call,
+                                              callback,
+                                              error_callback);
+  }
+
+  virtual TestInterface* GetTestInterface() OVERRIDE {
+    return NULL;
+  }
+
  private:
   dbus::ObjectProxy* proxy_;
   ShillClientHelper helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ShillManagerClientImpl);
-};
-
-// A stub implementation of ShillManagerClient.
-// Implemented: Stub cellular DeviceList entry for SMS testing.
-class ShillManagerClientStubImpl : public ShillManagerClient {
- public:
-  ShillManagerClientStubImpl() : weak_ptr_factory_(this) {
-    base::ListValue* device_list = new base::ListValue;
-    // Note: names match Device stub map.
-    const char kStubCellular1[] = "stub_cellular1";
-    const char kStubCellular2[] = "stub_cellular2";
-    device_list->Append(base::Value::CreateStringValue(kStubCellular1));
-    device_list->Append(base::Value::CreateStringValue(kStubCellular2));
-    stub_properties_.Set(flimflam::kDevicesProperty, device_list);
-  }
-
-  virtual ~ShillManagerClientStubImpl() {}
-
-  //////////////////////////////////
-  // ShillManagerClient overrides.
-  virtual void AddPropertyChangedObserver(
-      ShillPropertyChangedObserver* observer) OVERRIDE {}
-
-  virtual void RemovePropertyChangedObserver(
-      ShillPropertyChangedObserver* observer) OVERRIDE {}
-
-  // ShillManagerClient override.
-  virtual void GetProperties(const DictionaryValueCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(
-            &ShillManagerClientStubImpl::PassStubProperties,
-            weak_ptr_factory_.GetWeakPtr(),
-            callback));
-  }
-
-  // ShillManagerClient override.
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock() OVERRIDE {
-    return new base::DictionaryValue;
-  }
-
-  // ShillManagerClient override.
-  virtual void SetProperty(const std::string& name,
-                           const base::Value& value,
-                           const base::Closure& callback,
-                           const ErrorCallback& error_callback) OVERRIDE {
-    stub_properties_.Set(name, value.DeepCopy());
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  // ShillManagerClient override.
-  virtual void RequestScan(const std::string& type,
-                           const base::Closure& callback,
-                           const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  // ShillManagerClient override.
-  virtual void EnableTechnology(
-      const std::string& type,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  // ShillManagerClient override.
-  virtual void DisableTechnology(
-      const std::string& type,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  // ShillManagerClient override.
-  virtual void ConfigureService(
-      const base::DictionaryValue& properties,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  // ShillManagerClient override.
-  virtual void GetService(
-      const base::DictionaryValue& properties,
-      const ObjectPathCallback& callback,
-      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     base::Bind(callback,
-                                                dbus::ObjectPath()));
-  }
-
- private:
-  void PassStubProperties(const DictionaryValueCallback& callback) const {
-    callback.Run(DBUS_METHOD_CALL_SUCCESS, stub_properties_);
-  }
-
-  base::DictionaryValue stub_properties_;
-
-  // Note: This should remain the last member so it'll be destroyed and
-  // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<ShillManagerClientStubImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShillManagerClientStubImpl);
 };
 
 }  // namespace
@@ -283,7 +258,7 @@ ShillManagerClient* ShillManagerClient::Create(
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
     return new ShillManagerClientImpl(bus);
   DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
-  return new ShillManagerClientStubImpl();
+  return new ShillManagerClientStub();
 }
 
 }  // namespace chromeos

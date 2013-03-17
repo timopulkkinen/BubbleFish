@@ -9,16 +9,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/browser_thread.h"
-
-namespace content {
-class BrowserContext;
-}
 
 namespace webkit_blob {
 class BlobStorageController;
 }
 
+namespace content {
+class BrowserContext;
 struct ChromeBlobStorageContextDeleter;
 
 // A context class that keeps track of BlobStorageController used by the chrome.
@@ -35,7 +32,7 @@ class CONTENT_EXPORT ChromeBlobStorageContext
   ChromeBlobStorageContext();
 
   static ChromeBlobStorageContext* GetFor(
-      content::BrowserContext* browser_context);
+      BrowserContext* browser_context);
 
   void InitializeOnIOThread();
 
@@ -62,5 +59,7 @@ struct ChromeBlobStorageContextDeleter {
     context->DeleteOnCorrectThread();
   }
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_FILEAPI_CHROME_BLOB_STORAGE_CONTEXT_H_

@@ -20,12 +20,10 @@ class WebrtcBrutalityTest(webrtc_test_base.WebrtcTestBase):
     The test will make repeated getUserMedia requests with refreshes between
     them. Sometimes it will click past the bar and then refresh.
     """
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep00_test.html')
-    self.NavigateToURL(url)
-
+    self.LoadTestPageInOneTab()
     for i in range(1, 100):
       if i % 10 == 0:
-        self.GetUserMedia(tab_index=0, action='allow')
+        self.GetUserMedia(tab_index=0, action='accept')
       else:
         self._GetUserMediaWithoutTakingAction(tab_index=0)
       self.ReloadTab(tab_index=0)
@@ -35,42 +33,34 @@ class WebrtcBrutalityTest(webrtc_test_base.WebrtcTestBase):
 
     The test will alternate unanswered requests with requests that get answered.
     """
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep00_test.html')
-    self.NavigateToURL(url)
-
+    self.LoadTestPageInOneTab()
     for i in range(1, 100):
       if i % 10 == 0:
-        self.GetUserMedia(tab_index=0, action='allow')
+        self.GetUserMedia(tab_index=0, action='accept')
       else:
         self._GetUserMediaWithoutTakingAction(tab_index=0)
 
   def testSuccessfulGetUserMediaAndThenReload(self):
     """Waits for WebRTC to respond, and immediately reloads the tab."""
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep00_test.html')
-    self.NavigateToURL(url)
-
-    self.GetUserMedia(tab_index=0, action='allow')
+    self.LoadTestPageInOneTab()
+    self.GetUserMedia(tab_index=0, action='accept')
     self.ReloadTab(tab_index=0)
 
   def testClosingTabAfterGetUserMedia(self):
     """Tests closing the tab right after a getUserMedia call."""
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep00_test.html')
-    self.NavigateToURL(url)
-
+    self.LoadTestPageInOneTab()
     self._GetUserMediaWithoutTakingAction(tab_index=0)
     self.CloseTab(tab_index=0)
 
   def testSuccessfulGetUserMediaAndThenClose(self):
     """Waits for WebRTC to respond, and closes the tab."""
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep00_test.html')
-    self.NavigateToURL(url)
-
-    self.GetUserMedia(tab_index=0, action='allow')
+    self.LoadTestPageInOneTab()
+    self.GetUserMedia(tab_index=0, action='accept')
     self.CloseTab(tab_index=0)
 
   def _GetUserMediaWithoutTakingAction(self, tab_index):
     self.assertEquals('ok-requested', self.ExecuteJavascript(
-      'getUserMedia(true, true)', tab_index=0))
+      'getUserMedia("{ audio: true, video: true, }")', tab_index=0))
 
 
 if __name__ == '__main__':

@@ -139,16 +139,16 @@ const char* GetActionString(sync_pb::SyncEnums::Action action) {
 }
 
 const char* GetDeviceTypeString(
-    sync_pb::SessionHeader::DeviceType device_type) {
-  ASSERT_ENUM_BOUNDS(sync_pb::SessionHeader, DeviceType, TYPE_WIN, TYPE_TABLET);
+    sync_pb::SyncEnums::DeviceType device_type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::SyncEnums, DeviceType, TYPE_WIN, TYPE_TABLET);
   switch (device_type) {
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_WIN);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_MAC);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_LINUX);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_CROS);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_OTHER);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_PHONE);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_TABLET);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_WIN);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_MAC);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_LINUX);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_CROS);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_OTHER);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_PHONE);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_TABLET);
   }
   NOTREACHED();
   return "";
@@ -174,6 +174,29 @@ const char* PassphraseTypeString(
     ENUM_CASE(sync_pb::NigoriSpecifics, KEYSTORE_PASSPHRASE);
     ENUM_CASE(sync_pb::NigoriSpecifics, FROZEN_IMPLICIT_PASSPHRASE);
     ENUM_CASE(sync_pb::NigoriSpecifics, CUSTOM_PASSPHRASE);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* SingletonEventTypeString(
+    sync_pb::DebugEventInfo::SingletonEventType type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::DebugEventInfo, SingletonEventType,
+                     CONNECTION_STATUS_CHANGE, BOOTSTRAP_TOKEN_UPDATED);
+  switch (type) {
+    ENUM_CASE(sync_pb::DebugEventInfo, CONNECTION_STATUS_CHANGE);
+    ENUM_CASE(sync_pb::DebugEventInfo, UPDATED_TOKEN);
+    ENUM_CASE(sync_pb::DebugEventInfo, PASSPHRASE_REQUIRED);
+    ENUM_CASE(sync_pb::DebugEventInfo, PASSPHRASE_ACCEPTED);
+    ENUM_CASE(sync_pb::DebugEventInfo, INITIALIZATION_COMPLETE);
+    ENUM_CASE(sync_pb::DebugEventInfo, STOP_SYNCING_PERMANENTLY);
+    ENUM_CASE(sync_pb::DebugEventInfo, ENCRYPTION_COMPLETE);
+    ENUM_CASE(sync_pb::DebugEventInfo, ACTIONABLE_ERROR);
+    ENUM_CASE(sync_pb::DebugEventInfo, ENCRYPTED_TYPES_CHANGED);
+    ENUM_CASE(sync_pb::DebugEventInfo, PASSPHRASE_TYPE_CHANGED);
+    ENUM_CASE(sync_pb::DebugEventInfo, KEYSTORE_TOKEN_UPDATED);
+    ENUM_CASE(sync_pb::DebugEventInfo, CONFIGURE_COMPLETE);
+    ENUM_CASE(sync_pb::DebugEventInfo, BOOTSTRAP_TOKEN_UPDATED);
   }
   NOTREACHED();
   return "";

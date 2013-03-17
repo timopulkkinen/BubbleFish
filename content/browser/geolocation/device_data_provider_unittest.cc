@@ -7,14 +7,14 @@
 #include "content/browser/geolocation/wifi_data_provider_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
+namespace content {
 
 class NullWifiDataListenerInterface
     : public WifiDataProviderCommon::ListenerInterface {
  public:
   // ListenerInterface
   virtual void DeviceDataUpdateAvailable(
-      DeviceDataProvider<WifiData>* provider) {}
+      DeviceDataProvider<WifiData>* provider) OVERRIDE {}
 };
 
 TEST(GeolocationDeviceDataProviderWifiData, CreateDestroy) {
@@ -28,14 +28,14 @@ TEST(GeolocationDeviceDataProviderWifiData, CreateDestroy) {
     DeviceDataProvider<WifiData>::Register(&listener);
     for (int j = 0; j < 10; j++) {
       base::PlatformThread::Sleep(base::TimeDelta());
-      main_message_loop.RunAllPending();  // See comment above
+      main_message_loop.RunUntilIdle();  // See comment above
     }
     DeviceDataProvider<WifiData>::Unregister(&listener);
     for (int j = 0; j < 10; j++) {
       base::PlatformThread::Sleep(base::TimeDelta());
-      main_message_loop.RunAllPending();  // See comment above
+      main_message_loop.RunUntilIdle();  // See comment above
     }
   }
 }
 
-}  // namespace
+}  // namespace content

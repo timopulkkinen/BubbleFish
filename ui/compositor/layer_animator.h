@@ -20,6 +20,7 @@
 
 namespace gfx {
 class Rect;
+class Transform;
 }
 
 namespace ui {
@@ -29,7 +30,6 @@ class LayerAnimationSequence;
 class LayerAnimationDelegate;
 class LayerAnimationObserver;
 class ScopedLayerAnimationSettings;
-class Transform;
 
 // When a property of layer needs to be changed it is set by way of
 // LayerAnimator. This enables LayerAnimator to animate property changes.
@@ -60,8 +60,8 @@ class COMPOSITOR_EXPORT LayerAnimator
   static LayerAnimator* CreateImplicitAnimator();
 
   // Sets the transform on the delegate. May cause an implicit animation.
-  virtual void SetTransform(const Transform& transform);
-  Transform GetTargetTransform() const;
+  virtual void SetTransform(const gfx::Transform& transform);
+  gfx::Transform GetTargetTransform() const;
 
   // Sets the bounds on the delegate. May cause an implicit animation.
   virtual void SetBounds(const gfx::Rect& bounds);
@@ -82,6 +82,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // Sets the grayscale on the delegate. May cause an implicit animation.
   virtual void SetGrayscale(float grayscale);
   float GetTargetGrayscale() const;
+
+  // Sets the color on the delegate. May cause an implicit animation.
+  virtual void SetColor(SkColor color);
+  SkColor GetTargetColor() const;
 
   // Sets the layer animation delegate the animator is associated with. The
   // animator does not own the delegate. The layer animator expects a non-NULL
@@ -109,9 +113,20 @@ class COMPOSITOR_EXPORT LayerAnimator
   // of this animation sequence.
   void ScheduleAnimation(LayerAnimationSequence* animation);
 
-  // Schedules the animations to be run together. Obviously will no work if
-  // they animate any common properties. The animator takes ownership of the
-  // animation sequences.
+  // Starts the animations to be run together, ensuring that the first elements
+  // in these sequences have the same effective start time even when some of
+  // them start on the compositor thread (but there is no such guarantee for
+  // the effective start time of subsequent elements). Obviously will not work
+  // if they animate any common properties. The animator takes ownership of the
+  // animation sequences. Takes PreemptionStrategy into account.
+  void StartTogether(const std::vector<LayerAnimationSequence*>& animations);
+
+  // Schedules the animations to be run together, ensuring that the first
+  // elements in these sequences have the same effective start time even when
+  // some of them start on the compositor thread (but there is no such guarantee
+  // for the effective start time of subsequent elements). Obviously will not
+  // work if they animate any common properties. The animator takes ownership
+  // of the animation sequences.
   void ScheduleTogether(const std::vector<LayerAnimationSequence*>& animations);
 
   // Schedules a pause for length |duration| of all the specified properties.
@@ -137,13 +152,21 @@ class COMPOSITOR_EXPORT LayerAnimator
   void StopAnimatingProperty(
       LayerAnimationElement::AnimatableProperty property);
 
-  // Stops all animation and clears any queued animations.
-  void StopAnimating();
+  // Stops all animation and clears any queued animations. This call progresses
+  // animations to their end points and notifies all observers.
+  void StopAnimating() { StopAnimatingInternal(false); }
+
+  // This is similar to StopAnimating, but aborts rather than finishes the
+  // animations and notifies all observers.
+  void AbortAllAnimations() { StopAnimatingInternal(true); }
 
   // These functions are used for adding or removing observers from the observer
   // list. The observers are notified when animations end.
   void AddObserver(LayerAnimationObserver* observer);
   void RemoveObserver(LayerAnimationObserver* observer);
+
+  // Called when a threaded animation is actually started.
+  void OnThreadedAnimationStarted(const cc::AnimationEvent& event);
 
   // This determines how implicit animations will be tweened. This has no
   // effect on animations that are explicitly started or scheduled. The default
@@ -154,6 +177,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // For testing purposes only.
   void set_disable_timer_for_test(bool disable_timer) {
     disable_timer_for_test_ = disable_timer;
+  }
+
+  void set_last_step_time(base::TimeTicks time) {
+    last_step_time_ = time;
   }
   base::TimeTicks last_step_time() const { return last_step_time_; }
 
@@ -188,7 +215,9 @@ class COMPOSITOR_EXPORT LayerAnimator
 
   // Virtual for testing.
   virtual void ProgressAnimation(LayerAnimationSequence* sequence,
-                                 base::TimeDelta delta);
+                                 base::TimeTicks now);
+
+  void ProgressAnimationToEnd(LayerAnimationSequence* sequence);
 
   // Returns true if the sequence is owned by this animator.
   bool HasAnimation(LayerAnimationSequence* sequence) const;
@@ -196,16 +225,20 @@ class COMPOSITOR_EXPORT LayerAnimator
  private:
   friend class base::RefCounted<LayerAnimator>;
   friend class ScopedLayerAnimationSettings;
+  friend class LayerAnimatorTestController;
 
-  // We need to keep track of the start time of every running animation.
-  struct RunningAnimation {
-    RunningAnimation(LayerAnimationSequence* sequence,
-                     base::TimeTicks start_time)
-        : sequence(sequence),
-          start_time(start_time) {
-    }
-    LayerAnimationSequence* sequence;
-    base::TimeTicks start_time;
+  class RunningAnimation {
+   public:
+    RunningAnimation(const base::WeakPtr<LayerAnimationSequence>& sequence);
+    ~RunningAnimation();
+
+    bool is_sequence_alive() const { return !!sequence_; }
+    LayerAnimationSequence* sequence() const { return sequence_.get(); }
+
+   private:
+    base::WeakPtr<LayerAnimationSequence> sequence_;
+
+    // Copy and assign are allowed.
   };
 
   typedef std::vector<RunningAnimation> RunningAnimations;
@@ -215,6 +248,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   virtual void SetStartTime(base::TimeTicks start_time) OVERRIDE;
   virtual void Step(base::TimeTicks time_now) OVERRIDE;
   virtual base::TimeDelta GetTimerInterval() const OVERRIDE;
+
+  // Finishes all animations by either advancing them to their final state or by
+  // aborting them.
+  void StopAnimatingInternal(bool abort);
 
   // Starts or stops stepping depending on whether thare are running animations.
   void UpdateAnimationState();
@@ -226,7 +263,7 @@ class COMPOSITOR_EXPORT LayerAnimator
       LayerAnimationSequence* sequence) WARN_UNUSED_RESULT;
 
   // Progresses to the end of the sequence before removing it.
-  void FinishAnimation(LayerAnimationSequence* sequence);
+  void FinishAnimation(LayerAnimationSequence* sequence, bool abort);
 
   // Finishes any running animation with zero duration.
   void FinishAnyAnimationWithZeroDuration();
@@ -287,6 +324,9 @@ class COMPOSITOR_EXPORT LayerAnimator
   // have been aborted.
   void ClearAnimationsInternal();
 
+  // Cleans up any running animations that may have been deleted.
+  void PurgeDeletedAnimations();
+
   // This is the queue of animations to run.
   AnimationQueue animation_queue_;
 
@@ -314,6 +354,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // This prevents the animator from automatically stepping through animations
   // and allows for manual stepping.
   bool disable_timer_for_test_;
+
+  // Prevents timer adjustments in case when we start multiple animations
+  // with preemption strategies that discard previous animations.
+  bool adding_animations_;
 
   // This causes all animations to complete immediately.
   static bool disable_animations_for_test_;

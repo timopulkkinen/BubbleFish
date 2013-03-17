@@ -17,9 +17,6 @@
 
 namespace {
 
-// How far to inset the hint text area from sides.
-const CGFloat kHintTextYInset = 4.0;
-
 // How far to inset the hint image from sides.  Lines baseline of text
 // in image with baseline of prefix and suffix.
 const CGFloat kHintImageYInset = 4.0;
@@ -88,7 +85,8 @@ void KeywordHintDecoration::SetKeyword(const string16& short_name,
   hint_suffix_.reset([TrimAndConvert(keyword_hint.substr(split)) retain]);
 }
 
-CGFloat KeywordHintDecoration::GetWidthForSpace(CGFloat width) {
+CGFloat KeywordHintDecoration::GetWidthForSpace(CGFloat width,
+                                                CGFloat text_width) {
   NSImage* image = GetHintImage();
   const CGFloat image_width = image ? [image size].width : 0.0;
 
@@ -120,7 +118,7 @@ void KeywordHintDecoration::DrawInFrame(NSRect frame, NSView* control_view) {
   const bool draw_full = NSWidth(frame) > image_width;
 
   if (draw_full) {
-    NSRect prefix_rect = NSInsetRect(frame, 0.0, kHintTextYInset);
+    NSRect prefix_rect = NSInsetRect(frame, 0.0, kTextYInset);
     const CGFloat prefix_width =
         [hint_prefix_ sizeWithAttributes:attributes_].width;
     DCHECK_GE(NSWidth(prefix_rect), prefix_width);
@@ -144,14 +142,15 @@ void KeywordHintDecoration::DrawInFrame(NSRect frame, NSView* control_view) {
   frame.size.width -= NSWidth(image_rect);
 
   if (draw_full) {
-    NSRect suffix_rect = NSInsetRect(frame, 0.0, kHintTextYInset);
+    NSRect suffix_rect = NSInsetRect(frame, 0.0, kTextYInset);
     const CGFloat suffix_width =
         [hint_suffix_ sizeWithAttributes:attributes_].width;
 
-    // Right-justify the text within the remaining space, so it
-    // doesn't get too close to the image relative to a following
-    // decoration.
-    suffix_rect.origin.x = NSMaxX(suffix_rect) - suffix_width;
+    // Draw the text kHintImagePadding away from [tab] icon so that
+    // equal amount of space is maintained on either side of the icon.
+    // This also ensures that suffix text is at the same distance
+    // from [tab] icon in different web pages.
+    suffix_rect.origin.x += kHintImagePadding;
     DCHECK_GE(NSWidth(suffix_rect), suffix_width);
     [hint_suffix_ drawInRect:suffix_rect withAttributes:attributes_];
   }

@@ -8,6 +8,7 @@
 
 #include "base/stringprintf.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/point_conversions.h"
 
 namespace gfx {
 
@@ -28,7 +29,9 @@ ShadowValue::~ShadowValue() {
 }
 
 ShadowValue ShadowValue::Scale(float scale) const {
-  return ShadowValue(offset_.Scale(scale), blur_ * scale, color_);
+  gfx::Point scaled_offset =
+      gfx::ToFlooredPoint(gfx::ScalePoint(offset_, scale));
+  return ShadowValue(scaled_offset, blur_ * scale, color_);
 }
 
 std::string ShadowValue::ToString() const {

@@ -12,12 +12,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebContentLayerClient.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayerClient.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebLayer.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebContentLayer.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSolidColorLayer.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
+#include "cc/animation_events.h"
+#include "cc/content_layer_client.h"
+#include "cc/layer_animation_event_observer.h"
+#include "cc/texture_layer_client.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/compositor/compositor.h"
@@ -28,6 +26,14 @@
 #include "ui/gfx/transform.h"
 
 class SkCanvas;
+
+namespace cc {
+class ContentLayer;
+class Layer;
+class ResourceUpdateQueue;
+class SolidColorLayer;
+class TextureLayer;
+}
 
 namespace ui {
 
@@ -47,8 +53,9 @@ class Texture;
 // NULL, but the children are not deleted.
 class COMPOSITOR_EXPORT Layer
     : public LayerAnimationDelegate,
-      NON_EXPORTED_BASE(public WebKit::WebContentLayerClient),
-      NON_EXPORTED_BASE(public WebKit::WebExternalTextureLayerClient) {
+      NON_EXPORTED_BASE(public cc::ContentLayerClient),
+      NON_EXPORTED_BASE(public cc::TextureLayerClient),
+      NON_EXPORTED_BASE(public cc::LayerAnimationEventObserver) {
  public:
   Layer();
   explicit Layer(LayerType type);
@@ -108,12 +115,12 @@ class COMPOSITOR_EXPORT Layer
   LayerAnimator* GetAnimator();
 
   // The transform, relative to the parent.
-  void SetTransform(const Transform& transform);
-  const Transform& transform() const { return transform_; }
+  void SetTransform(const gfx::Transform& transform);
+  const gfx::Transform& transform() const { return transform_; }
 
   // Return the target transform if animator is running, or the current
   // transform otherwise.
-  Transform GetTargetTransform() const;
+  gfx::Transform GetTargetTransform() const;
 
   // The bounds, relative to the parent.
   void SetBounds(const gfx::Rect& bounds);
@@ -130,7 +137,7 @@ class COMPOSITOR_EXPORT Layer
 
   // The opacity of the layer. The opacity is applied to each pixel of the
   // texture (resulting alpha = opacity * alpha).
-  float opacity() const { return opacity_; }
+  float opacity() const;
   void SetOpacity(float opacity);
 
   // Returns the actual opacity, which the opacity of this layer multipled by
@@ -167,6 +174,12 @@ class COMPOSITOR_EXPORT Layer
   // Return the target grayscale if animator is running, or the current
   // grayscale otherwise.
   float GetTargetGrayscale() const;
+
+  // Zoom the background by a factor of |zoom|.  The upper left corner of the
+  // zoomed area is offset from the top left corner of the layer by |x_offset|
+  // and |y_offset|.  The effect is blended along the edge across |inset|
+  // pixels.
+  void SetBackgroundZoom(float x_offset, float y_offset, float zoom, int inset);
 
   // Invert the layer.
   bool layer_inverted() const { return layer_inverted_; }
@@ -247,9 +260,10 @@ class COMPOSITOR_EXPORT Layer
 
   // Sets whether the layer should scale its content. If true, the canvas will
   // be scaled in software rendering mode before it is passed to
-  // |LayerDelegate::OnPaint| and the texture will be scaled in accelerated
-  // mode. Set to false if the delegate handles scaling and the texture is
-  // the correct pixel size.
+  // |LayerDelegate::OnPaint|.
+  // Set to false if the delegate handles scaling.
+  // NOTE: if this is called during |LayerDelegate::OnPaint|, the new value will
+  // not apply to the canvas passed to the pending draw.
   void set_scale_content(bool scale_content) { scale_content_ = scale_content; }
 
   // Returns true if the layer scales its content.
@@ -259,16 +273,14 @@ class COMPOSITOR_EXPORT Layer
   // (e.g. the GPU process on UI_COMPOSITOR_IMAGE_TRANSPORT).
   bool layer_updated_externally() const { return layer_updated_externally_; }
 
-  // WebContentLayerClient
-  virtual void paintContents(WebKit::WebCanvas*,
-                             const WebKit::WebRect& clip,
-                             WebKit::WebFloatRect& opaque);
+  // ContentLayerClient
+  virtual void paintContents(
+      SkCanvas*, const gfx::Rect& clip, gfx::RectF& opaque) OVERRIDE;
 
-  WebKit::WebLayer* web_layer() { return web_layer_; }
+  cc::Layer* cc_layer() { return cc_layer_; }
 
-  // WebExternalTextureLayerClient
-  virtual unsigned prepareTexture(
-      WebKit::WebTextureUpdater& /* updater */) OVERRIDE;
+  // TextureLayerClient
+  virtual unsigned prepareTexture(cc::ResourceUpdateQueue&) OVERRIDE;
   virtual WebKit::WebGraphicsContext3D* context() OVERRIDE;
 
   float device_scale_factor() const { return device_scale_factor_; }
@@ -278,6 +290,9 @@ class COMPOSITOR_EXPORT Layer
   void SetForceRenderSurface(bool force);
   bool force_render_surface() const { return force_render_surface_; }
 
+  // LayerAnimationEventObserver
+  virtual void OnAnimationStarted(const cc::AnimationEvent& event) OVERRIDE;
+
  private:
   // Stacks |child| above or below |other|.  Helper method for StackAbove() and
   // StackBelow().
@@ -286,8 +301,8 @@ class COMPOSITOR_EXPORT Layer
   bool ConvertPointForAncestor(const Layer* ancestor, gfx::Point* point) const;
   bool ConvertPointFromAncestor(const Layer* ancestor, gfx::Point* point) const;
 
-  bool GetTransformRelativeTo(const Layer* ancestor,
-                              Transform* transform) const;
+  bool GetTargetTransformRelativeTo(const Layer* ancestor,
+                                    gfx::Transform* transform) const;
 
   // The only externally updated layers are ones that get their pixels from
   // WebKit and WebKit does not produce valid alpha values. All other layers
@@ -297,34 +312,45 @@ class COMPOSITOR_EXPORT Layer
   // Following are invoked from the animation or if no animation exists to
   // update the values immediately.
   void SetBoundsImmediately(const gfx::Rect& bounds);
-  void SetTransformImmediately(const ui::Transform& transform);
+  void SetTransformImmediately(const gfx::Transform& transform);
   void SetOpacityImmediately(float opacity);
   void SetVisibilityImmediately(bool visibility);
   void SetBrightnessImmediately(float brightness);
   void SetGrayscaleImmediately(float grayscale);
+  void SetColorImmediately(SkColor color);
 
   // Implementation of LayerAnimatorDelegate
   virtual void SetBoundsFromAnimation(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetTransformFromAnimation(const Transform& transform) OVERRIDE;
+  virtual void SetTransformFromAnimation(
+      const gfx::Transform& transform) OVERRIDE;
   virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
   virtual void SetVisibilityFromAnimation(bool visibility) OVERRIDE;
   virtual void SetBrightnessFromAnimation(float brightness) OVERRIDE;
   virtual void SetGrayscaleFromAnimation(float grayscale) OVERRIDE;
+  virtual void SetColorFromAnimation(SkColor color) OVERRIDE;
   virtual void ScheduleDrawForAnimation() OVERRIDE;
   virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
-  virtual const Transform& GetTransformForAnimation() const OVERRIDE;
+  virtual const gfx::Transform& GetTransformForAnimation() const OVERRIDE;
   virtual float GetOpacityForAnimation() const OVERRIDE;
   virtual bool GetVisibilityForAnimation() const OVERRIDE;
   virtual float GetBrightnessForAnimation() const OVERRIDE;
   virtual float GetGrayscaleForAnimation() const OVERRIDE;
+  virtual SkColor GetColorForAnimation() const OVERRIDE;
+  virtual void AddThreadedAnimation(
+      scoped_ptr<cc::Animation> animation) OVERRIDE;
+  virtual void RemoveThreadedAnimation(int animation_id) OVERRIDE;
 
   void CreateWebLayer();
   void RecomputeTransform();
   void RecomputeDrawsContentAndUVRect();
-  void RecomputeDebugBorderColor();
 
   // Set all filters which got applied to the layer.
   void SetLayerFilters();
+
+  // Set all filters which got applied to the layer background.
+  void SetLayerBackgroundFilters();
+
+  void UpdateIsDrawn();
 
   const LayerType type_;
 
@@ -337,12 +363,15 @@ class COMPOSITOR_EXPORT Layer
   // This layer's children, in bottom-to-top stacking order.
   std::vector<Layer*> children_;
 
-  ui::Transform transform_;
+  gfx::Transform transform_;
 
   gfx::Rect bounds_;
 
   // Visibility of this layer. See SetVisible/IsDrawn for more details.
   bool visible_;
+
+  // Computed based on the visibility of this layer and its ancestors.
+  bool is_drawn_;
 
   bool force_render_surface_;
 
@@ -355,7 +384,6 @@ class COMPOSITOR_EXPORT Layer
   // compositor is ready to paint the content.
   SkRegion damaged_region_;
 
-  float opacity_;
   int background_blur_radius_;
 
   // Several variables which will change the visible representation of
@@ -372,6 +400,18 @@ class COMPOSITOR_EXPORT Layer
   // while attached to the main layer before the main layer is deleted.
   Layer* layer_mask_back_link_;
 
+  // When the layer is zoomed, this is the offset to the upper left corner of
+  // the area in the layer that is zoomed.
+  float zoom_x_offset_;
+  float zoom_y_offset_;
+
+  // The zoom factor to scale the layer by.  Zooming is disabled when this is
+  // set to 1.
+  float zoom_;
+
+  // Width of the border in pixels, where the scaling is blended.
+  int zoom_inset_;
+
   std::string name_;
 
   LayerDelegate* delegate_;
@@ -380,12 +420,11 @@ class COMPOSITOR_EXPORT Layer
 
   // Ownership of the layer is held through one of the strongly typed layer
   // pointers, depending on which sort of layer this is.
-  scoped_ptr<WebKit::WebContentLayer> content_layer_;
-  scoped_ptr<WebKit::WebExternalTextureLayer> texture_layer_;
-  scoped_ptr<WebKit::WebSolidColorLayer> solid_color_layer_;
-  WebKit::WebLayer* web_layer_;
-  bool web_layer_is_accelerated_;
-  bool show_debug_borders_;
+  scoped_refptr<cc::ContentLayer> content_layer_;
+  scoped_refptr<cc::TextureLayer> texture_layer_;
+  scoped_refptr<cc::SolidColorLayer> solid_color_layer_;
+  cc::Layer* cc_layer_;
+  bool cc_layer_is_accelerated_;
 
   // If true, the layer scales the canvas and the texture with the device scale
   // factor as appropriate. When true, the texture size is in DIP.

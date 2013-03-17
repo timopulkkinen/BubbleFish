@@ -18,8 +18,11 @@
 #include "base/memory/singleton.h"
 #include "base/pickle.h"
 #include "base/sha1.h"
+#include "base/string_piece.h"
+#include "base/synchronization/lock.h"
 #include "base/sys_string_conversions.h"
 #include "crypto/cssm_init.h"
+#include "crypto/mac_security_services_lock.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/x509_util_mac.h"
@@ -42,6 +45,32 @@ void GetCertDistinguishedName(
     return;
   result->ParseDistinguishedName(distinguished_name.field()->Data,
                                  distinguished_name.field()->Length);
+}
+
+bool IsCertIssuerInEncodedList(X509Certificate::OSCertHandle cert_handle,
+                               const std::vector<std::string>& issuers) {
+  x509_util::CSSMCachedCertificate cached_cert;
+  if (cached_cert.Init(cert_handle) != CSSM_OK)
+    return false;
+
+  x509_util::CSSMFieldValue distinguished_name;
+  OSStatus status = cached_cert.GetField(&CSSMOID_X509V1IssuerNameStd,
+                                         &distinguished_name);
+  if (status || !distinguished_name.field())
+    return false;
+
+  base::StringPiece name_piece(
+      reinterpret_cast<const char*>(distinguished_name.field()->Data),
+      static_cast<size_t>(distinguished_name.field()->Length));
+
+  for (std::vector<std::string>::const_iterator it = issuers.begin();
+       it != issuers.end(); ++it) {
+    base::StringPiece issuer_piece(*it);
+    if (name_piece == issuer_piece)
+      return true;
+  }
+
+  return false;
 }
 
 void GetCertDateForOID(const x509_util::CSSMCachedCertificate& cached_cert,
@@ -93,6 +122,7 @@ OSStatus CopyCertChain(SecCertificateRef cert_handle,
                        CFArrayRef* out_cert_chain) {
   DCHECK(cert_handle);
   DCHECK(out_cert_chain);
+
   // Create an SSL policy ref configured for client cert evaluation.
   SecPolicyRef ssl_policy;
   OSStatus result = x509_util::CreateSSLClientPolicy(&ssl_policy);
@@ -105,7 +135,11 @@ OSStatus CopyCertChain(SecCertificateRef cert_handle,
       NULL, const_cast<const void**>(reinterpret_cast<void**>(&cert_handle)),
       1, &kCFTypeArrayCallBacks));
   SecTrustRef trust_ref = NULL;
-  result = SecTrustCreateWithCertificates(input_certs, ssl_policy, &trust_ref);
+  {
+    base::AutoLock lock(crypto::GetMacSecurityServicesLock());
+    result = SecTrustCreateWithCertificates(input_certs, ssl_policy,
+                                            &trust_ref);
+  }
   if (result)
     return result;
   ScopedCFTypeRef<SecTrustRef> trust(trust_ref);
@@ -113,10 +147,17 @@ OSStatus CopyCertChain(SecCertificateRef cert_handle,
   // Evaluate trust, which creates the cert chain.
   SecTrustResultType status;
   CSSM_TP_APPLE_EVIDENCE_INFO* status_chain;
-  result = SecTrustEvaluate(trust, &status);
+  {
+    base::AutoLock lock(crypto::GetMacSecurityServicesLock());
+    result = SecTrustEvaluate(trust, &status);
+  }
   if (result)
     return result;
-  return SecTrustGetResult(trust, &status, out_cert_chain, &status_chain);
+  {
+    base::AutoLock lock(crypto::GetMacSecurityServicesLock());
+    result = SecTrustGetResult(trust, &status, out_cert_chain, &status_chain);
+  }
+  return result;
 }
 
 // Returns true if |purpose| is listed as allowed in |usage|. This
@@ -162,8 +203,13 @@ void AddCertificatesFromBytes(const char* data, size_t length,
       kCFAllocatorNull));
 
   CFArrayRef items = NULL;
-  OSStatus status = SecKeychainItemImport(local_data, NULL, &input_format,
-                                          NULL, 0, NULL, NULL, &items);
+  OSStatus status;
+  {
+    base::AutoLock lock(crypto::GetMacSecurityServicesLock());
+    status = SecKeychainItemImport(local_data, NULL, &input_format,
+                                   NULL, 0, NULL, NULL, &items);
+  }
+
   if (status) {
     OSSTATUS_DLOG(WARNING, status)
         << "Unable to import items from data of length " << length;
@@ -312,6 +358,19 @@ void X509Certificate::Initialize() {
 
   fingerprint_ = CalculateFingerprint(cert_handle_);
   ca_fingerprint_ = CalculateCAFingerprint(intermediate_ca_certs_);
+}
+
+bool X509Certificate::IsIssuedByEncoded(
+    const std::vector<std::string>& valid_issuers) {
+  if (IsCertIssuerInEncodedList(cert_handle_, valid_issuers))
+    return true;
+
+  for (OSCertHandles::iterator it = intermediate_ca_certs_.begin();
+       it != intermediate_ca_certs_.end(); ++it) {
+    if (IsCertIssuerInEncodedList(*it, valid_issuers))
+      return true;
+  }
+  return false;
 }
 
 // static
@@ -653,110 +712,14 @@ bool X509Certificate::SupportsSSLClientAuth() const {
   return true;
 }
 
-bool X509Certificate::IsIssuedBy(
-    const std::vector<CertPrincipal>& valid_issuers) {
-  // Get the cert's issuer chain.
-  CFArrayRef cert_chain = NULL;
-  OSStatus result = CopyCertChain(os_cert_handle(), &cert_chain);
-  if (result)
-    return false;
-  ScopedCFTypeRef<CFArrayRef> scoped_cert_chain(cert_chain);
-
-  // Check all the certs in the chain for a match.
-  int n = CFArrayGetCount(cert_chain);
-  for (int i = 0; i < n; ++i) {
-    SecCertificateRef cert_handle = reinterpret_cast<SecCertificateRef>(
-        const_cast<void*>(CFArrayGetValueAtIndex(cert_chain, i)));
-    scoped_refptr<X509Certificate> cert(X509Certificate::CreateFromHandle(
-        cert_handle, X509Certificate::OSCertHandles()));
-    for (unsigned j = 0; j < valid_issuers.size(); j++) {
-      if (cert->issuer().Matches(valid_issuers[j]))
-        return true;
-    }
-  }
-  return false;
-}
-
-// static
-bool X509Certificate::GetSSLClientCertificates(
-    const std::string& server_domain,
-    const std::vector<CertPrincipal>& valid_issuers,
-    CertificateList* certs) {
-  ScopedCFTypeRef<SecIdentityRef> preferred_identity;
-  if (!server_domain.empty()) {
-    // See if there's an identity preference for this domain:
-    ScopedCFTypeRef<CFStringRef> domain_str(
-        base::SysUTF8ToCFStringRef("https://" + server_domain));
-    SecIdentityRef identity = NULL;
-    // While SecIdentityCopyPreferences appears to take a list of CA issuers
-    // to restrict the identity search to, within Security.framework the
-    // argument is ignored and filtering unimplemented. See
-    // SecIdentity.cpp in libsecurity_keychain, specifically
-    // _SecIdentityCopyPreferenceMatchingName().
-    if (SecIdentityCopyPreference(domain_str, 0, NULL, &identity) == noErr)
-      preferred_identity.reset(identity);
-  }
-
-  // Now enumerate the identities in the available keychains.
-  SecIdentitySearchRef search = nil;
-  OSStatus err = SecIdentitySearchCreate(NULL, CSSM_KEYUSE_SIGN, &search);
-  ScopedCFTypeRef<SecIdentitySearchRef> scoped_search(search);
-  while (!err) {
-    SecIdentityRef identity = NULL;
-    err = SecIdentitySearchCopyNext(search, &identity);
-    if (err)
-      break;
-    ScopedCFTypeRef<SecIdentityRef> scoped_identity(identity);
-
-    SecCertificateRef cert_handle;
-    err = SecIdentityCopyCertificate(identity, &cert_handle);
-    if (err != noErr)
-      continue;
-    ScopedCFTypeRef<SecCertificateRef> scoped_cert_handle(cert_handle);
-
-    scoped_refptr<X509Certificate> cert(
-        CreateFromHandle(cert_handle, OSCertHandles()));
-    if (cert->HasExpired() || !cert->SupportsSSLClientAuth())
-      continue;
-
-    // Skip duplicates (a cert may be in multiple keychains).
-    const SHA1HashValue& fingerprint = cert->fingerprint();
-    unsigned i;
-    for (i = 0; i < certs->size(); ++i) {
-      if ((*certs)[i]->fingerprint().Equals(fingerprint))
-        break;
-    }
-    if (i < certs->size())
-      continue;
-
-    bool is_preferred = preferred_identity &&
-        CFEqual(preferred_identity, identity);
-
-    // Make sure the issuer matches valid_issuers, if given.
-    if (!valid_issuers.empty() && !cert->IsIssuedBy(valid_issuers))
-      continue;
-
-    // The cert passes, so add it to the vector.
-    // If it's the preferred identity, add it at the start (so it'll be
-    // selected by default in the UI.)
-    if (is_preferred)
-      certs->insert(certs->begin(), cert);
-    else
-      certs->push_back(cert);
-  }
-
-  if (err != errSecItemNotFound) {
-    OSSTATUS_LOG(ERROR, err) << "SecIdentitySearch error";
-    return false;
-  }
-  return true;
-}
-
 CFArrayRef X509Certificate::CreateClientCertificateChain() const {
   // Initialize the result array with just the IdentityRef of the receiver:
   SecIdentityRef identity;
-  OSStatus result =
-      SecIdentityCreateWithCertificate(NULL, cert_handle_, &identity);
+  OSStatus result;
+  {
+    base::AutoLock lock(crypto::GetMacSecurityServicesLock());
+    result = SecIdentityCreateWithCertificate(NULL, cert_handle_, &identity);
+  }
   if (result) {
     OSSTATUS_LOG(ERROR, result) << "SecIdentityCreateWithCertificate error";
     return NULL;

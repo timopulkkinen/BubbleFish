@@ -19,6 +19,10 @@ html.loading * {
   overflow: hidden;
 }
 
+#dev-controls button {
+  white-space: nowrap;
+}
+
 #extension-settings.dev-mode #dev-controls {
   -webkit-transition-duration: 250ms;
   height: 32px;
@@ -67,6 +71,10 @@ html.loading * {
 #footer-section {
   background: url('chrome://theme/IDR_WEBSTORE_ICON_32') no-repeat left center;
   font-size: 1.25em;
+}
+
+html[dir=rtl] #footer-section {
+  background: url('chrome://theme/IDR_WEBSTORE_ICON_32') no-repeat right center;
 }
 
 #footer-section > a {
@@ -130,6 +138,7 @@ html[dir='rtl'] .extension-list-item {
 
 .extension-description,
 .extension-list-item-wrapper.inactive-extension .extension-details,
+.location-text,
 .enable-checkbox input:disabled + .enable-checkbox-text {
   color: rgb(151, 156, 160);
 }
@@ -165,7 +174,8 @@ html[dir='rtl'] .extension-list-item {
 }
 
 .terminated-reload-link {
-  -webkit-margin-end: 2em;
+  -webkit-margin-end: 2.5em;
+  padding-top: 7px;
 }
 
 .extension-list-item a {
@@ -209,6 +219,10 @@ html[dir='rtl'] .extension-list-item {
   float: right;
 }
 
+html[dir=rtl] .extension-commands-config {
+  float: left;
+}
+
 /* Overlays */
 
 #overlay {
@@ -227,6 +241,21 @@ html[dir='rtl'] .extension-list-item {
 
 #dropTargetOverlay div {
   margin: 1em;
+}
+
+/* Disabled extensions banner and related elements. */
+
+.page:not(.sideload-wipeout) #sideload-wipeout-banner {
+  display: none;
+}
+
+.extension-disable-reason {
+  padding-left: 12px;
+}
+
+.location-text {
+  display: block;
+  width: 100px;
 }
 
 /* Trash */
@@ -254,16 +283,44 @@ html[dir='rtl'] #extension-settings .trash {
   visibility: hidden;
 }
 
-.may-not-disable .optional-controls {
+.extension-highlight {
+  background: rgb(238, 238, 238);
+  background-position: auto;
+  background-repeat: auto;
+  border-radius: 3px;
+  padding: 5px 0 5px 5px;
+}
+
+.may-not-disable .optional-controls .optional-controls-disableable {
   display: none;
 }
 
 /* Managed mode */
 
-.page:not(.managed-mode) #managed-mode-banner {
+.page:not(.managed-user-locked) .profile-is-managed-banner,
+.managed-user-locked .more-extensions-link,
+.page:not(.profile-is-managed) #managed-user-control-div,
+.page:not(.managed-user-locked) #unlock-button,
+.managed-user-locked #lock-button {
   display: none;
 }
 
-.managed-mode .more-extensions-link {
-  display: none;
+.profile-is-managed-banner .page-banner-text {
+  background-image: url('chrome://theme/IDR_WARNING');
+}
+
+#managed-user-control-div {
+  display: inline-block;
+  padding-left: 7px;
+}
+
+/* Sideload Wipeout */
+
+.sideload-wipeout-learn-more {
+  text-decoration: none;
+}
+
+.sideload-wipeout-banner .page-banner-text {
+  -webkit-padding-start: 8px;
+  background-image: none;
 }

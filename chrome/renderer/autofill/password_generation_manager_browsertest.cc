@@ -11,9 +11,9 @@
 #include "chrome/renderer/autofill/password_generation_manager.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using WebKit::WebDocument;
 using WebKit::WebElement;
@@ -80,9 +80,9 @@ class PasswordGenerationManagerTest : public ChromeRenderViewTest {
   }
 
   void SetNotBlacklistedMessage(const char* form_str) {
-    webkit::forms::PasswordForm form;
+    content::PasswordForm form;
     form.origin =
-        GURL(StringPrintf("data:text/html;charset=utf-8,%s",form_str));
+        GURL(StringPrintf("data:text/html;charset=utf-8,%s", form_str));
     AutofillMsg_FormNotBlacklisted msg(0, form);
     generation_manager_->OnMessageReceived(msg);
   }
@@ -104,8 +104,9 @@ const char kSigninFormHTML[] =
 const char kAccountCreationFormHTML[] =
     "<FORM name = 'blah' action = 'http://www.random.com/'> "
     "  <INPUT type = 'text' id = 'username'/> "
-    "  <INPUT type = 'password' id = 'first_password' size=5/> "
-    "  <INPUT type = 'password' id = 'second_password' size=5/> "
+    "  <INPUT type = 'password' id = 'first_password' "
+    "         autocomplete = 'off' size = 5/>"
+    "  <INPUT type = 'password' id = 'second_password' size = 5/> "
     "  <INPUT type = 'text' id = 'address'/> "
     "  <INPUT type = 'submit' value = 'LOGIN' />"
     "</FORM>";

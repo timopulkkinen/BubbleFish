@@ -8,11 +8,13 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/test/mock_devices_changed_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace content {
 
 class SystemMessageWindowWinTest : public testing::Test {
  public:
@@ -32,10 +34,12 @@ class SystemMessageWindowWinTest : public testing::Test {
 TEST_F(SystemMessageWindowWinTest, DevicesChanged) {
   EXPECT_CALL(observer_, OnDevicesChanged(testing::_)).Times(1);
   window_.OnDeviceChange(DBT_DEVNODES_CHANGED, NULL);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(SystemMessageWindowWinTest, RandomMessage) {
   window_.OnDeviceChange(DBT_DEVICEQUERYREMOVE, NULL);
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
+
+}  // namespace content

@@ -18,12 +18,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/common/password_form.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
-#include "webkit/forms/password_form.h"
 
 using content::BrowserThread;
 
@@ -150,7 +150,7 @@ void PasswordChangeProcessor::Observe(
             return;
           }
           model_associator_->Disassociate(sync_node.GetId());
-          sync_node.Remove();
+          sync_node.Tombstone();
         }
         break;
       }
@@ -160,6 +160,7 @@ void PasswordChangeProcessor::Observe(
 
 void PasswordChangeProcessor::ApplyChangesFromSyncModel(
     const syncer::BaseTransaction* trans,
+    int64 model_version,
     const syncer::ImmutableChangeRecordList& changes) {
   DCHECK(expected_loop_ == MessageLoop::current());
 
@@ -184,7 +185,7 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
       syncer::ExtraPasswordChangeRecordData* extra =
           it->extra.get();
       const sync_pb::PasswordSpecificsData& password = extra->unencrypted();
-      webkit::forms::PasswordForm form;
+      content::PasswordForm form;
       PasswordModelAssociator::CopyPassword(password, &form);
       deleted_passwords_.push_back(form);
       model_associator_->Disassociate(it->id);
@@ -204,7 +205,7 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
 
     const sync_pb::PasswordSpecificsData& password_data =
         sync_node.GetPasswordSpecifics();
-    webkit::forms::PasswordForm password;
+    content::PasswordForm password;
     PasswordModelAssociator::CopyPassword(password_data, &password);
 
     if (syncer::ChangeRecord::ACTION_ADD == it->action) {

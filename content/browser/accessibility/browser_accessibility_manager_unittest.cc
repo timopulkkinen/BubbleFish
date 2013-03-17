@@ -10,8 +10,7 @@
 #include "content/common/accessibility_node_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::AccessibilityNodeData;
-
+namespace content {
 namespace {
 
 // Subclass of BrowserAccessibility that counts the number of instances.
@@ -46,7 +45,7 @@ class CountedBrowserAccessibilityFactory
     : public BrowserAccessibilityFactory {
  public:
   virtual ~CountedBrowserAccessibilityFactory() {}
-  virtual BrowserAccessibility* Create() {
+  virtual BrowserAccessibility* Create() OVERRIDE {
     return new CountedBrowserAccessibility();
   }
 };
@@ -635,3 +634,5 @@ TEST(BrowserAccessibilityManagerTest, TestCreateEmptyDocument) {
   manager.reset();
   ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
 }
+
+}  // namespace content

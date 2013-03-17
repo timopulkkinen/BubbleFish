@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/time.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/proxy/proxy_config.h"
@@ -117,6 +118,16 @@ class NET_EXPORT ProxyInfo {
   // Deletes any entry which doesn't have one of the specified proxy schemes.
   void RemoveProxiesWithoutScheme(int scheme_bit_field);
 
+  ProxyConfig::ID config_id() const { return config_id_; }
+
+  base::TimeTicks proxy_resolve_start_time() const {
+    return proxy_resolve_start_time_;
+  }
+
+  base::TimeTicks proxy_resolve_end_time() const {
+    return proxy_resolve_end_time_;
+  }
+
  private:
   friend class ProxyService;
 
@@ -145,6 +156,11 @@ class NET_EXPORT ProxyInfo {
 
   // Whether we used a PAC script for resolving the proxy.
   bool did_use_pac_script_;
+
+  // How long it took to resolve the proxy.  Times are both null if proxy was
+  // determined synchronously without running a PAC.
+  base::TimeTicks proxy_resolve_start_time_;
+  base::TimeTicks proxy_resolve_end_time_;
 };
 
 }  // namespace net

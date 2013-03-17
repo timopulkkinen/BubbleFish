@@ -7,6 +7,7 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/ui/views/notifications/balloon_view_views.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
 
@@ -80,7 +81,8 @@ bool BalloonCollectionImpl::IsCursorInBalloonCollection() const {
 #else
   // TODO(saintlou): Not sure if this is correct because on Windows at least
   // the following call is GetCursorPos() not GetMessagePos().
-  gfx::Point cursor(gfx::Screen::GetCursorScreenPoint());
+  // TODO(scottmg): NativeScreen might be wrong. http://crbug.com/133312
+  gfx::Point cursor(gfx::Screen::GetNativeScreen()->GetCursorScreenPoint());
 #endif
   return GetBalloonsBoundingBox().Contains(cursor);
 }

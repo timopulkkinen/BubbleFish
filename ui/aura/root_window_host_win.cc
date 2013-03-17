@@ -10,34 +10,27 @@
 
 #include "base/message_loop.h"
 #include "ui/aura/client/capture_client.h"
-#include "ui/aura/env.h"
+#include "ui/aura/client/cursor_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/events/event.h"
 #include "ui/base/view_prop.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
 
 using std::max;
 using std::min;
 
 namespace aura {
-
 namespace {
 
-const char* kRootWindowHostWinKey = "__AURA_ROOT_WINDOW_HOST_WIN__";
+bool use_popup_as_root_window_for_test = false;
 
 }  // namespace
 
 // static
-RootWindowHost* RootWindowHost::Create(RootWindowHostDelegate* delegate,
-                                       const gfx::Rect& bounds) {
-  return new RootWindowHostWin(delegate, bounds);
-}
-
-// static
-RootWindowHost* RootWindowHost::GetForAcceleratedWidget(
-    gfx::AcceleratedWidget accelerated_widget) {
-  return reinterpret_cast<RootWindowHost*>(
-      ui::ViewProp::GetValue(accelerated_widget, kRootWindowHostWinKey));
+RootWindowHost* RootWindowHost::Create(const gfx::Rect& bounds) {
+  return new RootWindowHostWin(bounds);
 }
 
 // static
@@ -46,20 +39,24 @@ gfx::Size RootWindowHost::GetNativeScreenSize() {
                    GetSystemMetrics(SM_CYSCREEN));
 }
 
-RootWindowHostWin::RootWindowHostWin(RootWindowHostDelegate* delegate,
-                                     const gfx::Rect& bounds)
-    : delegate_(delegate),
+RootWindowHostWin::RootWindowHostWin(const gfx::Rect& bounds)
+    : delegate_(NULL),
       fullscreen_(false),
       has_capture_(false),
       saved_window_style_(0),
       saved_window_ex_style_(0) {
+  if (use_popup_as_root_window_for_test)
+    set_window_style(WS_POPUP);
   Init(NULL, bounds);
   SetWindowText(hwnd(), L"aura::RootWindow!");
-  prop_.reset(new ui::ViewProp(hwnd(), kRootWindowHostWinKey, this));
 }
 
 RootWindowHostWin::~RootWindowHostWin() {
   DestroyWindow(hwnd());
+}
+
+void RootWindowHostWin::SetDelegate(RootWindowHostDelegate* delegate) {
+  delegate_ = delegate;
 }
 
 RootWindow* RootWindowHostWin::GetRootWindow() {
@@ -94,12 +91,12 @@ void RootWindowHostWin::ToggleFullScreen() {
     MONITORINFO mi;
     mi.cbSize = sizeof(mi);
     GetMonitorInfo(MonitorFromWindow(hwnd(), MONITOR_DEFAULTTONEAREST), &mi);
-    target_rect = mi.rcMonitor;
+    target_rect = gfx::Rect(mi.rcMonitor);
   } else {
     fullscreen_ = false;
     SetWindowLong(hwnd(), GWL_STYLE, saved_window_style_);
     SetWindowLong(hwnd(), GWL_EXSTYLE, saved_window_ex_style_);
-    target_rect = saved_window_rect_;
+    target_rect = gfx::Rect(saved_window_rect_);
   }
   SetWindowPos(hwnd(),
                NULL,
@@ -134,11 +131,19 @@ void RootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
   SetWindowPos(
       hwnd(),
       NULL,
-      0,
-      0,
+      window_rect.left,
+      window_rect.top,
       window_rect.right - window_rect.left,
       window_rect.bottom - window_rect.top,
       SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOREDRAW | SWP_NOREPOSITION);
+
+  // Explicity call OnHostResized when the scale has changed because
+  // the window size may not have changed.
+  float current_scale = delegate_->GetDeviceScaleFactor();
+  float new_scale = gfx::Screen::GetScreenFor(delegate_->AsRootWindow())->
+      GetDisplayNearestWindow(delegate_->AsRootWindow()).device_scale_factor();
+  if (current_scale != new_scale)
+    delegate_->OnHostResized(bounds.size());
 }
 
 gfx::Point RootWindowHostWin::GetLocationOnNativeScreen() const {
@@ -172,11 +177,14 @@ void RootWindowHostWin::ReleaseCapture() {
   }
 }
 
-void RootWindowHostWin::ShowCursor(bool show) {
-  // NOTIMPLEMENTED();
-}
-
 bool RootWindowHostWin::QueryMouseLocation(gfx::Point* location_return) {
+  client::CursorClient* cursor_client =
+      client::GetCursorClient(GetRootWindow());
+  if (cursor_client && !cursor_client->IsMouseEventsEnabled()) {
+    *location_return = gfx::Point(0, 0);
+    return false;
+  }
+
   POINT pt;
   GetCursorPos(&pt);
   ScreenToClient(hwnd(), &pt);
@@ -194,6 +202,13 @@ bool RootWindowHostWin::ConfineCursorToRootWindow() {
   return ClipCursor(&window_rect) != 0;
 }
 
+bool RootWindowHostWin::CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                           const gfx::Point& dest_offset,
+                                           SkCanvas* canvas) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 bool RootWindowHostWin::GrabSnapshot(
     const gfx::Rect& snapshot_bounds,
     std::vector<unsigned char>* png_representation) {
@@ -205,10 +220,12 @@ void RootWindowHostWin::UnConfineCursor() {
   ClipCursor(NULL);
 }
 
+void RootWindowHostWin::OnCursorVisibilityChanged(bool show) {
+  NOTIMPLEMENTED();
+}
+
 void RootWindowHostWin::MoveCursorTo(const gfx::Point& location) {
-  POINT pt;
-  ClientToScreen(hwnd(), &pt);
-  SetCursorPos(pt.x, pt.y);
+  // Deliberately not implemented.
 }
 
 void RootWindowHostWin::SetFocusWhenShown(bool focus_when_shown) {
@@ -261,9 +278,22 @@ LRESULT RootWindowHostWin::OnCaptureChanged(UINT message,
                                             LPARAM l_param) {
   if (has_capture_) {
     has_capture_ = false;
-    delegate_->OnHostLostCapture();
+    delegate_->OnHostLostWindowCapture();
   }
   return 0;
+}
+
+LRESULT RootWindowHostWin::OnNCActivate(UINT message,
+                                        WPARAM w_param,
+                                        LPARAM l_param) {
+  if (!!w_param)
+    delegate_->OnHostActivated();
+  return DefWindowProc(hwnd(), message, w_param, l_param);
+}
+
+void RootWindowHostWin::OnMove(const CPoint& point) {
+  if (delegate_)
+    delegate_->OnHostMoved(gfx::Point(point.x, point.y));
 }
 
 void RootWindowHostWin::OnPaint(HDC dc) {
@@ -274,8 +304,17 @@ void RootWindowHostWin::OnPaint(HDC dc) {
 void RootWindowHostWin::OnSize(UINT param, const CSize& size) {
   // Minimizing resizes the window to 0x0 which causes our layout to go all
   // screwy, so we just ignore it.
-  if (param != SIZE_MINIMIZED)
+  if (delegate_ && param != SIZE_MINIMIZED)
     delegate_->OnHostResized(gfx::Size(size.cx, size.cy));
 }
+
+namespace test {
+
+// static
+void SetUsePopupAsRootWindowForTest(bool use) {
+  use_popup_as_root_window_for_test = use;
+}
+
+}  // namespace test
 
 }  // namespace aura

@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_message.h"
 #include "webkit/glue/resource_type.h"
 
 class GURL;
@@ -24,6 +23,10 @@ class ResourceContext;
 class ResourceThrottle;
 struct Referrer;
 struct ResourceResponse;
+}
+
+namespace IPC {
+class Sender;
 }
 
 namespace net {
@@ -63,11 +66,7 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       ScopedVector<ResourceThrottle>* throttles);
 
   // Allows an embedder to add additional resource handlers for a download.
-  // |is_new_request| is true if this is a request that is just starting, i.e.
-  // the content layer has just added its own resource handlers; it's false if
-  // this was originally a non-download request that had some resource handlers
-  // applied already and now we found out it's a download.
-  // |in_complete| is true if this is invoked from |OnResponseCompleted|.
+  // |must_download| is set if the request must be handled as a download.
   virtual void DownloadStarting(
       net::URLRequest* request,
       ResourceContext* resource_context,
@@ -75,6 +74,7 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       int route_id,
       int request_id,
       bool is_content_initiated,
+      bool must_download,
       ScopedVector<ResourceThrottle>* throttles);
 
   // Called when an SSL Client Certificate is requested. If false is returned,
@@ -95,8 +95,10 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   virtual ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
       net::AuthChallengeInfo* auth_info, net::URLRequest* request);
 
-  // Launches the url for the given tab.
-  virtual void HandleExternalProtocol(const GURL& url,
+  // Launches the url for the given tab. Returns true if an attempt to handle
+  // the url was made, e.g. by launching an app. Note that this does not
+  // guarantee that the app successfully handled it.
+  virtual bool HandleExternalProtocol(const GURL& url,
                                       int child_id,
                                       int route_id);
 

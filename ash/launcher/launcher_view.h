@@ -10,8 +10,8 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "ash/shelf_types.h"
 #include "ash/wm/gestures/shelf_gesture_handler.h"
-#include "ash/wm/shelf_types.h"
 #include "base/observer_list.h"
 #include "ui/views/animation/bounds_animator_observer.h"
 #include "ui/views/context_menu_controller.h"
@@ -21,6 +21,7 @@
 
 namespace views {
 class BoundsAnimator;
+class MenuModelAdapter;
 class MenuRunner;
 class ViewModel;
 }
@@ -59,9 +60,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   LauncherTooltipManager* tooltip_manager() { return tooltip_.get(); }
 
+  LauncherModel* model() { return model_; }
+
   void Init();
 
-  void SetAlignment(ShelfAlignment alignment);
+  void OnShelfAlignmentChanged();
 
   // Returns the ideal bounds of the specified item, or an empty rect if id
   // isn't know.
@@ -84,10 +87,6 @@ class ASH_EXPORT LauncherView : public views::View,
   // of the buttons area.
   bool ShouldHideTooltip(const gfx::Point& cursor_location);
 
-  void set_first_visible_index(int first_visible_index) {
-    first_visible_index_ = first_visible_index;
-  }
-
   int leading_inset() const { return leading_inset_; }
   void set_leading_inset(int leading_inset) { leading_inset_ = leading_inset; }
 
@@ -106,15 +105,6 @@ class ASH_EXPORT LauncherView : public views::View,
     gfx::Rect overflow_bounds;
   };
 
-  // Used in calculating ideal bounds.
-  int primary_axis_coordinate(int x, int y) const {
-    return is_horizontal_alignment() ? x : y;
-  }
-
-  bool is_horizontal_alignment() const {
-    return alignment_ == SHELF_ALIGNMENT_BOTTOM;
-  }
-
   bool is_overflow_mode() const {
     return first_visible_index_ > 0;
   }
@@ -132,7 +122,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Returns the index of the last view whose max primary axis coordinate is
   // less than |max_value|. Returns -1 if nothing fits, or there are no views.
-  int DetermineLastVisibleIndex(int max_value);
+  int DetermineLastVisibleIndex(int max_value) const;
+
+  // Returns the index of the first panel whose min primary axis coordinate is
+  // at least |min_value|. Returns the index past the last panel if none fit.
+  int DetermineFirstVisiblePanelIndex(int min_value) const;
 
   // Animates the bounds of each view to its ideal bounds.
   void AnimateToIdealBounds();
@@ -164,20 +158,27 @@ class ASH_EXPORT LauncherView : public views::View,
   // Common setup done for all children.
   void ConfigureChildView(views::View* view);
 
-  // Shows the overflow menu.
-  void ShowOverflowBubble();
+  // Toggles the overflow menu.
+  void ToggleOverflowBubble();
 
   // Update first launcher button's padding. This method adds padding to the
   // first button to include the leading inset. It needs to be called once on
   // button creation and every time when shelf alignment is changed.
   void UpdateFirstButtonPadding();
 
+  // Invoked after the fading out animation for item deletion is ended.
+  void OnFadeOutAnimationEnded();
+
+  // Updates the visible range of overflow items in |overflow_view|.
+  void UpdateOverflowRange(LauncherView* overflow_view);
+
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
@@ -202,16 +203,31 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void MouseMovedOverButton(views::View* view) OVERRIDE;
   virtual void MouseEnteredButton(views::View* view) OVERRIDE;
   virtual void MouseExitedButton(views::View* view) OVERRIDE;
-  virtual ShelfAlignment GetShelfAlignment() const OVERRIDE;
   virtual string16 GetAccessibleName(const views::View* view) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
 
+  // Show the list of all running items for this |item|. It will return true
+  // when the menu was shown and false if there were no possible items to
+  // choose from. |source| specifies the view which is responsible for showing
+  // the menu, and the bubble will point towards it.
+  bool ShowListMenuForView(const LauncherItem& item,
+                           views::View* source);
+
   // Overridden from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
                                       const gfx::Point& point) OVERRIDE;
+
+  // Show either a context or normal click menu of given |menu_model_adapter|.
+  // If |context_menu| is set, the displayed menu is a context menu and not
+  // a menu listing one or more running applications.
+  // The |click_point| is only used for |context_menu|'s.
+  void ShowMenu(scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
+                views::View* source,
+                const gfx::Point& click_point,
+                bool context_menu);
 
   // Overridden from views::BoundsAnimatorObserver:
   virtual void OnBoundsAnimatorProgressed(
@@ -270,13 +286,18 @@ class ASH_EXPORT LauncherView : public views::View,
 
   ObserverList<LauncherIconObserver> observers_;
 
-  ShelfAlignment alignment_;
-
   // Amount content is inset on the left edge (or top edge for vertical
   // alignment).
   int leading_inset_;
 
   ShelfGestureHandler gesture_handler_;
+
+  // True when an item being inserted or removed in the model cancels a drag.
+  bool cancelling_drag_model_changed_;
+
+  // Index of the last hidden launcher item. If there are no hidden items this
+  // will be equal to last_visible_index_ + 1.
+  int last_hidden_index_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

@@ -8,7 +8,7 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
@@ -17,7 +17,7 @@
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/vector2d.h"
 
 class SkBitmap;
 struct WebDropData;
@@ -39,7 +39,7 @@ class CONTENT_EXPORT WebDragSourceGtk : public MessageLoopForUI::Observer {
                      WebKit::WebDragOperationsMask allowed_ops,
                      GdkEventButton* last_mouse_down,
                      const SkBitmap& image,
-                     const gfx::Point& image_offset);
+                     const gfx::Vector2d& image_offset);
 
   // MessageLoop::Observer implementation:
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
@@ -57,11 +57,11 @@ class CONTENT_EXPORT WebDragSourceGtk : public MessageLoopForUI::Observer {
   CHROMEGTK_CALLBACK_1(WebDragSourceGtk, gboolean, OnDragIconExpose,
                        GdkEventExpose*);
 
-  content::RenderViewHostImpl* GetRenderViewHost() const;
+  RenderViewHostImpl* GetRenderViewHost() const;
   gfx::NativeView GetContentNativeView() const;
 
   // The tab we're manging the drag for.
-  content::WebContents* web_contents_;
+  WebContents* web_contents_;
 
   // The drop data for the current drag (for drags that originate in the render
   // view). Non-NULL iff there is a current drag.
@@ -70,7 +70,7 @@ class CONTENT_EXPORT WebDragSourceGtk : public MessageLoopForUI::Observer {
   // The image used for depicting the drag, and the offset between the cursor
   // and the top left pixel.
   GdkPixbuf* drag_pixbuf_;
-  gfx::Point image_offset_;
+  gfx::Vector2d image_offset_;
 
   // The mime type for the file contents of the current drag (if any).
   GdkAtom drag_file_mime_type_;
@@ -93,7 +93,7 @@ class CONTENT_EXPORT WebDragSourceGtk : public MessageLoopForUI::Observer {
   string16 wide_download_mime_type_;
 
   // The file name to be saved to for a drag-out download.
-  FilePath download_file_name_;
+  base::FilePath download_file_name_;
 
   // The URL to download from for a drag-out download.
   GURL download_url_;

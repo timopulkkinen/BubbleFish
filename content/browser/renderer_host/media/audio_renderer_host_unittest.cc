@@ -9,6 +9,7 @@
 #include "base/process_util.h"
 #include "base/sync_socket.h"
 #include "content/browser/browser_thread_impl.h"
+#include "content/browser/renderer_host/media/audio_mirroring_manager.h"
 #include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
 #include "content/common/media/audio_messages.h"
@@ -23,29 +24,43 @@ using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::DoAll;
 using ::testing::InSequence;
-using ::testing::InvokeWithoutArgs;
+using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SaveArg;
 using ::testing::SetArgumentPointee;
-using content::BrowserThread;
 
-using content::BrowserThreadImpl;
+namespace content {
 
+static const int kRenderProcessId = 1;
+static const int kRenderViewId = 4;
 static const int kStreamId = 50;
 
-static bool IsRunningHeadless() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (env->HasVar("CHROME_HEADLESS"))
-    return true;
-  return false;
-}
+class MockAudioMirroringManager : public AudioMirroringManager {
+ public:
+  MockAudioMirroringManager() {}
+  virtual ~MockAudioMirroringManager() {}
+
+  MOCK_METHOD3(AddDiverter,
+               void(int render_process_id, int render_view_id,
+                    Diverter* diverter));
+  MOCK_METHOD3(RemoveDiverter,
+               void(int render_process_id, int render_view_id,
+                    Diverter* diverter));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockAudioMirroringManager);
+};
 
 class MockAudioRendererHost : public AudioRendererHost {
  public:
   explicit MockAudioRendererHost(
       media::AudioManager* audio_manager,
-      content::MediaObserver* media_observer)
-      : AudioRendererHost(audio_manager, media_observer),
+      AudioMirroringManager* mirroring_manager,
+      MediaInternals* media_internals)
+      : AudioRendererHost(kRenderProcessId,
+                          audio_manager,
+                          mirroring_manager,
+                          media_internals),
         shared_memory_length_(0) {
   }
 
@@ -143,9 +158,7 @@ ACTION_P(QuitMessageLoop, message_loop) {
 
 class AudioRendererHostTest : public testing::Test {
  public:
-  AudioRendererHostTest()
-      : mock_stream_(true) {
-  }
+  AudioRendererHostTest() {}
 
  protected:
   virtual void SetUp() {
@@ -158,11 +171,9 @@ class AudioRendererHostTest : public testing::Test {
     ui_thread_.reset(new BrowserThreadImpl(BrowserThread::UI,
                                            message_loop_.get()));
     audio_manager_.reset(media::AudioManager::Create());
-    observer_.reset(new MockMediaObserver());
-    host_ = new MockAudioRendererHost(audio_manager_.get(), observer_.get());
-
-    // Expect the audio stream will be deleted.
-    EXPECT_CALL(*observer_, OnDeleteAudioStream(_, kStreamId));
+    observer_.reset(new MockMediaInternals());
+    host_ = new MockAudioRendererHost(
+        audio_manager_.get(), &mirroring_manager_, observer_.get());
 
     // Simulate IPC channel connected.
     host_->OnChannelConnected(base::GetCurrentProcId());
@@ -194,21 +205,33 @@ class AudioRendererHostTest : public testing::Test {
     EXPECT_CALL(*host_, OnStreamCreated(kStreamId, _))
         .WillOnce(QuitMessageLoop(message_loop_.get()));
 
-    media::AudioParameters::Format format;
-    if (mock_stream_)
-      format = media::AudioParameters::AUDIO_MOCK;
-    else
-      format = media::AudioParameters::AUDIO_PCM_LINEAR;
-
-    media::AudioParameters params(
-        format, CHANNEL_LAYOUT_STEREO,
-        media::AudioParameters::kAudioCDSampleRate, 16,
-        media::AudioParameters::kAudioCDSampleRate / 10);
-
     // Send a create stream message to the audio output stream and wait until
     // we receive the created message.
-    host_->OnCreateStream(kStreamId, params, 0);
+    host_->OnCreateStream(kStreamId,
+                          media::AudioParameters(
+                              media::AudioParameters::AUDIO_FAKE,
+                              media::CHANNEL_LAYOUT_STEREO,
+                              media::AudioParameters::kAudioCDSampleRate, 16,
+                              media::AudioParameters::kAudioCDSampleRate / 10));
     message_loop_->Run();
+
+    // Simulate the renderer process associating a stream with a render view.
+    EXPECT_CALL(mirroring_manager_,
+                RemoveDiverter(kRenderProcessId, MSG_ROUTING_NONE, _))
+        .RetiresOnSaturation();
+    EXPECT_CALL(mirroring_manager_,
+                AddDiverter(kRenderProcessId, kRenderViewId, NotNull()))
+        .RetiresOnSaturation();
+    host_->OnAssociateStreamWithProducer(kStreamId, kRenderViewId);
+    message_loop_->RunUntilIdle();
+    // At some point in the future, a corresponding RemoveDiverter() call must
+    // be made.
+    EXPECT_CALL(mirroring_manager_,
+                RemoveDiverter(kRenderProcessId, kRenderViewId, NotNull()))
+        .RetiresOnSaturation();
+
+    // Expect the audio stream will be deleted at some later point.
+    EXPECT_CALL(*observer_, OnDeleteAudioStream(_, kStreamId));
   }
 
   void Close() {
@@ -218,7 +241,7 @@ class AudioRendererHostTest : public testing::Test {
     // Send a message to AudioRendererHost to tell it we want to close the
     // stream.
     host_->OnCloseStream(kStreamId);
-    message_loop_->RunAllPending();
+    message_loop_->RunUntilIdle();
   }
 
   void Play() {
@@ -246,7 +269,7 @@ class AudioRendererHostTest : public testing::Test {
                 OnSetAudioStreamVolume(_, kStreamId, volume));
 
     host_->OnSetVolume(kStreamId, volume);
-    message_loop_->RunAllPending();
+    message_loop_->RunUntilIdle();
   }
 
   void SimulateError() {
@@ -256,7 +279,7 @@ class AudioRendererHostTest : public testing::Test {
     CHECK(host_->audio_entries_.size())
         << "Calls Create() before calling this method";
     media::AudioOutputController* controller =
-        host_->audio_entries_.begin()->second->controller;
+        host_->LookupControllerByIdForTesting(kStreamId);
     CHECK(controller) << "AudioOutputController not found";
 
     // Expect an error signal sent through IPC.
@@ -296,11 +319,9 @@ class AudioRendererHostTest : public testing::Test {
     message_loop_->Run();
   }
 
-  void EnableRealDevice() { mock_stream_ = false; }
-
  private:
-  bool mock_stream_;
-  scoped_ptr<MockMediaObserver> observer_;
+  scoped_ptr<MockMediaInternals> observer_;
+  MockAudioMirroringManager mirroring_manager_;
   scoped_refptr<MockAudioRendererHost> host_;
   scoped_ptr<MessageLoop> message_loop_;
   scoped_ptr<BrowserThreadImpl> io_thread_;
@@ -311,34 +332,22 @@ class AudioRendererHostTest : public testing::Test {
 };
 
 TEST_F(AudioRendererHostTest, CreateAndClose) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Close();
 }
 
 // Simulate the case where a stream is not properly closed.
 TEST_F(AudioRendererHostTest, CreateAndShutdown) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
 }
 
 TEST_F(AudioRendererHostTest, CreatePlayAndClose) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
   Close();
 }
 
 TEST_F(AudioRendererHostTest, CreatePlayPauseAndClose) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
   Pause();
@@ -346,9 +355,6 @@ TEST_F(AudioRendererHostTest, CreatePlayPauseAndClose) {
 }
 
 TEST_F(AudioRendererHostTest, SetVolume) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   SetVolume(0.5);
   Play();
@@ -358,27 +364,18 @@ TEST_F(AudioRendererHostTest, SetVolume) {
 
 // Simulate the case where a stream is not properly closed.
 TEST_F(AudioRendererHostTest, CreatePlayAndShutdown) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
 }
 
 // Simulate the case where a stream is not properly closed.
 TEST_F(AudioRendererHostTest, CreatePlayPauseAndShutdown) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
   Pause();
 }
 
 TEST_F(AudioRendererHostTest, SimulateError) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
   SimulateError();
@@ -388,14 +385,12 @@ TEST_F(AudioRendererHostTest, SimulateError) {
 // the audio device is closed but the render process try to close the
 // audio stream again.
 TEST_F(AudioRendererHostTest, SimulateErrorAndClose) {
-  if (!IsRunningHeadless())
-    EnableRealDevice();
-
   Create();
   Play();
   SimulateError();
   Close();
 }
 
-
 // TODO(hclam): Add tests for data conversation in low latency mode.
+
+}  // namespace content

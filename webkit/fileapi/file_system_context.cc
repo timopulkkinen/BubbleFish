@@ -5,10 +5,10 @@
 #include "webkit/fileapi/file_system_context.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/stl_util.h"
 #include "base/single_thread_task_runner.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_options.h"
@@ -18,8 +18,11 @@
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/isolated_mount_point_provider.h"
+#include "webkit/fileapi/mount_points.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
-#include "webkit/fileapi/syncable/local_file_sync_status.h"
+#include "webkit/fileapi/syncable/local_file_change_tracker.h"
+#include "webkit/fileapi/syncable/local_file_sync_context.h"
+#include "webkit/fileapi/syncable/syncable_file_system_util.h"
 #include "webkit/fileapi/test_mount_point_provider.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/special_storage_policy.h"
@@ -52,9 +55,10 @@ void DidOpenFileSystem(
 
 FileSystemContext::FileSystemContext(
     scoped_ptr<FileSystemTaskRunners> task_runners,
+    ExternalMountPoints* external_mount_points,
     quota::SpecialStoragePolicy* special_storage_policy,
     quota::QuotaManagerProxy* quota_manager_proxy,
-    const FilePath& profile_path,
+    const base::FilePath& partition_path,
     const FileSystemOptions& options)
     : task_runners_(task_runners.Pass()),
       quota_manager_proxy_(quota_manager_proxy),
@@ -62,37 +66,52 @@ FileSystemContext::FileSystemContext(
           new SandboxMountPointProvider(
               quota_manager_proxy,
               task_runners_->file_task_runner(),
-              profile_path,
+              partition_path,
               options)),
-      isolated_provider_(new IsolatedMountPointProvider(profile_path)),
-      sync_status_(new LocalFileSyncStatus) {
+      isolated_provider_(new IsolatedMountPointProvider(partition_path)),
+      external_mount_points_(external_mount_points),
+      partition_path_(partition_path) {
   DCHECK(task_runners_.get());
 
   if (quota_manager_proxy) {
     quota_manager_proxy->RegisterClient(CreateQuotaClient(
             this, options.is_incognito()));
   }
+
 #if defined(OS_CHROMEOS)
+  DCHECK(external_mount_points);
   external_provider_.reset(
-      new chromeos::CrosMountPointProvider(special_storage_policy));
+      new chromeos::CrosMountPointProvider(
+          special_storage_policy,
+          external_mount_points,
+          ExternalMountPoints::GetSystemInstance()));
 #endif
+
+  if (external_mount_points)
+    url_crackers_.push_back(external_mount_points);
+  url_crackers_.push_back(ExternalMountPoints::GetSystemInstance());
+  url_crackers_.push_back(IsolatedContext::GetInstance());
 }
 
 bool FileSystemContext::DeleteDataForOriginOnFileThread(
     const GURL& origin_url) {
   DCHECK(task_runners_->file_task_runner()->RunsTasksOnCurrentThread());
   DCHECK(sandbox_provider());
+  DCHECK(origin_url == origin_url.GetOrigin());
 
   // Delete temporary and persistent data.
   return
       (sandbox_provider()->DeleteOriginDataOnFileThread(
-          this, quota_manager_proxy(), origin_url, kFileSystemTypeTemporary) ==
+          this, quota_manager_proxy(), origin_url,
+          kFileSystemTypeTemporary) ==
        base::PLATFORM_FILE_OK) &&
       (sandbox_provider()->DeleteOriginDataOnFileThread(
-          this, quota_manager_proxy(), origin_url, kFileSystemTypePersistent) ==
+          this, quota_manager_proxy(), origin_url,
+          kFileSystemTypePersistent) ==
        base::PLATFORM_FILE_OK) &&
       (sandbox_provider()->DeleteOriginDataOnFileThread(
-          this, quota_manager_proxy(), origin_url, kFileSystemTypeSyncable) ==
+          this, quota_manager_proxy(), origin_url,
+          kFileSystemTypeSyncable) ==
        base::PLATFORM_FILE_OK);
 }
 
@@ -105,13 +124,13 @@ FileSystemContext::GetQuotaUtil(FileSystemType type) const {
   return mount_point_provider->GetQuotaUtil();
 }
 
-FileSystemFileUtil* FileSystemContext::GetFileUtil(
+AsyncFileUtil* FileSystemContext::GetAsyncFileUtil(
     FileSystemType type) const {
   FileSystemMountPointProvider* mount_point_provider =
       GetMountPointProvider(type);
   if (!mount_point_provider)
     return NULL;
-  return mount_point_provider->GetFileUtil(type);
+  return mount_point_provider->GetAsyncFileUtil(type);
 }
 
 FileSystemMountPointProvider* FileSystemContext::GetMountPointProvider(
@@ -123,6 +142,7 @@ FileSystemMountPointProvider* FileSystemContext::GetMountPointProvider(
       return sandbox_provider_.get();
     case kFileSystemTypeExternal:
     case kFileSystemTypeDrive:
+    case kFileSystemTypeRestrictedNativeLocal:
       return external_provider_.get();
     case kFileSystemTypeIsolated:
     case kFileSystemTypeDragged:
@@ -203,16 +223,9 @@ void FileSystemContext::OpenSyncableFileSystem(
   DCHECK(!callback.is_null());
 
   DCHECK(type == kFileSystemTypeSyncable);
-  IsolatedContext::GetInstance()->RegisterExternalFileSystem(
-      mount_name,
-      kFileSystemTypeSyncable,
-      FilePath());
 
-  std::string root = GetFileSystemRootURI(
-      origin_url, kFileSystemTypeExternal).spec();
-  root.append(mount_name);
-  root.append("/");
-  GURL root_url = GURL(root);
+  GURL root_url = sync_file_system::GetSyncableFileSystemRootURI(
+      origin_url, mount_name);
   std::string name = GetFileSystemName(origin_url, kFileSystemTypeSyncable);
 
   FileSystemMountPointProvider* mount_point_provider =
@@ -227,6 +240,7 @@ void FileSystemContext::DeleteFileSystem(
     const GURL& origin_url,
     FileSystemType type,
     const DeleteFileSystemCallback& callback) {
+  DCHECK(origin_url == origin_url.GetOrigin());
   FileSystemMountPointProvider* mount_point_provider =
       GetMountPointProvider(type);
   if (!mount_point_provider) {
@@ -238,12 +252,13 @@ void FileSystemContext::DeleteFileSystem(
 }
 
 FileSystemOperation* FileSystemContext::CreateFileSystemOperation(
-    const FileSystemURL& url, PlatformFileError* error_code) {
+    const FileSystemURL& url, base::PlatformFileError* error_code) {
   if (!url.is_valid()) {
     if (error_code)
       *error_code = base::PLATFORM_FILE_ERROR_INVALID_URL;
     return NULL;
   }
+
   FileSystemMountPointProvider* mount_point_provider =
       GetMountPointProvider(url.type());
   if (!mount_point_provider) {
@@ -252,7 +267,7 @@ FileSystemOperation* FileSystemContext::CreateFileSystemOperation(
     return NULL;
   }
 
-  PlatformFileError fs_error = base::PLATFORM_FILE_OK;
+  base::PlatformFileError fs_error = base::PLATFORM_FILE_OK;
   FileSystemOperation* operation =
       mount_point_provider->CreateFileSystemOperation(url, this, &fs_error);
 
@@ -263,14 +278,16 @@ FileSystemOperation* FileSystemContext::CreateFileSystemOperation(
 
 webkit_blob::FileStreamReader* FileSystemContext::CreateFileStreamReader(
     const FileSystemURL& url,
-    int64 offset) {
+    int64 offset,
+    const base::Time& expected_modification_time) {
   if (!url.is_valid())
     return NULL;
   FileSystemMountPointProvider* mount_point_provider =
       GetMountPointProvider(url.type());
   if (!mount_point_provider)
     return NULL;
-  return mount_point_provider->CreateFileStreamReader(url, offset, this);
+  return mount_point_provider->CreateFileStreamReader(
+      url, offset, expected_modification_time, this);
 }
 
 void FileSystemContext::RegisterMountPointProvider(
@@ -281,7 +298,39 @@ void FileSystemContext::RegisterMountPointProvider(
   provider_map_[type] = provider;
 }
 
-FileSystemContext::~FileSystemContext() {}
+void FileSystemContext::SetLocalFileChangeTracker(
+    scoped_ptr<sync_file_system::LocalFileChangeTracker> tracker) {
+  DCHECK(!change_tracker_.get());
+  DCHECK(tracker.get());
+  change_tracker_ = tracker.Pass();
+  sandbox_provider_->AddSyncableFileUpdateObserver(
+      change_tracker_.get(),
+      task_runners_->file_task_runner());
+  sandbox_provider_->AddSyncableFileChangeObserver(
+      change_tracker_.get(),
+      task_runners_->file_task_runner());
+}
+
+void FileSystemContext::set_sync_context(
+    sync_file_system::LocalFileSyncContext* sync_context) {
+  sync_context_ = sync_context;
+}
+
+FileSystemURL FileSystemContext::CrackURL(const GURL& url) const {
+  return CrackFileSystemURL(FileSystemURL(url));
+}
+
+FileSystemURL FileSystemContext::CreateCrackedFileSystemURL(
+    const GURL& origin,
+    FileSystemType type,
+    const base::FilePath& path) const {
+  return CrackFileSystemURL(FileSystemURL(origin, type, path));
+}
+
+FileSystemContext::~FileSystemContext() {
+  task_runners_->file_task_runner()->DeleteSoon(
+      FROM_HERE, change_tracker_.release());
+}
 
 void FileSystemContext::DeleteOnCorrectThread() const {
   if (!task_runners_->io_task_runner()->RunsTasksOnCurrentThread() &&
@@ -291,6 +340,38 @@ void FileSystemContext::DeleteOnCorrectThread() const {
   STLDeleteContainerPairSecondPointers(provider_map_.begin(),
                                        provider_map_.end());
   delete this;
+}
+
+FileSystemURL FileSystemContext::CrackFileSystemURL(
+    const FileSystemURL& url) const {
+  if (!url.is_valid())
+    return FileSystemURL();
+
+  // The returned value in case there is no crackers which can crack the url.
+  // This is valid situation for non isolated/external file systems.
+  FileSystemURL result = url;
+
+  for (size_t i = 0; i < url_crackers_.size(); ++i) {
+    if (!url_crackers_[i]->HandlesFileSystemMountType(url.type()))
+      continue;
+
+    result = url_crackers_[i]->CreateCrackedFileSystemURL(url.origin(),
+                                                          url.type(),
+                                                          url.path());
+    if (result.is_valid())
+      return result;
+  }
+
+  return result;
+}
+
+FileSystemFileUtil* FileSystemContext::GetFileUtil(
+    FileSystemType type) const {
+  FileSystemMountPointProvider* mount_point_provider =
+      GetMountPointProvider(type);
+  if (!mount_point_provider)
+    return NULL;
+  return mount_point_provider->GetFileUtil(type);
 }
 
 }  // namespace fileapi

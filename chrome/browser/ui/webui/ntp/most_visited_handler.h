@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
 #include "content/public/browser/notification_observer.h"
@@ -16,7 +17,7 @@
 
 class GURL;
 class PageUsageData;
-class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class ListValue;
@@ -66,7 +67,7 @@ class MostVisitedHandler : public content::WebUIMessageHandler,
     return most_visited_urls_;
   }
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
  private:
   struct MostVisitedPage;
@@ -91,8 +92,8 @@ class MostVisitedHandler : public content::WebUIMessageHandler,
 
   content::NotificationRegistrar registrar_;
 
-  // Our consumer for the history service.
-  CancelableRequestConsumer topsites_consumer_;
+  // For callbacks may be run after destruction.
+  base::WeakPtrFactory<MostVisitedHandler> weak_ptr_factory_;
 
   // The most visited URLs, in priority order.
   // Only used for matching up clicks on the page to which most visited entry

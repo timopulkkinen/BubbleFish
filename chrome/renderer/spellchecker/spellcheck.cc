@@ -5,74 +5,86 @@
 #include "chrome/renderer/spellchecker/spellcheck.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
-#include "base/metrics/histogram.h"
 #include "base/message_loop_proxy.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/spellcheck_result.h"
-#include "content/public/renderer/render_thread.h"
-#include "third_party/hunspell/src/hunspell/hunspell.hxx"
+#include "chrome/renderer/spellchecker/spellcheck_language.h"
+#include "chrome/renderer/spellchecker/spellcheck_provider.h"
+#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_visitor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingCompletion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingResult.h"
 
-using base::TimeTicks;
-using content::RenderThread;
 using WebKit::WebVector;
 using WebKit::WebTextCheckingResult;
 using WebKit::WebTextCheckingType;
 
-class SpellCheck::SpellCheckRequestParam
-    : public base::RefCountedThreadSafe<SpellCheck::SpellCheckRequestParam> {
+namespace {
+
+class UpdateSpellcheckEnabled : public content::RenderViewVisitor {
  public:
-  SpellCheckRequestParam(const string16& text,
-                         int offset,
-                         WebKit::WebTextCheckingCompletion* completion)
-      : text_(text),
-        offset_(offset),
-        completion_(completion) {
-    DCHECK(completion);
-  }
-
-  string16 text() {
-    return text_;
-  }
-
-  int offset() {
-    return offset_;
-  }
-
-  WebKit::WebTextCheckingCompletion* completion() {
-    return completion_;
-  }
+  explicit UpdateSpellcheckEnabled(bool enabled) : enabled_(enabled) {}
+  virtual bool Visit(content::RenderView* render_view) OVERRIDE;
 
  private:
-  friend class base::RefCountedThreadSafe<SpellCheckRequestParam>;
+  bool enabled_;  // New spellcheck-enabled state.
+  DISALLOW_COPY_AND_ASSIGN(UpdateSpellcheckEnabled);
+};
 
-  ~SpellCheckRequestParam() {}
+bool UpdateSpellcheckEnabled::Visit(content::RenderView* render_view) {
+  SpellCheckProvider* provider = SpellCheckProvider::Get(render_view);
+  DCHECK(provider);
+  provider->EnableSpellcheck(enabled_);
+  return true;
+}
 
-  // Text to be checked in this task.
-  string16 text_;
+}  // namespace
 
-  // The text offset from the beginning.
-  int offset_;
+class SpellCheck::SpellcheckRequest {
+ public:
+  SpellcheckRequest(const string16& text,
+                    int offset,
+                    WebKit::WebTextCheckingCompletion* completion)
+      : text_(text), offset_(offset), completion_(completion) {
+    DCHECK(completion);
+  }
+  ~SpellcheckRequest() {}
+
+  string16 text() { return text_; }
+  int offset() { return offset_; }
+  WebKit::WebTextCheckingCompletion* completion() { return completion_; }
+
+ private:
+  string16 text_;  // Text to be checked in this task.
+  int offset_;   // The text offset from the beginning.
 
   // The interface to send the misspelled ranges to WebKit.
   WebKit::WebTextCheckingCompletion* completion_;
 
-  DISALLOW_COPY_AND_ASSIGN(SpellCheckRequestParam);
+  DISALLOW_COPY_AND_ASSIGN(SpellcheckRequest);
 };
 
+
+// Initializes SpellCheck object.
+// spellcheck_enabled_ currently MUST be set to true, due to peculiarities of
+// the initialization sequence.
+// Since it defaults to true, newly created SpellCheckProviders will enable
+// spellchecking. After the first word is typed, the provider requests a check,
+// which in turn triggers the delayed initialization sequence in SpellCheck.
+// This does send a message to the browser side, which triggers the creation
+// of the SpellcheckService. That does create the observer for the preference
+// responsible for enabling/disabling checking, which allows subsequent changes
+// to that preference to be sent to all SpellCheckProviders.
+// Setting |spellcheck_enabled_| to false by default prevents that mechanism,
+// and as such the SpellCheckProviders will never be notified of different
+// values.
+// TODO(groby): Simplify this.
 SpellCheck::SpellCheck()
-    : file_(base::kInvalidPlatformFileValue),
-      auto_spell_correct_turned_on_(false),
-      is_using_platform_spelling_engine_(false),
-      initialized_(false),
-      dictionary_requested_(false) {
-  // Wait till we check the first word before doing any initializing.
+    : auto_spell_correct_turned_on_(false),
+      spellcheck_enabled_(true) {
 }
 
 SpellCheck::~SpellCheck() {
@@ -82,9 +94,11 @@ bool SpellCheck::OnControlMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SpellCheck, message)
     IPC_MESSAGE_HANDLER(SpellCheckMsg_Init, OnInit)
-    IPC_MESSAGE_HANDLER(SpellCheckMsg_WordAdded, OnWordAdded)
+    IPC_MESSAGE_HANDLER(SpellCheckMsg_CustomDictionaryChanged,
+                        OnCustomDictionaryChanged)
     IPC_MESSAGE_HANDLER(SpellCheckMsg_EnableAutoSpellCorrect,
                         OnEnableAutoSpellCorrect)
+    IPC_MESSAGE_HANDLER(SpellCheckMsg_EnableSpellCheck, OnEnableSpellCheck)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -98,44 +112,34 @@ void SpellCheck::OnInit(IPC::PlatformFileForTransit bdict_file,
   Init(IPC::PlatformFileForTransitToPlatformFile(bdict_file),
        custom_words, language);
   auto_spell_correct_turned_on_ = auto_spell_correct;
-
-  PostDelayedSpellCheckTask();
+#if !defined(OS_MACOSX)
+  PostDelayedSpellCheckTask(pending_request_param_.release());
+#endif
 }
 
-void SpellCheck::OnWordAdded(const std::string& word) {
-  if (is_using_platform_spelling_engine_)
-    return;
-
-  if (!hunspell_.get()) {
-    // Save it for later---add it when hunspell is initialized.
-    custom_words_.push_back(word);
-  } else {
-    AddWordToHunspell(word);
-  }
+void SpellCheck::OnCustomDictionaryChanged(
+    const std::vector<std::string>& words_added,
+    const std::vector<std::string>& words_removed) {
+  custom_dictionary_.OnCustomDictionaryChanged(words_added, words_removed);
 }
 
 void SpellCheck::OnEnableAutoSpellCorrect(bool enable) {
   auto_spell_correct_turned_on_ = enable;
 }
 
+void SpellCheck::OnEnableSpellCheck(bool enable) {
+  spellcheck_enabled_ = enable;
+  UpdateSpellcheckEnabled updater(enable);
+  content::RenderView::ForEach(&updater);
+}
+
+// TODO(groby): Make sure we always have a spelling engine, even before Init()
+// is called.
 void SpellCheck::Init(base::PlatformFile file,
                       const std::vector<std::string>& custom_words,
                       const std::string& language) {
-  initialized_ = true;
-  hunspell_.reset();
-  bdict_file_.reset();
-  file_ = file;
-  is_using_platform_spelling_engine_ =
-      file == base::kInvalidPlatformFileValue && !language.empty();
-
-  character_attributes_.SetDefaultLanguage(language);
-  text_iterator_.Reset();
-  contraction_iterator_.Reset();
-
-  custom_words_.insert(custom_words_.end(),
-                       custom_words.begin(), custom_words.end());
-
-  // We delay the actual initialization of hunspell until it is needed.
+  spellcheck_.Init(file, language);
+  custom_dictionary_.Init(custom_words);
 }
 
 bool SpellCheck::SpellCheckWord(
@@ -153,58 +157,19 @@ bool SpellCheck::SpellCheckWord(
   if (InitializeIfNeeded())
     return true;
 
-  // Do nothing if spell checking is disabled.
-  if (initialized_ && file_ == base::kInvalidPlatformFileValue &&
-      !is_using_platform_spelling_engine_) {
-    return true;
-  }
-
-  *misspelling_start = 0;
-  *misspelling_len = 0;
-  if (in_word_len == 0)
-    return true;  // No input means always spelled correctly.
-
-  string16 word;
-  int word_start;
-  int word_length;
-  if (!text_iterator_.IsInitialized() &&
-      !text_iterator_.Initialize(&character_attributes_, true)) {
-      // We failed to initialize text_iterator_, return as spelled correctly.
-      VLOG(1) << "Failed to initialize SpellcheckWordIterator";
-      return true;
-  }
-
-  text_iterator_.SetText(in_word, in_word_len);
-  while (text_iterator_.GetNextWord(&word, &word_start, &word_length)) {
-    // Found a word (or a contraction) that the spellchecker can check the
-    // spelling of.
-    if (CheckSpelling(word, tag))
-      continue;
-
-    // If the given word is a concatenated word of two or more valid words
-    // (e.g. "hello:hello"), we should treat it as a valid word.
-    if (IsValidContraction(word, tag))
-      continue;
-
-    *misspelling_start = word_start;
-    *misspelling_len = word_length;
-
-    // Get the list of suggested words.
-    if (optional_suggestions)
-      FillSuggestionList(word, optional_suggestions);
-    return false;
-  }
-
-  return true;
+  return spellcheck_.SpellCheckWord(in_word, in_word_len,
+                                    tag,
+                                    misspelling_start, misspelling_len,
+                                    optional_suggestions);
 }
 
 bool SpellCheck::SpellCheckParagraph(
     const string16& text,
-    WebKit::WebVector<WebKit::WebTextCheckingResult>* results) {
+    WebVector<WebTextCheckingResult>* results) {
 #if !defined(OS_MACOSX)
   // Mac has its own spell checker, so this method will not be used.
   DCHECK(results);
-  std::vector<WebKit::WebTextCheckingResult> textcheck_results;
+  std::vector<WebTextCheckingResult> textcheck_results;
   size_t length = text.length();
   size_t offset = 0;
 
@@ -226,12 +191,15 @@ bool SpellCheck::SpellCheckParagraph(
       return true;
     }
 
-    string16 replacement;
-    textcheck_results.push_back(WebKit::WebTextCheckingResult(
-        WebKit::WebTextCheckingTypeSpelling,
-        misspelling_start + offset,
-        misspelling_length,
-        replacement));
+    if (!custom_dictionary_.SpellCheckWord(
+            &text[offset], misspelling_start, misspelling_length)) {
+      string16 replacement;
+      textcheck_results.push_back(WebTextCheckingResult(
+          WebKit::WebTextCheckingTypeSpelling,
+          misspelling_start + offset,
+          misspelling_length,
+          replacement));
+    }
     offset += misspelling_start + misspelling_length;
   }
   results->assign(textcheck_results);
@@ -293,206 +261,57 @@ string16 SpellCheck::GetAutoCorrectionWord(const string16& word, int tag) {
   return autocorrect_word;
 }
 
+#if !defined(OS_MACOSX)  // OSX uses its own spell checker
 void SpellCheck::RequestTextChecking(
     const string16& text,
     int offset,
     WebKit::WebTextCheckingCompletion* completion) {
-#if !defined(OS_MACOSX)
-  // Commented out on Mac, because SpellCheckRequest::PerformSpellCheck is not
-  // implemented on Mac. Mac uses its own spellchecker, so this method
-  // will not be used.
-  DCHECK(!is_using_platform_spelling_engine_);
-
   // Clean up the previous request before starting a new request.
-  if (pending_request_param_.get()) {
+  if (pending_request_param_.get())
     pending_request_param_->completion()->didCancelCheckingText();
-    pending_request_param_ = NULL;
-  }
 
-  if (InitializeIfNeeded()) {
-    // We will check this text after we finish loading the hunspell dictionary.
-    // Save parameters so that we can use them when we receive an init message
-    // from the browser process.
-    pending_request_param_ = new SpellCheckRequestParam(
-        text, offset, completion);
+  pending_request_param_.reset(new SpellcheckRequest(
+      text, offset, completion));
+  // We will check this text after we finish loading the hunspell dictionary.
+  if (InitializeIfNeeded())
     return;
-  }
 
-  requested_params_.push(new SpellCheckRequestParam(text, offset, completion));
-  base::MessageLoopProxy::current()->PostTask(FROM_HERE,
-      base::Bind(&SpellCheck::PerformSpellCheck, AsWeakPtr()));
-#else
-  NOTREACHED();
+  PostDelayedSpellCheckTask(pending_request_param_.release());
+}
 #endif
-}
-
-void SpellCheck::InitializeHunspell() {
-  if (hunspell_.get())
-    return;
-
-  bdict_file_.reset(new file_util::MemoryMappedFile);
-
-  if (bdict_file_->Initialize(file_)) {
-    TimeTicks debug_start_time = base::Histogram::DebugNow();
-
-    hunspell_.reset(
-        new Hunspell(bdict_file_->data(), bdict_file_->length()));
-
-    // Add custom words to Hunspell.
-    for (std::vector<std::string>::iterator it = custom_words_.begin();
-         it != custom_words_.end(); ++it) {
-      AddWordToHunspell(*it);
-    }
-
-    DHISTOGRAM_TIMES("Spellcheck.InitTime",
-                     base::Histogram::DebugNow() - debug_start_time);
-  } else {
-    NOTREACHED() << "Could not mmap spellchecker dictionary.";
-  }
-}
-
-void SpellCheck::AddWordToHunspell(const std::string& word) {
-  if (!word.empty() && word.length() < MAXWORDLEN)
-    hunspell_->add(word.c_str());
-}
 
 bool SpellCheck::InitializeIfNeeded() {
-  if (is_using_platform_spelling_engine_)
-    return false;
-
-  if (!initialized_ && !dictionary_requested_) {
-    // RenderThread will not exist in test.
-    if (RenderThread::Get())
-      RenderThread::Get()->Send(new SpellCheckHostMsg_RequestDictionary);
-    dictionary_requested_ = true;
-    return true;
-  }
-
-  // Don't initialize if hunspell is disabled.
-  if (file_ != base::kInvalidPlatformFileValue)
-    InitializeHunspell();
-
-  return !initialized_;
+  return spellcheck_.InitializeIfNeeded();
 }
 
-// When called, relays the request to check the spelling to the proper
-// backend, either hunspell or a platform-specific backend.
-bool SpellCheck::CheckSpelling(const string16& word_to_check, int tag) {
-  bool word_correct = false;
-
-  if (is_using_platform_spelling_engine_) {
-#if defined(OS_MACOSX)
-    RenderThread::Get()->Send(new SpellCheckHostMsg_CheckSpelling(
-        word_to_check, tag, &word_correct));
-#endif
-  } else {
-    std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
-    // Hunspell shouldn't let us exceed its max, but check just in case
-    if (word_to_check_utf8.length() < MAXWORDLEN) {
-      if (hunspell_.get()) {
-        // |hunspell_->spell| returns 0 if the word is spelled correctly and
-        // non-zero otherwsie.
-        word_correct = (hunspell_->spell(word_to_check_utf8.c_str()) != 0);
-      } else {
-        // If |hunspell_| is NULL here, an error has occurred, but it's better
-        // to check rather than crash.
-        word_correct = true;
-      }
-    }
-  }
-
-  return word_correct;
-}
-
-void SpellCheck::PostDelayedSpellCheckTask() {
-  if (!pending_request_param_)
+#if !defined(OS_MACOSX) // OSX doesn't have |pending_request_param_|
+void SpellCheck::PostDelayedSpellCheckTask(SpellcheckRequest* request) {
+  if (!request)
     return;
 
-  if (file_ == base::kInvalidPlatformFileValue) {
-    pending_request_param_->completion()->didCancelCheckingText();
-  } else {
-    requested_params_.push(pending_request_param_);
-    base::MessageLoopProxy::current()->PostTask(FROM_HERE,
-        base::Bind(&SpellCheck::PerformSpellCheck, AsWeakPtr()));
-  }
-
-  pending_request_param_ = NULL;
+  base::MessageLoopProxy::current()->PostTask(FROM_HERE,
+      base::Bind(&SpellCheck::PerformSpellCheck,
+                 AsWeakPtr(),
+                 base::Owned(request)));
 }
+#endif
 
-void SpellCheck::PerformSpellCheck() {
-#if !defined(OS_MACOSX)
-  DCHECK(!requested_params_.empty());
-  scoped_refptr<SpellCheckRequestParam> param = requested_params_.front();
+#if !defined(OS_MACOSX)  // Mac uses its native engine instead.
+void SpellCheck::PerformSpellCheck(SpellcheckRequest* param) {
   DCHECK(param);
-  requested_params_.pop();
 
-  WebKit::WebVector<WebKit::WebTextCheckingResult> results;
-  SpellCheckParagraph(param->text(), &results);
-  param->completion()->didFinishCheckingText(results);
-#else
-  // SpellCheck::SpellCheckParagraph is not implemented on Mac,
-  // so we return without spellchecking. Note that Mac uses its own
-  // spellchecker, this function won't be used.
-  NOTREACHED();
+  if (!spellcheck_.IsEnabled()) {
+    param->completion()->didCancelCheckingText();
+  } else {
+    WebVector<WebKit::WebTextCheckingResult> results;
+    SpellCheckParagraph(param->text(), &results);
+    param->completion()->didFinishCheckingText(results);
+  }
+}
 #endif
-}
 
-void SpellCheck::FillSuggestionList(
-    const string16& wrong_word,
-    std::vector<string16>* optional_suggestions) {
-  if (is_using_platform_spelling_engine_) {
-#if defined(OS_MACOSX)
-    RenderThread::Get()->Send(new SpellCheckHostMsg_FillSuggestionList(
-        wrong_word, optional_suggestions));
-#endif
-    return;
-  }
-
-  // If |hunspell_| is NULL here, an error has occurred, but it's better
-  // to check rather than crash.
-  if (!hunspell_.get())
-    return;
-
-  char** suggestions;
-  int number_of_suggestions =
-      hunspell_->suggest(&suggestions, UTF16ToUTF8(wrong_word).c_str());
-
-  // Populate the vector of WideStrings.
-  for (int i = 0; i < number_of_suggestions; ++i) {
-    if (i < chrome::spellcheck_common::kMaxSuggestions)
-      optional_suggestions->push_back(UTF8ToUTF16(suggestions[i]));
-    free(suggestions[i]);
-  }
-  if (suggestions != NULL)
-    free(suggestions);
-}
-
-// Returns whether or not the given string is a valid contraction.
-// This function is a fall-back when the SpellcheckWordIterator class
-// returns a concatenated word which is not in the selected dictionary
-// (e.g. "in'n'out") but each word is valid.
-bool SpellCheck::IsValidContraction(const string16& contraction, int tag) {
-  if (!contraction_iterator_.IsInitialized() &&
-      !contraction_iterator_.Initialize(&character_attributes_, false)) {
-    // We failed to initialize the word iterator, return as spelled correctly.
-    VLOG(1) << "Failed to initialize contraction_iterator_";
-    return true;
-  }
-
-  contraction_iterator_.SetText(contraction.c_str(), contraction.length());
-
-  string16 word;
-  int word_start;
-  int word_length;
-  while (contraction_iterator_.GetNextWord(&word, &word_start, &word_length)) {
-    if (!CheckSpelling(word, tag))
-      return false;
-  }
-  return true;
-}
-
-#if !defined(OS_MACOSX)
 void SpellCheck::CreateTextCheckingResults(
+    ResultFilter filter,
     int line_offset,
     const string16& line_text,
     const std::vector<SpellCheckResult>& spellcheck_results,
@@ -501,25 +320,28 @@ void SpellCheck::CreateTextCheckingResults(
   // markers to them if our spellchecker tells they are correct words, i.e. they
   // are probably contextually-misspelled words.
   const char16* text = line_text.c_str();
-  WebVector<WebTextCheckingResult> list(spellcheck_results.size());
+  std::vector<WebTextCheckingResult> list;
   for (size_t i = 0; i < spellcheck_results.size(); ++i) {
     WebTextCheckingType type =
         static_cast<WebTextCheckingType>(spellcheck_results[i].type);
     int word_location = spellcheck_results[i].location;
     int word_length = spellcheck_results[i].length;
-    if (type == WebKit::WebTextCheckingTypeSpelling) {
-      int misspelling_start = 0;
-      int misspelling_length = 0;
+    int misspelling_start = 0;
+    int misspelling_length = 0;
+    if (type == WebKit::WebTextCheckingTypeSpelling &&
+        filter == USE_NATIVE_CHECKER) {
       if (SpellCheckWord(text + word_location, word_length, 0,
                          &misspelling_start, &misspelling_length, NULL)) {
         type = WebKit::WebTextCheckingTypeGrammar;
       }
     }
-    list[i] = WebKit::WebTextCheckingResult(type,
-                                            word_location + line_offset,
-                                            word_length,
-                                            spellcheck_results[i].replacement);
+    if (!custom_dictionary_.SpellCheckWord(text, word_location, word_length)) {
+      list.push_back(WebTextCheckingResult(
+          type,
+          word_location + line_offset,
+          word_length,
+          spellcheck_results[i].replacement));
+    }
   }
-  textcheck_results->swap(list);
+  textcheck_results->assign(list);
 }
-#endif

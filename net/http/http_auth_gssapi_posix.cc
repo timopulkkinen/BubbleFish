@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -419,7 +419,7 @@ bool GSSAPISharedLibrary::InitImpl() {
 }
 
 base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
-  const char** library_names;
+  const char* const* library_names;
   size_t num_lib_names;
   const char* user_specified_library[1];
   if (!gssapi_library_name_.empty()) {
@@ -427,7 +427,7 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
     library_names = user_specified_library;
     num_lib_names = 1;
   } else {
-    static const char* kDefaultLibraryNames[] = {
+    static const char* const kDefaultLibraryNames[] = {
 #if defined(OS_MACOSX)
       "libgssapi_krb5.dylib"  // MIT Kerberos
 #elif defined(OS_OPENBSD)
@@ -445,7 +445,7 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
 
   for (size_t i = 0; i < num_lib_names; ++i) {
     const char* library_name = library_names[i];
-    FilePath file_path(library_name);
+    base::FilePath file_path(library_name);
 
     // TODO(asanka): Move library loading to a separate thread.
     //               http://crbug.com/66702

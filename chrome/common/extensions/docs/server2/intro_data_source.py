@@ -3,12 +3,18 @@
 # found in the LICENSE file.
 
 from HTMLParser import HTMLParser
+import logging
+import os
 import re
 
 from docs_server_utils import FormatKey
 from file_system import FileNotFoundError
 import compiled_file_system as compiled_fs
 from third_party.handlebar import Handlebar
+
+# Increment this version if there are changes to the table of contents dict that
+# IntroDataSource caches.
+_VERSION = 4
 
 _H1_REGEX = re.compile('<h1[^>.]*?>.*?</h1>', flags=re.DOTALL)
 
@@ -59,19 +65,38 @@ class IntroDataSource(object):
   of contents dictionary is created, which contains the headings in the intro.
   """
   class Factory(object):
-    def __init__(self, cache_factory, base_paths):
+    def __init__(self, cache_factory, ref_resolver_factory, base_paths):
       self._cache = cache_factory.Create(self._MakeIntroDict,
-                                         compiled_fs.INTRO)
+                                         compiled_fs.INTRO,
+                                         version=_VERSION)
+      self._ref_resolver = ref_resolver_factory.Create()
       self._base_paths = base_paths
 
-    def _MakeIntroDict(self, intro):
-      parser = _IntroParser()
-      parser.feed(intro)
-      intro = re.sub(_H1_REGEX, '', intro, count=1)
+    def _MakeIntroDict(self, intro_path, intro):
+      # Guess the name of the API from the path to the intro.
+      api_name = os.path.splitext(intro_path.split('/')[-1])[0]
+      intro_with_links = self._ref_resolver.ResolveAllLinks(intro,
+                                                            namespace=api_name)
+      apps_parser = _IntroParser()
+      apps_parser.feed(Handlebar(intro_with_links).render(
+          { 'is_apps': True }).text)
+      extensions_parser = _IntroParser()
+      extensions_parser.feed(Handlebar(intro_with_links).render(
+          { 'is_apps': False }).text)
+      # TODO(cduvall): Use the normal template rendering system, so we can check
+      # errors.
+      if extensions_parser.page_title != apps_parser.page_title:
+        logging.error(
+            'Title differs for apps and extensions: Apps: %s, Extensions: %s.' %
+                (extensions_parser.page_title, apps_parser.page_title))
+      # The templates will render the heading themselves, so remove it from the
+      # HTML content.
+      intro_with_links = re.sub(_H1_REGEX, '', intro_with_links, count=1)
       return {
-        'intro': Handlebar(intro),
-        'toc': parser.toc,
-        'title': parser.page_title
+        'intro': Handlebar(intro_with_links),
+        'title': apps_parser.page_title,
+        'apps_toc': apps_parser.toc,
+        'extensions_toc': extensions_parser.toc,
       }
 
     def Create(self):
@@ -80,9 +105,6 @@ class IntroDataSource(object):
   def __init__(self, cache, base_paths):
     self._cache = cache
     self._base_paths = base_paths
-
-  def __getitem__(self, key):
-    return self.get(key)
 
   def get(self, key):
     real_path = FormatKey(key)

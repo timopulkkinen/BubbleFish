@@ -38,8 +38,9 @@ cr.define('options', function() {
       SettingsDialog.prototype.initializePage.call(this);
 
       var self = this;
-      $('homepage-use-ntp').onchange = this.updateHomePageInput_.bind(this);
-      $('homepage-use-url').onchange = this.updateHomePageInput_.bind(this);
+      options.Preferences.getInstance().addEventListener(
+          'homepage_is_newtabpage',
+          this.handleHomepageIsNTPPrefChange.bind(this));
 
       var urlField = $('homepage-url-field');
       urlField.addEventListener('keydown', function(event) {
@@ -52,7 +53,7 @@ cr.define('options', function() {
 
       var suggestionList = new cr.ui.AutocompleteList();
       suggestionList.autoExpands = true;
-      suggestionList.suggestionUpdateRequestCallback =
+      suggestionList.requestSuggestions =
           this.requestAutocompleteSuggestions_.bind(this);
       $('home-page-overlay').appendChild(suggestionList);
       this.autocompleteList_ = suggestionList;
@@ -64,28 +65,31 @@ cr.define('options', function() {
         self.autocompleteList_.detach();
       });
 
-      // Text fields may change widths when the window changes size, so make
-      // sure the suggestion list stays in sync.
+      // Text fields may change widths and positions when the window changes
+      // size, so make sure the suggestion list stays in sync.
       window.addEventListener('resize', function() {
-        self.autocompleteList_.syncWidthToInput();
+        self.autocompleteList_.syncWidthAndPositionToInput();
       });
     },
 
-    /** @inheritDoc */
+    /** @override */
     didShowPage: function() {
-      this.updateHomePageInput_();
       this.updateFavicon_();
     },
 
     /**
-     * Updates the state of the homepage text input. The input is enabled only
-     * if the |homepage-use-url| radio button is checked.
-     * @private
+     * Updates the state of the homepage text input and its controlled setting
+     * indicator when the |homepage_is_newtabpage| pref changes. The input is
+     * enabled only if the homepage is not the NTP. The indicator is always
+     * enabled but treats the input's value as read-only if the homepage is the
+     * NTP.
+     * @param {Event} Pref change event.
      */
-    updateHomePageInput_: function() {
+    handleHomepageIsNTPPrefChange: function(event) {
       var urlField = $('homepage-url-field');
-      var homePageUseURL = $('homepage-use-url');
-      urlField.setDisabled('radio-choice', !homePageUseURL.checked);
+      var urlFieldIndicator = $('homepage-url-field-indicator');
+      urlField.setDisabled('homepage-is-ntp', event.value.value);
+      urlFieldIndicator.readOnly = event.value.value;
     },
 
     /**
@@ -95,8 +99,7 @@ cr.define('options', function() {
      */
     updateFavicon_: function() {
       var urlField = $('homepage-url-field');
-      urlField.style.backgroundImage = url('chrome://favicon/' +
-                                           urlField.value);
+      urlField.style.backgroundImage = getFaviconImageSet(urlField.value);
     },
 
     /**

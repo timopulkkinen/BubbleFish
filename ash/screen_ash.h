@@ -7,7 +7,8 @@
 
 #include "ash/ash_export.h"
 #include "base/compiler_specific.h"
-#include "ui/gfx/screen_impl.h"
+#include "base/observer_list.h"
+#include "ui/gfx/screen.h"
 
 namespace gfx {
 class Rect;
@@ -17,7 +18,7 @@ namespace ash {
 
 // Aura implementation of gfx::Screen. Implemented here to avoid circular
 // dependencies.
-class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
+class ASH_EXPORT ScreenAsh : public gfx::Screen {
  public:
   ScreenAsh();
   virtual ~ScreenAsh();
@@ -30,10 +31,6 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
   // Returns the bounds for maximized windows in parent coordinates.
   // Maximized windows trigger auto-hiding the shelf.
   static gfx::Rect GetMaximizedWindowBoundsInParent(aura::Window* window);
-
-  // Returns work area when a maximized window is not present in
-  // parent coordinates.
-  static gfx::Rect GetUnmaximizedWorkAreaBoundsInParent(aura::Window* window);
 
   // Returns the display bounds in parent coordinates.
   static gfx::Rect GetDisplayBoundsInParent(aura::Window* window);
@@ -52,13 +49,23 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
                                          const gfx::Rect& rect);
 
   // Returns a gfx::Display object for secondary display. Returns
-  // ivalid display if there is no secondary display connected.
+  // invalid display if there is no secondary display connected.
   static const gfx::Display& GetSecondaryDisplay();
 
+  // Returns a gfx::Display object for the specified id.  Returns
+  // invalid display if no such display is connected.
+  static const gfx::Display& GetDisplayForId(int64 display_id);
+
+  // Notifies observers of display configuration changes.
+  void NotifyBoundsChanged(const gfx::Display& display);
+  void NotifyDisplayAdded(const gfx::Display& display);
+  void NotifyDisplayRemoved(const gfx::Display& display);
+
  protected:
+  // Implementation of gfx::Screen:
+  virtual bool IsDIPEnabled() OVERRIDE;
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
   virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE;
-
   virtual int GetNumDisplays() OVERRIDE;
   virtual gfx::Display GetDisplayNearestWindow(
       gfx::NativeView view) const OVERRIDE;
@@ -67,8 +74,12 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
   virtual gfx::Display GetDisplayMatching(
       const gfx::Rect& match_rect) const OVERRIDE;
   virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
+  virtual void AddObserver(gfx::DisplayObserver* observer) OVERRIDE;
+  virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE;
 
  private:
+  ObserverList<gfx::DisplayObserver> observers_;
+
   DISALLOW_COPY_AND_ASSIGN(ScreenAsh);
 };
 

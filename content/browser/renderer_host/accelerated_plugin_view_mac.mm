@@ -83,7 +83,7 @@ using content::RenderWidgetHostViewMac;
 - (void)drawRect:(NSRect)rect {
   TRACE_EVENT0("browser", "AcceleratedPluginView::drawRect");
   const NSRect* dirtyRects;
-  int dirtyRectCount;
+  NSInteger dirtyRectCount;
   [self getRectsBeingDrawn:&dirtyRects count:&dirtyRectCount];
 
   {
@@ -220,7 +220,7 @@ using content::RenderWidgetHostViewMac;
   TRACE_EVENT0("browser", "AcceleratedPluginViewMac::initOpenGLContext");
   std::vector<NSOpenGLPixelFormatAttribute> attributes;
   attributes.push_back(NSOpenGLPFADoubleBuffer);
-  if (gfx::GpuSwitchingManager::GetInstance()->SupportsDualGpus())
+  if (ui::GpuSwitchingManager::GetInstance()->SupportsDualGpus())
     attributes.push_back(NSOpenGLPFAAllowOfflineRenderers);
   attributes.push_back(0);
 

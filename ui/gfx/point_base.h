@@ -14,7 +14,7 @@
 namespace gfx {
 
 // A point has an x and y coordinate.
-template<typename Class, typename Type>
+template<typename Class, typename Type, typename VectorClass>
 class UI_EXPORT PointBase {
  public:
   Type x() const { return x_; }
@@ -33,39 +33,32 @@ class UI_EXPORT PointBase {
     y_ += delta_y;
   }
 
-  Class Scale(float scale) const WARN_UNUSED_RESULT {
-    return Scale(scale, scale);
+  void operator+=(const VectorClass& vector) {
+    x_ += vector.x();
+    y_ += vector.y();
   }
 
-  Class Scale(float x_scale, float y_scale) const WARN_UNUSED_RESULT {
-    return Class(static_cast<Type>(x_ * x_scale),
-                 static_cast<Type>(y_ * y_scale));
+  void operator-=(const VectorClass& vector) {
+    x_ -= vector.x();
+    y_ -= vector.y();
   }
 
-  Class Add(const Class& other) const WARN_UNUSED_RESULT {
-    const Class* orig = static_cast<const Class*>(this);
-    Class copy = *orig;
-    copy.Offset(other.x_, other.y_);
-    return copy;
+  void ClampToMax(const Class& max) {
+    x_ = x_ <= max.x_ ? x_ : max.x_;
+    y_ = y_ <= max.y_ ? y_ : max.y_;
   }
 
-  Class Subtract(const Class& other) const WARN_UNUSED_RESULT {
-    const Class* orig = static_cast<const Class*>(this);
-    Class copy = *orig;
-    copy.Offset(-other.x_, -other.y_);
-    return copy;
+  void ClampToMin(const Class& min) {
+    x_ = x_ >= min.x_ ? x_ : min.x_;
+    y_ = y_ >= min.y_ ? y_ : min.y_;
   }
 
-  Class Middle(const Class& other) const WARN_UNUSED_RESULT {
-    return Class((x_ + other.x_) / 2, (y_ + other.y_) / 2);
+  bool IsOrigin() const {
+    return x_ == 0 && y_ == 0;
   }
 
-  bool operator==(const Class& rhs) const {
-    return x_ == rhs.x_ && y_ == rhs.y_;
-  }
-
-  bool operator!=(const Class& rhs) const {
-    return !(*this == rhs);
+  VectorClass OffsetFromOrigin() const {
+    return VectorClass(x_, y_);
   }
 
   // A point is less than another point if its y-value is closer

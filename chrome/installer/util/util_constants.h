@@ -77,12 +77,15 @@ enum InstallStatus {
   APP_HOST_REQUIRES_USER_LEVEL,  // 44. --system-level is forbidden.
   APP_HOST_REQUIRES_BINARIES,  // 45. No Chrome binaries at either level.
   INSTALL_OF_GOOGLE_UPDATE_FAILED,  // 46. Failed to install Google Update.
+  INVALID_STATE_FOR_OPTION,    // 47. A non-install option was called with an
+                               // invalid installer state.
+  WAIT_FOR_EXISTING_FAILED,    // 48. OS error waiting for existing setup.exe.
   // Friendly reminder: note the COMPILE_ASSERT below.
 };
 
 
 // Existing InstallStatus values must not change.  Always add to the end.
-COMPILE_ASSERT(installer::INSTALL_OF_GOOGLE_UPDATE_FAILED == 46,
+COMPILE_ASSERT(installer::WAIT_FOR_EXISTING_FAILED == 48,
                dont_change_enum);
 
 // The type of an update archive.
@@ -115,18 +118,20 @@ enum InstallerStage {
   FINISHING,                   // 15: Finishing the install.
   CONFIGURE_AUTO_LAUNCH,       // 16: Configuring Chrome to auto-launch.
   CREATING_VISUAL_MANIFEST,    // 17: Creating VisualElementsManifest.xml
-  NUM_STAGES                   // 18: The number of stages.
+  DEFERRING_TO_HIGHER_VERSION,  // 18: Deferring to an installed higher version.
+  NUM_STAGES                   // 19: The number of stages.
 };
 
 // When we start reporting the numerical values from the enum, the order
 // above MUST be preserved.
-COMPILE_ASSERT(CREATING_VISUAL_MANIFEST == 17,
+COMPILE_ASSERT(DEFERRING_TO_HIGHER_VERSION == 18,
                never_ever_ever_change_InstallerStage_values_bang);
 
 namespace switches {
 extern const char kAutoLaunchChrome[];
 extern const char kChrome[];
-extern const char kChromeAppHost[];
+extern const char kChromeAppHostDeprecated[];  // TODO(huangs): Remove by M27.
+extern const char kChromeAppLauncher[];
 extern const char kChromeFrame[];
 extern const char kChromeFrameQuickEnable[];
 extern const char kChromeFrameReadyMode[];
@@ -135,7 +140,6 @@ extern const char kChromeFrameReadyModeTempOptOut[];
 extern const char kChromeFrameReadyModeEndTempOptOut[];
 extern const char kChromeSxS[];
 extern const char kConfigureUserSettings[];
-extern const char kCreateAllShortcuts[];
 extern const char kCriticalUpdateVersion[];
 extern const char kDeleteProfile[];
 extern const char kDisableLogging[];
@@ -144,6 +148,7 @@ extern const char kDoNotRegisterForUpdateLaunch[];
 extern const char kDoNotRemoveSharedItems[];
 extern const char kEnableLogging[];
 extern const char kEnsureGoogleUpdatePresent[];
+extern const char kForceConfigureUserSettings[];
 extern const char kForceUninstall[];
 extern const char kInstallArchive[];
 extern const char kInstallerData[];
@@ -153,25 +158,28 @@ extern const char kMsi[];
 extern const char kMultiInstall[];
 extern const char kNewSetupExe[];
 extern const char kOnOsUpgrade[];
+extern const char kQueryEULAAcceptance[];
 extern const char kRegisterChromeBrowser[];
 extern const char kRegisterChromeBrowserSuffix[];
+extern const char kRegisterDevChrome[];
 extern const char kRegisterURLProtocol[];
 extern const char kRenameChromeExe[];
 extern const char kRemoveChromeRegistration[];
 extern const char kRunAsAdmin[];
+extern const char kSelfDestruct[];
 extern const char kSystemLevel[];
 extern const char kUninstall[];
 extern const char kUpdateSetupExe[];
 extern const char kVerboseLogging[];
 extern const char kShowEula[];
 extern const char kShowEulaForMetro[];
-extern const char kAltDesktopShortcut[];
 extern const char kInactiveUserToast[];
 extern const char kSystemLevelToast[];
 extern const char kExperimentGroup[];
 extern const char kToastResultsKey[];
 }  // namespace switches
 
+extern const wchar_t kActiveSetupExe[];
 extern const wchar_t kChromeAppHostExe[];
 extern const wchar_t kChromeDll[];
 extern const wchar_t kChromeExe[];
@@ -183,17 +191,20 @@ extern const wchar_t kChromeLauncherExe[];
 extern const wchar_t kChromeOldExe[];
 extern const wchar_t kChromeNewExe[];
 extern const wchar_t kCmdInstallApp[];
+extern const wchar_t kCmdInstallExtension[];
 extern const wchar_t kCmdOnOsUpgrade[];
+extern const wchar_t kCmdQueryEULAAcceptance[];
 extern const wchar_t kCmdQuickEnableApplicationHost[];
 extern const wchar_t kCmdQuickEnableCf[];
 extern const wchar_t kDelegateExecuteExe[];
-extern const char kEULASentinelFile[];
+extern const wchar_t kEULASentinelFile[];
 extern const wchar_t kGoogleChromeInstallSubDir1[];
 extern const wchar_t kGoogleChromeInstallSubDir2[];
 extern const wchar_t kInstallBinaryDir[];
 extern const wchar_t kInstallerDir[];
 extern const wchar_t kInstallTempDir[];
 extern const wchar_t kInstallUserDataDir[];
+extern const wchar_t kLnkExt[];
 extern const wchar_t kNaClExe[];
 extern const wchar_t kSetupExe[];
 extern const wchar_t kSxSSuffix[];
@@ -209,9 +220,6 @@ extern const wchar_t kInstallerExtraCode1[];
 extern const wchar_t kInstallerResult[];
 extern const wchar_t kInstallerResultUIString[];
 extern const wchar_t kInstallerSuccessLaunchCmdLine[];
-
-// Google Update named environment variable that implies kSystemLevel.
-extern const char kGoogleUpdateIsMachineEnvVar[];
 
 // Product options.
 extern const wchar_t kOptionMultiInstall[];

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "base/utf_string_conversion_utils.h"
+#include "base/strings/utf_string_conversion_utils.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
@@ -19,10 +19,8 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
@@ -32,6 +30,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
@@ -40,7 +39,6 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "third_party/undoview/undo_view.h"
-#include "ui/base/animation/multi_animation.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
@@ -372,7 +370,7 @@ void OmniboxViewGtk::Init() {
   GtkTextIter end_iter;
   gtk_text_buffer_get_end_iter(text_buffer_, &end_iter);
 
-  // Insert a Zero Width Space character just before the instant anchor.
+  // Insert a Zero Width Space character just before the Instant anchor.
   // It's a hack to workaround a bug of GtkTextView which can not align the
   // pre-edit string and a child anchor correctly when there is no other content
   // around the pre-edit string.
@@ -404,20 +402,12 @@ void OmniboxViewGtk::Init() {
 
   AdjustVerticalAlignmentOfInstantView();
 
-  ui::MultiAnimation::Parts parts;
-  parts.push_back(ui::MultiAnimation::Part(
-      InstantController::kInlineAutocompletePauseTimeMS, ui::Tween::ZERO));
-  parts.push_back(ui::MultiAnimation::Part(
-      InstantController::kInlineAutocompleteFadeInTimeMS, ui::Tween::EASE_IN));
-  instant_animation_.reset(new ui::MultiAnimation(parts));
-  instant_animation_->set_continuous(false);
-
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 
-  ViewIDUtil::SetID(GetNativeView(), VIEW_ID_AUTOCOMPLETE);
+  ViewIDUtil::SetID(GetNativeView(), VIEW_ID_OMNIBOX);
 }
 
 void OmniboxViewGtk::HandleHierarchyChanged(GtkWidget* sender,
@@ -434,6 +424,11 @@ void OmniboxViewGtk::HandleHierarchyChanged(GtkWidget* sender,
 void OmniboxViewGtk::SetFocus() {
   DCHECK(text_view_);
   gtk_widget_grab_focus(text_view_);
+}
+
+void OmniboxViewGtk::ApplyCaretVisibility() {
+  // TODO(mathp): implement for Linux.
+  NOTIMPLEMENTED();
 }
 
 int OmniboxViewGtk::WidthOfTextAfterCursor() {
@@ -578,14 +573,16 @@ void OmniboxViewGtk::UpdatePopup() {
 
 void OmniboxViewGtk::OnTemporaryTextMaybeChanged(
     const string16& display_text,
-    bool save_original_selection) {
+    bool save_original_selection,
+    bool notify_text_changed) {
   if (save_original_selection)
     saved_temporary_selection_ = GetSelection();
 
   StartUpdatingHighlightedText();
   SetWindowTextAndCaretPos(display_text, display_text.length(), false, false);
   FinishUpdatingHighlightedText();
-  TextChanged();
+  if (notify_text_changed)
+    TextChanged();
 }
 
 bool OmniboxViewGtk::OnInlineAutocompleteTextMaybeChanged(
@@ -606,7 +603,6 @@ void OmniboxViewGtk::OnRevertTemporaryText() {
   StartUpdatingHighlightedText();
   SetSelectedRange(saved_temporary_selection_);
   FinishUpdatingHighlightedText();
-  TextChanged();
 }
 
 void OmniboxViewGtk::OnBeforePossibleChange() {
@@ -712,24 +708,14 @@ gfx::NativeView OmniboxViewGtk::GetRelativeWindowForPopup() const {
   return toplevel;
 }
 
-void OmniboxViewGtk::SetInstantSuggestion(const string16& suggestion,
-                                          bool animate_to_complete) {
+void OmniboxViewGtk::SetInstantSuggestion(const string16& suggestion) {
   std::string suggestion_utf8 = UTF16ToUTF8(suggestion);
 
   gtk_label_set_text(GTK_LABEL(instant_view_), suggestion_utf8.c_str());
 
-  StopAnimation();
-
   if (suggestion.empty()) {
     gtk_widget_hide(instant_view_);
     return;
-  }
-  bool animate = animate_to_complete;
-  if (supports_pre_edit_)
-    animate = animate && pre_edit_.empty();
-  if (animate) {
-    instant_animation_->set_delegate(this);
-    instant_animation_->Start();
   }
 
   gtk_widget_show(instant_view_);
@@ -762,7 +748,7 @@ int OmniboxViewGtk::TextWidth() const {
   GdkRectangle first_char_bounds, last_char_bounds;
   gtk_text_buffer_get_start_iter(text_buffer_, &start);
 
-  // Use the real end iterator here to take the width of instant suggestion
+  // Use the real end iterator here to take the width of Instant suggestion
   // text into account, so that location bar can layout its children correctly.
   gtk_text_buffer_get_end_iter(text_buffer_, &end);
   gtk_text_view_get_iter_location(GTK_TEXT_VIEW(text_view_),
@@ -797,18 +783,6 @@ void OmniboxViewGtk::Observe(int type,
   DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   SetBaseColor();
-}
-
-void OmniboxViewGtk::AnimationEnded(const ui::Animation* animation) {
-  model()->CommitSuggestedText(false);
-}
-
-void OmniboxViewGtk::AnimationProgressed(const ui::Animation* animation) {
-  UpdateInstantViewColors();
-}
-
-void OmniboxViewGtk::AnimationCanceled(const ui::Animation* animation) {
-  UpdateInstantViewColors();
 }
 
 void OmniboxViewGtk::SetBaseColor() {
@@ -875,50 +849,15 @@ void OmniboxViewGtk::SetBaseColor() {
 }
 
 void OmniboxViewGtk::UpdateInstantViewColors() {
-  SkColor selection_text, selection_bg;
-  GdkColor faded_text, normal_bg;
-
-  bool use_gtk = theme_service_->UsingNativeTheme();
-  if (use_gtk) {
+  GdkColor faded_text;
+  if (theme_service_->UsingNativeTheme()) {
     GtkStyle* style = gtk_rc_get_style(instant_view_);
-
     faded_text = gtk_util::AverageColors(
         style->text[GTK_STATE_NORMAL], style->base[GTK_STATE_NORMAL]);
-    normal_bg = style->base[GTK_STATE_NORMAL];
-
-    selection_text = gfx::GdkColorToSkColor(style->text[GTK_STATE_SELECTED]);
-    selection_bg = gfx::GdkColorToSkColor(style->base[GTK_STATE_SELECTED]);
   } else {
     gdk_color_parse(kTextBaseColor, &faded_text);
-
-    normal_bg = LocationBarViewGtk::kBackgroundColor;
-    selection_text =
-        theme_service_->get_active_selection_fg_color();
-    selection_bg =
-        theme_service_->get_active_selection_bg_color();
   }
-
-  double alpha = instant_animation_->is_animating() ?
-      instant_animation_->GetCurrentValue() : 0.0;
-  GdkColor text = gfx::SkColorToGdkColor(color_utils::AlphaBlend(
-      selection_text,
-      gfx::GdkColorToSkColor(faded_text),
-      alpha * 0xff));
-  GdkColor bg = gfx::SkColorToGdkColor(color_utils::AlphaBlend(
-      selection_bg,
-      gfx::GdkColorToSkColor(normal_bg),
-      alpha * 0xff));
-
-  if (alpha > 0.0) {
-    gtk_label_select_region(GTK_LABEL(instant_view_), 0, -1);
-    // ACTIVE is the state for text that is selected, but not focused.
-    gtk_widget_modify_text(instant_view_, GTK_STATE_ACTIVE, &text);
-    gtk_widget_modify_base(instant_view_, GTK_STATE_ACTIVE, &bg);
-  } else {
-    // When the text is unselected, fg is used for text color, the state
-    // is NORMAL, and the background is transparent.
-    gtk_widget_modify_fg(instant_view_, GTK_STATE_NORMAL, &text);
-  }
+  gtk_widget_modify_fg(instant_view_, GTK_STATE_NORMAL, &faded_text);
 }
 
 void OmniboxViewGtk::HandleBeginUserAction(GtkTextBuffer* sender) {
@@ -1293,7 +1232,7 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
   g_free(text);
 
   // Copy URL menu item.
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
+  if (chrome::search::IsQueryExtractionEnabled(browser_->profile())) {
     GtkWidget* copy_url_menuitem = gtk_menu_item_new_with_mnemonic(
         ui::ConvertAcceleratorsFromWindowsStyle(
             l10n_util::GetStringUTF8(IDS_COPY_URL)).c_str());
@@ -1353,8 +1292,6 @@ void OmniboxViewGtk::HandleMarkSet(GtkTextBuffer* buffer,
       mark != gtk_text_buffer_get_selection_bound(text_buffer_)) {
     return;
   }
-
-  StopAnimation();
 
   // If we are here, that means the user may be changing the selection
   selection_suggested_ = false;
@@ -1447,7 +1384,8 @@ void OmniboxViewGtk::HandleDragDataGet(GtkWidget* widget,
       break;
     }
     case ui::CHROME_NAMED_URL: {
-      WebContents* current_tab = chrome::GetActiveWebContents(browser_);
+      WebContents* current_tab =
+          browser_->tab_strip_model()->GetActiveWebContents();
       string16 tab_title = current_tab->GetTitle();
       // Pass an empty string if user has edited the URL.
       if (current_tab->GetURL().spec() != dragged_text_)
@@ -1510,24 +1448,24 @@ void OmniboxViewGtk::HandleInsertText(GtkTextBuffer* buffer,
   if (len == 1 && (text[0] == '\n' || text[0] == '\r'))
     enter_was_inserted_ = true;
 
-  for (const gchar* p = text; *p && (p - text) < len;
-       p = g_utf8_next_char(p)) {
-    gunichar c = g_utf8_get_char(p);
+  if (model()->is_pasting()) {
+    filtered_text = GetClipboardText();
+  } else {
+    for (const gchar* p = text; *p && (p - text) < len;
+         p = g_utf8_next_char(p)) {
+      gunichar c = g_utf8_get_char(p);
 
-    // 0x200B is Zero Width Space, which is inserted just before the instant
-    // anchor for working around the GtkTextView's misalignment bug.
-    // This character might be captured and inserted into the content by undo
-    // manager, so we need to filter it out here.
-    if (c != 0x200B)
-      base::WriteUnicodeCharacter(c, &filtered_text);
+      // 0x200B is Zero Width Space, which is inserted just before the Instant
+      // anchor for working around the GtkTextView's misalignment bug.
+      // This character might be captured and inserted into the content by undo
+      // manager, so we need to filter it out here.
+      if (c != 0x200B)
+        base::WriteUnicodeCharacter(c, &filtered_text);
+    }
   }
 
-  if (model()->is_pasting())
-    filtered_text = StripJavascriptSchemas(
-        CollapseWhitespace(filtered_text, true));
-
   if (!filtered_text.empty()) {
-    // Avoid inserting the text after the instant anchor.
+    // Avoid inserting the text after the Instant anchor.
     ValidateTextBufferIter(location);
 
     // Call the default handler to insert filtered text.
@@ -1641,10 +1579,12 @@ void OmniboxViewGtk::HandleCopyOrCutClipboard(bool copy) {
   model()->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
                             &url, &write_url);
 
-  // TODO(dominich): On other platforms we write |text| to the clipboard
-  // irregardless of |write_url|. Is this correct?
+  // On other platforms we write |text| to the clipboard irregardless of
+  // |write_url|.  We don't need to do that here because we fall through to
+  // the default signal handlers.
   if (write_url) {
     DoWriteToClipboard(url, text);
+    SetSelectedRange(selection);
 
     // Stop propagating the signal.
     static guint copy_signal_id =
@@ -1719,8 +1659,8 @@ void OmniboxViewGtk::EmphasizeURLComponents() {
 
   strikethrough_ = CharRange();
   // Emphasize the scheme for security UI display purposes (if necessary).
-  if (!model()->user_input_in_progress() && scheme.is_nonempty() &&
-      (security_level_ != ToolbarModel::NONE)) {
+  if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
+      scheme.is_nonempty() && (security_level_ != ToolbarModel::NONE)) {
     CharRange scheme_range = CharRange(GetUTF8Offset(text, scheme.begin),
                                        GetUTF8Offset(text, scheme.end()));
     ItersFromCharRange(scheme_range, &start, &end);
@@ -1943,13 +1883,6 @@ bool OmniboxViewGtk::IsCaretAtEnd() const {
       selection.cp_min == GetOmniboxTextLength();
 }
 
-void OmniboxViewGtk::StopAnimation() {
-  // Clear the animation delegate so we don't get an AnimationEnded() callback.
-  instant_animation_->set_delegate(NULL);
-  instant_animation_->Stop();
-  UpdateInstantViewColors();
-}
-
 void OmniboxViewGtk::SavePrimarySelection(const std::string& selected_text) {
   DCHECK(text_view_);
 
@@ -2046,8 +1979,8 @@ void OmniboxViewGtk::HandleKeymapDirectionChanged(GdkKeymap* sender) {
 void OmniboxViewGtk::HandleDeleteRange(GtkTextBuffer* buffer,
                                        GtkTextIter* start,
                                        GtkTextIter* end) {
-  // Prevent the user from deleting the instant anchor. We can't simply set the
-  // instant anchor readonly by applying a tag with "editable" = FALSE, because
+  // Prevent the user from deleting the Instant anchor. We can't simply set the
+  // Instant anchor readonly by applying a tag with "editable" = FALSE, because
   // it'll prevent the insert caret from blinking.
   ValidateTextBufferIter(start);
   ValidateTextBufferIter(end);
@@ -2070,7 +2003,7 @@ void OmniboxViewGtk::HandleMarkSetAlways(GtkTextBuffer* buffer,
   static guint signal_id = g_signal_lookup("mark-set", GTK_TYPE_TEXT_BUFFER);
 
   // "mark-set" signal is actually emitted after the mark's location is already
-  // set, so if the location is beyond the instant anchor, we need to move the
+  // set, so if the location is beyond the Instant anchor, we need to move the
   // mark again, which will emit the signal again. In order to prevent other
   // signal handlers from being called twice, we need to stop signal emission
   // before moving the mark again.

@@ -8,7 +8,9 @@
 #include "base/message_loop_proxy.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
+#include "webkit/plugins/ppapi/mock_platform_image_2d.h"
+#include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 namespace webkit {
@@ -66,13 +68,19 @@ SkBitmap* MockPluginDelegate::GetSadPluginBitmap() {
 }
 
 WebKit::WebPlugin* MockPluginDelegate::CreatePluginReplacement(
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   return NULL;
 }
 
 MockPluginDelegate::PlatformImage2D* MockPluginDelegate::CreateImage2D(
     int width,
     int height) {
+  return new MockPlatformImage2D(width, height);
+}
+
+PluginDelegate::PlatformGraphics2D* MockPluginDelegate::GetGraphics2D(
+    PluginInstance* instance,
+    PP_Resource graphics_2d) {
   return NULL;
 }
 
@@ -133,7 +141,7 @@ void MockPluginDelegate::NumberOfFindResultsChanged(int identifier,
 void MockPluginDelegate::SelectedFindResultChanged(int identifier, int index) {
 }
 
-bool MockPluginDelegate::AsyncOpenFile(const FilePath& path,
+bool MockPluginDelegate::AsyncOpenFile(const base::FilePath& path,
                                        int flags,
                                        const AsyncOpenFileCallback& callback) {
   return false;
@@ -175,6 +183,13 @@ bool MockPluginDelegate::Touch(
   return false;
 }
 
+bool MockPluginDelegate::SetLength(
+    const GURL& path,
+    int64_t length,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  return false;
+}
+
 bool MockPluginDelegate::Delete(
     const GURL& path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
@@ -205,52 +220,11 @@ void MockPluginDelegate::WillUpdateFile(const GURL& file_path) {
 void MockPluginDelegate::DidUpdateFile(const GURL& file_path, int64_t delta) {
 }
 
-base::PlatformFileError MockPluginDelegate::OpenFile(
-    const ::ppapi::PepperFilePath& path,
-    int flags,
-    base::PlatformFile* file) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::RenameFile(
-    const ::ppapi::PepperFilePath& from_path,
-    const ::ppapi::PepperFilePath& to_path) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::DeleteFileOrDir(
-    const ::ppapi::PepperFilePath& path,
-    bool recursive) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::CreateDir(
-    const ::ppapi::PepperFilePath& path) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::QueryFile(
-    const ::ppapi::PepperFilePath& path,
-    base::PlatformFileInfo* info) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::GetDirContents(
-    const ::ppapi::PepperFilePath& path,
-    ::ppapi::DirContents* contents) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-base::PlatformFileError MockPluginDelegate::CreateTemporaryFile(
-    base::PlatformFile* file) {
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
 void MockPluginDelegate::SyncGetFileSystemPlatformPath(
     const GURL& url,
-    FilePath* platform_path) {
+    base::FilePath* platform_path) {
   DCHECK(platform_path);
-  *platform_path = FilePath();
+  *platform_path = base::FilePath();
 }
 
 scoped_refptr<base::MessageLoopProxy>
@@ -290,39 +264,16 @@ void MockPluginDelegate::TCPSocketWrite(uint32 socket_id,
                                         const std::string& buffer) {
 }
 
+void MockPluginDelegate::TCPSocketSetBoolOption(uint32 socket_id,
+                                                PP_TCPSocketOption_Private name,
+                                                bool value) {
+}
+
 void MockPluginDelegate::TCPSocketDisconnect(uint32 socket_id) {
 }
 
 void MockPluginDelegate::RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
                                            uint32 socket_id) {
-}
-
-uint32 MockPluginDelegate::UDPSocketCreate() {
-  return 0;
-}
-
-void MockPluginDelegate::UDPSocketSetBoolSocketFeature(
-    PPB_UDPSocket_Private_Impl* socket,
-    uint32 socket_id,
-    int32_t name,
-    bool value) {
-}
-
-void MockPluginDelegate::UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
-                                       uint32 socket_id,
-                                       const PP_NetAddress_Private& addr) {
-}
-
-void MockPluginDelegate::UDPSocketRecvFrom(uint32 socket_id,
-                                           int32_t num_bytes) {
-}
-
-void MockPluginDelegate::UDPSocketSendTo(uint32 socket_id,
-                                         const std::string& buffer,
-                                         const PP_NetAddress_Private& addr) {
-}
-
-void MockPluginDelegate::UDPSocketClose(uint32 socket_id) {
 }
 
 void MockPluginDelegate::TCPServerSocketListen(
@@ -339,20 +290,6 @@ void MockPluginDelegate::TCPServerSocketStopListening(
     uint32 socket_id) {
 }
 
-void MockPluginDelegate::RegisterHostResolver(
-    ::ppapi::PPB_HostResolver_Shared* host_resolver,
-    uint32 host_resolver_id) {
-}
-
-void MockPluginDelegate::HostResolverResolve(
-    uint32 host_resolver_id,
-    const ::ppapi::HostPortPair& host_port,
-    const PP_HostResolver_Private_Hint* hint) {
-}
-
-void MockPluginDelegate::UnregisterHostResolver(uint32 host_resolver_id) {
-}
-
 bool MockPluginDelegate::AddNetworkListObserver(
     webkit_glue::NetworkListObserver* observer) {
   return false;
@@ -366,13 +303,6 @@ bool MockPluginDelegate::X509CertificateParseDER(
     const std::vector<char>& der,
     ::ppapi::PPB_X509Certificate_Fields* fields) {
   return false;
-}
-
-int32_t MockPluginDelegate::ShowContextMenu(
-    PluginInstance* instance,
-    webkit::ppapi::PPB_Flash_Menu_Impl* menu,
-    const gfx::Point& position) {
-  return PP_ERROR_FAILED;
 }
 
 FullscreenContainer* MockPluginDelegate::CreateFullscreenContainer(
@@ -392,10 +322,6 @@ void MockPluginDelegate::ZoomLimitsChanged(double minimum_factor,
                                            double maximum_factor) {
 }
 
-std::string MockPluginDelegate::ResolveProxy(const GURL& url) {
-  return std::string();
-}
-
 void MockPluginDelegate::DidStartLoading() {
 }
 
@@ -408,12 +334,8 @@ void MockPluginDelegate::SetContentRestriction(int restrictions) {
 void MockPluginDelegate::SaveURLAs(const GURL& url) {
 }
 
-double MockPluginDelegate::GetLocalTimeZoneOffset(base::Time t) {
-  return 0.0;
-}
-
 base::SharedMemory* MockPluginDelegate::CreateAnonymousSharedMemory(
-    uint32_t size) {
+    size_t size) {
   return NULL;
 }
 
@@ -458,21 +380,6 @@ int MockPluginDelegate::EnumerateDevices(
 }
 
 void MockPluginDelegate::StopEnumerateDevices(int request_id) {
-}
-
-webkit_glue::ClipboardClient*
-MockPluginDelegate::CreateClipboardClient() const {
-  return NULL;
-}
-
-std::string MockPluginDelegate::GetDeviceID() {
-  return std::string();
-}
-
-PP_FlashLSORestrictions MockPluginDelegate::GetLocalDataRestrictions(
-    const GURL& document_url,
-    const GURL& plugin_url) {
-  return PP_FLASHLSORESTRICTIONS_NONE;
 }
 
 }  // namespace ppapi

@@ -6,12 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
-#include "ui/aura/desktop/desktop_screen.h"
-#include "ui/aura/desktop/desktop_stacking_client.h"
-#include "ui/aura/display_manager.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_display_manager.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -25,19 +23,19 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
-#include "ui/views/test/test_views_delegate.h"
-#include "ui/views/views_switches.h"
-#include "ui/views/widget/desktop_native_widget_aura.h"
-#include "ui/views/widget/desktop_native_widget_helper_aura.h"
+#include "ui/views/test/desktop_test_views_delegate.h"
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "content/shell/minimal_ash.h"
+#include "ui/aura/test/test_screen.h"
 #endif
 
 // ViewDelegate implementation for aura content shell
-class ShellViewsDelegateAura : public views::TestViewsDelegate {
+class ShellViewsDelegateAura : public views::DesktopTestViewsDelegate {
  public:
   ShellViewsDelegateAura() : use_transparent_windows_(false) {
   }
@@ -53,10 +51,6 @@ class ShellViewsDelegateAura : public views::TestViewsDelegate {
   // Overridden from views::TestViewsDelegate:
   virtual bool UseTransparentWindows() const OVERRIDE {
     return use_transparent_windows_;
-  }
-  virtual views::NativeWidgetHelperAura* CreateNativeWidgetHelper(
-      views::NativeWidgetAura* native_widget) OVERRIDE {
-    return new views::DesktopNativeWidgetHelperAura(native_widget);
   }
 
  private:
@@ -94,21 +88,21 @@ class ShellWindowDelegateView : public WidgetDelegateView,
     contents_view_->SetLayoutManager(new FillLayout());
     web_view_ = new WebView(web_contents->GetBrowserContext());
     web_view_->SetWebContents(web_contents);
-    web_contents->Focus();
+    web_contents->GetView()->Focus();
     contents_view_->AddChildView(web_view_);
     Layout();
   }
   void SetWindowTitle(const string16& title) { title_ = title; }
   void EnableUIControl(UIControl control, bool is_enabled) {
     if (control == BACK_BUTTON) {
-      back_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      back_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     } else if (control == FORWARD_BUTTON) {
-      forward_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      forward_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     } else if (control == STOP_BUTTON) {
-      stop_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      stop_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     }
   }
 
@@ -197,7 +191,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
 
     layout->AddPaddingRow(0, 5);
   }
-  // Overriden from TextfieldController
+  // Overridden from TextfieldController
   virtual void ContentsChanged(Textfield* sender,
                                const string16& new_contents) OVERRIDE {
   }
@@ -216,7 +210,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
    return false;
   }
 
-  // Overriden from ButtonListener
+  // Overridden from ButtonListener
   virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE {
     if (sender == back_button_)
       shell_->GoBackOrForward(-1);
@@ -228,18 +222,21 @@ class ShellWindowDelegateView : public WidgetDelegateView,
       shell_->Stop();
   }
 
-  // Overriden from WidgetDelegateView
+  // Overridden from WidgetDelegateView
   virtual bool CanResize() const OVERRIDE { return true; }
   virtual bool CanMaximize() const OVERRIDE { return true; }
   virtual string16 GetWindowTitle() const OVERRIDE {
     return title_;
   }
   virtual void WindowClosing() OVERRIDE {
-    if (shell_) delete shell_;
+    if (shell_) {
+      delete shell_;
+      shell_ = NULL;
+    }
   }
   virtual View* GetContentsView() OVERRIDE { return this; }
 
-  // Overriden from View
+  // Overridden from View
   virtual void ViewHierarchyChanged(bool is_add,
                                     View* parent,
                                     View* child) OVERRIDE {
@@ -276,28 +273,35 @@ using views::ShellWindowDelegateView;
 
 namespace content {
 
-aura::client::StackingClient* Shell::stacking_client_ = NULL;
+#if defined(OS_CHROMEOS)
+MinimalAsh* Shell::minimal_ash_ = NULL;
+#endif
 views::ViewsDelegate* Shell::views_delegate_ = NULL;
 
 // static
-void Shell::PlatformInitialize() {
+void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 #if defined(OS_CHROMEOS)
   chromeos::DBusThreadManager::Initialize();
+  gfx::Screen::SetScreenInstance(
+      gfx::SCREEN_TYPE_NATIVE, aura::TestScreen::Create());
+  minimal_ash_ = new content::MinimalAsh(default_window_size);
+#else
+  gfx::Screen::SetScreenInstance(
+      gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
 #endif
-  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
-  stacking_client_ = new aura::DesktopStackingClient();
-  gfx::Screen::SetInstance(aura::CreateDesktopScreen());
   views_delegate_ = new ShellViewsDelegateAura();
 }
 
 void Shell::PlatformExit() {
 #if defined(OS_CHROMEOS)
-  chromeos::DBusThreadManager::Shutdown();
+  if (minimal_ash_)
+    delete minimal_ash_;
 #endif
-  if (stacking_client_)
-    delete stacking_client_;
   if (views_delegate_)
     delete views_delegate_;
+#if defined(OS_CHROMEOS)
+  chromeos::DBusThreadManager::Shutdown();
+#endif
   aura::Env::DeleteInstance();
 }
 
@@ -329,10 +333,22 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
+#if defined(OS_CHROMEOS)
+  window_widget_ =
+      views::Widget::CreateWindowWithContextAndBounds(
+          new ShellWindowDelegateView(this),
+          minimal_ash_->GetDefaultParent(NULL, NULL, gfx::Rect()),
+          gfx::Rect(0, 0, width, height));
+#else
   window_widget_ =
       views::Widget::CreateWindowWithBounds(new ShellWindowDelegateView(this),
                gfx::Rect(0, 0, width, height));
+#endif
+
   window_ = window_widget_->GetNativeWindow();
+  // Call ShowRootWindow on RootWindow created by MinimalAsh without
+  // which XWindow owned by RootWindow doesn't get mapped.
+  window_->GetRootWindow()->ShowRootWindow();
   window_widget_->Show();
 }
 

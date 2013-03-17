@@ -8,6 +8,7 @@
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 
+#include "base/atomicops.h"
 #include "base/basictypes.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
@@ -75,7 +76,6 @@ inline WAVEHDR* PCMWaveOutAudioOutputStream::GetBuffer(int n) const {
   DCHECK_LT(n, num_buffers_);
   return reinterpret_cast<WAVEHDR*>(&buffers_[n * BufferSize()]);
 }
-
 
 PCMWaveOutAudioOutputStream::PCMWaveOutAudioOutputStream(
     AudioManagerWin* manager, const AudioParameters& params, int num_buffers,
@@ -216,7 +216,7 @@ void PCMWaveOutAudioOutputStream::Start(AudioSourceCallback* callback) {
   // From now on |pending_bytes_| would be accessed by callback thread.
   // Most likely waveOutPause() or waveOutRestart() has its own memory barrier,
   // but issuing our own is safer.
-  MemoryBarrier();
+  base::subtle::MemoryBarrier();
 
   MMRESULT result = ::waveOutPause(waveout_);
   if (result != MMSYSERR_NOERROR) {
@@ -251,7 +251,7 @@ void PCMWaveOutAudioOutputStream::Stop() {
   if (state_ != PCMA_PLAYING)
     return;
   state_ = PCMA_STOPPING;
-  MemoryBarrier();
+  base::subtle::MemoryBarrier();
 
   // Stop watching for buffer event, wait till all the callbacks are complete.
   // Should be done before ::waveOutReset() call to avoid race condition when
@@ -278,6 +278,9 @@ void PCMWaveOutAudioOutputStream::Stop() {
     return;
   }
 
+  // Wait for lock to ensure all outstanding callbacks have completed.
+  base::AutoLock auto_lock(lock_);
+
   // waveOutReset() leaves buffers in the unpredictable state, causing
   // problems if we want to close, release, or reuse them. Fix the states.
   for (int ix = 0; ix != num_buffers_; ++ix) {
@@ -295,20 +298,22 @@ void PCMWaveOutAudioOutputStream::Stop() {
 // as callback_ is set to NULL. Just print it and hope somebody somehow
 // will find it...
 void PCMWaveOutAudioOutputStream::Close() {
-  Stop();  // Just to be sure. No-op if not playing.
+  // Force Stop() to ensure it's safe to release buffers and free the stream.
+  Stop();
+
   if (waveout_) {
-    MMRESULT result = ::waveOutClose(waveout_);
-    // If ::waveOutClose() fails we cannot just delete the stream, callback
-    // may try to access it and would crash. Better to leak the stream.
-    if (result != MMSYSERR_NOERROR) {
-      HandleError(result);
-      state_ = PCMA_PLAYING;
-      return;
-    }
+    FreeBuffers();
+
+    // waveOutClose() generates a WIM_CLOSE callback.  In case Start() was never
+    // called, force a reset to ensure close succeeds.
+    MMRESULT res = ::waveOutReset(waveout_);
+    DCHECK_EQ(res, static_cast<MMRESULT>(MMSYSERR_NOERROR));
+    res = ::waveOutClose(waveout_);
+    DCHECK_EQ(res, static_cast<MMRESULT>(MMSYSERR_NOERROR));
     state_ = PCMA_CLOSED;
     waveout_ = NULL;
-    FreeBuffers();
   }
+
   // Tell the audio manager that we have been released. This can result in
   // the manager destroying us in-place so this needs to be the last thing
   // we do on this function.
@@ -334,16 +339,21 @@ void PCMWaveOutAudioOutputStream::HandleError(MMRESULT error) {
 }
 
 void PCMWaveOutAudioOutputStream::QueueNextPacket(WAVEHDR *buffer) {
+  DCHECK_EQ(channels_, format_.Format.nChannels);
   // Call the source which will fill our buffer with pleasant sounds and
   // return to us how many bytes were used.
-  // If we are down sampling to a smaller number of channels, we need to
-  // scale up the amount of pending bytes.
   // TODO(fbarchard): Handle used 0 by queueing more.
-  uint32 scaled_pending_bytes = pending_bytes_ * channels_ /
-                                format_.Format.nChannels;
+
+  // HACK: Yield if Read() is called too often.  On older platforms which are
+  // still using the WaveOut backend, we run into synchronization issues where
+  // the renderer has not finished filling the shared memory when Read() is
+  // called.  Reading too early will lead to clicks and pops.  See issues:
+  // http://crbug.com/161307 and http://crbug.com/61022
+  callback_->WaitTillDataReady();
+
   // TODO(sergeyu): Specify correct hardware delay for AudioBuffersState.
   int frames_filled = callback_->OnMoreData(
-      audio_bus_.get(), AudioBuffersState(scaled_pending_bytes, 0));
+      audio_bus_.get(), AudioBuffersState(pending_bytes_, 0));
   uint32 used = frames_filled * audio_bus_->channels() *
       format_.Format.wBitsPerSample / 8;
 
@@ -354,16 +364,10 @@ void PCMWaveOutAudioOutputStream::QueueNextPacket(WAVEHDR *buffer) {
         frames_filled, format_.Format.wBitsPerSample / 8, buffer->lpData);
 
     buffer->dwBufferLength = used * format_.Format.nChannels / channels_;
-    if (channels_ > 2 && format_.Format.nChannels == 2) {
-      media::FoldChannels(buffer->lpData, used,
-                          channels_, format_.Format.wBitsPerSample >> 3,
-                          volume_);
-    } else {
-      media::AdjustVolume(buffer->lpData, used,
-                          format_.Format.nChannels,
-                          format_.Format.wBitsPerSample >> 3,
-                          volume_);
-    }
+    media::AdjustVolume(buffer->lpData, used,
+                        format_.Format.nChannels,
+                        format_.Format.wBitsPerSample >> 3,
+                        volume_);
   } else {
     HandleError(0);
     return;

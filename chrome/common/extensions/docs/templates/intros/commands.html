@@ -1,30 +1,37 @@
-<p>
-The commands API allows you to add keyboard shortcuts that trigger actions in
-your extension. An action can be opening the browser action or page action popup
-or sending a command to the extension.
-</p>
+<table class="intro">
+  <tr>
+    <th scope="col"></th>
+    <th scope="col"></th>
+  </tr>
+  <tr>
+    <td><strong>Description:</strong></td>
+    <td>Use the commands API to add keyboard shortcuts
+    that trigger actions in your extension,
+    for example, an action to open the browser action
+    or send a command to the extension.</td>
+  </tr>
+  <tr>
+    <td><strong>Availability:</strong></td>
+    <td>On target to be stable in Chrome 25</td>
+  </tr>
+  <tr>
+    <td><strong>Permissions:</strong></td>
+    <td>None</td>
+  </tr>
+</table>
 
 <h2 id="manifest">Manifest</h2>
 <p>
-You must declare the "commands" permission in your extension's manifest to use
-this API and set manifest_version to (at least) 2.
+You must set manifest_version to (at least) 2 to use this API.
 </p>
-
-<pre>{
-  "name": "My extension",
-  ...
-<b>  "permissions": [
-    "commands",
-  ]</b>,
-  ...
-}</pre>
 
 <h2 id="usage">Usage</h2>
 <p>The commands API allows you to define specific commands, and bind them to a
 default key combination. Each command your extension accepts must be listed in
 the manifest as an attribute of the 'commands' manifest key. Note: Combinations
 that involve Ctrl+Alt are not permitted in order to avoid conflicts with the
-AltGr key.</p>
+AltGr key. Also note that on Mac 'Ctrl' is automatically converted to 'Command'.
+If you want 'Ctrl' instead, please specify 'MacCtrl'.</p>
 
 <pre>{
   "name": "My extension",

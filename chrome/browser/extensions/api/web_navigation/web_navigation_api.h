@@ -12,8 +12,9 @@
 #include <set>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/common/web_contents_user_data.h"
+#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/api/web_navigation/frame_navigation_state.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "googleurl/src/gurl.h"
 
 struct RetargetingDetails;
@@ -31,11 +33,11 @@ namespace extensions {
 class WebNavigationTabObserver
     : public content::NotificationObserver,
       public content::WebContentsObserver,
-      public WebContentsUserData<WebNavigationTabObserver> {
+      public content::WebContentsUserData<WebNavigationTabObserver> {
  public:
   virtual ~WebNavigationTabObserver();
 
-  // Returns the object for the given |tab_contents|.
+  // Returns the object for the given |web_contents|.
   static WebNavigationTabObserver* Get(content::WebContents* web_contents);
 
   const FrameNavigationState& frame_navigation_state() const {
@@ -55,9 +57,11 @@ class WebNavigationTabObserver
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_num,
+      int64 parent_frame_num,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_num,
@@ -93,11 +97,13 @@ class WebNavigationTabObserver
                                    WindowOpenDisposition disposition,
                                    content::PageTransition transition,
                                    int64 source_frame_num) OVERRIDE;
+  virtual void FrameDetached(content::RenderViewHost* render_view_host,
+                             int64 frame_num) OVERRIDE;
   virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
 
  private:
   explicit WebNavigationTabObserver(content::WebContents* web_contents);
-  friend class WebContentsUserData<WebNavigationTabObserver>;
+  friend class content::WebContentsUserData<WebNavigationTabObserver>;
 
   // True if the transition and target url correspond to a reference fragment
   // navigation.
@@ -137,10 +143,6 @@ class WebNavigationEventRouter : public TabStripModelObserver,
   explicit WebNavigationEventRouter(Profile* profile);
   virtual ~WebNavigationEventRouter();
 
-  // Invoked by the extensions service once the extension system is fully set
-  // up and can start dispatching events to extensions.
-  void Init();
-
  private:
   // Used to cache the information about newly created WebContents objects.
   struct PendingWebContents{
@@ -161,8 +163,8 @@ class WebNavigationEventRouter : public TabStripModelObserver,
 
   // TabStripModelObserver implementation.
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContents* old_contents,
-                             TabContents* new_contents,
+                             content::WebContents* old_contents,
+                             content::WebContents* new_contents,
                              int index) OVERRIDE;
 
   // chrome::BrowserListObserver implementation.
@@ -201,17 +203,51 @@ class WebNavigationEventRouter : public TabStripModelObserver,
 };
 
 // API function that returns the state of a given frame.
-class GetFrameFunction : public SyncExtensionFunction {
-  virtual ~GetFrameFunction() {}
+class WebNavigationGetFrameFunction : public SyncExtensionFunction {
+  virtual ~WebNavigationGetFrameFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("webNavigation.getFrame")
+  DECLARE_EXTENSION_FUNCTION("webNavigation.getFrame", WEBNAVIGATION_GETFRAME)
 };
 
 // API function that returns the states of all frames in a given tab.
-class GetAllFramesFunction : public SyncExtensionFunction {
-  virtual ~GetAllFramesFunction() {}
+class WebNavigationGetAllFramesFunction : public SyncExtensionFunction {
+  virtual ~WebNavigationGetAllFramesFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("webNavigation.getAllFrames")
+  DECLARE_EXTENSION_FUNCTION("webNavigation.getAllFrames",
+                             WEBNAVIGATION_GETALLFRAMES)
+};
+
+class WebNavigationAPI : public ProfileKeyedAPI,
+                         public extensions::EventRouter::Observer {
+ public:
+  explicit WebNavigationAPI(Profile* profile);
+  virtual ~WebNavigationAPI();
+
+  // ProfileKeyedService implementation.
+  virtual void Shutdown() OVERRIDE;
+
+  // ProfileKeyedAPI implementation.
+  static ProfileKeyedAPIFactory<WebNavigationAPI>* GetFactoryInstance();
+
+  // EventRouter::Observer implementation.
+  virtual void OnListenerAdded(const extensions::EventListenerInfo& details)
+      OVERRIDE;
+
+ private:
+  friend class ProfileKeyedAPIFactory<WebNavigationAPI>;
+
+  Profile* profile_;
+
+  // ProfileKeyedAPI implementation.
+  static const char* service_name() {
+    return "WebNavigationAPI";
+  }
+  static const bool kServiceIsNULLWhileTesting = true;
+
+  // Created lazily upon OnListenerAdded.
+  scoped_ptr<WebNavigationEventRouter> web_navigation_event_router_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebNavigationAPI);
 };
 
 }  // namespace extensions

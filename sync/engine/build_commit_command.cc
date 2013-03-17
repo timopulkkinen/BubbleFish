@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,13 @@
 #include "sync/syncable/mutable_entry.h"
 #include "sync/syncable/syncable_changes_version.h"
 #include "sync/syncable/syncable_proto_util.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 #include "sync/util/time.h"
+
+// TODO(vishwath): Remove this include after node positions have
+// shifted to completely using Ordinals.
+// See http://crbug.com/145412 .
+#include "sync/internal_api/public/base/node_ordinal.h"
 
 using std::set;
 using std::string;
@@ -31,7 +36,7 @@ namespace syncer {
 using sessions::SyncSession;
 using syncable::Entry;
 using syncable::IS_DEL;
-using syncable::SERVER_POSITION_IN_PARENT;
+using syncable::SERVER_ORDINAL_IN_PARENT;
 using syncable::IS_UNAPPLIED_UPDATE;
 using syncable::IS_UNSYNCED;
 using syncable::Id;
@@ -92,6 +97,19 @@ void BuildCommitCommand::AddExtensionsActivityToMessage(
   }
 }
 
+void BuildCommitCommand::AddClientConfigParamsToMessage(
+    SyncSession* session, sync_pb::CommitMessage* message) {
+  const ModelSafeRoutingInfo& routing_info = session->context()->routing_info();
+  sync_pb::ClientConfigParams* config_params = message->mutable_config_params();
+  for (std::map<ModelType, ModelSafeGroup>::const_iterator iter =
+          routing_info.begin(); iter != routing_info.end(); ++iter) {
+    if (ProxyTypes().Has(iter->first))
+      continue;
+    int field_number = GetSpecificsFieldNumberFromModelType(iter->first);
+    config_params->mutable_enabled_type_ids()->Add(field_number);
+  }
+}
+
 namespace {
 void SetEntrySpecifics(MutableEntry* meta_entry,
                        sync_pb::SyncEntity* sync_entry) {
@@ -111,6 +129,7 @@ SyncerError BuildCommitCommand::ExecuteImpl(SyncSession* session) {
   commit_message->set_cache_guid(
       session->write_transaction()->directory()->cache_guid());
   AddExtensionsActivityToMessage(session, commit_message);
+  AddClientConfigParamsToMessage(session, commit_message);
 
   // Cache previously computed position values.  Because |commit_ids|
   // is already in sibling order, we should always hit this map after
@@ -128,7 +147,9 @@ SyncerError BuildCommitCommand::ExecuteImpl(SyncSession* session) {
                             syncable::GET_BY_ID, id);
     CHECK(meta_entry.good());
 
-    DCHECK(0 != session->routing_info().count(meta_entry.GetModelType()))
+    DCHECK_NE(0UL,
+              session->context()->routing_info().count(
+                  meta_entry.GetModelType()))
         << "Committing change to datatype that's not actively enabled.";
 
     string name = meta_entry.Get(syncable::NON_UNIQUE_NAME);
@@ -192,7 +213,7 @@ SyncerError BuildCommitCommand::ExecuteImpl(SyncSession* session) {
     } else {
       if (meta_entry.Get(SPECIFICS).has_bookmark()) {
         // Common data in both new and old protocol.
-        const Id& prev_id = meta_entry.Get(syncable::PREV_ID);
+        const Id& prev_id = meta_entry.GetPredecessorId();
         string prev_id_string =
             prev_id.IsRoot() ? string() : prev_id.GetServerId();
         sync_entry->set_insert_after_item_id(prev_id_string);
@@ -231,7 +252,7 @@ int64 BuildCommitCommand::FindAnchorPosition(syncable::IdField direction,
                      syncable::GET_BY_ID,
                      next_id);
     if (!next_entry.Get(IS_UNSYNCED) && !next_entry.Get(IS_UNAPPLIED_UPDATE)) {
-      return next_entry.Get(SERVER_POSITION_IN_PARENT);
+      return NodeOrdinalToInt64(next_entry.Get(SERVER_ORDINAL_IN_PARENT));
     }
     next_id = next_entry.Get(direction);
   }

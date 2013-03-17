@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
+#include "content/common/drag_event_source_info.h"
 #include "content/public/common/context_menu_source_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 
@@ -18,8 +19,8 @@ struct WebMenuItem;
 
 namespace gfx {
 class ImageSkia;
-class Point;
 class Rect;
+class Vector2d;
 }
 
 namespace content {
@@ -53,7 +54,8 @@ class CONTENT_EXPORT RenderViewHostDelegateView {
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
                              const gfx::ImageSkia& image,
-                             const gfx::Point& image_offset) {}
+                             const gfx::Vector2d& image_offset,
+                             const DragEventSourceInfo& event_info) {}
 
   // The page wants to update the mouse cursor during a drag & drop operation.
   // |operation| describes the current operation (none, move, copy, link.)
@@ -66,12 +68,6 @@ class CONTENT_EXPORT RenderViewHostDelegateView {
   // the browser's chrome. If reverse is true, it means the focus was
   // retrieved by doing a Shift-Tab.
   virtual void TakeFocus(bool reverse) {}
-
-#if defined(OS_ANDROID)
-  // Called when an unhandled touch event is sent back from the renderer.
-  // TODO(joth): This should be pure virtual.
-  virtual void ConfirmTouchEvent(bool handled) {}
-#endif
 
  protected:
   virtual ~RenderViewHostDelegateView() {}

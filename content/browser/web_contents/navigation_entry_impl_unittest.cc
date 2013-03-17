@@ -21,7 +21,9 @@ class NavigationEntryTest : public testing::Test {
   virtual void SetUp() {
     entry1_.reset(new NavigationEntryImpl);
 
+#if !defined(OS_IOS)
     instance_ = static_cast<SiteInstanceImpl*>(SiteInstance::Create(NULL));
+#endif
     entry2_.reset(new NavigationEntryImpl(
           instance_, 3,
           GURL("test:url"),
@@ -172,8 +174,10 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   // Restored
   EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry1_->restore_type());
   EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry2_->restore_type());
-  entry2_->set_restore_type(NavigationEntryImpl::RESTORE_LAST_SESSION);
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_LAST_SESSION, entry2_->restore_type());
+  entry2_->set_restore_type(
+      NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY);
+  EXPECT_EQ(NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY,
+            entry2_->restore_type());
 
   // Original URL
   EXPECT_EQ(GURL(), entry1_->GetOriginalRequestURL());
@@ -199,6 +203,10 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   entry2_->SetBrowserInitiatedPostData(post_data.get());
   EXPECT_EQ(post_data->front(),
       entry2_->GetBrowserInitiatedPostData()->front());
+
+ // Frame to navigate.
+  EXPECT_TRUE(entry1_->GetFrameToNavigate().empty());
+  EXPECT_TRUE(entry2_->GetFrameToNavigate().empty());
 }
 
 // Test timestamps.
@@ -207,6 +215,27 @@ TEST_F(NavigationEntryTest, NavigationEntryTimestamps) {
   const base::Time now = base::Time::Now();
   entry1_->SetTimestamp(now);
   EXPECT_EQ(now, entry1_->GetTimestamp());
+}
+
+// Test extra data stored in the navigation entry.
+TEST_F(NavigationEntryTest, NavigationEntryExtraData) {
+  string16 test_data = ASCIIToUTF16("my search terms");
+  string16 output;
+  entry1_->SetExtraData("search_terms", test_data);
+
+  EXPECT_FALSE(entry1_->GetExtraData("non_existent_key", &output));
+  EXPECT_EQ(ASCIIToUTF16(""), output);
+  EXPECT_TRUE(entry1_->GetExtraData("search_terms", &output));
+  EXPECT_EQ(test_data, output);
+  // Data is cleared.
+  entry1_->ClearExtraData("search_terms");
+  // Content in |output| is not modified if data is not present at the key.
+  EXPECT_FALSE(entry1_->GetExtraData("search_terms", &output));
+  EXPECT_EQ(test_data, output);
+  // Using an empty string shows that the data is not present in the map.
+  string16 output2;
+  EXPECT_FALSE(entry1_->GetExtraData("search_terms", &output2));
+  EXPECT_EQ(ASCIIToUTF16(""), output2);
 }
 
 }  // namespace content

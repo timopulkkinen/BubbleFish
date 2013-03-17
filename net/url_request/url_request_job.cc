@@ -39,7 +39,7 @@ URLRequestJob::URLRequestJob(URLRequest* request,
     base::SystemMonitor::Get()->AddPowerObserver(this);
 }
 
-void URLRequestJob::SetUpload(UploadData* upload) {
+void URLRequestJob::SetUpload(UploadDataStream* upload) {
 }
 
 void URLRequestJob::SetExtraRequestHeaders(const HttpRequestHeaders& headers) {
@@ -117,6 +117,10 @@ bool URLRequestJob::GetCharset(std::string* charset) {
 void URLRequestJob::GetResponseInfo(HttpResponseInfo* info) {
 }
 
+void URLRequestJob::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
+  // Only certain request types return more than just request start times.
+}
+
 bool URLRequestJob::GetResponseCookies(std::vector<std::string>* cookies) {
   return false;
 }
@@ -190,6 +194,8 @@ void URLRequestJob::FollowDeferredRedirect() {
 
   // It is also possible that FollowRedirect will drop the last reference to
   // this job, so we need to reset our members before calling it.
+
+  SetUnblockedOnDelegate();
 
   GURL redirect_url = deferred_redirect_url_;
   int redirect_status_code = deferred_redirect_status_code_;
@@ -278,6 +284,9 @@ void URLRequestJob::NotifyHeadersComplete() {
   // survival until we can get out of this method.
   scoped_refptr<URLRequestJob> self_preservation(this);
 
+  if (request_)
+    request_->OnHeadersComplete();
+
   GURL new_location;
   int http_status_code;
   if (IsRedirectResponse(&new_location, &http_status_code)) {
@@ -307,6 +316,7 @@ void URLRequestJob::NotifyHeadersComplete() {
       if (defer_redirect) {
         deferred_redirect_url_ = new_location;
         deferred_redirect_status_code_ = http_status_code;
+        SetBlockedOnDelegate();
       } else {
         FollowRedirect(new_location, http_status_code);
       }

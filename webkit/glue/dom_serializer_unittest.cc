@@ -3,15 +3,18 @@
 // found in the LICENSE file.
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -20,12 +23,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeList.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/dom_operations.h"
-#include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
@@ -84,9 +84,9 @@ class DomSerializerTests : public TestShellTest,
     : local_directory_name_(FILE_PATH_LITERAL("./dummy_files/")) { }
 
   // DomSerializerDelegate.
-  void didSerializeDataForFrame(const WebURL& frame_web_url,
-                                const WebCString& data,
-                                PageSerializationStatus status) {
+  virtual void didSerializeDataForFrame(const WebURL& frame_web_url,
+                                        const WebCString& data,
+                                        PageSerializationStatus status) {
 
     GURL frame_url(frame_web_url);
     // If the all frames are finished saving, check all finish status
@@ -175,7 +175,7 @@ class DomSerializerTests : public TestShellTest,
     // Add input file URl to links_.
     links_.assign(&page_url,1);
     // Add dummy file path to local_path_.
-    WebString file_path = webkit_glue::FilePathStringToWebString(
+    WebString file_path = webkit_base::FilePathStringToWebString(
         FILE_PATH_LITERAL("c:\\dummy.htm"));
     local_paths_.assign(&file_path, 1);
     // Start serializing DOM.
@@ -184,7 +184,7 @@ class DomSerializerTests : public TestShellTest,
        static_cast<WebPageSerializerClient*>(this),
        links_,
        local_paths_,
-       webkit_glue::FilePathToWebString(local_directory_name_));
+       webkit_base::FilePathToWebString(local_directory_name_));
     ASSERT_TRUE(result);
     ASSERT_TRUE(serialized_);
   }
@@ -205,7 +205,7 @@ class DomSerializerTests : public TestShellTest,
   WebVector<WebString> local_paths_;
   // The local_directory_name_ is dummy relative path of directory which
   // contain all saved auxiliary files included all sub frames and resources.
-  const FilePath local_directory_name_;
+  const base::FilePath local_directory_name_;
 
  protected:
   // testing::Test
@@ -283,7 +283,7 @@ bool IsMetaElement(const WebNode& node, std::string& charset_info) {
 // If original contents have document type, the serialized contents also have
 // document type.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithDocType) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_1.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -312,7 +312,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithDocType) {
 // If original contents do not have document type, the serialized contents
 // also do not have document type.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithoutDocType) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -342,7 +342,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithoutDocType) {
 // finishing serialization, the serialized contents should be same
 // with original XML document.
 TEST_F(DomSerializerTests, SerializeXMLDocWithBuiltInEntities) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("note.xml");
   // Read original contents for later comparison.
@@ -364,7 +364,7 @@ TEST_F(DomSerializerTests, SerializeXMLDocWithBuiltInEntities) {
 
 // When serializing DOM, we add MOTW declaration before html tag.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithAddingMOTW) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   // Read original contents for later comparison .
@@ -398,7 +398,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithAddingMOTW) {
 // http://bugs.webkit.org/show_bug.cgi?id=16621 even the original document
 // does not have META charset declaration.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_1.htm");
   // Get file URL.
@@ -462,7 +462,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
 // declarations.
 TEST_F(DomSerializerTests,
        SerializeHTMLDOMWithMultipleMetaCharsetInOriginalDoc) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
   // Get file URL.
@@ -527,7 +527,7 @@ TEST_F(DomSerializerTests,
 
 // Test situation of html entities in text when serializing HTML DOM.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInText) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII(
       "dom_serializer/htmlentities_in_text.htm");
   // Get file URL. The URL is dummy URL to identify the following loading
@@ -587,7 +587,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInText) {
 // HTML DOM.
 // This test started to fail at WebKit r65388. See http://crbug.com/52279.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInAttributeValue) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII(
       "dom_serializer/htmlentities_in_attribute_value.htm");
   // Get file URL. The URL is dummy URL to identify the following loading
@@ -638,7 +638,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInAttributeValue) {
 // This test started to fail at WebKit r65351. See http://crbug.com/52279.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithNonStandardEntities) {
   // Make a test file URL and load it.
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("nonstandard_htmlentities.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -678,7 +678,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithBaseTag) {
   // There are total 2 available base tags in this test file.
   const int kTotalBaseTagCountInTestFile = 2;
 
-  FilePath page_file_path = data_dir_.AppendASCII("dom_serializer");
+  base::FilePath page_file_path = data_dir_.AppendASCII("dom_serializer");
   file_util::EnsureEndsWithSeparator(&page_file_path);
 
   // Get page dir URL which is base URL of this file.
@@ -782,7 +782,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithBaseTag) {
 
 // Serializing page which has an empty HEAD tag.
 TEST_F(DomSerializerTests, SerializeHTMLDOMWithEmptyHead) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("empty_head.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -842,7 +842,7 @@ TEST_F(DomSerializerTests, SerializeHTMLDOMWithEmptyHead) {
 // Test that we don't crash when the page contains an iframe that
 // was handled as a download (http://crbug.com/42212).
 TEST_F(DomSerializerTests, SerializeDocumentWithDownloadedIFrame) {
-  FilePath page_file_path = data_dir_;
+  base::FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("iframe-src-is-exe.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -851,6 +851,22 @@ TEST_F(DomSerializerTests, SerializeDocumentWithDownloadedIFrame) {
   LoadPageFromURL(file_url);
   // Do a recursive serialization. We pass if we don't crash.
   SerializeDomForURL(file_url, true);
+}
+
+TEST_F(DomSerializerTests, SubResourceForElementsInNonHTMLNamespace) {
+  base::FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("non_html_namespace.htm");
+  GURL file_url = net::FilePathToFileURL(page_file_path);
+  LoadPageFromURL(file_url);
+  WebFrame* web_frame = FindSubFrameByURL(test_shell_->webView(), file_url);
+  ASSERT_TRUE(web_frame != NULL);
+  WebDocument doc = web_frame->document();
+  WebNode lastNodeInBody = doc.body().lastChild();
+  ASSERT_EQ(WebNode::ElementNode, lastNodeInBody.nodeType());
+  WebString uri = webkit_glue::GetSubResourceLinkFromElement(
+      lastNodeInBody.to<WebElement>());
+  EXPECT_TRUE(uri.isNull());
 }
 
 }  // namespace

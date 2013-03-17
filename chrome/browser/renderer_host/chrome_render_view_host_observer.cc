@@ -6,11 +6,14 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -18,11 +21,17 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
+#include "extensions/common/constants.h"
+
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#endif  // OS_WIN
 
 using content::ChildProcessSecurityPolicy;
 using content::RenderViewHost;
 using content::SiteInstance;
 using extensions::Extension;
+using extensions::Manifest;
 
 ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
     RenderViewHost* render_view_host, chrome_browser_net::Predictor* predictor)
@@ -32,7 +41,6 @@ ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
   profile_ = Profile::FromBrowserContext(
       site_instance->GetBrowserContext());
 
-  InitRenderViewHostForExtensions();
   InitRenderViewForExtensions();
 }
 
@@ -65,24 +73,11 @@ bool ChromeRenderViewHostObserver::OnMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewHostObserver, message)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FocusedEditableNodeTouched,
-                        OnFocusedEditableNodeTouched)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FocusedNodeTouched,
+                        OnFocusedNodeTouched)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void ChromeRenderViewHostObserver::InitRenderViewHostForExtensions() {
-  const Extension* extension = GetExtension();
-  if (!extension)
-    return;
-
-  ExtensionProcessManager* process_manager =
-      profile_->GetExtensionProcessManager();
-  CHECK(process_manager);
-
-  // TODO(creis): Use this to replace SetInstalledAppForRenderer.
-  process_manager->RegisterRenderViewHost(render_view_host(), extension);
 }
 
 void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
@@ -92,35 +87,26 @@ void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
 
   content::RenderProcessHost* process = render_view_host()->GetProcess();
 
-  if (extension->is_app()) {
-    // Though we already record the associated process ID for the renderer in
-    // InitRenderViewHostForExtensions, the process might have crashed and been
-    // restarted (hence the re-initialization), so we need to update that
-    // mapping.
-    profile_->GetExtensionService()->SetInstalledAppForRenderer(
-        process->GetID(), extension);
-  }
-
   // Some extensions use chrome:// URLs.
-  Extension::Type type = extension->GetType();
-  if (type == Extension::TYPE_EXTENSION ||
-      type == Extension::TYPE_LEGACY_PACKAGED_APP) {
+  Manifest::Type type = extension->GetType();
+  if (type == Manifest::TYPE_EXTENSION ||
+      type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
     ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
         process->GetID(), chrome::kChromeUIScheme);
 
-    if (profile_->GetExtensionService()->extension_prefs()->AllowFileAccess(
-          extension->id())) {
+    if (extensions::ExtensionSystem::Get(profile_)->extension_service()->
+            extension_prefs()->AllowFileAccess(extension->id())) {
       ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
           process->GetID(), chrome::kFileScheme);
     }
   }
 
   switch (type) {
-    case Extension::TYPE_EXTENSION:
-    case Extension::TYPE_USER_SCRIPT:
-    case Extension::TYPE_HOSTED_APP:
-    case Extension::TYPE_LEGACY_PACKAGED_APP:
-    case Extension::TYPE_PLATFORM_APP:
+    case Manifest::TYPE_EXTENSION:
+    case Manifest::TYPE_USER_SCRIPT:
+    case Manifest::TYPE_HOSTED_APP:
+    case Manifest::TYPE_LEGACY_PACKAGED_APP:
+    case Manifest::TYPE_PLATFORM_APP:
       // Always send a Loaded message before ActivateExtension so that
       // ExtensionDispatcher knows what Extension is active, not just its ID.
       // This is important for classifying the Extension's JavaScript context
@@ -131,8 +117,8 @@ void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
       Send(new ExtensionMsg_ActivateExtension(extension->id()));
       break;
 
-    case Extension::TYPE_UNKNOWN:
-    case Extension::TYPE_THEME:
+    case Manifest::TYPE_UNKNOWN:
+    case Manifest::TYPE_THEME:
       break;
   }
 }
@@ -144,10 +130,11 @@ const Extension* ChromeRenderViewHostObserver::GetExtension() {
   SiteInstance* site_instance = render_view_host()->GetSiteInstance();
   const GURL& site = site_instance->GetSiteURL();
 
-  if (!site.SchemeIs(chrome::kExtensionScheme))
+  if (!site.SchemeIs(extensions::kExtensionScheme))
     return NULL;
 
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   if (!service)
     return NULL;
 
@@ -166,14 +153,23 @@ const Extension* ChromeRenderViewHostObserver::GetExtension() {
 void ChromeRenderViewHostObserver::RemoveRenderViewHostForExtensions(
     RenderViewHost* rvh) {
   ExtensionProcessManager* process_manager =
-      profile_->GetExtensionProcessManager();
+      extensions::ExtensionSystem::Get(profile_)->process_manager();
   if (process_manager)
     process_manager->UnregisterRenderViewHost(rvh);
 }
 
-void ChromeRenderViewHostObserver::OnFocusedEditableNodeTouched() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED,
-      content::Source<RenderViewHost>(render_view_host()),
-      content::NotificationService::NoDetails());
+void ChromeRenderViewHostObserver::OnFocusedNodeTouched(bool editable) {
+  if (editable) {
+#if defined(OS_WIN)
+    base::win::DisplayVirtualKeyboard();
+#endif
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_FOCUSED_NODE_TOUCHED,
+        content::Source<RenderViewHost>(render_view_host()),
+        content::Details<bool>(&editable));
+  } else {
+#if defined(OS_WIN)
+    base::win::DismissVirtualKeyboard();
+#endif
+  }
 }

@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 JSON.parse = function() {
   return "JSON.parse clobbered by content script.";
 };
@@ -15,7 +19,7 @@ Object.prototype.toJSON = function() {
 };
 
 // For complex connect tests.
-chrome.extension.onConnect.addListener(function(port) {
+chrome.runtime.onConnect.addListener(function(port) {
   console.log('connected');
   port.onMessage.addListener(function(msg) {
     console.log('got ' + msg);
@@ -23,16 +27,16 @@ chrome.extension.onConnect.addListener(function(port) {
       port.postMessage({success: true});
     } else if (msg.testPostMessageFromTab) {
       testPostMessageFromTab(port);
-    } else if (msg.testSendRequestFromTab) {
-      testSendRequestFromTab();
+    } else if (msg.testSendMessageFromTab) {
+      testSendMessageFromTab();
     } else if (msg.testDisconnect) {
       port.disconnect();
     } else if (msg.testDisconnectOnClose) {
       window.location = "about:blank";
     } else if (msg.testPortName) {
       port.postMessage({portName:port.name});
-    } else if (msg.testSendRequestFromTabError) {
-      testSendRequestFromTabError();
+    } else if (msg.testSendMessageFromTabError) {
+      testSendMessageFromTabError();
     } else if (msg.testConnectFromTabError) {
       testConnectFromTabError();
     }
@@ -42,7 +46,7 @@ chrome.extension.onConnect.addListener(function(port) {
 // Tests that postMessage to the extension and its response works.
 function testPostMessageFromTab(origPort) {
   var portName = "peter";
-  var port = chrome.extension.connect({name: portName});
+  var port = chrome.runtime.connect({name: portName});
   port.postMessage({testPostMessageFromTab: true});
   port.onMessage.addListener(function(msg) {
     origPort.postMessage({success: (msg.success && (msg.portName == portName))});
@@ -51,35 +55,35 @@ function testPostMessageFromTab(origPort) {
   });
 }
 
-// For test onRequest.
-function testSendRequestFromTab() {
-  chrome.extension.sendRequest({step: 1}, function(response) {
+// For test onMessage.
+function testSendMessageFromTab() {
+  chrome.runtime.sendMessage({step: 1}, function(response) {
     if (response.nextStep) {
-      console.log('testSendRequestFromTab sent');
-      chrome.extension.sendRequest({step: 2});
+      console.log('testSendMessageFromTab sent');
+      chrome.runtime.sendMessage({step: 2});
     }
   });
 }
 
-// Tests sendRequest to an invalid extension.
-function testSendRequestFromTabError() {
+// Tests sendMessage to an invalid extension.
+function testSendMessageFromTabError() {
   // try sending a request to a bad extension id
-  chrome.extension.sendRequest("bad-extension-id", {m: 1}, function(response) {
-    var success = (response === undefined && chrome.extension.lastError);
-    chrome.extension.sendRequest({success: success});
+  chrome.runtime.sendMessage("bad-extension-id", {m: 1}, function(response) {
+    var success = (response === undefined && chrome.runtime.lastError);
+    chrome.runtime.sendMessage({success: success});
   });
 }
 
 // Tests connecting to an invalid extension.
 function testConnectFromTabError() {
-  var port = chrome.extension.connect("bad-extension-id");
+  var port = chrome.runtime.connect("bad-extension-id");
   port.onDisconnect.addListener(function() {
-    var success = (chrome.extension.lastError ? true : false);
-    chrome.extension.sendRequest({success: success});
+    var success = (chrome.runtime.lastError ? true : false);
+    chrome.runtime.sendMessage({success: success});
   });
 }
 
-// For test sendRequest.
-chrome.extension.onRequest.addListener(function(request, sender, sendResponse) {
+// For test sendMessage.
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   sendResponse({success: (request.step2 == 1)});
 });

@@ -4,6 +4,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 
 #include "../client/query_tracker.h"
 
@@ -11,6 +12,7 @@
 #include "../client/gles2_cmd_helper.h"
 #include "../client/gles2_implementation.h"
 #include "../client/mapped_memory.h"
+#include "../common/time.h"
 
 namespace gpu {
 namespace gles2 {
@@ -22,8 +24,9 @@ QuerySyncManager::QuerySyncManager(MappedMemoryManager* manager)
 
 QuerySyncManager::~QuerySyncManager() {
   while (!buckets_.empty()) {
-    mapped_memory_->Free(buckets_.front());
-    buckets_.pop();
+    mapped_memory_->Free(buckets_.front()->syncs);
+    delete buckets_.front();
+    buckets_.pop_front();
   }
 }
 
@@ -38,21 +41,48 @@ bool QuerySyncManager::Alloc(QuerySyncManager::QueryInfo* info) {
       return false;
     }
     QuerySync* syncs = static_cast<QuerySync*>(mem);
-    buckets_.push(syncs);
+    Bucket* bucket = new Bucket(syncs);
+    buckets_.push_back(bucket);
     for (size_t ii = 0; ii < kSyncsPerBucket; ++ii) {
-      free_queries_.push(QueryInfo(shm_id, shm_offset, syncs));
+      free_queries_.push_back(QueryInfo(bucket, shm_id, shm_offset, syncs));
       ++syncs;
       shm_offset += sizeof(*syncs);
     }
   }
   *info = free_queries_.front();
+  ++(info->bucket->used_query_count);
   info->sync->Reset();
-  free_queries_.pop();
+  free_queries_.pop_front();
   return true;
 }
 
 void QuerySyncManager::Free(const QuerySyncManager::QueryInfo& info) {
-  free_queries_.push(info);
+  DCHECK_GT(info.bucket->used_query_count, 0u);
+  --(info.bucket->used_query_count);
+  free_queries_.push_back(info);
+}
+
+void QuerySyncManager::Shrink() {
+  std::deque<QueryInfo> new_queue;
+  while (!free_queries_.empty()) {
+    if (free_queries_.front().bucket->used_query_count)
+      new_queue.push_back(free_queries_.front());
+    free_queries_.pop_front();
+  }
+  free_queries_.swap(new_queue);
+
+  std::deque<Bucket*> new_buckets;
+  while (!buckets_.empty()) {
+    Bucket* bucket = buckets_.front();
+    if (bucket->used_query_count) {
+      new_buckets.push_back(bucket);
+    } else {
+      mapped_memory_->Free(bucket->syncs);
+      delete bucket;
+    }
+    buckets_.pop_front();
+  }
+  buckets_.swap(new_buckets);
 }
 
 QueryTracker::Query::Query(GLuint id, GLenum target,
@@ -64,6 +94,7 @@ QueryTracker::Query::Query(GLuint id, GLenum target,
       submit_count_(0),
       token_(0),
       flushed_(false),
+      client_begin_time_us_(0),
       result_(0) {
     }
 
@@ -75,6 +106,15 @@ void QueryTracker::Query::Begin(GLES2Implementation* gl) {
   switch (target()) {
     case GL_GET_ERROR_QUERY_CHROMIUM:
       // To nothing on begin for error queries.
+      break;
+    case GL_LATENCY_QUERY_CHROMIUM:
+      client_begin_time_us_ = MicrosecondsSinceOriginOfTime();
+      // tell service about id, shared memory and count
+      gl->helper()->BeginQueryEXT(target(), id(), shm_id(), shm_offset());
+      break;
+    case GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM:
+      // tell service about id, shared memory and count
+      gl->helper()->BeginQueryEXT(target(), id(), shm_id(), shm_offset());
       break;
     default:
       // tell service about id, shared memory and count
@@ -114,7 +154,23 @@ bool QueryTracker::Query::CheckResultsAvailable(
       // Need a MemoryBarrier here so that sync->result read after
       // sync->process_count.
       gpu::MemoryBarrier();
-      result_ = info_.sync->result;
+      switch (target()) {
+        case GL_COMMANDS_ISSUED_CHROMIUM:
+          result_ = std::min(info_.sync->result,
+                             static_cast<uint64>(0xFFFFFFFFL));
+          break;
+        case GL_LATENCY_QUERY_CHROMIUM:
+          GPU_DCHECK(info_.sync->result >= client_begin_time_us_);
+          result_ = std::min(info_.sync->result - client_begin_time_us_,
+                             static_cast<uint64>(0xFFFFFFFFL));
+          break;
+        case GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM:
+          result_ = info_.sync->result;
+          break;
+        default:
+          result_ = info_.sync->result;
+          break;
+      }
       state_ = kComplete;
     } else {
       if (!flushed_) {
@@ -175,6 +231,10 @@ void QueryTracker::RemoveQuery(GLuint client_id, bool context_lost) {
     queries_.erase(it);
     delete query;
   }
+}
+
+void QueryTracker::Shrink() {
+  query_sync_manager_.Shrink();
 }
 
 }  // namespace gles2

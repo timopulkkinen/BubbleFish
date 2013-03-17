@@ -30,7 +30,6 @@ namespace webkit {
 namespace npapi {
 
 WebPluginDelegateImpl::WebPluginDelegateImpl(
-    gfx::PluginWindowHandle containing_view,
     PluginInstance* instance)
     : windowed_handle_(0),
       windowed_did_set_window_(false),
@@ -42,7 +41,6 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       first_event_time_(-1.0),
       plug_(NULL),
       socket_(NULL),
-      parent_(containing_view),
       quirks_(0),
       handle_event_depth_(0),
       first_set_window_call_(true),
@@ -355,12 +353,12 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
   // "real" means as seen by Chrome
   // "apparent" means as seen by the plugin.
 
-  gfx::Rect draw_rect = window_rect_.Intersect(damage_rect);
+  gfx::Rect draw_rect = gfx::IntersectRects(window_rect_, damage_rect);
 
   // clip_rect_ is relative to the plugin
   gfx::Rect clip_rect_window = clip_rect_;
   clip_rect_window.Offset(window_rect_.x(), window_rect_.y());
-  draw_rect = draw_rect.Intersect(clip_rect_window);
+  draw_rect.Intersect(clip_rect_window);
 
   // These offsets represent by how much the view is shifted to accomodate
   // Flash (the coordinates of X relative to O in the diagram above).

@@ -78,22 +78,29 @@ const char* const kNonUpdatedHeaders[] = {
   "trailer",
   "transfer-encoding",
   "upgrade",
-  // these should never change:
-  "content-location",
-  "content-md5",
   "etag",
-  // assume cache-control: no-transform
-  "content-encoding",
-  "content-range",
-  "content-type",
-  // some broken microsoft servers send 'content-length: 0' with 304s
-  "content-length"
+  "x-frame-options",
+  "x-xss-protection",
+};
+
+// Some header prefixes mean "Don't copy this header from a 304 response.".
+// Rather than listing all the relevant headers, we can consolidate them into
+// this list:
+const char* const kNonUpdatedHeaderPrefixes[] = {
+  "content-",
+  "x-content-",
+  "x-webkit-"
 };
 
 bool ShouldUpdateHeader(const std::string::const_iterator& name_begin,
                         const std::string::const_iterator& name_end) {
   for (size_t i = 0; i < arraysize(kNonUpdatedHeaders); ++i) {
     if (LowerCaseEqualsASCII(name_begin, name_end, kNonUpdatedHeaders[i]))
+      return false;
+  }
+  for (size_t i = 0; i < arraysize(kNonUpdatedHeaderPrefixes); ++i) {
+    if (StartsWithASCII(std::string(name_begin, name_end),
+                        kNonUpdatedHeaderPrefixes[i], false))
       return false;
   }
   return true;
@@ -1097,7 +1104,18 @@ bool HttpResponseHeaders::GetTimeValuedHeader(const std::string& name,
   if (!EnumerateHeader(NULL, name, &value))
     return false;
 
-  return Time::FromString(value.c_str(), result);
+  // When parsing HTTP dates it's beneficial to default to GMT because:
+  // 1. RFC2616 3.3.1 says times should always be specified in GMT
+  // 2. Only counter-example incorrectly appended "UTC" (crbug.com/153759)
+  // 3. When adjusting cookie expiration times for clock skew
+  //    (crbug.com/135131) this better matches our cookie expiration
+  //    time parser which ignores timezone specifiers and assumes GMT.
+  // 4. This is exactly what Firefox does.
+  // TODO(pauljensen): The ideal solution would be to return false if the
+  // timezone could not be understood so as to avoid makeing other calculations
+  // based on an incorrect time.  This would require modifying the time
+  // library or duplicating the code. (http://crbug.com/158327)
+  return Time::FromUTCString(value.c_str(), result);
 }
 
 bool HttpResponseHeaders::IsKeepAlive() const {
@@ -1140,9 +1158,14 @@ bool HttpResponseHeaders::HasStrongValidators() const {
 // From RFC 2616:
 // Content-Length = "Content-Length" ":" 1*DIGIT
 int64 HttpResponseHeaders::GetContentLength() const {
+  return GetInt64HeaderValue("content-length");
+}
+
+int64 HttpResponseHeaders::GetInt64HeaderValue(
+    const std::string& header) const {
   void* iter = NULL;
   std::string content_length_val;
-  if (!EnumerateHeader(&iter, "content-length", &content_length_val))
+  if (!EnumerateHeader(&iter, header, &content_length_val))
     return -1;
 
   if (content_length_val.empty())
@@ -1295,8 +1318,8 @@ bool HttpResponseHeaders::FromNetLogParam(
     scoped_refptr<HttpResponseHeaders>* http_response_headers) {
   *http_response_headers = NULL;
 
-  const base::DictionaryValue* dict;
-  const base::ListValue* header_list;
+  const base::DictionaryValue* dict = NULL;
+  const base::ListValue* header_list = NULL;
 
   if (!event_param ||
       !event_param->GetAsDictionary(&dict) ||

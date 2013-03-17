@@ -10,9 +10,10 @@
 #include "base/bind.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/webdata/web_data_service.h"
@@ -73,8 +74,8 @@ void PurgeMemoryIOHelper::PurgeMemoryOnIOThread() {
         PurgeMemory();
   }
 
-#if defined(ENABLE_SAFE_BROWSING)
-  safe_browsing_service_->PurgeMemory();
+#if defined(FULL_SAFE_BROWSING)
+  safe_browsing_service_->database_manager()->PurgeMemory();
 #endif
 }
 

@@ -17,14 +17,6 @@ Import(['pre_base_env'])
 # Underlay things migrating to ppapi repo.
 Dir('#/..').addRepository(Dir('#/../ppapi'))
 
-# Load a config file from the Chrome repo. This allows scons files to be added
-# and removed in Chrome without requiring a DEPS roll.
-ppapi_scons_files = {}
-execfile(
-    File('#/../ppapi/native_client/ppapi_scons_files.py').abspath,
-    {}, # Globals
-    ppapi_scons_files)
-
 # Append a list of files to another, filtering out the files that already exist.
 # Filtering helps migrate declarations between repos by preventing redundant
 # declarations from causing an error.
@@ -37,32 +29,44 @@ def ExtendFileList(existing, additional):
     combined.add(file_name)
   return sorted(combined)
 
-ppapi_scons_files['nonvariant_test_scons_files'] = ExtendFileList(
-    ppapi_scons_files.get('nonvariant_test_scons_files', []), [
-        'tests/nacl_browser/browser_dynamic_library/nacl.scons',
-        'tests/nacl_browser/browser_startup_time/nacl.scons',
-        'tests/nacl_browser/inbrowser_test_runner/nacl.scons',
-        'tests/nacl_browser/manifest_file/nacl.scons',
-        'tests/nacl_browser/nameservice/nacl.scons',
-        'tests/nacl_browser/postmessage_redir/nacl.scons',
-    ])
 
-ppapi_scons_files['irt_variant_test_scons_files'] = ExtendFileList(
-    ppapi_scons_files.get('irt_variant_test_scons_files', []), [
-        # Disabled by Brad Chen 4 Sep to try to green Chromium
-        # nacl_integration tests
-        #'tests/nacl_browser/fault_injection/nacl.scons',
-        'tests/nacl.scons',
-        'tests/nacl_browser/pnacl_client_translator/nacl.scons',
-    ])
+ppapi_scons_files = {}
+ppapi_scons_files['trusted_scons_files'] = []
+ppapi_scons_files['untrusted_irt_scons_files'] = []
 
-ppapi_scons_files['untrusted_scons_files'] = ExtendFileList(
-    ppapi_scons_files.get('untrusted_scons_files', []), [
-        'src/untrusted/irt_stub/nacl.scons',
-        'src/untrusted/nacl_ppapi_util/nacl.scons',
-        'src/untrusted/pnacl_irt_shim/nacl.scons',
-        'src/untrusted/pnacl_support_extension/nacl.scons',
-    ])
+ppapi_scons_files['nonvariant_test_scons_files'] = [
+    'tests/breakpad_crash_test/nacl.scons',
+    'tests/nacl_browser/browser_dynamic_library/nacl.scons',
+    'tests/nacl_browser/manifest_file/nacl.scons',
+    'tests/nacl_browser/nameservice/nacl.scons',
+    'tests/nacl_browser/postmessage_redir/nacl.scons',
+    'tests/ppapi_browser/bad/nacl.scons',
+    'tests/ppapi_browser/crash/nacl.scons',
+    'tests/ppapi_browser/extension_mime_handler/nacl.scons',
+    'tests/ppapi_browser/manifest/nacl.scons',
+    'tests/ppapi_browser/ppb_instance/nacl.scons',
+    'tests/ppapi_browser/ppp_instance/nacl.scons',
+    'tests/ppapi_test_lib/nacl.scons',
+]
+
+ppapi_scons_files['irt_variant_test_scons_files'] = [
+    # 'inbrowser_test_runner' must be in the irt_variant list
+    # otherwise it will run no tests.
+    'tests/nacl_browser/inbrowser_test_runner/nacl.scons',
+    # Disabled by Brad Chen 4 Sep to try to green Chromium
+    # nacl_integration tests
+    #'tests/nacl_browser/fault_injection/nacl.scons',
+    'tests/nacl_browser/pnacl_client_translator/nacl.scons',
+]
+
+ppapi_scons_files['untrusted_scons_files'] = [
+    'src/shared/ppapi/nacl.scons',
+    'src/untrusted/irt_stub/nacl.scons',
+    'src/untrusted/nacl_ppapi_util/nacl.scons',
+    'src/untrusted/pnacl_irt_shim/nacl.scons',
+    'src/untrusted/pnacl_support_extension/nacl.scons',
+]
+
 
 EXTRA_ENV = ['XAUTHORITY', 'HOME', 'DISPLAY', 'SSH_TTY', 'KRB5CCNAME']
 
@@ -84,44 +88,30 @@ def GetHeadlessPrefix(env):
 pre_base_env.AddMethod(GetHeadlessPrefix)
 
 
-pre_base_env['CHROME_DOWNLOAD_DIR'] = \
-    pre_base_env.Dir(ARGUMENTS.get('chrome_binaries_dir', '#chromebinaries'))
-
-def ChromeBinaryArch(env):
-  arch = env['BUILD_FULLARCH']
-  # Currently there are no 64-bit Chrome binaries for Windows or Mac OS X.
-  if (env.Bit('host_windows') or env.Bit('host_mac')) and arch == 'x86-64':
-    arch = 'x86-32'
-  return arch
-
-pre_base_env.AddMethod(ChromeBinaryArch)
+# A fake file to depend on if a path to Chrome is not specified.
+no_browser = pre_base_env.File('chrome_browser_path_not_specified')
 
 
-def DownloadedChromeBinary(env):
-  if env.Bit('host_linux'):
-    os_name = 'linux'
-    binary = 'chrome'
-  elif env.Bit('host_windows'):
-    os_name = 'windows'
-    binary = 'chrome.exe'
-  elif env.Bit('host_mac'):
-    os_name = 'mac'
-    binary = 'Chromium.app/Contents/MacOS/Chromium'
-  else:
-    raise Exception('Unsupported OS')
+# SCons attempts to run a test that depends on "no_browser", detect this at
+# runtime and cause a build error.
+def NoBrowserError(target, source, env):
+  print target, source, env
+  print ("***\nYou need to specificy chrome_browser_path=... on the " +
+         "command line to run these tests.\n***\n")
+  return 1
 
-  arch = env.ChromeBinaryArch()
-  return env.File(os.path.join('${CHROME_DOWNLOAD_DIR}',
-                               '%s_%s' % (os_name, arch), binary))
+pre_base_env.Append(BUILDERS = {
+    'NoBrowserError': Builder(action=NoBrowserError)
+})
 
-pre_base_env.AddMethod(DownloadedChromeBinary)
+pre_base_env.NoBrowserError([no_browser], [])
 
 
 def ChromeBinary(env):
   if 'chrome_browser_path' in ARGUMENTS:
     return env.File(env.SConstructAbsPath(ARGUMENTS['chrome_browser_path']))
   else:
-    return env.DownloadedChromeBinary()
+    return no_browser
 
 pre_base_env.AddMethod(ChromeBinary)
 
@@ -500,9 +490,6 @@ def PPAPIBrowserTester(env,
   if env.Bit('pnacl_generate_pexe'):
     # We likely prefer to choose the 'portable' field in nmfs in this mode.
     args = args + ['--prefer_portable_in_manifest']
-    # Pass through env var controlling streaming translation
-    if 'NACL_STREAMING_TRANSLATION' in os.environ:
-      env['ENV']['NACL_STREAMING_TRANSLATION'] = 'true'
 
   # Lint the extra arguments that are being passed to the tester.
   special_args = ['--ppapi_plugin', '--sel_ldr', '--irt_library', '--file',
@@ -529,27 +516,14 @@ def PPAPIBrowserTester(env,
       '--url', url,
       # Fail if there is no response for X seconds.
       '--timeout', str(timeout)]
-  if not env.Bit('disable_dynamic_plugin_loading'):
-    command.extend(['--ppapi_plugin', env['TRUSTED_ENV'].GetPPAPIPluginPath()])
-    command.extend(['--sel_ldr', env.GetSelLdr()])
-    bootstrap, _ = env.GetBootstrap()
-    if bootstrap is not None:
-      command.extend(['--sel_ldr_bootstrap', bootstrap])
-  if (not env.Bit('disable_dynamic_plugin_loading') or
-      env.Bit('override_chrome_irt')):
-    command.extend(['--irt_library', env.GetIrtNexe(chrome_irt=True)])
   for dep_file in files:
     command.extend(['--file', dep_file])
   for extension in extensions:
     command.extend(['--extension', extension])
   if env.Bit('bitcode'):
-    # TODO(jvoung): remove this --extension once we have --pnacl-dir working.
-    command.extend(['--extension', env.GetPnaclExtensionNode().abspath])
     # Enable the installed version of pnacl, and point to a custom install
     # directory for testing purposes.
     browser_flags.append('--enable-pnacl')
-    browser_flags.append('--pnacl-dir=%s' %
-                         env.GetPnaclExtensionRootNode().abspath)
   for dest_path, dep_file in map_files:
     command.extend(['--map_file', dest_path, dep_file])
   for file_ext, mime_type in mime_types:

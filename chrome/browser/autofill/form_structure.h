@@ -9,12 +9,16 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/field_types.h"
+#include "chrome/common/autofill/web_element_descriptor.h"
 #include "googleurl/src/gurl.h"
 
+struct FormData;
+struct FormDataPredictions;
 
 enum RequestMethod {
   GET,
@@ -29,6 +33,10 @@ enum UploadRequired {
 
 class AutofillMetrics;
 
+namespace autofill {
+struct AutocheckoutPageMetaData;
+}
+
 namespace base {
 class TimeTicks;
 }
@@ -37,23 +45,17 @@ namespace buzz {
 class XmlElement;
 }
 
-namespace webkit {
-namespace forms {
-struct FormData;
-struct FormDataPredictions;
-}
-}
-
 // FormStructure stores a single HTML form together with the values entered
 // in the fields along with additional information needed by Autofill.
 class FormStructure {
  public:
-  explicit FormStructure(const webkit::forms::FormData& form);
+  FormStructure(const FormData& form,
+                const std::string& autocheckout_url_prefix);
   virtual ~FormStructure();
 
   // Runs several heuristics against the form fields to determine their possible
   // types.
-  void DetermineHeuristicTypes();
+  void DetermineHeuristicTypes(const AutofillMetrics& metric_logger);
 
   // Encodes the XML upload request from this FormStructure.
   bool EncodeUploadRequest(const FieldTypeSet& available_field_types,
@@ -71,15 +73,17 @@ class FormStructure {
 
   // Parses the field types from the server query response. |forms| must be the
   // same as the one passed to EncodeQueryRequest when constructing the query.
-  static void ParseQueryResponse(const std::string& response_xml,
-                                 const std::vector<FormStructure*>& forms,
-                                 const AutofillMetrics& metric_logger);
+  static void ParseQueryResponse(
+      const std::string& response_xml,
+      const std::vector<FormStructure*>& forms,
+      autofill::AutocheckoutPageMetaData* page_meta_data,
+      const AutofillMetrics& metric_logger);
 
   // Fills |forms| with the details from the given |form_structures| and their
   // fields' predicted types.
   static void GetFieldTypePredictions(
       const std::vector<FormStructure*>& form_structures,
-      std::vector<webkit::forms::FormDataPredictions>* forms);
+      std::vector<FormDataPredictions>* forms);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -119,9 +123,20 @@ class FormStructure {
                          const base::TimeTicks& interaction_time,
                          const base::TimeTicks& submission_time) const;
 
+  // Classifies each field in |fields_| based upon its |autocomplete| attribute,
+  // if the attribute is available.  The association is stored into the field's
+  // |heuristic_type|.
+  // Fills |found_types| with |true| if the attribute is available and neither
+  // empty nor set to the special values "on" or "off" for at least one field.
+  // Fills |found_sections| with |true| if the attribute specifies a section for
+  // at least one field.
+  void ParseFieldTypesFromAutocompleteAttributes(bool* found_types,
+                                                 bool* found_sections);
+
   const AutofillField* field(size_t index) const;
   AutofillField* field(size_t index);
   size_t field_count() const;
+  size_t checkable_field_count() const;
 
   // Returns the number of fields that are able to be autofilled.
   size_t autofill_count() const { return autofill_count_; }
@@ -140,12 +155,17 @@ class FormStructure {
 
   virtual std::string server_experiment_id() const;
 
-  bool operator==(const webkit::forms::FormData& form) const;
-  bool operator!=(const webkit::forms::FormData& form) const;
+  // Returns a FormData containing the data this form structure knows about.
+  // |user_submitted| is currently always false.
+  FormData ToFormData() const;
+
+  bool operator==(const FormData& form) const;
+  bool operator!=(const FormData& form) const;
 
  private:
   friend class FormStructureTest;
   FRIEND_TEST_ALL_PREFIXES(AutofillDownloadTest, QueryAndUploadTest);
+
   // 64-bit hash of the string - used in FormSignature and unit-tests.
   static std::string Hash64Bit(const std::string& str);
 
@@ -159,14 +179,6 @@ class FormStructure {
   bool EncodeFormRequest(EncodeRequestType request_type,
                          buzz::XmlElement* encompassing_xml_element) const;
 
-  // Classifies each field in |fields_| based upon its |autocompletetype|
-  // attribute, if the attribute is available.  The association is stored into
-  // |map|.  Fills |found_attribute| with |true| if the attribute is available
-  // (and non-empty) for at least one field.  Fills |found_sections| with |true|
-  // if the attribute specifies a section for at least one field.
-  void ParseAutocompletetypeAttributes(bool* found_attribute,
-                                       bool* found_sections);
-
   // Classifies each field in |fields_| into a logical section.
   // Sections are identified by the heuristic that a logical section should not
   // include multiple fields of the same autofill type (with some exceptions, as
@@ -175,6 +187,11 @@ class FormStructure {
   // If |has_author_specified_sections| is true, only the second pass --
   // distinguishing credit card sections from non-credit card ones -- is made.
   void IdentifySections(bool has_author_specified_sections);
+
+  bool IsAutocheckoutEnabled() const;
+
+  // Returns the minimal number of fillable fields required to start autofill.
+  size_t RequiredFillableFields() const;
 
   // The name of the form.
   string16 form_name_;
@@ -190,6 +207,9 @@ class FormStructure {
 
   // A vector of all the input fields in the form.
   ScopedVector<AutofillField> fields_;
+
+  // The number of fields able to be checked.
+  size_t checkable_field_count_;
 
   // The names of the form input elements, that are part of the form signature.
   // The string starts with "&" and the names are also separated by the "&"
@@ -210,6 +230,10 @@ class FormStructure {
   // Whether the form includes any field types explicitly specified by the site
   // author, via the |autocompletetype| attribute.
   bool has_author_specified_types_;
+
+  // The URL prefix matched in autocheckout whitelist. An empty string implies
+  // autocheckout is not enabled for this form.
+  std::string autocheckout_url_prefix_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

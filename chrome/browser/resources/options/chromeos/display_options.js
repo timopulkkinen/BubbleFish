@@ -11,6 +11,11 @@ cr.define('options', function() {
   // The number of pixels to share the edges between displays.
   /** @const */ var MIN_OFFSET_OVERLAP = 5;
 
+  // The border width of the display rectangles for the focused one.
+  /** @const */ var FOCUSED_BORDER_WIDTH_PX = 2;
+  // The border width of the display rectangles for the normal one.
+  /** @const */ var NORMAL_BORDER_WIDTH_PX = 1;
+
   /**
    * Enumeration of secondary display layout.  The value has to be same as the
    * values in ash/display/display_controller.cc.
@@ -22,6 +27,53 @@ cr.define('options', function() {
     BOTTOM: 2,
     LEFT: 3
   };
+
+  /**
+   * Calculates the bounds of |element| relative to the page.
+   * @param {HTMLElement} element The element to be known.
+   * @return {Object} The object for the bounds, with x, y, width, and height.
+   */
+  function getBoundsInPage(element) {
+    var bounds = {
+      x: element.offsetLeft,
+      y: element.offsetTop,
+      width: element.offsetWidth,
+      height: element.offsetHeight
+    };
+    var parent = element.offsetParent;
+    while (parent && parent != document.body) {
+      bounds.x += parent.offsetLeft;
+      bounds.y += parent.offsetTop;
+      parent = parent.offsetParent;
+    }
+    return bounds;
+  }
+
+  /**
+   * Gets the position of |point| to |rect|, left, right, top, or bottom.
+   * @param {Object} rect The base rectangle with x, y, width, and height.
+   * @param {Object} point The point to check the position.
+   * @return {SecondaryDisplayLayout} The position of the calculated point.
+   */
+  function getPositionToRectangle(rect, point) {
+    // Separates the area into four (LEFT/RIGHT/TOP/BOTTOM) by the diagonals of
+    // the rect, and decides which area the display should reside.
+    var diagonalSlope = rect.height / rect.width;
+    var topDownIntercept = rect.y - rect.x * diagonalSlope;
+    var bottomUpIntercept = rect.y + rect.height + rect.x * diagonalSlope;
+
+    if (point.y > topDownIntercept + point.x * diagonalSlope) {
+      if (point.y > bottomUpIntercept - point.x * diagonalSlope)
+        return SecondaryDisplayLayout.BOTTOM;
+      else
+        return SecondaryDisplayLayout.LEFT;
+    } else {
+      if (point.y > bottomUpIntercept - point.x * diagonalSlope)
+        return SecondaryDisplayLayout.RIGHT;
+      else
+        return SecondaryDisplayLayout.TOP;
+    }
+  }
 
   /**
    * Encapsulated handling of the 'Display' page.
@@ -77,13 +129,6 @@ cr.define('options', function() {
     secondaryDisplay_: null,
 
     /**
-     * The flag to check if the current options status should be sent to the
-     * system or not (unchanged).
-     * @private
-     */
-    dirty_: false,
-
-    /**
      * The container div element which contains all of the display rectangles.
      * @private
      */
@@ -97,6 +142,14 @@ cr.define('options', function() {
     visualScale_: VISUAL_SCALE,
 
     /**
+     * The location where the last touch event happened.  This is used to
+     * prevent unnecessary dragging events happen.  Set to null unless it's
+     * during touch events.
+     * @private
+     */
+    lastTouchLocation_: null,
+
+    /**
      * Initialize the page.
      */
     initializePage: function() {
@@ -107,6 +160,24 @@ cr.define('options', function() {
         chrome.send('setMirroring', [this.mirroring_]);
       }).bind(this);
 
+      var container = $('display-options-displays-view-host');
+      container.onmousemove = this.onMouseMove_.bind(this);
+      window.addEventListener('mouseup', this.endDragging_.bind(this), true);
+      container.ontouchmove = this.onTouchMove_.bind(this);
+      container.ontouchend = this.endDragging_.bind(this);
+
+      $('display-options-set-primary').onclick = (function() {
+        chrome.send('setPrimary', [this.displays_[this.focusedIndex_].id]);
+      }).bind(this);
+
+      $('selected-display-start-calibrating-overscan').onclick = (function() {
+        // Passes the target display ID. Do not specify it through URL hash,
+        // we do not care back/forward.
+        var displayOverscan = options.DisplayOverscan.getInstance();
+        displayOverscan.setDisplayId(this.displays_[this.focusedIndex_].id);
+        OptionsPage.navigateToPage('displayOverscan');
+      }).bind(this);
+
       chrome.send('getDisplayInfo');
     },
 
@@ -115,6 +186,75 @@ cr.define('options', function() {
       OptionsPage.prototype.onVisibilityChanged_(this);
       if (this.visible)
         chrome.send('getDisplayInfo');
+    },
+
+    /**
+     * Mouse move handler for dragging display rectangle.
+     * @param {Event} e The mouse move event.
+     * @private
+     */
+    onMouseMove_: function(e) {
+      return this.processDragging_(e, {x: e.pageX, y: e.pageY});
+    },
+
+    /**
+     * Touch move handler for dragging display rectangle.
+     * @param {Event} e The touch move event.
+     * @private
+     */
+    onTouchMove_: function(e) {
+      if (e.touches.length != 1)
+        return true;
+
+      var touchLocation = {x: e.touches[0].pageX, y: e.touches[0].pageY};
+      // Touch move events happen even if the touch location doesn't change, but
+      // it doesn't need to process the dragging.  Since sometimes the touch
+      // position changes slightly even though the user doesn't think to move
+      // the finger, very small move is just ignored.
+      /** @const */ var IGNORABLE_TOUCH_MOVE_PX = 1;
+      var x_diff = Math.abs(touchLocation.x - this.lastTouchLocation_.x);
+      var y_diff = Math.abs(touchLocation.y - this.lastTouchLocation_.y);
+      if (x_diff <= IGNORABLE_TOUCH_MOVE_PX &&
+          y_diff <= IGNORABLE_TOUCH_MOVE_PX) {
+        return true;
+      }
+
+      this.lastTouchLocation_ = touchLocation;
+      return this.processDragging_(e, touchLocation);
+    },
+
+    /**
+     * Mouse down handler for dragging display rectangle.
+     * @param {Event} e The mouse down event.
+     * @private
+     */
+    onMouseDown_: function(e) {
+      if (this.mirroring_)
+        return true;
+
+      if (e.button != 0)
+        return true;
+
+      e.preventDefault();
+      return this.startDragging_(e.target, {x: e.pageX, y: e.pageY});
+    },
+
+    /**
+     * Touch start handler for dragging display rectangle.
+     * @param {Event} e The touch start event.
+     * @private
+     */
+    onTouchStart_: function(e) {
+      if (this.mirroring_)
+        return true;
+
+      if (e.touches.length != 1)
+        return false;
+
+      e.preventDefault();
+      var touch = e.touches[0];
+      this.lastTouchLocation_ = {x: touch.pageX, y: touch.pageY};
+      return this.startDragging_(e.target, this.lastTouchLocation_);
     },
 
     /**
@@ -134,7 +274,6 @@ cr.define('options', function() {
       }
       chrome.send('setDisplayLayout',
                   [this.layout_, offset / this.visualScale_]);
-      this.dirty_ = false;
     },
 
     /**
@@ -165,11 +304,12 @@ cr.define('options', function() {
     },
 
     /**
-     * Mouse move handler for dragging display rectangle.
+     * Processes the actual dragging of display rectangle.
+     * @param {Event} e The event which triggers this drag.
+     * @param {Object} eventLocation The location where the event happens.
      * @private
-     * @param {Event} e The mouse move event.
      */
-    onMouseMove_: function(e) {
+    processDragging_: function(e, eventLocation) {
       if (!this.dragging_)
         return true;
 
@@ -183,16 +323,16 @@ cr.define('options', function() {
       if (index < 0)
         return true;
 
+      e.preventDefault();
+
       // Note that current code of moving display-rectangles doesn't work
       // if there are >=3 displays.  This is our assumption for M21.
       // TODO(mukai): Fix the code to allow >=3 displays.
-      var mousePosition = {
-        x: e.pageX - this.dragging_.offset.x,
-        y: e.pageY - this.dragging_.offset.y
-      };
       var newPosition = {
-        x: mousePosition.x - this.dragging_.clickLocation.x,
-        y: mousePosition.y - this.dragging_.clickLocation.y
+        x: this.dragging_.originalLocation.x +
+            (eventLocation.x - this.dragging_.eventLocation.x),
+        y: this.dragging_.originalLocation.y +
+            (eventLocation.y - this.dragging_.eventLocation.y)
       };
 
       var baseDiv = this.dragging_.display.isPrimary ?
@@ -204,31 +344,34 @@ cr.define('options', function() {
       newPosition.y = this.snapToEdge_(newPosition.y, draggingDiv.offsetHeight,
                                        baseDiv.offsetTop, baseDiv.offsetHeight);
 
-      // Separate the area into four (LEFT/RIGHT/TOP/BOTTOM) by the diagonals of
-      // the base display, and decide which area the display should reside.
-      var diagonalSlope = baseDiv.offsetHeight / baseDiv.offsetWidth;
-      var topDownIntercept =
-          baseDiv.offsetTop - baseDiv.offsetLeft * diagonalSlope;
-      var bottomUpIntercept = baseDiv.offsetTop +
-          baseDiv.offsetHeight + baseDiv.offsetLeft * diagonalSlope;
+      var newCenter = {
+        x: newPosition.x + draggingDiv.offsetWidth / 2,
+        y: newPosition.y + draggingDiv.offsetHeight / 2
+      };
 
-      if (mousePosition.y >
-          topDownIntercept + mousePosition.x * diagonalSlope) {
-        if (mousePosition.y >
-            bottomUpIntercept - mousePosition.x * diagonalSlope)
-          this.layout_ = this.dragging_.display.isPrimary ?
-              SecondaryDisplayLayout.TOP : SecondaryDisplayLayout.BOTTOM;
-        else
-          this.layout_ = this.dragging_.display.isPrimary ?
-              SecondaryDisplayLayout.RIGHT : SecondaryDisplayLayout.LEFT;
-      } else {
-        if (mousePosition.y >
-            bottomUpIntercept - mousePosition.x * diagonalSlope)
-          this.layout_ = this.dragging_.display.isPrimary ?
-              SecondaryDisplayLayout.LEFT : SecondaryDisplayLayout.RIGHT;
-        else
-          this.layout_ = this.dragging_.display.isPrimary ?
-              SecondaryDisplayLayout.BOTTOM : SecondaryDisplayLayout.TOP;
+      var baseBounds = {
+        x: baseDiv.offsetLeft,
+        y: baseDiv.offsetTop,
+        width: baseDiv.offsetWidth,
+        height: baseDiv.offsetHeight
+      };
+      switch (getPositionToRectangle(baseBounds, newCenter)) {
+      case SecondaryDisplayLayout.RIGHT:
+        this.layout_ = this.dragging_.display.isPrimary ?
+            SecondaryDisplayLayout.LEFT : SecondaryDisplayLayout.RIGHT;
+        break;
+      case SecondaryDisplayLayout.LEFT:
+        this.layout_ = this.dragging_.display.isPrimary ?
+            SecondaryDisplayLayout.RIGHT : SecondaryDisplayLayout.LEFT;
+        break;
+      case SecondaryDisplayLayout.TOP:
+        this.layout_ = this.dragging_.display.isPrimary ?
+            SecondaryDisplayLayout.BOTTOM : SecondaryDisplayLayout.TOP;
+        break;
+      case SecondaryDisplayLayout.BOTTOM:
+        this.layout_ = this.dragging_.display.isPrimary ?
+            SecondaryDisplayLayout.TOP : SecondaryDisplayLayout.BOTTOM;
+        break;
       }
 
       if (this.layout_ == SecondaryDisplayLayout.LEFT ||
@@ -293,27 +436,22 @@ cr.define('options', function() {
         break;
       }
 
-      this.dirty_ = true;
       return false;
     },
 
     /**
-     * Mouse down handler for dragging display rectangle.
+     * start dragging of a display rectangle.
+     * @param {HTMLElement} target The event target.
+     * @param {Object} eventLocation The object to hold the location where
+     *     this event happens.
      * @private
-     * @param {Event} e The mouse down event.
      */
-    onMouseDown_: function(e) {
-      if (this.mirroring_)
-        return true;
-
-      if (e.button != 0)
-        return true;
-
+    startDragging_: function(target, eventLocation) {
       this.focusedIndex_ = null;
       for (var i = 0; i < this.displays_.length; i++) {
         var display = this.displays_[i];
-        if (this.displays_[i].div == e.target ||
-            (display.isPrimary && $('display-launcher') == e.target)) {
+        if (display.div == target ||
+            (target.offsetParent && target.offsetParent == display.div)) {
           this.focusedIndex_ = i;
           break;
         }
@@ -328,22 +466,25 @@ cr.define('options', function() {
 
         display.div.classList.add('displays-focused');
         this.dragging_ = {
-            display: display,
-            clickLocation: {x: e.offsetX, y: e.offsetY},
-            offset: {x: e.pageX - e.offsetX - display.div.offsetLeft,
-                     y: e.pageY - e.offsetY - display.div.offsetTop}
+          display: display,
+          originalLocation: {
+            x: display.div.offsetLeft, y: display.div.offsetTop
+          },
+          eventLocation: eventLocation
         };
       }
+
       this.updateSelectedDisplayDescription_();
       return false;
     },
 
     /**
-     * Mouse up handler for dragging display rectangle.
+     * finish the current dragging of displays.
+     * @param {Event} e The event which triggers this.
      * @private
-     * @param {Event} e The mouse up event.
      */
-    onMouseUp_: function(e) {
+    endDragging_: function(e) {
+      this.lastTouchLocation_ = null;
       if (this.dragging_) {
         // Make sure the dragging location is connected.
         var baseDiv = this.dragging_.display.isPrimary ?
@@ -367,9 +508,11 @@ cr.define('options', function() {
                           MIN_OFFSET_OVERLAP);
           draggingDiv.style.left = left + 'px';
         }
-        this.dragging_ = null;
-        if (this.dirty_)
+        var originalPosition = this.dragging_.display.originalPosition;
+        if (originalPosition.x != draggingDiv.offsetLeft ||
+            originalPosition.y != draggingDiv.offsetTop)
           this.applyResult_();
+        this.dragging_ = null;
       }
       this.updateSelectedDisplayDescription_();
       return false;
@@ -384,6 +527,8 @@ cr.define('options', function() {
           this.displays_[this.focusedIndex_] == null) {
         $('selected-display-data-container').hidden = true;
         $('display-configuration-arrow').hidden = true;
+        $('display-options-set-primary').hidden = true;
+        $('display-options-toggle-mirroring').hidden = !this.mirroring_;
         return;
       }
 
@@ -400,12 +545,21 @@ cr.define('options', function() {
         resolutionElement.removeChild(resolutionElement.firstChild);
       resolutionElement.appendChild(document.createTextNode(resolutionData));
 
+      $('start-calibrating-overscan-control').hidden = display.isInternal;
+
       var arrow = $('display-configuration-arrow');
       arrow.hidden = false;
-      arrow.style.top =
-          $('display-configurations').offsetTop - arrow.offsetHeight / 2 + 'px';
+      // Adding 1 px to the position to fit the border line and the border in
+      // arrow precisely.
+      arrow.style.top = $('display-configurations').offsetTop -
+          arrow.offsetHeight / 2 + 1 + 'px';
       arrow.style.left = display.div.offsetLeft + display.div.offsetWidth / 2 -
           arrow.offsetWidth / 2 + 'px';
+
+      $('display-options-set-primary').hidden =
+          this.displays_[this.focusedIndex_].isPrimary;
+      $('display-options-toggle-mirroring').hidden =
+          (this.displays_.length <= 1 && !this.mirroring_);
     },
 
     /**
@@ -417,9 +571,6 @@ cr.define('options', function() {
       displaysViewHost.removeChild(displaysViewHost.firstChild);
       this.displaysView_ = document.createElement('div');
       this.displaysView_.id = 'display-options-displays-view';
-      this.displaysView_.onmousemove = this.onMouseMove_.bind(this);
-      this.displaysView_.onmousedown = this.onMouseDown_.bind(this);
-      this.displaysView_.onmouseup = this.onMouseUp_.bind(this);
       displaysViewHost.appendChild(this.displaysView_);
     },
 
@@ -431,21 +582,14 @@ cr.define('options', function() {
      * @private
      */
     resizeDisplayRectangle_: function(display, index) {
-      /** @const */ var FOCUSED_BORDER_WIDTH_PX = 2;
-      /** @const */ var NORMAL_BORDER_WIDTH_PX = 1;
       var borderWidth = (index == this.focusedIndex_) ?
           FOCUSED_BORDER_WIDTH_PX : NORMAL_BORDER_WIDTH_PX;
       display.div.style.width =
           display.width * this.visualScale_ - borderWidth * 2 + 'px';
-      display.div.style.height =
-          display.height * this.visualScale_ - borderWidth * 2 + 'px';
-      display.div.style.lineHeight = display.div.style.height;
-      if (display.isPrimary) {
-        var launcher = display.div.firstChild;
-        if (launcher && launcher.id == 'display-launcher') {
-          launcher.style.width = display.div.style.width;
-        }
-      }
+      var newHeight = display.height * this.visualScale_ - borderWidth * 2;
+      display.div.style.height = newHeight + 'px';
+      display.nameContainer.style.marginTop =
+            (newHeight - display.nameContainer.offsetHeight) / 2 + 'px';
     },
 
     /**
@@ -453,8 +597,9 @@ cr.define('options', function() {
      * @private
      */
     layoutMirroringDisplays_: function() {
-      // Offset pixels for secondary display rectangles.
-      /** @const */ var MIRRORING_OFFSET_PIXELS = 2;
+      // Offset pixels for secondary display rectangles. The offset includes the
+      // border width.
+      /** @const */ var MIRRORING_OFFSET_PIXELS = 3;
       // Always show two displays because there must be two displays when
       // the display_options is enabled.  Don't rely on displays_.length because
       // there is only one display from chrome's perspective in mirror mode.
@@ -546,33 +691,56 @@ cr.define('options', function() {
           div.classList.add('displays-focused');
 
         if (display.isPrimary) {
-          // Put a grey rectangle to the primary display to denote launcher
-          // below.
-          var launcher = document.createElement('div');
-          launcher.id = 'display-launcher';
-          div.appendChild(launcher);
           this.primaryDisplay_ = display;
         } else {
           this.secondaryDisplay_ = display;
         }
+        var displayNameContainer = document.createElement('div');
+        displayNameContainer.textContent = display.name;
+        div.appendChild(displayNameContainer);
+        display.nameContainer = displayNameContainer;
         this.resizeDisplayRectangle_(display, i);
         div.style.left = display.x * this.visualScale_ + offset.x + 'px';
         div.style.top = display.y * this.visualScale_ + offset.y + 'px';
-        div.appendChild(document.createTextNode(display.name));
+
+        div.onmousedown = this.onMouseDown_.bind(this);
+        div.ontouchstart = this.onTouchStart_.bind(this);
 
         this.displaysView_.appendChild(div);
+
+        // Set the margin top to place the display name at the middle of the
+        // rectangle.  Note that this has to be done after it's added into the
+        // |displaysView_|.  Otherwise its offsetHeight is yet 0.
+        displayNameContainer.style.marginTop =
+            (div.offsetHeight - displayNameContainer.offsetHeight) / 2 + 'px';
+        display.originalPosition = {x: div.offsetLeft, y: div.offsetTop};
       }
     },
 
     /**
      * Called when the display arrangement has changed.
-     * @private
      * @param {boolean} mirroring Whether current mode is mirroring or not.
      * @param {Array} displays The list of the display information.
      * @param {SecondaryDisplayLayout} layout The layout strategy.
      * @param {number} offset The offset of the secondary display.
+     * @private
      */
     onDisplayChanged_: function(mirroring, displays, layout, offset) {
+      if (!this.visible)
+        return;
+
+      var hasExternal = false;
+      for (var i = 0; i < displays.length; i++) {
+        if (!displays[i].isInternal) {
+          hasExternal = true;
+          break;
+        }
+      }
+      if (!hasExternal && !mirroring) {
+        OptionsPage.showDefaultPage();
+        return;
+      }
+
       this.mirroring_ = mirroring;
       this.layout_ = layout;
       this.offset_ = offset;
@@ -596,8 +764,9 @@ cr.define('options', function() {
         this.layoutMirroringDisplays_();
       else
         this.layoutDisplays_();
+
       this.updateSelectedDisplayDescription_();
-    },
+    }
   };
 
   DisplayOptions.setDisplayInfo = function(

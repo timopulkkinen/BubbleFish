@@ -30,6 +30,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -48,7 +49,7 @@ using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::GetClass;
-using base::android::GetMethodID;
+using base::android::MethodID;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
@@ -119,15 +120,16 @@ void ConvertBookmarkNode(
 
 jlong ConvertJLongObjectToPrimitive(JNIEnv* env, jobject long_obj) {
   ScopedJavaLocalRef<jclass> jlong_clazz = GetClass(env, "java/lang/Long");
-  jmethodID long_value = GetMethodID(env, jlong_clazz, "longValue", "()J");
+  jmethodID long_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, jlong_clazz.obj(), "longValue", "()J");
   return env->CallLongMethod(long_obj, long_value, NULL);
 }
 
 jboolean ConvertJBooleanObjectToPrimitive(JNIEnv* env, jobject boolean_object) {
   ScopedJavaLocalRef<jclass> jboolean_clazz =
       GetClass(env, "java/lang/Boolean");
-  jmethodID boolean_value =
-      GetMethodID(env, jboolean_clazz, "booleanValue", "()Z");
+  jmethodID boolean_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, jboolean_clazz.obj(), "booleanValue", "()Z");
   return env->CallBooleanMethod(boolean_object, boolean_value, NULL);
 }
 
@@ -139,7 +141,8 @@ base::Time ConvertJlongToTime(jlong value) {
 jint ConvertJIntegerToJint(JNIEnv* env, jobject integer_obj) {
   ScopedJavaLocalRef<jclass> jinteger_clazz =
       GetClass(env, "java/lang/Integer");
-  jmethodID int_value = GetMethodID(env, jinteger_clazz, "intValue", "()I");
+  jmethodID int_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, jinteger_clazz.obj(), "intValue", "()I");
   return env->CallIntMethod(integer_obj, int_value, NULL);
 }
 
@@ -423,7 +426,8 @@ class CreateBookmarksFolderOnceTask : public BookmarkModelTask {
     bool in_mobile_bookmarks;
     IsInMobileBookmarksBranchTask::RunOnUIThread(model, parent->id(),
                                                  &in_mobile_bookmarks);
-    if (in_mobile_bookmarks) {
+    if (!in_mobile_bookmarks) {
+      // The parent folder must be inside the Mobile Bookmarks folder.
       *result = kInvalidBookmarkId;
       return;
     }
@@ -612,14 +616,20 @@ class FaviconServiceTask : public AsyncServiceRequest<FaviconService> {
  public:
   FaviconServiceTask(FaviconService* service,
                      Profile* profile,
-                     CancelableRequestConsumer* cancelable_consumer)
+                     CancelableRequestConsumer* cancelable_consumer,
+                     CancelableTaskTracker* cancelable_tracker)
       : AsyncServiceRequest<FaviconService>(service, cancelable_consumer),
-        profile_(profile) {}
+        profile_(profile),
+        cancelable_tracker_(cancelable_tracker) {}
 
   Profile* profile() const { return profile_; }
+  CancelableTaskTracker* cancelable_tracker() const {
+    return cancelable_tracker_;
+  }
 
  private:
   Profile* profile_;
+  CancelableTaskTracker* cancelable_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconServiceTask);
 };
@@ -630,8 +640,10 @@ class BookmarkIconFetchTask : public FaviconServiceTask {
   BookmarkIconFetchTask(
       FaviconService* favicon_service,
       Profile* profile,
-      CancelableRequestConsumer* cancelable_consumer)
-      : FaviconServiceTask(favicon_service, profile, cancelable_consumer) {}
+      CancelableRequestConsumer* cancelable_consumer,
+      CancelableTaskTracker* cancelable_tracker)
+      : FaviconServiceTask(favicon_service, profile,
+                           cancelable_consumer, cancelable_tracker) {}
 
   history::FaviconBitmapResult Run(const GURL& url) {
     RunAsyncRequestOnUIThreadBlocking(
@@ -641,18 +653,17 @@ class BookmarkIconFetchTask : public FaviconServiceTask {
                        profile(),
                        url,
                        history::FAVICON | history::TOUCH_ICON,
-                       gfx::kFaviconSize,
-                       cancelable_consumer()),
-                   ui::SCALE_FACTOR_100P,
+                       gfx::kFaviconSize),
+                   ui::GetMaxScaleFactor(),
                    base::Bind(
                        &BookmarkIconFetchTask::OnFaviconRetrieved,
-                       base::Unretained(this))));
+                       base::Unretained(this)),
+                   cancelable_tracker()));
     return result_;
   }
 
  private:
-  void OnFaviconRetrieved(FaviconService::Handle handle,
-                          const history::FaviconBitmapResult& bitmap_result) {
+  void OnFaviconRetrieved(const history::FaviconBitmapResult& bitmap_result) {
     result_ = bitmap_result;
     RequestCompleted();
   }
@@ -1512,7 +1523,8 @@ ScopedJavaLocalRef<jbyteArray> ChromeBrowserProvider::GetFaviconOrTouchIcon(
   GURL url = GURL(ConvertJavaStringToUTF16(env, jurl));
   BookmarkIconFetchTask favicon_task(favicon_service_.get(),
                                      profile_,
-                                     &favicon_consumer_);
+                                     &favicon_consumer_,
+                                     &cancelable_task_tracker_);
   history::FaviconBitmapResult bitmap_result = favicon_task.Run(url);
 
   if (!bitmap_result.is_valid() || !bitmap_result.bitmap_data.get())

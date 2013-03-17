@@ -8,15 +8,16 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "content/common/content_export.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamCenter.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamCenter.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
 
 namespace WebKit {
 class WebMediaStreamCenterClient;
 }
 
-class MediaStreamDependencyFactory;
-
 namespace content {
+class MediaStreamDependencyFactory;
 
 class CONTENT_EXPORT MediaStreamCenter
     : NON_EXPORTED_BASE(public WebKit::WebMediaStreamCenter) {
@@ -28,24 +29,18 @@ class CONTENT_EXPORT MediaStreamCenter
       const WebKit::WebMediaStreamSourcesRequest& request) OVERRIDE;
 
   virtual void didEnableMediaStreamTrack(
-      const WebKit::WebMediaStreamDescriptor& stream,
-      const WebKit::WebMediaStreamComponent& component) OVERRIDE;
+      const WebKit::WebMediaStream& stream,
+      const WebKit::WebMediaStreamTrack& component) OVERRIDE;
 
   virtual void didDisableMediaStreamTrack(
-      const WebKit::WebMediaStreamDescriptor& stream,
-      const WebKit::WebMediaStreamComponent& component) OVERRIDE;
+      const WebKit::WebMediaStream& stream,
+      const WebKit::WebMediaStreamTrack& component) OVERRIDE;
 
   virtual void didStopLocalMediaStream(
-      const WebKit::WebMediaStreamDescriptor& stream) OVERRIDE;
+      const WebKit::WebMediaStream& stream) OVERRIDE;
 
   virtual void didCreateMediaStream(
-      WebKit::WebMediaStreamDescriptor& stream) OVERRIDE;
-
-  virtual WebKit::WebString constructSDP(
-      const WebKit::WebICECandidateDescriptor& candidate) OVERRIDE;
-
-  virtual WebKit::WebString constructSDP(
-      const WebKit::WebSessionDescriptionDescriptor& description) OVERRIDE;
+      WebKit::WebMediaStream& stream) OVERRIDE;
 
  private:
   // |rtc_factory_| is a weak pointer and is owned by the RenderThreadImpl.

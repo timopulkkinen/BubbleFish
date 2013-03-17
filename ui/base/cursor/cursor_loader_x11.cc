@@ -18,7 +18,7 @@
 namespace {
 
 // Returns X font cursor shape from an Aura cursor.
-int CursorShapeFromNative(gfx::NativeCursor native_cursor) {
+int CursorShapeFromNative(const gfx::NativeCursor& native_cursor) {
   switch (native_cursor.native_type()) {
     case ui::kCursorMiddlePanning:
       return XC_fleur;
@@ -76,6 +76,7 @@ int CursorShapeFromNative(gfx::NativeCursor native_cursor) {
     case ui::kCursorVerticalText:
     case ui::kCursorZoomIn:
     case ui::kCursorZoomOut:
+    case ui::kCursorHand:
       // In some environments, the image assets are not set (e.g. in
       // content-browsertests, content-shell etc.).
       return XC_left_ptr;
@@ -141,25 +142,24 @@ CursorLoader* CursorLoader::Create() {
   return new CursorLoaderX11;
 }
 
-CursorLoaderX11::CursorLoaderX11() {
+CursorLoaderX11::CursorLoaderX11()
+    : invisible_cursor_(CreateInvisibleCursor(), GetXDisplay()) {
 }
 
 CursorLoaderX11::~CursorLoaderX11() {
   UnloadAll();
-  // Clears XCursorCache.
-  ui::GetXCursor(ui::kCursorClearXCursorCache);
 }
 
 void CursorLoaderX11::LoadImageCursor(int id,
                                       int resource_id,
                                       const gfx::Point& hot) {
   const gfx::ImageSkia* image =
-      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   const gfx::ImageSkiaRep& image_rep = image->GetRepresentation(
-      ui::GetScaleFactorFromScale(device_scale_factor()));
+      GetScaleFactorFromScale(device_scale_factor()));
   XcursorImage* x_image =
-      ui::SkBitmapToXcursorImage(&image_rep.sk_bitmap(), hot);
-  cursors_[id] = ui::CreateReffedCustomXCursor(x_image);
+      SkBitmapToXcursorImage(&image_rep.sk_bitmap(), hot);
+  cursors_[id] = CreateReffedCustomXCursor(x_image);
   // |image_rep| is owned by the resource bundle. So we do not need to free it.
 }
 
@@ -168,9 +168,9 @@ void CursorLoaderX11::LoadAnimatedCursor(int id,
                                          const gfx::Point& hot,
                                          int frame_delay_ms) {
   const gfx::ImageSkia* image =
-      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   const gfx::ImageSkiaRep& image_rep = image->GetRepresentation(
-      ui::GetScaleFactorFromScale(device_scale_factor()));
+      GetScaleFactorFromScale(device_scale_factor()));
   const SkBitmap bitmap = image_rep.sk_bitmap();
   DCHECK_EQ(bitmap.config(), SkBitmap::kARGB_8888_Config);
   int frame_width = bitmap.height();
@@ -200,20 +200,20 @@ void CursorLoaderX11::LoadAnimatedCursor(int id,
   bitmap.unlockPixels();
 
   animated_cursors_[id] = std::make_pair(
-      XcursorImagesLoadCursor(ui::GetXDisplay(), x_images), x_images);
+      XcursorImagesLoadCursor(GetXDisplay(), x_images), x_images);
   // |bitmap| is owned by the resource bundle. So we do not need to free it.
 }
 
 void CursorLoaderX11::UnloadAll() {
   for (ImageCursorMap::const_iterator it = cursors_.begin();
        it != cursors_.end(); ++it)
-    ui::UnrefCustomXCursor(it->second);
+    UnrefCustomXCursor(it->second);
 
   // Free animated cursors and images.
   for (AnimatedCursorMap::iterator it = animated_cursors_.begin();
        it != animated_cursors_.end(); ++it) {
     XcursorImagesDestroy(it->second.second);  // also frees individual frames.
-    XFreeCursor(ui::GetXDisplay(), it->second.first);
+    XFreeCursor(GetXDisplay(), it->second.first);
   }
 }
 
@@ -223,12 +223,14 @@ void CursorLoaderX11::SetPlatformCursor(gfx::NativeCursor* cursor) {
   ::Cursor xcursor;
   if (IsImageCursor(*cursor))
     xcursor = ImageCursorFromNative(*cursor);
-  else if (*cursor == ui::kCursorCustom)
+  else if (*cursor == kCursorNone)
+    xcursor =  invisible_cursor_.get();
+  else if (*cursor == kCursorCustom)
     xcursor = cursor->platform();
   else if (device_scale_factor() == 1.0f)
-    xcursor = ui::GetXCursor(CursorShapeFromNative(*cursor));
+    xcursor = GetXCursor(CursorShapeFromNative(*cursor));
   else
-    xcursor = ImageCursorFromNative(ui::kCursorPointer);
+    xcursor = ImageCursorFromNative(kCursorPointer);
 
   cursor->SetPlatformCursor(xcursor);
 }
@@ -247,7 +249,7 @@ bool CursorLoaderX11::IsImageCursor(gfx::NativeCursor native_cursor) {
   ImageCursorMap::iterator find = cursors_.find(type);
   if (find != cursors_.end())
     return cursors_[type];
-  return ui::GetXCursor(CursorShapeFromNative(native_cursor));
+  return GetXCursor(CursorShapeFromNative(native_cursor));
 }
 
-}
+}  // namespace ui

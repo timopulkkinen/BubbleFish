@@ -7,13 +7,15 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -21,30 +23,29 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/feedback/feedback_data.h"
 #include "chrome/browser/feedback/feedback_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -59,10 +60,10 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/gdata/drive.pb.h"
-#include "chrome/browser/chromeos/gdata/drive_file_system_interface.h"
-#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
-#include "chrome/browser/chromeos/gdata/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_system_service.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/syslogs_provider.h"
 #include "ui/aura/root_window.h"
@@ -102,11 +103,11 @@ std::string GetUserEmail() {
   if (!manager)
     return std::string();
   else
-    return manager->GetLoggedInUser().display_email();
+    return manager->GetLoggedInUser()->display_email();
 }
 
-bool ScreenshotDriveTimestampComp(const gdata::DriveEntryProto& entry1,
-                                  const gdata::DriveEntryProto& entry2) {
+bool ScreenshotDriveTimestampComp(const drive::DriveEntryProto& entry1,
+                                  const drive::DriveEntryProto& entry2) {
   return entry1.file_info().last_modified() >
       entry2.file_info().last_modified();
 }
@@ -114,18 +115,18 @@ bool ScreenshotDriveTimestampComp(const gdata::DriveEntryProto& entry1,
 void ReadDirectoryCallback(size_t max_saved,
                            std::vector<std::string>* saved_screenshots,
                            base::Closure callback,
-                           gdata::DriveFileError error,
+                           drive::DriveFileError error,
                            bool hide_hosted_documents,
-                           scoped_ptr<gdata::DriveEntryProtoVector> entries) {
-  if (error != gdata::DRIVE_FILE_OK) {
+                           scoped_ptr<drive::DriveEntryProtoVector> entries) {
+  if (error != drive::DRIVE_FILE_OK) {
     callback.Run();
     return;
   }
 
   size_t max_scan = std::min(kMaxNumScanFiles, entries->size());
-  std::vector<gdata::DriveEntryProto> screenshot_entries;
+  std::vector<drive::DriveEntryProto> screenshot_entries;
   for (size_t i = 0; i < max_scan; ++i) {
-    const gdata::DriveEntryProto& entry = (*entries)[i];
+    const drive::DriveEntryProto& entry = (*entries)[i];
     if (StartsWithASCII(entry.base_name(),
                         ScreenshotSource::kScreenshotPrefix, true) &&
         EndsWith(entry.base_name(),
@@ -140,7 +141,7 @@ void ReadDirectoryCallback(size_t max_saved,
                     screenshot_entries.end(),
                     ScreenshotDriveTimestampComp);
   for (size_t i = 0; i < sort_size; ++i) {
-    const gdata::DriveEntryProto& entry = screenshot_entries[i];
+    const drive::DriveEntryProto& entry = screenshot_entries[i];
     saved_screenshots->push_back(
         std::string(ScreenshotSource::kScreenshotUrlRoot) +
         std::string(ScreenshotSource::kScreenshotSaved) +
@@ -168,8 +169,8 @@ std::string GetUserEmail() {
 // Returns the index of the feedback tab if already open, -1 otherwise
 int GetIndexOfFeedbackTab(Browser* browser) {
   GURL feedback_url(chrome::kChromeUIFeedbackURL);
-  for (int i = 0; i < browser->tab_count(); ++i) {
-    WebContents* tab = chrome::GetWebContentsAt(browser, i);
+  for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
+    WebContents* tab = browser->tab_strip_model()->GetWebContentsAt(i);
     if (tab && tab->GetURL().GetWithEmptyPath() == feedback_url)
       return i;
   }
@@ -194,11 +195,11 @@ void ShowFeedbackPage(Browser* browser,
   // First check if we're already open (we cannot depend on ShowSingletonTab
   // for this functionality since we need to make *sure* we never get
   // instantiated again while we are open - with singleton tabs, that can
-  // happen)
+  // happen).
   int feedback_tab_index = GetIndexOfFeedbackTab(browser);
   if (feedback_tab_index >= 0) {
-    // Do not refresh screenshot, do not create a new tab
-    chrome::ActivateTabAt(browser, feedback_tab_index, true);
+    // Do not refresh screenshot, do not create a new tab.
+    browser->tab_strip_model()->ActivateTabAt(feedback_tab_index, true);
     return;
   }
 
@@ -226,7 +227,8 @@ void ShowFeedbackPage(Browser* browser,
 
   std::string feedback_url = std::string(chrome::kChromeUIFeedbackURL) + "?" +
       kSessionIDParameter + base::IntToString(browser->session_id().id()) +
-      "&" + kTabIndexParameter + base::IntToString(browser->active_index()) +
+      "&" + kTabIndexParameter +
+      base::IntToString(browser->tab_strip_model()->active_index()) +
       "&" + kDescriptionParameter +
       net::EscapeUrlEncodedData(description_template, false) + "&" +
       kCategoryTagParameter + net::EscapeUrlEncodedData(category_tag, false);
@@ -242,7 +244,7 @@ void ShowFeedbackPage(Browser* browser,
 
 // The handler for Javascript messages related to the "bug report" dialog
 class FeedbackHandler : public WebUIMessageHandler,
-                         public base::SupportsWeakPtr<FeedbackHandler> {
+                        public base::SupportsWeakPtr<FeedbackHandler> {
  public:
   explicit FeedbackHandler(content::WebContents* tab);
   virtual ~FeedbackHandler();
@@ -261,7 +263,8 @@ class FeedbackHandler : public WebUIMessageHandler,
   void RefreshSavedScreenshotsCallback(
       std::vector<std::string>* saved_screenshots);
   void GetMostRecentScreenshotsDrive(
-      const FilePath& filepath, std::vector<std::string>* saved_screenshots,
+      const base::FilePath& filepath,
+      std::vector<std::string>* saved_screenshots,
       size_t max_saved, base::Closure callback);
 #endif
   void HandleSendReport(const ListValue* args);
@@ -280,9 +283,9 @@ class FeedbackHandler : public WebUIMessageHandler,
   FeedbackData* feedback_data_;
   std::string target_tab_url_;
 #if defined(OS_CHROMEOS)
-  // Variables to track SyslogsProvider::RequestSyslogs callback.
-  chromeos::system::SyslogsProvider::Handle syslogs_handle_;
-  CancelableRequestConsumer syslogs_consumer_;
+  // Variables to track SyslogsProvider::RequestSyslogs.
+  CancelableTaskTracker::TaskId syslogs_task_id_;
+  CancelableTaskTracker syslogs_tracker_;
 
   // Timestamp of when the feedback request was initiated.
   std::string timestamp_;
@@ -291,10 +294,10 @@ class FeedbackHandler : public WebUIMessageHandler,
   DISALLOW_COPY_AND_ASSIGN(FeedbackHandler);
 };
 
-ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
-  ChromeWebUIDataSource* source =
-      new ChromeWebUIDataSource(chrome::kChromeUIFeedbackHost);
-  source->set_use_json_js_format_v2();
+content::WebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
+  content::WebUIDataSource* source =
+      content::WebUIDataSource::Create(chrome::kChromeUIFeedbackHost);
+  source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("title", IDS_FEEDBACK_TITLE);
   source->AddLocalizedString("page-title", IDS_FEEDBACK_REPORT_PAGE_TITLE);
@@ -317,6 +320,13 @@ ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
                              IDS_FEEDBACK_CHOOSE_DIFFERENT_SCREENSHOT);
   source->AddLocalizedString("choose-original-screenshot",
                              IDS_FEEDBACK_CHOOSE_ORIGINAL_SCREENSHOT);
+  source->AddLocalizedString("attach-file-custom-label",
+                             IDS_FEEDBACK_ATTACH_FILE_LABEL);
+  source->AddLocalizedString("attach-file-note",
+                             IDS_FEEDBACK_ATTACH_FILE_NOTE);
+  source->AddLocalizedString("attach-file-to-big",
+                             IDS_FEEDBACK_ATTACH_FILE_TO_BIG);
+  source->AddLocalizedString("reading-file", IDS_FEEDBACK_READING_FILE);
 #else
   source->AddLocalizedString("currentscreenshots",
                              IDS_FEEDBACK_INCLUDE_NEW_SCREEN_IMAGE);
@@ -332,9 +342,9 @@ ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
                              IDS_FEEDBACK_NO_SAVED_SCREENSHOTS_HELP);
   source->AddLocalizedString("privacy-note", IDS_FEEDBACK_PRIVACY_NOTE);
 
-  source->set_json_path("strings.js");
-  source->add_resource_path("feedback.js", IDR_FEEDBACK_JS);
-  source->set_default_resource(
+  source->SetJsonPath("strings.js");
+  source->AddResourcePath("feedback.js", IDR_FEEDBACK_JS);
+  source->SetDefaultResource(
       successful_init ? IDR_FEEDBACK_HTML : IDR_FEEDBACK_HTML_INVALID);
 
   return source;
@@ -350,10 +360,9 @@ FeedbackHandler::FeedbackHandler(WebContents* tab)
       screenshot_source_(NULL),
       feedback_data_(NULL)
 #if defined(OS_CHROMEOS)
-    , syslogs_handle_(0)
+      , syslogs_task_id_(CancelableTaskTracker::kBadTaskId)
 #endif
-{
-}
+{}
 
 FeedbackHandler::~FeedbackHandler() {
   // Just in case we didn't send off feedback_data_ to SendReport
@@ -371,21 +380,17 @@ void FeedbackHandler::ClobberScreenshotsSource() {
   // setting the screenshot to NULL, effectively disabling the source
   // TODO(rkc): Once there is a method to 'remove' a source, change this code
   Profile* profile = Profile::FromBrowserContext(tab_->GetBrowserContext());
-  ChromeURLDataManager::AddDataSource(profile,
-                                      new ScreenshotSource(NULL, profile));
+  content::URLDataSource::Add(profile, new ScreenshotSource(NULL, profile));
 
   FeedbackUtil::ClearScreenshotPng();
 }
 
 void FeedbackHandler::SetupScreenshotsSource() {
   Profile* profile = Profile::FromBrowserContext(tab_->GetBrowserContext());
-  // If we don't already have a screenshot source object created, create one.
-  if (!screenshot_source_) {
-    screenshot_source_ =
-        new ScreenshotSource(FeedbackUtil::GetScreenshotPng(), profile);
-  }
+  screenshot_source_ =
+      new ScreenshotSource(FeedbackUtil::GetScreenshotPng(), profile);
   // Add the source to the data manager.
-  ChromeURLDataManager::AddDataSource(profile, screenshot_source_);
+  content::URLDataSource::Add(profile, screenshot_source_);
 }
 
 bool FeedbackHandler::Init() {
@@ -445,13 +450,14 @@ bool FeedbackHandler::Init() {
     if (session_id == -1)
       return false;
 
-    Browser* browser = browser::FindBrowserWithID(session_id);
+    Browser* browser = chrome::FindBrowserWithID(session_id);
     // Sanity checks.
-    if (!browser || index >= browser->tab_count())
+    if (!browser || index >= browser->tab_strip_model()->count())
       return false;
 
     if (index >= 0) {
-      WebContents* target_tab = chrome::GetWebContentsAt(browser, index);
+      WebContents* target_tab =
+          browser->tab_strip_model()->GetWebContentsAt(index);
       if (target_tab)
         target_tab_url_ = target_tab->GetURL().spec();
     }
@@ -468,8 +474,6 @@ bool FeedbackHandler::Init() {
 }
 
 void FeedbackHandler::RegisterMessages() {
-  SetupScreenshotsSource();
-
   web_ui()->RegisterMessageCallback("getDialogDefaults",
       base::Bind(&FeedbackHandler::HandleGetDialogDefaults,
                  base::Unretained(this)));
@@ -526,12 +530,12 @@ void FeedbackHandler::HandleGetDialogDefaults(const ListValue*) {
   chromeos::system::SyslogsProvider* provider =
       chromeos::system::SyslogsProvider::GetInstance();
   if (provider) {
-    syslogs_handle_ = provider->RequestSyslogs(
+    syslogs_task_id_ = provider->RequestSyslogs(
         true,  // don't compress.
         chromeos::system::SyslogsProvider::SYSLOGS_FEEDBACK,
-        &syslogs_consumer_,
         base::Bind(&FeedbackData::SyslogsComplete,
-                   base::Unretained(feedback_data_)));
+                   base::Unretained(feedback_data_)),
+        &syslogs_tracker_);
   }
 
   // On ChromeOS if the user's email is blank, it means we don't
@@ -553,12 +557,12 @@ void FeedbackHandler::HandleRefreshCurrentScreenshot(const ListValue*) {
 #if defined(OS_CHROMEOS)
 void FeedbackHandler::HandleRefreshSavedScreenshots(const ListValue*) {
   std::vector<std::string>* saved_screenshots = new std::vector<std::string>;
-  FilePath filepath = DownloadPrefs::FromBrowserContext(
+  base::FilePath filepath = DownloadPrefs::FromBrowserContext(
       tab_->GetBrowserContext())->DownloadPath();
   base::Closure refresh_callback = base::Bind(
       &FeedbackHandler::RefreshSavedScreenshotsCallback,
       AsWeakPtr(), base::Owned(saved_screenshots));
-  if (gdata::util::IsUnderDriveMountPoint(filepath)) {
+  if (drive::util::IsUnderDriveMountPoint(filepath)) {
     GetMostRecentScreenshotsDrive(
         filepath, saved_screenshots, kMaxSavedScreenshots, refresh_callback);
   } else {
@@ -579,13 +583,13 @@ void FeedbackHandler::RefreshSavedScreenshotsCallback(
 }
 
 void FeedbackHandler::GetMostRecentScreenshotsDrive(
-    const FilePath& filepath, std::vector<std::string>* saved_screenshots,
+    const base::FilePath& filepath, std::vector<std::string>* saved_screenshots,
     size_t max_saved, base::Closure callback) {
-  gdata::DriveFileSystemInterface* file_system =
-      gdata::DriveSystemServiceFactory::GetForProfile(
+  drive::DriveFileSystemInterface* file_system =
+      drive::DriveSystemServiceFactory::GetForProfile(
           Profile::FromWebUI(web_ui()))->file_system();
   file_system->ReadDirectoryByPath(
-      gdata::util::ExtractDrivePath(filepath),
+      drive::util::ExtractDrivePath(filepath),
       base::Bind(&ReadDirectoryCallback, max_saved, saved_screenshots,
                  callback));
 }
@@ -595,15 +599,6 @@ void FeedbackHandler::GetMostRecentScreenshotsDrive(
 void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   if (!feedback_data_) {
     LOG(ERROR) << "Bug report hasn't been intialized yet.";
-    return;
-  }
-  // TODO(rkc): Find a better way to do this check.
-#if defined(OS_CHROMEOS)
-  if (list_value->GetSize() != 6) {
-#else
-  if (list_value->GetSize() != 5) {
-#endif
-    LOG(ERROR) << "Feedback data corrupt! Feedback not sent.";
     return;
   }
 
@@ -633,29 +628,52 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   // If we aren't sending the sys_info, cancel the gathering of the syslogs.
   if (!send_sys_info)
     CancelFeedbackCollection();
+
+  std::string attached_filename;
+  std::string* attached_filedata = NULL;
+  // If we have an attached file, we'll still have more data in the list.
+  if (i != list_value->end()) {
+    (*i++)->GetAsString(&attached_filename);
+    if (base::FilePath::IsSeparator(attached_filename[0])) {
+      // We have an attached filepath, not filename, hence we need read this
+      // this file in chrome. We won't have any file data, skip over it.
+      i++;
+    } else {
+      std::string encoded_filedata;
+      attached_filedata = new std::string;
+      (*i++)->GetAsString(&encoded_filedata);
+      if (!base::Base64Decode(
+          base::StringPiece(encoded_filedata), attached_filedata)) {
+        LOG(ERROR) << "Unable to attach file: " << attached_filename;
+        // Clear the filename so feedback_util doesn't try to attach the file.
+        attached_filename = "";
+      }
+    }
+  }
 #endif
 
   // Update the data in feedback_data_ so it can be sent
   feedback_data_->UpdateData(Profile::FromWebUI(web_ui())
-                               , target_tab_url_
-                               , std::string()
-                               , page_url
-                               , description
-                               , user_email
-                               , image_ptr
+                             , std::string()
+                             , page_url
+                             , description
+                             , user_email
+                             , image_ptr
 #if defined(OS_CHROMEOS)
-                               , send_sys_info
-                               , false  // sent_report
-                               , timestamp_
+                             , send_sys_info
+                             , false  // sent_report
+                             , timestamp_
+                             , attached_filename
+                             , attached_filedata
 #endif
-                               );
+                             );
 
 #if defined(OS_CHROMEOS)
   // If we don't require sys_info, or we have it, or we never requested it
   // (because libcros failed to load), then send the report now.
   // Otherwise, the report will get sent when we receive sys_info.
   if (!send_sys_info || feedback_data_->sys_info() != NULL ||
-      syslogs_handle_ == 0) {
+      syslogs_task_id_ == CancelableTaskTracker::kBadTaskId) {
     feedback_data_->SendReport();
   }
 #else
@@ -689,12 +707,8 @@ void FeedbackHandler::HandleOpenSystemTab(const ListValue* args) {
 
 void FeedbackHandler::CancelFeedbackCollection() {
 #if defined(OS_CHROMEOS)
-  if (syslogs_handle_ != 0) {
-    chromeos::system::SyslogsProvider* provider =
-        chromeos::system::SyslogsProvider::GetInstance();
-    if (provider && syslogs_consumer_.HasPendingRequests())
-      provider->CancelRequest(syslogs_handle_);
-  }
+  // Canceling a finished task ID or kBadTaskId is a noop.
+  syslogs_tracker_.TryCancel(syslogs_task_id_);
 #endif
 }
 
@@ -714,18 +728,18 @@ FeedbackUI::FeedbackUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(handler);
 
   // The handler's init will determine whether we show the error html page.
-  ChromeWebUIDataSource* html_source =
+  content::WebUIDataSource* html_source =
       CreateFeedbackUIHTMLSource(handler->Init());
 
   // Set up the chrome://feedback/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::WebUIDataSource::Add(profile, html_source);
 }
 
 #if defined(OS_CHROMEOS)
 // static
 void FeedbackUI::GetMostRecentScreenshots(
-    const FilePath& filepath,
+    const base::FilePath& filepath,
     std::vector<std::string>* saved_screenshots,
     size_t max_saved) {
   std::string pattern =
@@ -734,7 +748,7 @@ void FeedbackUI::GetMostRecentScreenshots(
   file_util::FileEnumerator screenshots(filepath, false,
                                         file_util::FileEnumerator::FILES,
                                         pattern);
-  FilePath screenshot = screenshots.Next();
+  base::FilePath screenshot = screenshots.Next();
 
   std::vector<std::string> screenshot_filepaths;
   while (!screenshot.empty()) {
@@ -749,8 +763,8 @@ void FeedbackUI::GetMostRecentScreenshots(
                     ScreenshotTimestampComp);
   for (size_t i = 0; i < sort_size; ++i)
     saved_screenshots->push_back(
-                    std::string(ScreenshotSource::kScreenshotUrlRoot) +
-                    std::string(ScreenshotSource::kScreenshotSaved) +
-                    screenshot_filepaths[i]);
+        std::string(ScreenshotSource::kScreenshotUrlRoot) +
+        std::string(ScreenshotSource::kScreenshotSaved) +
+        screenshot_filepaths[i]);
 }
 #endif

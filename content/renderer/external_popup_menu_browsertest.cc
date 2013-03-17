@@ -7,11 +7,12 @@
 #include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 // Tests for the external select popup menu (Mac specific).
 
+namespace content {
 namespace {
 
 const char* const kSelectID = "mySelect";
@@ -19,7 +20,7 @@ const char* const kEmptySelectID = "myEmptySelect";
 
 }  // namespace
 
-class ExternalPopupMenuTest : public content::RenderViewTest {
+class ExternalPopupMenuTest : public RenderViewTest {
  public:
   ExternalPopupMenuTest() {}
 
@@ -28,7 +29,7 @@ class ExternalPopupMenuTest : public content::RenderViewTest {
   }
 
   virtual void SetUp() {
-    content::RenderViewTest::SetUp();
+    RenderViewTest::SetUp();
     // We need to set this explictly as RenderMain is not run.
     WebKit::WebView::setUseExternalPopupMenus(true);
 
@@ -127,7 +128,7 @@ class ExternalPopupMenuRemoveTest : public ExternalPopupMenuTest {
   ExternalPopupMenuRemoveTest() {}
 
  protected:
-  virtual bool ShouldRemoveSelectOnChange() const { return true; }
+  virtual bool ShouldRemoveSelectOnChange() const OVERRIDE { return true; }
 };
 
 // Tests that nothing bad happen when the page removes the select when it
@@ -143,3 +144,5 @@ TEST_F(ExternalPopupMenuRemoveTest, RemoveOnChange) {
   // It should return false as the select has been removed.
   EXPECT_FALSE(SimulateElementClick(kSelectID));
 }
+
+}  // namespace content

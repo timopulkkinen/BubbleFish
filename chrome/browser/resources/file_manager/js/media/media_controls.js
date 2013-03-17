@@ -70,7 +70,7 @@ MediaControls.prototype.createControl = function(className, opt_parent) {
  * @param {string} className Class name.
  * @param {function(Event)} handler Click handler.
  * @param {HTMLElement=} opt_parent Parent element or container if undefined.
- * @param {Boolean} opt_toggle True if the button has toggle state.
+ * @param {boolean=} opt_toggle True if the button has toggle state.
  * @return {HTMLElement} The new button element.
  */
 MediaControls.prototype.createButton = function(
@@ -147,7 +147,7 @@ MediaControls.prototype.togglePlayState = function() {
 };
 
 /**
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initPlayButton = function(opt_parent) {
   this.playButton_ = this.createButton('play media-control',
@@ -164,9 +164,9 @@ MediaControls.prototype.initPlayButton = function(opt_parent) {
 MediaControls.PROGRESS_RANGE = 5000;
 
 /**
- * @param {boolean} opt_seekMark True if the progress slider should have
- *   a seek mark.
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {boolean=} opt_seekMark True if the progress slider should have
+ *     a seek mark.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initTimeControls = function(opt_seekMark, opt_parent) {
   var timeControls = this.createControl('time-controls', opt_parent);
@@ -202,7 +202,7 @@ MediaControls.prototype.displayProgress_ = function(current, duration) {
 };
 
 /**
- * @param {number} value Progress [0..1]
+ * @param {number} value Progress [0..1].
  * @private
  */
 MediaControls.prototype.onProgressChange_ = function(value) {
@@ -239,7 +239,7 @@ MediaControls.prototype.onProgressDrag_ = function(on) {
  */
 
 /**
- * @param {HTMLElement} opt_parent Parent element for the controls.
+ * @param {HTMLElement=} opt_parent Parent element for the controls.
  */
 MediaControls.prototype.initVolumeControls = function(opt_parent) {
   var volumeControls = this.createControl('volume-controls', opt_parent);
@@ -271,7 +271,7 @@ MediaControls.prototype.onSoundButtonClick_ = function() {
 };
 
 /**
- * @param {number} value Volume [0..1]
+ * @param {number} value Volume [0..1].
  * @return {number} The rough level [0..3] used to pick an icon.
  * @private
  */
@@ -343,6 +343,17 @@ MediaControls.prototype.detachMedia = function() {
   this.media_.removeEventListener('error', this.onMediaError_);
 
   this.media_ = null;
+};
+
+/**
+ * Force-empty the media pipeline. This is a workaround for crbug.com/149957.
+ * The document is not going to be GC-ed until the last Files app window closes,
+ * but we want the media pipeline to deinitialize ASAP to minimize leakage.
+ */
+MediaControls.prototype.cleanup = function() {
+  this.media_.src = '';
+  this.media_.load();
+  this.detachMedia();
 };
 
 /**
@@ -430,11 +441,17 @@ MediaControls.prototype.onPlayStateChanged = function() {};
 MediaControls.prototype.restorePlayState = function() {};
 
 /**
- * Encode current play/pause status and the current time into the page URL.
+ * Encode current state into the page URL or the app state.
  */
-MediaControls.prototype.encodeStateIntoLocation = function() {
+MediaControls.prototype.encodeState = function() {
   if (!this.media_.duration)
     return;
+
+  if (window.appState) {
+    window.appState.time = this.media_.currentTime;
+    util.saveAppState();
+    return;
+  }
 
   var playState = JSON.stringify({
       play: this.isPlaying(),
@@ -444,14 +461,24 @@ MediaControls.prototype.encodeStateIntoLocation = function() {
   var newLocation = document.location.origin + document.location.pathname +
       document.location.search + '#' + playState;
 
-  history.replaceState(undefined, playState, newLocation);
+  document.location.href = newLocation;
 };
 
 /**
- * Decode current play/pause status and the current time from the page URL.
+ * Decode current state from the page URL or the app state.
  * @return {boolean} True if decode succeeded.
  */
-MediaControls.prototype.decodeStateFromLocation = function() {
+MediaControls.prototype.decodeState = function() {
+  if (window.appState) {
+    if (!('time' in window.appState))
+      return false;
+    // There is no page reload for apps v2, only app restart.
+    // Always restart in paused state.
+    this.media_.currentTime = appState.time;
+    this.pause();
+    return true;
+  }
+
   var hash = document.location.hash.substring(1);
   if (hash) {
     try {
@@ -472,6 +499,23 @@ MediaControls.prototype.decodeStateFromLocation = function() {
     }
   }
   return false;
+};
+
+/**
+ * Remove current state from the page URL or the app state.
+ */
+MediaControls.prototype.clearState = function() {
+  if (window.appState) {
+    if ('time' in window.appState)
+      delete window.appState.time;
+    util.saveAppState();
+    return;
+  }
+
+  var newLocation = document.location.origin + document.location.pathname +
+      document.location.search + '#';
+
+  document.location.href = newLocation;
 };
 
 /**
@@ -558,7 +602,7 @@ MediaControls.Slider.prototype.getValue = function() {
 };
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  */
 MediaControls.Slider.prototype.setValue = function(value) {
   this.value_ = value;
@@ -568,7 +612,7 @@ MediaControls.Slider.prototype.setValue = function(value) {
 /**
  * Fill the given proportion the slider bar (from the left).
  *
- * @param {number} proportion [0..1]
+ * @param {number} proportion [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setFilled_ = function(proportion) {
@@ -578,7 +622,7 @@ MediaControls.Slider.prototype.setFilled_ = function(proportion) {
 /**
  * Get the value from the input element.
  *
- * @return {number} Value [0..1]
+ * @return {number} Value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.getValueFromUI_ = function() {
@@ -588,7 +632,7 @@ MediaControls.Slider.prototype.getValueFromUI_ = function() {
 /**
  * Update the UI with the current value.
  *
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setValueToUI_ = function(value) {
@@ -643,6 +687,7 @@ MediaControls.Slider.prototype.onInputDrag_ = function(on) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.AnimatedSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -664,7 +709,7 @@ MediaControls.AnimatedSlider.STEPS = 10;
 MediaControls.AnimatedSlider.DURATION = 100;
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
@@ -696,6 +741,7 @@ MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.PreciseSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -705,6 +751,7 @@ MediaControls.PreciseSlider = function(
 
   /**
    * @type {function(number):string}
+   * @private
    */
   this.valueToString_ = null;
 
@@ -765,7 +812,7 @@ MediaControls.PreciseSlider.prototype.setValueToStringFunction =
  *
  * @param {number} ratio [0..1] The proportion of the duration.
  * @param {number} timeout Timeout in ms after which the label should be hidden.
- *   MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
+ *     MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
  * @private
  */
 MediaControls.PreciseSlider.prototype.showSeekMark_ =
@@ -881,9 +928,9 @@ MediaControls.PreciseSlider.prototype.onInputDrag_ = function(on) {
  *
  * @param {HTMLElement} containerElement The container for the controls.
  * @param {function} onMediaError Function to display an error message.
- * @param {function} opt_fullScreenToggle Function to toggle fullscreen mode.
- * @param {HTMLElement} opt_stateIconParent The parent for the icon that
- *                      gives visual feedback when the playback state changes.
+ * @param {function=} opt_fullScreenToggle Function to toggle fullscreen mode.
+ * @param {HTMLElement=} opt_stateIconParent The parent for the icon that
+ *     gives visual feedback when the playback state changes.
  * @constructor
  */
 function VideoControls(containerElement, onMediaError,
@@ -908,25 +955,10 @@ function VideoControls(containerElement, onMediaError,
         'playback-state-icon', opt_stateIconParent);
   }
 
-  this.resumePositions_ = new TimeLimitedMap(
-      'VideoResumePosition',
-      VideoControls.RESUME_POSITIONS_CAPACITY,
-      VideoControls.RESUME_POSITION_LIFETIME);
-
   var video_controls = this;
   chrome.mediaPlayerPrivate.onTogglePlayState.addListener(
       function() { video_controls.togglePlayStateWithFeedback(); });
 }
-
-/**
- * Capacity of the resume position storage.
- */
-VideoControls.RESUME_POSITIONS_CAPACITY = 100;
-
-/**
- * Maximum lifetime of a stored position.
- */
-VideoControls.RESUME_POSITION_LIFETIME = 30 * 24 * 60 * 60 * 1000;  // 30 days.
 
 /**
  * No resume if we are withing this margin from the start or the end.
@@ -962,35 +994,10 @@ VideoControls.prototype.togglePlayStateWithFeedback = function() {
 
   this.togglePlayState();
 
-  var self = this;
-
-  var delay = function(action, opt_timeout) {
-    if (self.statusIconTimer_) {
-      clearTimeout(self.statusIconTimer_);
-    }
-    self.statusIconTimer_ = setTimeout(function() {
-      self.statusIconTimer_ = null;
-      action();
-    }, opt_timeout || 0);
-  };
-
-  function hideStatusIcon() {
-    self.stateIcon_.removeAttribute('visible');
-    self.stateIcon_.removeAttribute('state');
-  }
-
-  hideStatusIcon();
-
-  // The delays are required to trigger the layout between attribute changes.
-  // Otherwise everything just goes to the final state without the animation.
-  delay(function() {
-    self.stateIcon_.setAttribute('visible', true);
-    delay(function() {
-      self.stateIcon_.setAttribute(
-          'state', self.isPlaying() ? 'play' : 'pause');
-      delay(hideStatusIcon, 1000);  /* Twice the animation duration. */
-    });
-  });
+  this.stateIcon_.removeAttribute('state');
+  setTimeout(function() {
+    this.stateIcon_.setAttribute('state', this.isPlaying() ? 'play' : 'pause');
+  }.bind(this), 0);
 };
 
 /**
@@ -1006,21 +1013,35 @@ VideoControls.prototype.togglePlayState = function() {
 
 /**
  * Save the playback position to the persistent storage.
+ * @param {boolean=} opt_sync True if the position must be saved synchronously
+ *     (required when closing app windows).
  */
-VideoControls.prototype.savePosition = function() {
+VideoControls.prototype.savePosition = function(opt_sync) {
   if (!this.media_.duration ||
-      this.media_.duration_ < VideoControls.RESUME_THRESHOLD)
+      this.media_.duration < VideoControls.RESUME_THRESHOLD) {
     return;
+  }
 
   var ratio = this.media_.currentTime / this.media_.duration;
+  var position;
   if (ratio < VideoControls.RESUME_MARGIN ||
       ratio > (1 - VideoControls.RESUME_MARGIN)) {
     // We are too close to the beginning or the end.
     // Remove the resume position so that next time we start from the beginning.
-    this.resumePositions_.removeValue(this.media_.src);
+    position = null;
   } else {
-    this.resumePositions_.setValue(this.media_.src, Math.floor(Math.max(0,
-        this.media_.currentTime - VideoControls.RESUME_REWIND)));
+    position = Math.floor(
+        Math.max(0, this.media_.currentTime - VideoControls.RESUME_REWIND));
+  }
+
+  if (opt_sync && util.platform.v2()) {
+    // Packaged apps cannot save synchronously.
+    // Pass the data to the background page.
+    if (!window.saveOnExit)
+      window.saveOnExit = [];
+    window.saveOnExit.push({ key: this.media_.src, value: position });
+  } else {
+    util.AppCache.update(this.media_.src, position);
   }
 };
 
@@ -1029,9 +1050,10 @@ VideoControls.prototype.savePosition = function() {
  */
 VideoControls.prototype.restorePlayState = function() {
   if (this.media_.duration >= VideoControls.RESUME_THRESHOLD) {
-    var position = this.resumePositions_.getValue(this.media_.src);
-    if (position)
-      this.media_.currentTime = position;
+    util.AppCache.getValue(this.media_.src, function(position) {
+      if (position)
+        this.media_.currentTime = position;
+    }.bind(this));
   }
 };
 
@@ -1058,114 +1080,6 @@ VideoControls.prototype.updateStyle = function() {
   hideBelow('.volume-controls', 210);
   hideBelow('.fullscreen', 150);
 };
-
-/**
- *  TimeLimitedMap is persistent timestamped key-value storage backed by
- *  HTML5 local storage.
- *
- *  It is not designed for frequent access. In order to avoid costly
- *  localStorage iteration all data is kept in a single localStorage item.
- *  There is no in-memory caching, so concurrent access is OK.
- *
- *  @param {string} localStorageKey A key in the local storage.
- *  @param {number} capacity Maximim number of items. If exceeded, oldest items
- *                           are removed.
- *  @param {number} lifetime Maximim time to keep an item (in milliseconds).
- */
-function TimeLimitedMap(localStorageKey, capacity, lifetime) {
-  this.localStorageKey_ = localStorageKey;
-  this.capacity_ = capacity;
-  this.lifetime_ = lifetime;
-}
-
-/**
- * @param {string} key Key
- * @return {string} Value
- */
-TimeLimitedMap.prototype.getValue = function(key) {
-  var map = this.read_();
-  var entry = map[key];
-  return entry && entry.value;
-};
-
-/**
- * @param {string} key Key.
- * @param {string} value Value.
- */
-TimeLimitedMap.prototype.setValue = function(key, value) {
-  var map = this.read_();
-  map[key] = { value: value, timestamp: Date.now() };
-  this.cleanup_(map);
-  this.write_(map);
-};
-
-/**
- * @param {string} key Key to remove.
- */
-TimeLimitedMap.prototype.removeValue = function(key) {
-  var map = this.read_();
-  if (!(key in map))
-    return;  // Nothing to do.
-
-  delete map[key];
-  this.cleanup_(map);
-  this.write_(map);
-};
-
-/**
- * @return {Object} A map of timestamped key-value pairs.
- * @private
- */
-TimeLimitedMap.prototype.read_ = function() {
-  var json = localStorage[this.localStorageKey_];
-  if (json) {
-    try {
-      return JSON.parse(json);
-    } catch (e) {
-      // The localStorage item somehow got messed up, start fresh.
-    }
-  }
-  return {};
-};
-
-/**
- * @param {Object} map A map of timestamped key-value pairs.
- * @private
- */
-TimeLimitedMap.prototype.write_ = function(map) {
-  localStorage[this.localStorageKey_] = JSON.stringify(map);
-};
-
-/**
- * Remove over-capacity and obsolete items.
- *
- * @param {Object} map A map of timestamped key-value pairs.
- * @private
- */
-TimeLimitedMap.prototype.cleanup_ = function(map) {
-  // Sort keys by ascending timestamps.
-  var keys = [];
-  for (var key in map) {
-    keys.push(key);
-  }
-  keys.sort(function(a, b) { return map[a].timestamp > map[b].timestamp });
-
-  var cutoff = Date.now() - this.lifetime_;
-
-  var obsolete = 0;
-  while (obsolete < keys.length &&
-         map[keys[obsolete]].timestamp < cutoff) {
-    obsolete++;
-  }
-
-  var overCapacity = Math.max(0, keys.length - this.capacity_);
-
-  var itemsToDelete = Math.max(obsolete, overCapacity);
-  for (var i = 0; i != itemsToDelete; i++) {
-    delete map[keys[i]];
-  }
-};
-
 
 /**
  * Create audio controls.

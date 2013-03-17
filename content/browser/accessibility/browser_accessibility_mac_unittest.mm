@@ -13,8 +13,6 @@
 #import "testing/gtest_mac.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
 
-using content::AccessibilityNodeData;
-
 @interface MockAccessibilityDelegate :
     NSView<BrowserAccessibilityDelegateCocoa>
 
@@ -53,6 +51,7 @@ using content::AccessibilityNodeData;
 
 @end
 
+namespace content {
 
 class BrowserAccessibilityTest : public ui::CocoaTest {
  public:
@@ -122,7 +121,8 @@ TEST_F(BrowserAccessibilityTest, InvalidHitTestCoordsTest) {
 }
 
 // Test to ensure querying standard attributes works.
-TEST_F(BrowserAccessibilityTest, BasicAttributeTest) {
+// http://crbug.com/173983 Test fails on Mac ASan bot
+TEST_F(BrowserAccessibilityTest, DISABLED_BasicAttributeTest) {
   NSString* helpText = [accessibility_
       accessibilityAttributeValue:NSAccessibilityHelpAttribute];
   EXPECT_NSEQ(@"HelpText", helpText);
@@ -134,3 +134,5 @@ TEST_F(BrowserAccessibilityTest, InvalidAttributeTest) {
       accessibilityAttributeValue:@"NSAnInvalidAttribute"];
   EXPECT_TRUE(shouldBeNil == nil);
 }
+
+}  // namespace content

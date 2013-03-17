@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <limits>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
@@ -16,7 +16,7 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
-using webkit::forms::PasswordForm;
+using content::PasswordForm;
 
 static const int kCurrentVersionNumber = 1;
 static const int kCompatibleVersionNumber = 1;
@@ -48,7 +48,7 @@ LoginDatabase::LoginDatabase() {
 LoginDatabase::~LoginDatabase() {
 }
 
-bool LoginDatabase::Init(const FilePath& db_path) {
+bool LoginDatabase::Init(const base::FilePath& db_path) {
   // Set pragmas for a small, private database (based on WebDatabase).
   db_.set_page_size(2048);
   db_.set_cache_size(32);
@@ -297,7 +297,7 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
 bool LoginDatabase::GetLoginsCreatedBetween(
     const base::Time begin,
     const base::Time end,
-    std::vector<webkit::forms::PasswordForm*>* forms) const {
+    std::vector<content::PasswordForm*>* forms) const {
   DCHECK(forms);
   sql::Statement s(db_.GetCachedStatement(SQL_FROM_HERE,
       "SELECT origin_url, action_url, "

@@ -22,7 +22,3 @@ ClientSocketPoolBaseTest.DisableCleanupTimer
 
 # Flaky, see http://crbug.com/108422
 SSLClientSocketTest.ConnectMismatched
-
-##############################################################################
-# TODO(rnk): The exclusions below should only apply to the full mode
-# DrMemory bot.

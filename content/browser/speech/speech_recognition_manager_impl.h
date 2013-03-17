@@ -22,14 +22,6 @@
 namespace content {
 class BrowserMainLoop;
 class SpeechRecognitionManagerDelegate;
-}
-
-namespace media_stream {
-class MediaStreamManager;
-}
-
-namespace speech {
-
 class SpeechRecognizer;
 
 // This is the manager for speech recognition. It is a single instance in
@@ -52,8 +44,8 @@ class SpeechRecognizer;
 //  - Relays also recognition results/status/error events of every session to
 //    the catch-all snoop listener (optionally) provided by the delegate.
 class CONTENT_EXPORT SpeechRecognitionManagerImpl :
-    public NON_EXPORTED_BASE(content::SpeechRecognitionManager),
-    public content::SpeechRecognitionEventListener {
+    public NON_EXPORTED_BASE(SpeechRecognitionManager),
+    public SpeechRecognitionEventListener {
  public:
   // Returns the current SpeechRecognitionManagerImpl or NULL if the call is
   // issued when it is not created yet or destroyed (by BrowserMainLoop).
@@ -61,17 +53,17 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
 
   // SpeechRecognitionManager implementation.
   virtual int CreateSession(
-      const content::SpeechRecognitionSessionConfig& config) OVERRIDE;
+      const SpeechRecognitionSessionConfig& config) OVERRIDE;
   virtual void StartSession(int session_id) OVERRIDE;
   virtual void AbortSession(int session_id) OVERRIDE;
   virtual void AbortAllSessionsForListener(
-        content::SpeechRecognitionEventListener* listener) OVERRIDE;
+        SpeechRecognitionEventListener* listener) OVERRIDE;
   virtual void AbortAllSessionsForRenderView(int render_process_id,
                                              int render_view_id) OVERRIDE;
   virtual void StopAudioCaptureForSession(int session_id) OVERRIDE;
-  virtual const content::SpeechRecognitionSessionConfig& GetSessionConfig(
+  virtual const SpeechRecognitionSessionConfig& GetSessionConfig(
       int session_id) const OVERRIDE;
-  virtual content::SpeechRecognitionSessionContext GetSessionContext(
+  virtual SpeechRecognitionSessionContext GetSessionContext(
       int session_id) const OVERRIDE;
   virtual int GetSession(int render_process_id,
                          int render_view_id,
@@ -89,17 +81,18 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   virtual void OnSoundEnd(int session_id) OVERRIDE;
   virtual void OnAudioEnd(int session_id) OVERRIDE;
   virtual void OnRecognitionEnd(int session_id) OVERRIDE;
-  virtual void OnRecognitionResult(
-      int session_id, const content::SpeechRecognitionResult& result) OVERRIDE;
+  virtual void OnRecognitionResults(
+      int session_id, const SpeechRecognitionResults& result) OVERRIDE;
   virtual void OnRecognitionError(
-      int session_id, const content::SpeechRecognitionError& error) OVERRIDE;
+      int session_id, const SpeechRecognitionError& error) OVERRIDE;
   virtual void OnAudioLevelsChange(int session_id, float volume,
                                    float noise_volume) OVERRIDE;
 
  protected:
   // BrowserMainLoop is the only one allowed to istantiate and free us.
-  friend class content::BrowserMainLoop;
-  friend class scoped_ptr<SpeechRecognitionManagerImpl>;  // Needed for dtor.
+  friend class BrowserMainLoop;
+  // Needed for dtor.
+  friend struct base::DefaultDeleter<SpeechRecognitionManagerImpl>;
   SpeechRecognitionManagerImpl();
   virtual ~SpeechRecognitionManagerImpl();
 
@@ -127,8 +120,8 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
 
     int id;
     bool listener_is_active;
-    content::SpeechRecognitionSessionConfig config;
-    content::SpeechRecognitionSessionContext context;
+    SpeechRecognitionSessionConfig config;
+    SpeechRecognitionSessionContext context;
     scoped_refptr<SpeechRecognizer> recognizer;
   };
 
@@ -137,6 +130,12 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   void RecognitionAllowedCallback(int session_id,
                                   bool ask_user,
                                   bool is_allowed);
+
+  // Callback to get back the result of a media request. |label| is the string
+  // to identify the request; |devices| is an array of devices approved to be
+  // used for the request, |devices| is empty if the users deny the request.
+  void MediaRequestPermissionCallback(const std::string& label,
+                                      const MediaStreamDevices& devices);
 
   // Entry point for pushing any external event into the session handling FSM.
   void DispatchEvent(int session_id, FSMEvent event);
@@ -159,8 +158,8 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
 
   bool SessionExists(int session_id) const;
   const Session& GetSession(int session_id) const;
-  content::SpeechRecognitionEventListener* GetListener(int session_id) const;
-  content::SpeechRecognitionEventListener* GetDelegateListener() const;
+  SpeechRecognitionEventListener* GetListener(int session_id) const;
+  SpeechRecognitionEventListener* GetDelegateListener() const;
   int GetNextSessionID();
 
   typedef std::map<int, Session> SessionsTable;
@@ -168,17 +167,14 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   int primary_session_id_;
   int last_session_id_;
   bool is_dispatching_event_;
-  scoped_ptr<content::SpeechRecognitionManagerDelegate> delegate_;
+  scoped_ptr<SpeechRecognitionManagerDelegate> delegate_;
 
   // Used for posting asynchronous tasks (on the IO thread) without worrying
   // about this class being destroyed in the meanwhile (due to browser shutdown)
   // since tasks pending on a destroyed WeakPtr are automatically discarded.
   base::WeakPtrFactory<SpeechRecognitionManagerImpl> weak_factory_;
-
-  class PermissionRequest;
-  scoped_ptr<PermissionRequest> permission_request_;
 };
 
-}  // namespace speech
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_MANAGER_IMPL_H_

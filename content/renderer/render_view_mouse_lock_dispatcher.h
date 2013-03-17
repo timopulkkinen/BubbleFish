@@ -10,11 +10,12 @@
 #include "content/public/renderer/render_view_observer.h"
 #include "content/renderer/mouse_lock_dispatcher.h"
 
+namespace content {
 class RenderViewImpl;
 
 // RenderViewMouseLockDispatcher is owned by RenderViewImpl.
 class RenderViewMouseLockDispatcher : public MouseLockDispatcher,
-                                      public content::RenderViewObserver {
+                                      public RenderViewObserver {
  public:
   explicit RenderViewMouseLockDispatcher(RenderViewImpl* render_view_impl);
   virtual ~RenderViewMouseLockDispatcher();
@@ -27,11 +28,13 @@ class RenderViewMouseLockDispatcher : public MouseLockDispatcher,
   // RenderView::Observer implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  void OnMsgLockMouseACK(bool succeeded);
+  void OnLockMouseACK(bool succeeded);
 
   RenderViewImpl* render_view_impl_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewMouseLockDispatcher);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_RENDER_VIEW_MOUSE_LOCK_DISPATCHER_H_

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_bundle.h"
@@ -28,7 +29,7 @@ class PolicyServiceImpl : public PolicyService,
   // The PolicyServiceImpl will merge policies from |providers|. |providers|
   // must be sorted in decreasing order of priority; the first provider will
   // have the highest priority. The PolicyServiceImpl does not take ownership of
-  // the providers, but handles OnProviderGoingAway() if they are destroyed.
+  // the providers, and they must outlive the PolicyServiceImpl.
   explicit PolicyServiceImpl(const Providers& providers);
   virtual ~PolicyServiceImpl();
 
@@ -37,31 +38,44 @@ class PolicyServiceImpl : public PolicyService,
                            PolicyService::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(PolicyDomain domain,
                               PolicyService::Observer* observer) OVERRIDE;
-  virtual const PolicyMap& GetPolicies(
+  virtual void RegisterPolicyDomain(
       PolicyDomain domain,
-      const std::string& component_id) const OVERRIDE;
-  virtual bool IsInitializationComplete() const OVERRIDE;
+      const std::set<std::string>& components) OVERRIDE;
+  virtual const PolicyMap& GetPolicies(
+      const PolicyNamespace& ns) const OVERRIDE;
+  virtual bool IsInitializationComplete(PolicyDomain domain) const OVERRIDE;
   virtual void RefreshPolicies(const base::Closure& callback) OVERRIDE;
 
  private:
   typedef ObserverList<PolicyService::Observer, true> Observers;
   typedef std::map<PolicyDomain, Observers*> ObserverMap;
-  typedef std::vector<ConfigurationPolicyObserverRegistrar*> RegistrarList;
+
+  // Information about policy changes sent to observers.
+  class PolicyChangeInfo {
+   public:
+    PolicyChangeInfo(const PolicyNamespace& policy_namespace,
+                     const PolicyMap& previous,
+                     const PolicyMap& current);
+    ~PolicyChangeInfo();
+
+    PolicyNamespace policy_namespace_;
+    PolicyMap previous_;
+    PolicyMap current_;
+  };
 
   // ConfigurationPolicyProvider::Observer overrides:
   virtual void OnUpdatePolicy(ConfigurationPolicyProvider* provider) OVERRIDE;
-  virtual void OnProviderGoingAway(
-      ConfigurationPolicyProvider* provider) OVERRIDE;
 
-  // Returns an iterator to the entry in |registrars_| that corresponds to
-  // |provider|, or |registrars_.end()|.
-  RegistrarList::iterator GetRegistrar(ConfigurationPolicyProvider* provider);
-
-  // Notifies observers of |ns| that its policies have changed, passing along
-  // the |previous| and the |current| policies.
-  void NotifyNamespaceUpdated(const PolicyBundle::PolicyNamespace& ns,
+  // Posts a task to notify observers of |ns| that its policies have changed,
+  // passing along the |previous| and the |current| policies.
+  void NotifyNamespaceUpdated(const PolicyNamespace& ns,
                               const PolicyMap& previous,
                               const PolicyMap& current);
+
+  // Helper function invoked by NotifyNamespaceUpdated() to notify observers
+  // via a queued task, to deal with reentrancy issues caused by observers
+  // generating policy changes.
+  void NotifyNamespaceUpdatedTask(scoped_ptr<PolicyChangeInfo> info);
 
   // Combines the policies from all the providers, and notifies the observers
   // of namespaces whose policies have been modified.
@@ -74,9 +88,8 @@ class PolicyServiceImpl : public PolicyService,
   // Invokes all the refresh callbacks if there are no more refreshes pending.
   void CheckRefreshComplete();
 
-  // Contains a registrar for each of the providers passed in the constructor,
-  // in order of decreasing priority.
-  RegistrarList registrars_;
+  // The providers passed in the constructor, in order of decreasing priority.
+  Providers providers_;
 
   // Maps each policy namespace to its current policies.
   PolicyBundle policy_bundle_;
@@ -84,8 +97,8 @@ class PolicyServiceImpl : public PolicyService,
   // Maps each policy domain to its observer list.
   ObserverMap observers_;
 
-  // True if all the providers are initialized.
-  bool initialization_complete_;
+  // True if all the providers are initialized for the indexed policy domain.
+  bool initialization_complete_[POLICY_DOMAIN_SIZE];
 
   // Set of providers that have a pending update that was triggered by a
   // call to RefreshPolicies().
@@ -94,6 +107,10 @@ class PolicyServiceImpl : public PolicyService,
   // List of callbacks to invoke once all providers refresh after a
   // RefreshPolicies() call.
   std::vector<base::Closure> refresh_callbacks_;
+
+  // Used to create tasks to delay new policy updates while we may be already
+  // processing previous policy updates.
+  base::WeakPtrFactory<PolicyServiceImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PolicyServiceImpl);
 };

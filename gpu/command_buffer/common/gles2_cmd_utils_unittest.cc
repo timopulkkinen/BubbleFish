@@ -7,6 +7,7 @@
 #include <limits>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -234,6 +235,18 @@ TEST_F(GLES2UtilTest, RenderbufferBytesPerPixel) {
    EXPECT_EQ(0u, GLES2Util::RenderbufferBytesPerPixel(-1));
 }
 
+TEST_F(GLES2UtilTest, GetChannelsForCompressedFormat) {
+  EXPECT_EQ(0u, GLES2Util::GetChannelsForFormat(GL_ETC1_RGB8_OES));
+  EXPECT_EQ(0u, GLES2Util::GetChannelsForFormat(
+      GL_COMPRESSED_RGB_S3TC_DXT1_EXT));
+  EXPECT_EQ(0u, GLES2Util::GetChannelsForFormat(
+      GL_COMPRESSED_RGBA_S3TC_DXT1_EXT));
+  EXPECT_EQ(0u, GLES2Util::GetChannelsForFormat(
+      GL_COMPRESSED_RGBA_S3TC_DXT3_EXT));
+  EXPECT_EQ(0u, GLES2Util::GetChannelsForFormat(
+      GL_COMPRESSED_RGBA_S3TC_DXT5_EXT));
+}
+
 namespace {
 
 void CheckParseUniformName(
@@ -278,4 +291,3 @@ TEST_F(GLES2UtilTest, ParseUniformName) {
 
 }  // namespace gles2
 }  // namespace gpu
-

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -18,13 +18,18 @@
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/web_accessible_resources_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/resource_request_info.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/url_util.h"
 #include "grit/component_extension_resources_map.h"
 #include "net/base/mime_util.h"
@@ -34,7 +39,6 @@
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_simple_job.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::ResourceRequestInfo;
@@ -48,7 +52,7 @@ net::HttpResponseHeaders* BuildHttpHeaders(
   raw_headers.append("HTTP/1.1 200 OK");
   if (!content_security_policy.empty()) {
     raw_headers.append(1, '\0');
-    raw_headers.append("X-WebKit-CSP: ");
+    raw_headers.append("Content-Security-Policy: ");
     raw_headers.append(content_security_policy);
   }
 
@@ -60,7 +64,7 @@ net::HttpResponseHeaders* BuildHttpHeaders(
   return new net::HttpResponseHeaders(raw_headers);
 }
 
-void ReadMimeTypeFromFile(const FilePath& filename,
+void ReadMimeTypeFromFile(const base::FilePath& filename,
                           std::string* mime_type,
                           bool* result) {
   *result = net::GetMimeTypeFromFile(filename, mime_type);
@@ -70,7 +74,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
  public:
   URLRequestResourceBundleJob(net::URLRequest* request,
                               net::NetworkDelegate* network_delegate,
-                              const FilePath& filename,
+                              const base::FilePath& filename,
                               int resource_id,
                               const std::string& content_security_policy,
                               bool send_cors_header)
@@ -88,8 +92,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
                       std::string* data,
                       const net::CompletionCallback& callback) const OVERRIDE {
     const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    *data = rb.GetRawDataResource(
-        resource_id_, ui::SCALE_FACTOR_NONE).as_string();
+    *data = rb.GetRawDataResource(resource_id_).as_string();
 
     std::string* read_mime_type = new std::string;
     bool* read_result = new bool;
@@ -110,7 +113,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
     return net::ERR_IO_PENDING;
   }
 
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) {
+  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE {
     *info = response_info_;
   }
 
@@ -135,7 +138,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
   }
 
   // We need the filename of the resource to determine the mime type.
-  FilePath filename_;
+  base::FilePath filename_;
 
   // The resource bundle id to load.
   int resource_id_;
@@ -167,16 +170,18 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
     *charset = "utf-8";
 
     *data = "<!DOCTYPE html>\n<body>\n";
-    for (size_t i = 0; i < extension_->background_scripts().size(); ++i) {
+    const std::vector<std::string>& background_scripts =
+        extensions::BackgroundInfo::GetBackgroundScripts(extension_);
+    for (size_t i = 0; i < background_scripts.size(); ++i) {
       *data += "<script src=\"";
-      *data += extension_->background_scripts()[i];
+      *data += background_scripts[i];
       *data += "\"></script>\n";
     }
 
     return net::OK;
   }
 
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) {
+  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE {
     *info = response_info_;
   }
 
@@ -188,7 +193,7 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
 };
 
 void ReadResourceFilePath(const ExtensionResource& resource,
-                          FilePath* file_path) {
+                          base::FilePath* file_path) {
   *file_path = resource.GetFilePath();
 }
 
@@ -197,10 +202,10 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
   URLRequestExtensionJob(net::URLRequest* request,
                          net::NetworkDelegate* network_delegate,
                          const std::string& extension_id,
-                         const FilePath& directory_path,
+                         const base::FilePath& directory_path,
                          const std::string& content_security_policy,
                          bool send_cors_header)
-    : net::URLRequestFileJob(request, network_delegate, FilePath()),
+    : net::URLRequestFileJob(request, network_delegate, base::FilePath()),
       // TODO(tc): Move all of these files into resources.pak so we don't break
       // when updating on Linux.
       resource_(extension_id, directory_path,
@@ -216,7 +221,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
   }
 
   virtual void Start() OVERRIDE {
-    FilePath* read_file_path = new FilePath;
+    base::FilePath* read_file_path = new base::FilePath;
     bool posted = base::WorkerPool::PostTaskAndReply(
         FROM_HERE,
         base::Bind(&ReadResourceFilePath, resource_,
@@ -231,7 +236,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
  private:
   virtual ~URLRequestExtensionJob() {}
 
-  void OnFilePathRead(FilePath* read_file_path) {
+  void OnFilePathRead(base::FilePath* read_file_path) {
     file_path_ = *read_file_path;
     URLRequestFileJob::Start();
   }
@@ -285,7 +290,7 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
 
 // Returns true if the given URL references an icon in the given extension.
 bool URLIsForExtensionIcon(const GURL& url, const Extension* extension) {
-  DCHECK(url.SchemeIs(chrome::kExtensionScheme));
+  DCHECK(url.SchemeIs(extensions::kExtensionScheme));
 
   if (!extension)
     return false;
@@ -294,7 +299,7 @@ bool URLIsForExtensionIcon(const GURL& url, const Extension* extension) {
   DCHECK_EQ(url.host(), extension->id());
   DCHECK(path.length() > 0 && path[0] == '/');
   path = path.substr(1);
-  return extension->icons().ContainsPath(path);
+  return extensions::IconsInfo::GetIcons(extension).ContainsPath(path);
 }
 
 class ExtensionProtocolHandler
@@ -332,7 +337,7 @@ ExtensionProtocolHandler::MaybeCreateJob(
   const std::string& extension_id = request->url().host();
   const Extension* extension =
       extension_info_map_->extensions().GetByID(extension_id);
-  FilePath directory_path;
+  base::FilePath directory_path;
   if (extension)
     directory_path = extension->path();
   if (directory_path.value().empty()) {
@@ -353,8 +358,10 @@ ExtensionProtocolHandler::MaybeCreateJob(
     content_security_policy =
         extension->GetResourceContentSecurityPolicy(resource_path);
     if ((extension->manifest_version() >= 2 ||
-             extension->HasWebAccessibleResources()) &&
-        extension->IsResourceWebAccessible(resource_path))
+         extensions::WebAccessibleResourcesInfo::HasWebAccessibleResources(
+             extension)) &&
+        extensions::WebAccessibleResourcesInfo::IsResourceWebAccessible(
+            extension, resource_path))
       send_cors_header = true;
   }
 
@@ -365,8 +372,8 @@ ExtensionProtocolHandler::MaybeCreateJob(
         request, network_delegate, extension, content_security_policy);
   }
 
-  FilePath resources_path;
-  FilePath relative_path;
+  base::FilePath resources_path;
+  base::FilePath relative_path;
   // Try to load extension resources from chrome resource file if
   // directory_path is a descendant of resources_path. resources_path
   // corresponds to src/chrome/browser/resources in source tree.
@@ -375,26 +382,20 @@ ExtensionProtocolHandler::MaybeCreateJob(
       // component_extension_resources.pak file in resources_path, calculate
       // extension relative path against resources_path.
       resources_path.AppendRelativePath(directory_path, &relative_path)) {
-    relative_path = relative_path.Append(
-        extension_file_util::ExtensionURLToRelativeFilePath(request->url()));
-    relative_path = relative_path.NormalizePathSeparators();
-
-    // TODO(tc): Make a map of FilePath -> resource ids so we don't have to
-    // covert to FilePaths all the time.  This will be more useful as we add
-    // more resources.
-    for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
-      FilePath bm_resource_path =
-          FilePath().AppendASCII(kComponentExtensionResources[i].name);
-      bm_resource_path = bm_resource_path.NormalizePathSeparators();
-      if (relative_path == bm_resource_path) {
-        return new URLRequestResourceBundleJob(
-            request,
-            network_delegate,
-            relative_path,
-            kComponentExtensionResources[i].value,
-            content_security_policy,
-            send_cors_header);
-      }
+    base::FilePath request_path =
+        extension_file_util::ExtensionURLToRelativeFilePath(request->url());
+    int resource_id;
+    if (extensions::ImageLoader::IsComponentExtensionResource(
+        directory_path, request_path, &resource_id)) {
+      relative_path = relative_path.Append(request_path);
+      relative_path = relative_path.NormalizePathSeparators();
+      return new URLRequestResourceBundleJob(
+          request,
+          network_delegate,
+          relative_path,
+          resource_id,
+          content_security_policy,
+          send_cors_header);
     }
   }
 

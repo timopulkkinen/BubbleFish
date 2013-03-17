@@ -7,7 +7,7 @@
 #include <map>
 #include <utility>
 
-#include "android_webview/native/intercepted_request_data.h"
+#include "android_webview/native/intercepted_request_data_impl.h"
 #include "base/android/jni_helper.h"
 #include "base/android/jni_string.h"
 #include "base/lazy_instance.h"
@@ -15,10 +15,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "googleurl/src/gurl.h"
 #include "net/url_request/url_request.h"
 
 #include "jni/AwContentsIoThreadClient_jni.h"
@@ -171,8 +172,25 @@ AwContentsIoThreadClientImpl::AwContentsIoThreadClientImpl(
   : java_object_(obj) {
 }
 
+AwContentsIoThreadClientImpl::~AwContentsIoThreadClientImpl() {
+  // explict, out-of-line destructor.
+}
+
+AwContentsIoThreadClient::CacheMode
+AwContentsIoThreadClientImpl::GetCacheMode() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return AwContentsIoThreadClient::LOAD_DEFAULT;
+
+  JNIEnv* env = AttachCurrentThread();
+  return static_cast<AwContentsIoThreadClient::CacheMode>(
+      Java_AwContentsIoThreadClient_getCacheMode(
+          env, java_object_.obj()));
+}
+
 scoped_ptr<InterceptedRequestData>
 AwContentsIoThreadClientImpl::ShouldInterceptRequest(
+    const GURL& location,
     const net::URLRequest* request) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (java_object_.is_null())
@@ -180,14 +198,34 @@ AwContentsIoThreadClientImpl::ShouldInterceptRequest(
 
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jstring_url =
-      ConvertUTF8ToJavaString(env, request->url().spec());
+      ConvertUTF8ToJavaString(env, location.spec());
   ScopedJavaLocalRef<jobject> ret =
       Java_AwContentsIoThreadClient_shouldInterceptRequest(
           env, java_object_.obj(), jstring_url.obj());
   if (ret.is_null())
     return scoped_ptr<InterceptedRequestData>();
   return scoped_ptr<InterceptedRequestData>(
-      new InterceptedRequestData(ret));
+      new InterceptedRequestDataImpl(ret));
+}
+
+bool AwContentsIoThreadClientImpl::ShouldBlockContentUrls() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return false;
+
+  JNIEnv* env = AttachCurrentThread();
+  return Java_AwContentsIoThreadClient_shouldBlockContentUrls(
+      env, java_object_.obj());
+}
+
+bool AwContentsIoThreadClientImpl::ShouldBlockFileUrls() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return false;
+
+  JNIEnv* env = AttachCurrentThread();
+  return Java_AwContentsIoThreadClient_shouldBlockFileUrls(
+      env, java_object_.obj());
 }
 
 bool AwContentsIoThreadClientImpl::ShouldBlockNetworkLoads() const {
@@ -198,6 +236,55 @@ bool AwContentsIoThreadClientImpl::ShouldBlockNetworkLoads() const {
   JNIEnv* env = AttachCurrentThread();
   return Java_AwContentsIoThreadClient_shouldBlockNetworkLoads(
       env, java_object_.obj());
+}
+
+void AwContentsIoThreadClientImpl::NewDownload(
+    const GURL& url,
+    const std::string& user_agent,
+    const std::string& content_disposition,
+    const std::string& mime_type,
+    int64 content_length) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return;
+
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jstring_url =
+      ConvertUTF8ToJavaString(env, url.spec());
+  ScopedJavaLocalRef<jstring> jstring_user_agent =
+      ConvertUTF8ToJavaString(env, user_agent);
+  ScopedJavaLocalRef<jstring> jstring_content_disposition =
+      ConvertUTF8ToJavaString(env, content_disposition);
+  ScopedJavaLocalRef<jstring> jstring_mime_type =
+      ConvertUTF8ToJavaString(env, mime_type);
+
+  Java_AwContentsIoThreadClient_onDownloadStart(
+      env,
+      java_object_.obj(),
+      jstring_url.obj(),
+      jstring_user_agent.obj(),
+      jstring_content_disposition.obj(),
+      jstring_mime_type.obj(),
+      content_length);
+}
+
+void AwContentsIoThreadClientImpl::NewLoginRequest(const std::string& realm,
+                                                   const std::string& account,
+                                                   const std::string& args) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return;
+
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jrealm = ConvertUTF8ToJavaString(env, realm);
+  ScopedJavaLocalRef<jstring> jargs = ConvertUTF8ToJavaString(env, args);
+
+  ScopedJavaLocalRef<jstring> jaccount;
+  if (!account.empty())
+    jaccount = ConvertUTF8ToJavaString(env, account);
+
+  Java_AwContentsIoThreadClient_newLoginRequest(
+      env, java_object_.obj(), jrealm.obj(), jaccount.obj(), jargs.obj());
 }
 
 bool RegisterAwContentsIoThreadClientImpl(JNIEnv* env) {

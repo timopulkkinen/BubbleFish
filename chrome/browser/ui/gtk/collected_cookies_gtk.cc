@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/gtk/collected_cookies_gtk.h"
 
 #include <string>
+#include "base/prefs/pref_service.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
@@ -12,20 +14,17 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/browsing_data/local_data_container.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/cookies_tree_model.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_cookie_view.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_source.h"
@@ -97,21 +96,21 @@ const std::string GetInfobarLabel(ContentSetting setting,
 namespace chrome {
 
 // Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowCollectedCookiesDialog(TabContents* tab_contents) {
+void ShowCollectedCookiesDialog(content::WebContents* web_contents) {
   // Deletes itself on close.
   new CollectedCookiesGtk(
-      tab_contents->web_contents()->GetView()->GetTopLevelNativeWindow(),
-      tab_contents);
+      web_contents->GetView()->GetTopLevelNativeWindow(),
+      web_contents);
 }
 
 }  // namespace chrome
 
 CollectedCookiesGtk::CollectedCookiesGtk(GtkWindow* parent,
-                                         TabContents* tab_contents)
-    : tab_contents_(tab_contents),
+                                         content::WebContents* web_contents)
+    : web_contents_(web_contents),
       status_changed_(false) {
   TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(tab_contents->web_contents());
+      TabSpecificContentSettings::FromWebContents(web_contents);
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
                  content::Source<TabSpecificContentSettings>(content_settings));
 
@@ -190,7 +189,7 @@ void CollectedCookiesGtk::Init() {
   blocked_cookies_tree_adapter_->Init();
   EnableControls();
   ShowCookieInfo(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook_)));
-  window_ = new ConstrainedWindowGtk(tab_contents_, this);
+  window_ = new ConstrainedWindowGtk(web_contents_, this);
 }
 
 GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
@@ -212,8 +211,7 @@ GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
   gtk_box_pack_start(GTK_BOX(cookie_list_vbox), scroll_window, TRUE, TRUE, 0);
 
   TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(
-          tab_contents_->web_contents());
+      TabSpecificContentSettings::FromWebContents(web_contents_);
 
   const LocalSharedObjectsContainer& allowed_data =
       content_settings->allowed_local_shared_objects();
@@ -269,7 +267,8 @@ GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
 }
 
 GtkWidget* CollectedCookiesGtk::CreateBlockedPane() {
-  PrefService* prefs = tab_contents_->profile()->GetPrefs();
+  PrefService* prefs = Profile::FromBrowserContext(
+      web_contents_->GetBrowserContext())->GetPrefs();
 
   GtkWidget* cookie_list_vbox = gtk_vbox_new(FALSE, ui::kControlSpacing);
 
@@ -293,8 +292,7 @@ GtkWidget* CollectedCookiesGtk::CreateBlockedPane() {
   gtk_box_pack_start(GTK_BOX(cookie_list_vbox), scroll_window, TRUE, TRUE, 0);
 
   TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(
-          tab_contents_->web_contents());
+      TabSpecificContentSettings::FromWebContents(web_contents_);
 
   const LocalSharedObjectsContainer& blocked_data =
       content_settings->blocked_local_shared_objects();
@@ -457,16 +455,15 @@ void CollectedCookiesGtk::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void CollectedCookiesGtk::OnClose(GtkWidget* close_button) {
   if (status_changed_) {
-    InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
-    infobar_helper->AddInfoBar(
-        new CollectedCookiesInfoBarDelegate(infobar_helper));
+    CollectedCookiesInfoBarDelegate::Create(
+        InfoBarService::FromWebContents(web_contents_));
   }
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
@@ -492,7 +489,8 @@ void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
       if (!last_domain_name.empty())
         multiple_domains_added = true;
       last_domain_name = host_node->GetTitle();
-      Profile* profile = tab_contents_->profile();
+      Profile* profile =
+          Profile::FromBrowserContext(web_contents_->GetBrowserContext());
       host_node->CreateContentException(
           CookieSettings::Factory::GetForProfile(profile), setting);
     }

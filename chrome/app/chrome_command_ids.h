@@ -81,7 +81,7 @@
 #define IDC_ADVANCED_PRINT              35007
 #define IDC_CHROME_TO_MOBILE_PAGE       35008
 #define IDC_PRINT_TO_DESTINATION        35009
-#define IDC_SHARE_PAGE                  35010
+#define IDC_BOOKMARK_PAGE_FROM_STAR     35010
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -182,16 +182,22 @@
 #define IDC_SHOW_KEYBOARD_OVERLAY       40027
 #define IDC_PROFILING_ENABLED           40028
 #define IDC_BOOKMARKS_MENU              40029
+// TODO(atwilson): Remove IDC_SHOW_SYNC_SETUP when we officially allow signin
+// when sync is disabled.
 #define IDC_SHOW_SYNC_SETUP             40030
+#define IDC_SHOW_SIGNIN                 40030
 #define IDC_EXTENSION_ERRORS            40031
-#define IDC_SHOW_SYNC_ERROR             40032
+#define IDC_SHOW_SIGNIN_ERROR           40032
 #define IDC_SHOW_SETTINGS_CHANGE_FIRST  40033
-#define IDC_DEV_TOOLS_TOGGLE            40034
 #define IDC_SHOW_SETTINGS_CHANGE_LAST   40133
 #define IDC_SHOW_AVATAR_MENU            40134
 #define IDC_EXTENSION_DISABLED_FIRST    40135
 #define IDC_EXTENSION_DISABLED_LAST     40235
 #define IDC_TOGGLE_REQUEST_TABLET_SITE  40236
+#define IDC_DEV_TOOLS_TOGGLE            40237
+#define IDC_EXTERNAL_EXTENSION_ALERT    40238
+#define IDC_RECENT_TABS_MENU            40239
+#define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -291,6 +297,8 @@
 #define IDC_CONTENT_CONTEXT_SPEECH_STOP_SPEAKING 50160
 #define IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE 50161
 #define IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP 50162
+#define IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP 50163
+#define IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE 50164
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50170
 #define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50171

@@ -24,6 +24,8 @@ namespace net {
 class HttpResponseHeaders;
 class HttpResponseInfo;
 class HttpTransaction;
+class HttpUserAgentSettings;
+class UploadDataStream;
 class URLRequestContext;
 
 // A URLRequestJob subclass that is built on top of HttpTransaction.  It
@@ -35,7 +37,9 @@ class URLRequestHttpJob : public URLRequestJob {
                                 const std::string& scheme);
 
  protected:
-  URLRequestHttpJob(URLRequest* request, NetworkDelegate* network_delegate);
+  URLRequestHttpJob(URLRequest* request,
+                    NetworkDelegate* network_delegate,
+                    const HttpUserAgentSettings* http_user_agent_settings);
 
   // Shadows URLRequestJob's version of this method so we can grab cookies.
   void NotifyHeadersComplete();
@@ -66,7 +70,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void RestartTransactionWithAuth(const AuthCredentials& credentials);
 
   // Overridden from URLRequestJob:
-  virtual void SetUpload(UploadData* upload) OVERRIDE;
+  virtual void SetUpload(UploadDataStream* upload) OVERRIDE;
   virtual void SetExtraRequestHeaders(
       const HttpRequestHeaders& headers) OVERRIDE;
   virtual void Start() OVERRIDE;
@@ -76,6 +80,8 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
   virtual bool GetCharset(std::string* charset) OVERRIDE;
   virtual void GetResponseInfo(HttpResponseInfo* info) OVERRIDE;
+  virtual void GetLoadTimingInfo(
+      LoadTimingInfo* load_timing_info) const OVERRIDE;
   virtual bool GetResponseCookies(std::vector<std::string>* cookies) OVERRIDE;
   virtual int GetResponseCode() const OVERRIDE;
   virtual Filter* SetupFilter() const OVERRIDE;
@@ -170,9 +176,7 @@ class URLRequestHttpJob : public URLRequestJob {
   // Callback functions for Cookie Monster
   void DoLoadCookies();
   void CheckCookiePolicyAndLoad(const CookieList& cookie_list);
-  void OnCookiesLoaded(
-      const std::string& cookie_line,
-      const std::vector<CookieStore::CookieInfo>& cookie_infos);
+  void OnCookiesLoaded(const std::string& cookie_line);
   void DoStartTransaction();
 
   // See the implementation for a description of save_next_cookie_running and
@@ -243,6 +247,8 @@ class URLRequestHttpJob : public URLRequestJob {
   bool awaiting_callback_;
 
   scoped_ptr<HttpTransactionDelegateImpl> http_transaction_delegate_;
+
+  const HttpUserAgentSettings* http_user_agent_settings_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestHttpJob);
 };

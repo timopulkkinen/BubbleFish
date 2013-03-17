@@ -22,6 +22,7 @@ template<typename Class,
          typename PointClass,
          typename SizeClass,
          typename InsetsClass,
+         typename VectorClass,
          typename Type>
 class UI_EXPORT RectBase {
  public:
@@ -46,6 +47,14 @@ class UI_EXPORT RectBase {
   Type right() const { return x() + width(); }
   Type bottom() const { return y() + height(); }
 
+  PointClass top_right() const { return PointClass(right(), y()); }
+  PointClass bottom_left() const { return PointClass(x(), bottom()); }
+  PointClass bottom_right() const { return PointClass(right(), bottom()); }
+
+  VectorClass OffsetFromOrigin() const {
+    return VectorClass(x(), y());
+  }
+
   void SetRect(Type x, Type y, Type width, Type height);
 
   // Shrink the rectangle by a horizontal and vertical distance on all sides.
@@ -61,9 +70,11 @@ class UI_EXPORT RectBase {
 
   // Move the rectangle by a horizontal and vertical distance.
   void Offset(Type horizontal, Type vertical);
-  void Offset(const PointClass& point) {
-    Offset(point.x(), point.y());
+  void Offset(const VectorClass& distance) {
+    Offset(distance.x(), distance.y());
   }
+  void operator+=(const VectorClass& offset);
+  void operator-=(const VectorClass& offset);
 
   InsetsClass InsetsFrom(const Class& inner) const {
     return InsetsClass(inner.y() - y(),
@@ -74,12 +85,6 @@ class UI_EXPORT RectBase {
 
   // Returns true if the area of the rectangle is zero.
   bool IsEmpty() const { return size_.IsEmpty(); }
-
-  bool operator==(const Class& other) const;
-
-  bool operator!=(const Class& other) const {
-    return !(*this == other);
-  }
 
   // A rect is less than another rect if its origin is less than
   // the other rect's origin. If the origins are equal, then the
@@ -106,36 +111,31 @@ class UI_EXPORT RectBase {
   bool Intersects(const Class& rect) const;
 
   // Computes the intersection of this rectangle with the given rectangle.
-  Class Intersect(const Class& rect) const WARN_UNUSED_RESULT;
+  void Intersect(const Class& rect);
 
   // Computes the union of this rectangle with the given rectangle.  The union
   // is the smallest rectangle containing both rectangles.
-  Class Union(const Class& rect) const WARN_UNUSED_RESULT;
+  void Union(const Class& rect);
 
   // Computes the rectangle resulting from subtracting |rect| from |this|.  If
   // |rect| does not intersect completely in either the x- or y-direction, then
-  // |*this| is returned.  If |rect| contains |this|, then an empty Rect is
-  // returned.
-  Class Subtract(const Class& rect) const WARN_UNUSED_RESULT;
-
-  // Returns true if this rectangle equals that of the supplied rectangle.
-  bool Equals(const Class& rect) const {
-    return *this == rect;
-  }
+  // |*this| does not change.  If |rect| contains |this|, then an empty Rect is
+  // the result.
+  void Subtract(const Class& rect);
 
   // Fits as much of the receiving rectangle into the supplied rectangle as
-  // possible, returning the result. For example, if the receiver had
+  // possible, becoming the result. For example, if the receiver had
   // a x-location of 2 and a width of 4, and the supplied rectangle had
   // an x-location of 0 with a width of 5, the returned rectangle would have
   // an x-location of 1 with a width of 4.
-  Class AdjustToFit(const Class& rect) const WARN_UNUSED_RESULT;
+  void AdjustToFit(const Class& rect);
 
   // Returns the center of this rectangle.
   PointClass CenterPoint() const;
 
-  // Return a rectangle that has the same center point but with a size capped
+  // Becomes a rectangle that has the same center point but with a size capped
   // at given |size|.
-  Class Center(const SizeClass& size) const WARN_UNUSED_RESULT;
+  void ClampToCenteredSize(const SizeClass& size);
 
   // Splits |this| in two halves, |left_half| and |right_half|.
   void SplitVertically(Class* left_half, Class* right_half) const;
@@ -145,12 +145,15 @@ class UI_EXPORT RectBase {
   bool SharesEdgeWith(const Class& rect) const;
 
  protected:
-  RectBase(const PointClass& origin, const SizeClass& size);
-  explicit RectBase(const SizeClass& size);
-  explicit RectBase(const PointClass& origin);
+  RectBase(const PointClass& origin, const SizeClass& size)
+      : origin_(origin), size_(size) {}
+  explicit RectBase(const SizeClass& size)
+      : size_(size) {}
+  explicit RectBase(const PointClass& origin)
+      : origin_(origin) {}
   // Destructor is intentionally made non virtual and protected.
   // Do not make this public.
-  ~RectBase();
+  ~RectBase() {}
 
  private:
   PointClass origin_;

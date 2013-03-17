@@ -7,14 +7,12 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class HistoryService;
-class SkBitmap;
-struct ThumbnailScore;
 
 namespace history {
 struct HistoryAddPageArgs;
@@ -22,7 +20,7 @@ struct HistoryAddPageArgs;
 
 class HistoryTabHelper : public content::WebContentsObserver,
                          public content::NotificationObserver,
-                         public WebContentsUserData<HistoryTabHelper> {
+                         public content::WebContentsUserData<HistoryTabHelper> {
  public:
   virtual ~HistoryTabHelper();
 
@@ -45,7 +43,7 @@ class HistoryTabHelper : public content::WebContentsObserver,
 
  private:
   explicit HistoryTabHelper(content::WebContents* web_contents);
-  friend class WebContentsUserData<HistoryTabHelper>;
+  friend class content::WebContentsUserData<HistoryTabHelper>;
 
   // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -65,9 +63,6 @@ class HistoryTabHelper : public content::WebContentsObserver,
   void OnPageContents(const GURL& url,
                       int32 page_id,
                       const string16& contents);
-  void OnThumbnail(const GURL& url,
-                   const ThumbnailScore& score,
-                   const SkBitmap& bitmap);
 
   // Helper function to return the history service.  May return NULL.
   HistoryService* GetHistoryService();

@@ -6,11 +6,12 @@
 #define CONTENT_BROWSER_DOWNLOAD_SAVE_ITEM_H_
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/browser/download/save_types.h"
 #include "content/public/common/referrer.h"
 #include "googleurl/src/gurl.h"
 
+namespace content {
 class SavePackage;
 
 // One SaveItem per save file. This is the model class that stores all the
@@ -25,7 +26,7 @@ class SaveItem {
   };
 
   SaveItem(const GURL& url,
-           const content::Referrer& referrer,
+           const Referrer& referrer,
            SavePackage* package,
            SaveFileCreateInfo::SaveFileSource save_source);
 
@@ -47,7 +48,7 @@ class SaveItem {
   int PercentComplete() const;
 
   // Update path for SaveItem, the actual file is renamed on the file thread.
-  void Rename(const FilePath& full_path);
+  void Rename(const base::FilePath& full_path);
 
   void SetSaveId(int32 save_id);
 
@@ -55,10 +56,10 @@ class SaveItem {
 
   // Accessors.
   SaveState state() const { return state_; }
-  const FilePath& full_path() const { return full_path_; }
-  const FilePath& file_name() const { return file_name_; }
+  const base::FilePath& full_path() const { return full_path_; }
+  const base::FilePath& file_name() const { return file_name_; }
   const GURL& url() const { return url_; }
-  const content::Referrer& referrer() const { return referrer_; }
+  const Referrer& referrer() const { return referrer_; }
   int64 total_bytes() const { return total_bytes_; }
   int64 received_bytes() const { return received_bytes_; }
   int32 save_id() const { return save_id_; }
@@ -77,14 +78,14 @@ class SaveItem {
   int32 save_id_;
 
   // Full path to the save item file.
-  FilePath full_path_;
+  base::FilePath full_path_;
 
   // Short display version of the file.
-  FilePath file_name_;
+  base::FilePath file_name_;
 
   // The URL for this save item.
   GURL url_;
-  content::Referrer referrer_;
+  Referrer referrer_;
 
   // Total bytes expected.
   int64 total_bytes_;
@@ -108,5 +109,7 @@ class SaveItem {
 
   DISALLOW_COPY_AND_ASSIGN(SaveItem);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_SAVE_ITEM_H_

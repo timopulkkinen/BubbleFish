@@ -11,7 +11,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/power/power_button_controller_delegate_chromeos.h"
+#include "chrome/browser/chromeos/power/session_state_controller_delegate_chromeos.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -24,18 +24,31 @@ ash::user::LoginStatus GetCurrentLoginStatus() {
   const UserManager* user_manager = UserManager::Get();
   if (!user_manager->IsUserLoggedIn())
     return ash::user::LOGGED_IN_NONE;
+  if (user_manager->IsCurrentUserOwner())
+    return ash::user::LOGGED_IN_OWNER;
 
-  if (user_manager->GetLoggedInUser().is_guest())
-    return ash::user::LOGGED_IN_GUEST;
+  switch (user_manager->GetLoggedInUser()->GetType()) {
+    case User::USER_TYPE_REGULAR:
+      return ash::user::LOGGED_IN_USER;
+    case User::USER_TYPE_GUEST:
+      return ash::user::LOGGED_IN_GUEST;
+    case User::USER_TYPE_RETAIL_MODE:
+      return ash::user::LOGGED_IN_KIOSK;
+    case User::USER_TYPE_PUBLIC_ACCOUNT:
+      return ash::user::LOGGED_IN_PUBLIC;
+    case User::USER_TYPE_LOCALLY_MANAGED:
+      return ash::user::LOGGED_IN_LOCALLY_MANAGED;
+  }
 
+  NOTREACHED();
   return ash::user::LOGGED_IN_USER;
 }
 
 }  // namespace
 
 PowerButtonObserver::PowerButtonObserver() {
-  ash::Shell::GetInstance()->power_button_controller()->
-      set_delegate(new PowerButtonControllerDelegateChromeos);
+  ash::Shell::GetInstance()->session_state_controller()->
+      SetDelegate(new SessionStateControllerDelegateChromeos);
 
   registrar_.Add(
       this,
@@ -87,20 +100,14 @@ void PowerButtonObserver::Observe(int type,
   }
 }
 
-void PowerButtonObserver::PowerButtonStateChanged(
+void PowerButtonObserver::PowerButtonEventReceived(
     bool down, const base::TimeTicks& timestamp) {
   ash::Shell::GetInstance()->power_button_controller()->
       OnPowerButtonEvent(down, timestamp);
 }
 
-void PowerButtonObserver::LockButtonStateChanged(
-    bool down, const base::TimeTicks& timestamp) {
-  ash::Shell::GetInstance()->power_button_controller()->
-      OnLockButtonEvent(down, timestamp);
-}
-
 void PowerButtonObserver::LockScreen() {
-  ash::Shell::GetInstance()->power_button_controller()->OnStartingLock();
+  ash::Shell::GetInstance()->session_state_controller()->OnStartingLock();
 }
 
 }  // namespace chromeos

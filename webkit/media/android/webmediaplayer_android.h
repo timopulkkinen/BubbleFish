@@ -11,10 +11,10 @@
 #include "base/message_loop.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVideoFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 
 namespace webkit_media {
 
@@ -121,6 +121,9 @@ class WebMediaPlayerAndroid
   // Method inherited from DestructionObserver.
   virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
+  // Detach the player from its manager.
+  void Detach();
+
  protected:
   // Construct a WebMediaPlayerAndroid object with reference to the
   // client, manager and stream texture factory.
@@ -137,8 +140,11 @@ class WebMediaPlayerAndroid
   virtual void UpdateReadyState(WebKit::WebMediaPlayer::ReadyState state);
 
   // Helper method to reestablish the surface texture peer for android
-  // mediaplayer.
+  // media player.
   virtual void EstablishSurfaceTexturePeer();
+
+  // Requesting whether the surface texture peer needs to be reestablished.
+  virtual void SetNeedsEstablishPeer(bool needs_establish_peer);
 
   // Method to be implemented by child classes.
   // Initialize the media player bridge object.
@@ -164,9 +170,13 @@ class WebMediaPlayerAndroid
 
   WebKit::WebMediaPlayerClient* client() { return client_; }
 
-  int player_id() { return player_id_; }
+  int player_id() const { return player_id_; }
+
+  WebMediaPlayerManagerAndroid* manager() const { return manager_; }
 
  private:
+  void ReallocateVideoFrame();
+
   WebKit::WebMediaPlayerClient* const client_;
 
   // Save the list of buffered time ranges.
@@ -217,6 +227,9 @@ class WebMediaPlayerAndroid
 
   // Whether media player needs to re-establish the surface texture peer.
   bool needs_establish_peer_;
+
+  // Whether the video size info is available.
+  bool has_size_info_;
 
   // Object for allocating stream textures.
   scoped_ptr<StreamTextureFactory> stream_texture_factory_;

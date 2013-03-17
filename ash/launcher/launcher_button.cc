@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "ash/launcher/launcher_button_host.h"
+#include "ash/wm/shelf_layout_manager.h"
 #include "grit/ash_resources.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -19,6 +20,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/image_view.h"
 
 namespace {
@@ -58,12 +60,12 @@ class LauncherButton::BarView : public views::ImageView,
   }
 
   // View overrides.
-  bool HitTestRect(const gfx::Rect& rect) const OVERRIDE {
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE {
     // Allow Mouse...() messages to go to the parent view.
     return false;
   }
 
-  void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     if (animation_.is_animating()) {
       int alpha = animation_.CurrentValueBetween(0, 255);
       canvas->SaveLayerAlpha(alpha);
@@ -75,7 +77,7 @@ class LauncherButton::BarView : public views::ImageView,
   }
 
   // ui::AnimationDelegate overrides.
-  void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
     SchedulePaint();
   }
 
@@ -112,20 +114,25 @@ bool LauncherButton::IconView::HitTestRect(const gfx::Rect& rect) const {
 ////////////////////////////////////////////////////////////////////////////////
 // LauncherButton
 
-LauncherButton* LauncherButton::Create(views::ButtonListener* listener,
-                                       LauncherButtonHost* host) {
-  LauncherButton* button = new LauncherButton(listener, host);
+LauncherButton* LauncherButton::Create(
+    views::ButtonListener* listener,
+    LauncherButtonHost* host,
+    ShelfLayoutManager* shelf_layout_manager) {
+  LauncherButton* button =
+      new LauncherButton(listener, host, shelf_layout_manager);
   button->Init();
   return button;
 }
 
 LauncherButton::LauncherButton(views::ButtonListener* listener,
-                               LauncherButtonHost* host)
+                               LauncherButtonHost* host,
+                               ShelfLayoutManager* shelf_layout_manager)
     : CustomButton(listener),
       host_(host),
       icon_view_(NULL),
       bar_(new BarView),
-      state_(STATE_NORMAL) {
+      state_(STATE_NORMAL),
+      shelf_layout_manager_(shelf_layout_manager) {
   set_accessibility_focusable(true);
 
   const gfx::ShadowValue kShadows[] = {
@@ -259,29 +266,6 @@ void LauncherButton::OnMouseExited(const ui::MouseEvent& event) {
   host_->MouseExitedButton(this);
 }
 
-ui::EventResult LauncherButton::OnGestureEvent(
-    const ui::GestureEvent& event) {
-  switch (event.type()) {
-    case ui::ET_GESTURE_TAP_DOWN:
-      AddState(STATE_HOVERED);
-      return CustomButton::OnGestureEvent(event);
-    case ui::ET_GESTURE_END:
-      ClearState(STATE_HOVERED);
-      return CustomButton::OnGestureEvent(event);
-    case ui::ET_GESTURE_SCROLL_BEGIN:
-      host_->PointerPressedOnButton(this, LauncherButtonHost::TOUCH, event);
-      return ui::ER_CONSUMED;
-    case ui::ET_GESTURE_SCROLL_UPDATE:
-      host_->PointerDraggedOnButton(this, LauncherButtonHost::TOUCH, event);
-      return ui::ER_CONSUMED;
-    case ui::ET_GESTURE_SCROLL_END:
-      host_->PointerReleasedOnButton(this, LauncherButtonHost::TOUCH, false);
-      return ui::ER_CONSUMED;
-    default:
-      return CustomButton::OnGestureEvent(event);
-  }
-}
-
 void LauncherButton::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
   state->name = host_->GetAccessibleName(this);
@@ -292,22 +276,23 @@ void LauncherButton::Layout() {
   int x_offset = 0, y_offset = 0;
   gfx::Rect icon_bounds;
 
-  if (host_->GetShelfAlignment() == SHELF_ALIGNMENT_BOTTOM) {
+  if (shelf_layout_manager_->IsHorizontalAlignment()) {
     icon_bounds.SetRect(
         button_bounds.x(), button_bounds.y() + kIconPad,
         button_bounds.width(), kIconSize);
-    if (ShouldHop(state_))
-      y_offset -= kHopSpacing;
   } else {
     icon_bounds.SetRect(
         button_bounds.x() + kIconPad, button_bounds.y(),
         kIconSize, button_bounds.height());
-    if (!ShouldHop(state_))
-      x_offset += kHopSpacing;
   }
 
-  if (host_->GetShelfAlignment() == SHELF_ALIGNMENT_LEFT)
-    x_offset = -x_offset;
+  if (ShouldHop(state_)) {
+    x_offset += shelf_layout_manager_->SelectValueForShelfAlignment(
+        0, kHopSpacing, -kHopSpacing, 0);
+    y_offset += shelf_layout_manager_->SelectValueForShelfAlignment(
+        -kHopSpacing, 0, 0, kHopSpacing);
+  }
+
   icon_bounds.Offset(x_offset, y_offset);
   icon_view_->SetBoundsRect(icon_bounds);
   bar_->SetBoundsRect(GetContentsBounds());
@@ -327,6 +312,32 @@ void LauncherButton::OnBlur() {
   CustomButton::OnBlur();
 }
 
+void LauncherButton::OnGestureEvent(ui::GestureEvent* event) {
+  switch (event->type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+      AddState(STATE_HOVERED);
+      return CustomButton::OnGestureEvent(event);
+    case ui::ET_GESTURE_END:
+      ClearState(STATE_HOVERED);
+      return CustomButton::OnGestureEvent(event);
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+      host_->PointerPressedOnButton(this, LauncherButtonHost::TOUCH, *event);
+      event->SetHandled();
+      return;
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      host_->PointerDraggedOnButton(this, LauncherButtonHost::TOUCH, *event);
+      event->SetHandled();
+      return;
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_SCROLL_FLING_START:
+      host_->PointerReleasedOnButton(this, LauncherButtonHost::TOUCH, false);
+      event->SetHandled();
+      return;
+    default:
+      return CustomButton::OnGestureEvent(event);
+  }
+}
+
 void LauncherButton::Init() {
   icon_view_ = CreateIconView();
 
@@ -344,7 +355,7 @@ LauncherButton::IconView* LauncherButton::CreateIconView() {
 }
 
 bool LauncherButton::IsShelfHorizontal() const {
-  return host_->GetShelfAlignment() == SHELF_ALIGNMENT_BOTTOM;
+  return shelf_layout_manager_->IsHorizontalAlignment();
 }
 
 void LauncherButton::UpdateState() {
@@ -352,47 +363,44 @@ void LauncherButton::UpdateState() {
     bar_->SetVisible(false);
   } else {
     int bar_id;
-    if (IsShelfHorizontal()) {
-      if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION))
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_HOVER;
-      else if (state_ & STATE_ACTIVE)
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE;
-      else
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_RUNNING;
+    if (state_ & STATE_ACTIVE) {
+      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE;
+    } else if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION)) {
+      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_HOVER;
     } else {
-      if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION))
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_HOVER;
-      else if (state_ & STATE_ACTIVE)
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_ACTIVE;
-      else
-        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_RUNNING;
+      bar_id = IDR_AURA_LAUNCHER_UNDERLINE_RUNNING;
     }
-
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    bar_->SetImage(rb.GetImageNamed(bar_id).ToImageSkia());
+    const gfx::ImageSkia* image = rb.GetImageNamed(bar_id).ToImageSkia();
+    if(SHELF_ALIGNMENT_BOTTOM == shelf_layout_manager_->GetAlignment())
+      bar_->SetImage(*image);
+    else
+      bar_->SetImage(gfx::ImageSkiaOperations::CreateRotatedImage(*image,
+          shelf_layout_manager_->SelectValueForShelfAlignment(
+              SkBitmapOperations::ROTATION_270_CW,
+              SkBitmapOperations::ROTATION_270_CW,
+              SkBitmapOperations::ROTATION_90_CW,
+              SkBitmapOperations::ROTATION_180_CW)));
     bar_->SetVisible(true);
   }
+  bool rtl = base::i18n::IsRTL();
+  bar_->SetHorizontalAlignment(
+      shelf_layout_manager_->SelectValueForShelfAlignment(
+          views::ImageView::CENTER,
+          rtl ? views::ImageView::TRAILING : views::ImageView::LEADING,
+          rtl ? views::ImageView::LEADING : views::ImageView::TRAILING,
+          views::ImageView::CENTER));
+  bar_->SetVerticalAlignment(
+      shelf_layout_manager_->SelectValueForShelfAlignment(
+          views::ImageView::TRAILING,
+          views::ImageView::CENTER,
+          views::ImageView::CENTER,
+          views::ImageView::LEADING));
 
-  switch (host_->GetShelfAlignment()) {
-    case SHELF_ALIGNMENT_BOTTOM:
-      bar_->SetHorizontalAlignment(views::ImageView::CENTER);
-      bar_->SetVerticalAlignment(views::ImageView::TRAILING);
-      break;
-    case SHELF_ALIGNMENT_LEFT:
-      bar_->SetHorizontalAlignment(
-          base::i18n::IsRTL() ? views::ImageView::TRAILING :
-                                views::ImageView::LEADING);
-      bar_->SetVerticalAlignment(views::ImageView::CENTER);
-      break;
-    case SHELF_ALIGNMENT_RIGHT:
-      bar_->SetHorizontalAlignment(
-          base::i18n::IsRTL() ? views::ImageView::LEADING :
-                                views::ImageView::TRAILING);
-      bar_->SetVerticalAlignment(views::ImageView::CENTER);
-      break;
-  }
-
+  // Force bar to layout as alignment may have changed but not bounds.
+  bar_->Layout();
   Layout();
+  bar_->SchedulePaint();
   SchedulePaint();
 }
 

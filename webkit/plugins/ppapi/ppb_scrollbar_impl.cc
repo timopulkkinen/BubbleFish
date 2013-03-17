@@ -10,10 +10,10 @@
 #include "ppapi/c/dev/ppp_scrollbar_dev.h"
 #include "ppapi/thunk/thunk.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginScrollbar.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/event_conversion.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -67,7 +67,6 @@ PPB_Scrollbar_API* PPB_Scrollbar_Impl::AsPPB_Scrollbar_API() {
 }
 
 void PPB_Scrollbar_Impl::InstanceWasDeleted() {
-  Resource::LastPluginRefWasDeleted();
   scrollbar_.reset();
 }
 
@@ -211,7 +210,7 @@ void PPB_Scrollbar_Impl::invalidateScrollbarRect(
                      rect.y,
                      rect.width,
                      rect.height);
-  dirty_ = dirty_.Union(gfx_rect);
+  dirty_.Union(gfx_rect);
   // Can't call into the client to tell them about the invalidate right away,
   // since the PPB_Scrollbar_Impl code is still in the middle of updating its
   // internal state.

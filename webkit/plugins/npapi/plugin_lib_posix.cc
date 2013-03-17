@@ -15,8 +15,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -42,7 +42,7 @@ enum nsPluginVariable {
 // Read the ELF header and return true if it is usable on
 // the current architecture (e.g. 32-bit ELF on 32-bit build).
 // Returns false on other errors as well.
-bool ELFMatchesCurrentArchitecture(const FilePath& filename) {
+bool ELFMatchesCurrentArchitecture(const base::FilePath& filename) {
   // First make sure we can open the file and it is in fact, a regular file.
   struct stat stat_buf;
   // Open with O_NONBLOCK so we don't block on pipes.
@@ -91,7 +91,7 @@ struct __attribute__((packed)) NSPluginWrapperInfo {
 // if so attempt to unwrap it.  Pass in an opened plugin handle; on
 // success, |dl| and |unwrapped_path| will be filled in with the newly
 // opened plugin.  On failure, params are left unmodified.
-void UnwrapNSPluginWrapper(void **dl, FilePath* unwrapped_path) {
+void UnwrapNSPluginWrapper(void **dl, base::FilePath* unwrapped_path) {
   NSPluginWrapperInfo* info =
       reinterpret_cast<NSPluginWrapperInfo*>(dlsym(*dl, "NPW_Plugin"));
   if (!info)
@@ -107,7 +107,8 @@ void UnwrapNSPluginWrapper(void **dl, FilePath* unwrapped_path) {
                                              sizeof(info->path)));
   if (!path_end)
     path_end = info->path + sizeof(info->path);
-  FilePath path = FilePath(std::string(info->path, path_end - info->path));
+  base::FilePath path = base::FilePath(
+      std::string(info->path, path_end - info->path));
 
   if (!ELFMatchesCurrentArchitecture(path)) {
     LOG(WARNING) << path.value() << " is nspluginwrapper wrapping a "
@@ -139,7 +140,7 @@ void UnwrapNSPluginWrapper(void **dl, FilePath* unwrapped_path) {
 
 }  // namespace
 
-bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
+bool PluginLib::ReadWebPluginInfo(const base::FilePath& filename,
                                   WebPluginInfo* info) {
   // The file to reference is:
   // http://mxr.mozilla.org/firefox/source/modules/plugin/base/src/nsPluginsDirUnix.cpp
@@ -172,11 +173,20 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
       reinterpret_cast<NP_GetMimeDescriptionType>(
           dlsym(dl, "NP_GetMIMEDescription"));
   const char* mime_description = NULL;
-  if (NP_GetMIMEDescription)
-    mime_description = NP_GetMIMEDescription();
+  if (!NP_GetMIMEDescription) {
+    LOG_IF(ERROR, PluginList::DebugPluginLoading())
+        << "Plugin " << filename.value() << " doesn't have a "
+        << "NP_GetMIMEDescription symbol";
+    return false;
+  }
+  mime_description = NP_GetMIMEDescription();
 
-  if (mime_description)
-    ParseMIMEDescription(mime_description, &info->mime_types);
+  if (!mime_description) {
+    LOG_IF(ERROR, PluginList::DebugPluginLoading())
+        << "MIME description for " << filename.value() << " is empty";
+    return false;
+  }
+  ParseMIMEDescription(mime_description, &info->mime_types);
 
   // The plugin name and description live behind NP_GetValue calls.
   typedef NPError (*NP_GetValueType)(void* unused,

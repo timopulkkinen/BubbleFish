@@ -8,27 +8,57 @@
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_result.h"
-#include "content/public/browser/browser_thread.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
-#include "unicode/uloc.h"
+#include "third_party/icu/public/common/unicode/uloc.h"
 
-// Use the public URL to the Spelling service on Chromium.
-#ifndef SPELLING_SERVICE_URL
-#define SPELLING_SERVICE_URL "https://www.googleapis.com/rpc"
-#endif
+namespace {
 
-SpellingServiceClient::SpellingServiceClient() : tag_(0) {
+// Constants for the spellcheck field trial.
+const char kSpellcheckFieldTrialName[] = "Spellcheck";
+const char kSpellcheckFieldTrialSuggestionsGroupName[] = "Suggestions";
+
+// The URL for requesting spell checking and sending user feedback.
+const char kSpellingServiceURL[] = "https://www.googleapis.com/rpc";
+
+// Gets the ISO codes for the language and country of this |locale|. The
+// |locale| is an ISO locale ID that may not include a country ID, e.g., "fr" or
+// "de". This method converts the UI locale to a full locale ID and converts the
+// full locale ID to an ISO language code and an ISO3 country code.
+void GetISOLanguageCountryCodeFromLocale(
+    const std::string& locale,
+    std::string* language_code,
+    std::string* country_code) {
+  DCHECK(language_code);
+  DCHECK(country_code);
+  char language[ULOC_LANG_CAPACITY] = ULOC_ENGLISH;
+  const char* country = "USA";
+  if (!locale.empty()) {
+    UErrorCode error = U_ZERO_ERROR;
+    char id[ULOC_LANG_CAPACITY + ULOC_SCRIPT_CAPACITY + ULOC_COUNTRY_CAPACITY];
+    uloc_addLikelySubtags(locale.c_str(), id, arraysize(id), &error);
+    error = U_ZERO_ERROR;
+    uloc_getLanguage(id, language, arraysize(language), &error);
+    country = uloc_getISO3Country(id);
+  }
+  *language_code = std::string(language);
+  *country_code = std::string(country);
+}
+
+}  // namespace
+
+SpellingServiceClient::SpellingServiceClient() {
 }
 
 SpellingServiceClient::~SpellingServiceClient() {
@@ -36,34 +66,21 @@ SpellingServiceClient::~SpellingServiceClient() {
 
 bool SpellingServiceClient::RequestTextCheck(
     Profile* profile,
-    int tag,
     ServiceType type,
     const string16& text,
     const TextCheckCompleteCallback& callback) {
   DCHECK(type == SUGGEST || type == SPELLCHECK);
-  std::string locale = profile->GetPrefs()->GetString(
-      prefs::kSpellCheckDictionary);
-  char language[ULOC_LANG_CAPACITY] = ULOC_ENGLISH;
-  const char* country = "USA";
-  if (!locale.empty()) {
-    // Create the parameters needed by Spelling API. Spelling API needs three
-    // parameters: ISO language code, ISO3 country code, and text to be checked
-    // by the service. On the other hand, Chrome uses an ISO locale ID and it
-    // may not include a country ID, e.g. "fr", "de", etc. To create the input
-    // parameters, we convert the UI locale to a full locale ID, and  convert
-    // the full locale ID to an ISO language code and and ISO3 country code.
-    // Also, we convert the given text to a JSON string, i.e. quote all its
-    // non-ASCII characters.
-    UErrorCode error = U_ZERO_ERROR;
-    char id[ULOC_LANG_CAPACITY + ULOC_SCRIPT_CAPACITY + ULOC_COUNTRY_CAPACITY];
-    uloc_addLikelySubtags(locale.c_str(), id, arraysize(id), &error);
-
-    error = U_ZERO_ERROR;
-    uloc_getLanguage(id, language, arraysize(language), &error);
-    country = uloc_getISO3Country(id);
-  }
-  if (!IsAvailable(profile, type))
+  if (!profile || !IsAvailable(profile, type)) {
+    callback.Run(false, text, std::vector<SpellCheckResult>());
     return false;
+  }
+
+  std::string language_code;
+  std::string country_code;
+  GetISOLanguageCountryCodeFromLocale(
+      profile->GetPrefs()->GetString(prefs::kSpellCheckDictionary),
+      &language_code,
+      &country_code);
 
   // Format the JSON request to be sent to the Spelling service.
   std::string encoded_text;
@@ -77,19 +94,18 @@ bool SpellingServiceClient::RequestTextCheck(
       "\"text\":\"%s\","
       "\"language\":\"%s\","
       "\"originCountry\":\"%s\","
-      "\"key\":\"%s\""
+      "\"key\":%s"
       "}"
       "}";
-  std::string api_key = google_apis::GetAPIKey();
+  std::string api_key = base::GetDoubleQuotedJson(google_apis::GetAPIKey());
   std::string request = base::StringPrintf(
       kSpellingRequest,
       type,
       encoded_text.c_str(),
-      language,
-      country,
+      language_code.c_str(),
+      country_code.c_str(),
       api_key.c_str());
 
-  static const char kSpellingServiceURL[] = SPELLING_SERVICE_URL;
   GURL url = GURL(kSpellingServiceURL);
   fetcher_.reset(CreateURLFetcher(url));
   fetcher_->SetRequestContext(profile->GetRequestContext());
@@ -97,7 +113,6 @@ bool SpellingServiceClient::RequestTextCheck(
   fetcher_->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->Start();
-  tag_ = tag;
   text_ = text;
   callback_ = callback;
   return true;
@@ -105,28 +120,45 @@ bool SpellingServiceClient::RequestTextCheck(
 
 bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
   const PrefService* pref = profile->GetPrefs();
-  if (!pref->GetBoolean(prefs::kEnableSpellCheck) ||
-      !pref->GetBoolean(prefs::kSpellCheckUseSpellingService))
+  // If prefs don't allow spellchecking or if the profile is off the record,
+  // the spelling service should be unavailable.
+  if (!pref->GetBoolean(prefs::kEnableContinuousSpellcheck) ||
+      !pref->GetBoolean(prefs::kSpellCheckUseSpellingService) ||
+      profile->IsOffTheRecord())
     return false;
 
-  // The spellchecking service should be avilable only when asynchronous
-  // spellchecking is enabled because this service depends on it.
+  // If the locale for spelling has not been set, the user has not decided to
+  // use spellcheck so we don't do anything remote (suggest or spelling).
+  std::string locale = pref->GetString(prefs::kSpellCheckDictionary);
+  if (locale.empty())
+    return false;
+
+  // If we do not have the spelling service enabled, then we are only available
+  // for SUGGEST.
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableAsynchronousSpellChecking))
+  if (command_line->HasSwitch(switches::kUseSpellingSuggestions))
     return type == SUGGEST;
 
-  // Enable the suggest service only on languages not supported by the
-  // spellcheck service. When this client calls the spellcheck service, it
-  // returns not only spellcheck results but also spelling suggestions provided
-  // by the suggest service. That is, it is not useful to use the suggest
-  // service when this client can use the spellcheck service.
-  std::string locale = pref->GetString(prefs::kSpellCheckDictionary);
-#if defined(OS_MACOSX)
-  bool spellcheck_available = locale.empty();
-#else
-  bool spellcheck_available = locale.empty() || !locale.compare(0, 2, "en");
-#endif
-  return type == SUGGEST ? !spellcheck_available : spellcheck_available;
+  // Finally, if all options are available, we only enable only SUGGEST
+  // if SPELLCHECK is not available for our language because SPELLCHECK results
+  // are a superset of SUGGEST results.
+  // TODO(rlp): Only available for English right now. Fix this line to include
+  // all languages SPELLCHECK covers.
+  bool language_available = !locale.compare(0, 2, "en");
+  if (language_available) {
+    // Either SUGGEST or SPELLCHECK are normally allowed.
+    // Run the field trial for users who would normally have the service
+    // available.
+    if (base::FieldTrialList::FindFullName(kSpellcheckFieldTrialName) ==
+        kSpellcheckFieldTrialSuggestionsGroupName) {
+      return type == SUGGEST;
+    } else {
+      return type == SPELLCHECK;
+    }
+  } else {
+    // Only SUGGEST is allowed.
+    return type == SUGGEST;
+  }
 }
 
 void SpellingServiceClient::OnURLFetchComplete(
@@ -139,7 +171,7 @@ void SpellingServiceClient::OnURLFetchComplete(
     source->GetResponseAsString(&data);
     success = ParseResponse(data, &results);
   }
-  callback_.Run(tag_, success, text_, results);
+  callback_.Run(success, text_, results);
 }
 
 net::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {

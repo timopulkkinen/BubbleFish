@@ -14,25 +14,21 @@
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/notification_service_impl.h"
 #include "content/common/child_process.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
+#include "base/win/windows_version.h"
 #include "ui/base/win/scoped_ole_initializer.h"
-#include "ui/base/win/tsf_bridge.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "content/browser/android/surface_texture_peer_browser_impl.h"
+#include "ui/base/ime/win/tsf_bridge.h"
 #endif
 
 bool g_exited_main_message_loop = false;
 
-namespace {
+namespace content {
 
-class BrowserMainRunnerImpl : public content::BrowserMainRunner {
+class BrowserMainRunnerImpl : public BrowserMainRunner {
  public:
   BrowserMainRunnerImpl()
       : is_initialized_(false),
@@ -40,12 +36,12 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
         created_threads_(false) {
   }
 
-  ~BrowserMainRunnerImpl() {
+  virtual ~BrowserMainRunnerImpl() {
     if (is_initialized_ && !is_shutdown_)
       Shutdown();
   }
 
-  virtual int Initialize(const content::MainFunctionParams& parameters)
+  virtual int Initialize(const MainFunctionParams& parameters)
       OVERRIDE {
     is_initialized_ = true;
 
@@ -55,15 +51,22 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
     // child process (e.g. when launched by PyAuto).
     if (parameters.command_line.HasSwitch(switches::kWaitForDebugger))
       ChildProcess::WaitForDebugger("Browser");
-
-    if (parameters.command_line.HasSwitch(switches::kSingleProcess))
-      content::RenderProcessHost::set_run_renderer_in_process(true);
 #endif  // !defined(OS_IOS)
 
 #if defined(OS_WIN)
     if (parameters.command_line.HasSwitch(
             switches::kEnableTextServicesFramework)) {
-      base::win::SetForceToUseTsf();
+      base::win::SetForceToUseTSF();
+    } else if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+      // When "Extend support of advanced text services to all programs"
+      // (a.k.a. Cicero Unaware Application Support; CUAS) is enabled on
+      // Windows XP and handwriting modules shipped with Office 2003 are
+      // installed, "penjpn.dll" and "skchui.dll" will be loaded and then crash
+      // unless a user installs Office 2003 SP3. To prevent these modules from
+      // being loaded, disable TSF entirely. crbug/160914.
+      // TODO(yukawa): Add a high-level wrapper for this instead of calling
+      // Win32 API here directly.
+      ImmDisableTextFrameService(static_cast<DWORD>(-1));
     }
 #endif  // OS_WIN
 
@@ -71,7 +74,14 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
 
     notification_service_.reset(new NotificationServiceImpl);
 
-    main_loop_.reset(new content::BrowserMainLoop(parameters));
+#if defined(OS_WIN)
+    // Ole must be initialized before starting message pump, so that TSF
+    // (Text Services Framework) module can interact with the message pump
+    // on Windows 8 Metro mode.
+    ole_initializer_.reset(new ui::ScopedOleInitializer);
+#endif  // OS_WIN
+
+    main_loop_.reset(new BrowserMainLoop(parameters));
 
     main_loop_->Init();
 
@@ -94,17 +104,9 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
     // Make this call before going multithreaded, or spawning any subprocesses.
     base::allocator::SetupSubprocessAllocator();
 #endif
-    ole_initializer_.reset(new ui::ScopedOleInitializer);
-    if (base::win::IsTsfAwareRequired())
-      ui::TsfBridge::Initialize();
+    if (base::win::IsTSFAwareRequired())
+      ui::TSFBridge::Initialize();
 #endif  // OS_WIN
-
-#if defined(OS_ANDROID)
-    content::SurfaceTexturePeer::InitInstance(
-        new content::SurfaceTexturePeerBrowserImpl(
-            parameters.command_line.HasSwitch(
-                switches::kMediaPlayerInRenderProcess)));
-#endif
 
     main_loop_->CreateThreads();
     int result_code = main_loop_->GetResultCode();
@@ -132,8 +134,8 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
       main_loop_->ShutdownThreadsAndCleanUp();
 
 #if defined(OS_WIN)
-    if (base::win::IsTsfAwareRequired())
-      ui::TsfBridge::GetInstance()->Shutdown();
+    if (base::win::IsTSFAwareRequired())
+      ui::TSFBridge::GetInstance()->Shutdown();
     ole_initializer_.reset(NULL);
 #endif
 
@@ -155,17 +157,13 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
   bool created_threads_;
 
   scoped_ptr<NotificationServiceImpl> notification_service_;
-  scoped_ptr<content::BrowserMainLoop> main_loop_;
+  scoped_ptr<BrowserMainLoop> main_loop_;
 #if defined(OS_WIN)
   scoped_ptr<ui::ScopedOleInitializer> ole_initializer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserMainRunnerImpl);
 };
-
-}  // namespace
-
-namespace content {
 
 // static
 BrowserMainRunner* BrowserMainRunner::Create() {

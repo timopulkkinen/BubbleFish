@@ -8,7 +8,7 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -62,12 +62,6 @@ void AddContentTypeHandler(WebPluginInfo* info,
 
 typedef testing::Test ChromeContentRendererClientTest;
 
-#if !defined(__arm__)
-// The ARM ABI is not quite stable, so we only allow NaCl for
-// unrestricted extensions (i.e. built-in and under development).
-// Disable this whole test for ARM; other ABIs give us content-type coverage.
-// See http://crbug.com/145694
-// TODO(dschuff): remove this when the ARM ABI is stable
 TEST_F(ChromeContentRendererClientTest, NaClRestriction) {
   // Unknown content types have no NaCl module.
   {
@@ -142,7 +136,7 @@ TEST_F(ChromeContentRendererClientTest, NaClRestriction) {
   // interfaces.
   {
     WebPluginParams params;
-    EXPECT_TRUE(ChromeContentRendererClient::IsNaClAllowed(
+    EXPECT_FALSE(ChromeContentRendererClient::IsNaClAllowed(
         GURL(), GURL("http://plus.google.com/games"),
         kNaClRestricted, kExtensionRestricted, kExtensionNotFromWebStore,
         &params));
@@ -157,7 +151,7 @@ TEST_F(ChromeContentRendererClientTest, NaClRestriction) {
         kNaClRestricted, kExtensionRestricted, kExtensionNotFromWebStore,
         &params));
     EXPECT_FALSE(AllowsDevInterfaces(params));
-    EXPECT_TRUE(ChromeContentRendererClient::IsNaClAllowed(
+    EXPECT_FALSE(ChromeContentRendererClient::IsNaClAllowed(
         GURL(), GURL("http://plus.sandbox.google.com/games"),
         kNaClRestricted, kExtensionRestricted, kExtensionNotFromWebStore,
         &params));
@@ -197,12 +191,11 @@ TEST_F(ChromeContentRendererClientTest, NaClRestriction) {
   {
     WebPluginParams params;
     EXPECT_FALSE(ChromeContentRendererClient::IsNaClAllowed(
-        GURL(), GURL("http://plus.google.com.evil.com/games"),
+        GURL(), GURL("https://plus.google.com.evil.com/games"),
         kNaClRestricted, kExtensionRestricted, kExtensionNotFromWebStore,
         &params));
   }
 }
-#endif // !defined(__arm__)
 
 }  // namespace chrome
 

@@ -4,11 +4,11 @@
 
 #include "base/basictypes.h"
 #include "chrome/renderer/safe_browsing/phishing_thumbnailer.h"
-#include "content/public/test/render_widget_browsertest.h"
+#include "content/public/test/render_widget_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace safe_browsing {
 
@@ -19,7 +19,7 @@ class ThumbnailerTest : public content::RenderWidgetTest {
  protected:
   virtual void ResizeAndPaint(const gfx::Size& page_size,
                               const gfx::Size& desired_size,
-                              SkBitmap* snapshot) {
+                              SkBitmap* snapshot) OVERRIDE {
     ASSERT_TRUE(snapshot);
     *snapshot = GrabPhishingThumbnail(view_, page_size, desired_size);
     EXPECT_FALSE(snapshot->isNull());

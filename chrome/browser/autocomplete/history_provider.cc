@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/autocomplete/history_url_provider.h"
+#include "chrome/browser/autocomplete/history_provider.h"
 
 #include <string>
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -133,7 +134,7 @@ bool HistoryProvider::FixupUserInput(AutocompleteInput* input) {
 
   url_parse::Parsed parts;
   URLFixerUpper::SegmentURL(output, &parts);
-  input->UpdateText(output, parts);
+  input->UpdateText(output, string16::npos, parts);
   return !output.empty();
 }
 

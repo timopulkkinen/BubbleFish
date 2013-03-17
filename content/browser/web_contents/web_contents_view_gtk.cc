@@ -31,9 +31,8 @@
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
-using content::RenderWidgetHost;
-using content::WebContents;
 
+namespace content {
 namespace {
 
 // Called when the mouse leaves the widget. We notify our delegate.
@@ -62,7 +61,7 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
     return FALSE;
   }
 
-  content::WebContentsDelegate* delegate = web_contents->GetDelegate();
+  WebContentsDelegate* delegate = web_contents->GetDelegate();
   if (!delegate)
     return FALSE;
 
@@ -77,9 +76,7 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
 
 }  // namespace
 
-namespace content {
-
-WebContentsView* CreateWebContentsView(
+WebContentsViewPort* CreateWebContentsView(
     WebContentsImpl* web_contents,
     WebContentsViewDelegate* delegate,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
@@ -90,7 +87,7 @@ WebContentsView* CreateWebContentsView(
 
 WebContentsViewGtk::WebContentsViewGtk(
     WebContentsImpl* web_contents,
-    content::WebContentsViewDelegate* delegate)
+    WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
       expanded_(gtk_expanded_container_new()),
       delegate_(delegate) {
@@ -101,7 +98,7 @@ WebContentsViewGtk::WebContentsViewGtk(
                    G_CALLBACK(OnChildSizeRequestThunk), this);
 
   gtk_widget_show(expanded_.get());
-  drag_source_.reset(new content::WebDragSourceGtk(web_contents));
+  drag_source_.reset(new WebDragSourceGtk(web_contents));
 
   if (delegate_.get())
     delegate_->Initialize(expanded_.get(), &focus_store_);
@@ -109,46 +106,6 @@ WebContentsViewGtk::WebContentsViewGtk(
 
 WebContentsViewGtk::~WebContentsViewGtk() {
   expanded_.Destroy();
-}
-
-void WebContentsViewGtk::CreateView(const gfx::Size& initial_size) {
-  requested_size_ = initial_size;
-}
-
-RenderWidgetHostView* WebContentsViewGtk::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
-  if (render_widget_host->GetView()) {
-    // During testing, the view will already be set up in most cases to the
-    // test view, so we don't want to clobber it with a real one. To verify that
-    // this actually is happening (and somebody isn't accidentally creating the
-    // view twice), we check for the RVH Factory, which will be set when we're
-    // making special ones (which go along with the special views).
-    DCHECK(RenderViewHostFactory::has_factory());
-    return render_widget_host->GetView();
-  }
-
-  RenderWidgetHostView* view =
-      RenderWidgetHostView::CreateViewForWidget(render_widget_host);
-  view->InitAsChild(NULL);
-  gfx::NativeView content_view = view->GetNativeView();
-  g_signal_connect(content_view, "focus", G_CALLBACK(OnFocusThunk), this);
-  g_signal_connect(content_view, "leave-notify-event",
-                   G_CALLBACK(OnLeaveNotify), web_contents_);
-  g_signal_connect(content_view, "motion-notify-event",
-                   G_CALLBACK(OnMouseMove), web_contents_);
-  g_signal_connect(content_view, "scroll-event",
-                   G_CALLBACK(OnMouseScroll), web_contents_);
-  gtk_widget_add_events(content_view, GDK_LEAVE_NOTIFY_MASK |
-                        GDK_POINTER_MOTION_MASK);
-  InsertIntoContentArea(content_view);
-
-  // Renderer target DnD.
-  drag_dest_.reset(new content::WebDragDestGtk(web_contents_, content_view));
-
-  if (delegate_.get())
-    drag_dest_->set_delegate(delegate_->GetDragDestDelegate());
-
-  return view;
 }
 
 gfx::NativeView WebContentsViewGtk::GetNativeView() const {
@@ -187,33 +144,8 @@ void WebContentsViewGtk::GetContainerBounds(gfx::Rect* out) const {
                requested_size_.width(), requested_size_.height());
 }
 
-void WebContentsViewGtk::SetPageTitle(const string16& title) {
-  // Set the window name to include the page title so it's easier to spot
-  // when debugging (e.g. via xwininfo -tree).
-  gfx::NativeView content_view = GetContentNativeView();
-  if (content_view) {
-    GdkWindow* content_window = gtk_widget_get_window(content_view);
-    if (content_window) {
-      gdk_window_set_title(content_window, UTF16ToUTF8(title).c_str());
-    }
-  }
-}
-
 void WebContentsViewGtk::OnTabCrashed(base::TerminationStatus status,
                                       int error_code) {
-}
-
-void WebContentsViewGtk::SizeContents(const gfx::Size& size) {
-  // We don't need to manually set the size of of widgets in GTK+, but we do
-  // need to pass the sizing information on to the RWHV which will pass the
-  // sizing information on to the renderer.
-  requested_size_ = size;
-  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
-  if (rwhv)
-    rwhv->SetSize(size);
-}
-
-void WebContentsViewGtk::RenderViewCreated(content::RenderViewHost* host) {
 }
 
 void WebContentsViewGtk::Focus() {
@@ -246,13 +178,6 @@ WebDropData* WebContentsViewGtk::GetDropData() const {
   return drag_dest_->current_drop_data();
 }
 
-bool WebContentsViewGtk::IsEventTracking() const {
-  return false;
-}
-
-void WebContentsViewGtk::CloseTabAfterEventTracking() {
-}
-
 gfx::Rect WebContentsViewGtk::GetViewBounds() const {
   gfx::Rect rect;
   GdkWindow* window = gtk_widget_get_window(GetNativeView());
@@ -264,6 +189,80 @@ gfx::Rect WebContentsViewGtk::GetViewBounds() const {
   gdk_window_get_geometry(window, &x, &y, &w, &h, NULL);
   rect.SetRect(x, y, w, h);
   return rect;
+}
+
+void WebContentsViewGtk::CreateView(
+    const gfx::Size& initial_size, gfx::NativeView context) {
+  requested_size_ = initial_size;
+}
+
+RenderWidgetHostView* WebContentsViewGtk::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
+  if (render_widget_host->GetView()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->GetView();
+  }
+
+  RenderWidgetHostView* view =
+      RenderWidgetHostView::CreateViewForWidget(render_widget_host);
+  view->InitAsChild(NULL);
+  gfx::NativeView content_view = view->GetNativeView();
+  g_signal_connect(content_view, "focus", G_CALLBACK(OnFocusThunk), this);
+  g_signal_connect(content_view, "leave-notify-event",
+                   G_CALLBACK(OnLeaveNotify), web_contents_);
+  g_signal_connect(content_view, "motion-notify-event",
+                   G_CALLBACK(OnMouseMove), web_contents_);
+  g_signal_connect(content_view, "scroll-event",
+                   G_CALLBACK(OnMouseScroll), web_contents_);
+  gtk_widget_add_events(content_view, GDK_LEAVE_NOTIFY_MASK |
+                        GDK_POINTER_MOTION_MASK);
+  InsertIntoContentArea(content_view);
+
+  // Renderer target DnD.
+  drag_dest_.reset(new WebDragDestGtk(web_contents_, content_view));
+
+  if (delegate_.get())
+    drag_dest_->set_delegate(delegate_->GetDragDestDelegate());
+
+  return view;
+}
+
+RenderWidgetHostView* WebContentsViewGtk::CreateViewForPopupWidget(
+    RenderWidgetHost* render_widget_host) {
+  return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
+}
+
+void WebContentsViewGtk::SetPageTitle(const string16& title) {
+  // Set the window name to include the page title so it's easier to spot
+  // when debugging (e.g. via xwininfo -tree).
+  gfx::NativeView content_view = GetContentNativeView();
+  if (content_view) {
+    GdkWindow* content_window = gtk_widget_get_window(content_view);
+    if (content_window) {
+      gdk_window_set_title(content_window, UTF16ToUTF8(title).c_str());
+    }
+  }
+}
+
+void WebContentsViewGtk::SizeContents(const gfx::Size& size) {
+  // We don't need to manually set the size of of widgets in GTK+, but we do
+  // need to pass the sizing information on to the RWHV which will pass the
+  // sizing information on to the renderer.
+  requested_size_ = size;
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetSize(size);
+}
+
+void WebContentsViewGtk::RenderViewCreated(RenderViewHost* host) {
+}
+
+void WebContentsViewGtk::RenderViewSwappedIn(RenderViewHost* host) {
 }
 
 WebContents* WebContentsViewGtk::web_contents() {
@@ -284,7 +283,8 @@ void WebContentsViewGtk::GotFocus() {
 void WebContentsViewGtk::TakeFocus(bool reverse) {
   if (!web_contents_->GetDelegate())
     return;
-  if (!web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse)) {
+  if (!web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse) &&
+      GetTopLevelNativeWindow()) {
     gtk_widget_child_focus(GTK_WIDGET(GetTopLevelNativeWindow()),
         reverse ? GTK_DIR_TAB_BACKWARD : GTK_DIR_TAB_FORWARD);
   }
@@ -321,8 +321,8 @@ gboolean WebContentsViewGtk::OnFocus(GtkWidget* widget,
 }
 
 void WebContentsViewGtk::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const ContextMenuParams& params,
+    ContextMenuSourceType type) {
   if (delegate_.get())
     delegate_->ShowContextMenu(params, type);
   else
@@ -345,7 +345,8 @@ void WebContentsViewGtk::ShowPopupMenu(const gfx::Rect& bounds,
 void WebContentsViewGtk::StartDragging(const WebDropData& drop_data,
                                        WebDragOperationsMask ops,
                                        const gfx::ImageSkia& image,
-                                       const gfx::Point& image_offset) {
+                                       const gfx::Vector2d& image_offset,
+                                       const DragEventSourceInfo& event_info) {
   DCHECK(GetContentNativeView());
 
   RenderWidgetHostViewGtk* view_gtk = static_cast<RenderWidgetHostViewGtk*>(

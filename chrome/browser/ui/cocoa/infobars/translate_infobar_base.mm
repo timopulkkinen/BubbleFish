@@ -5,7 +5,6 @@
 #import "chrome/browser/ui/cocoa/infobars/translate_infobar_base.h"
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -31,7 +30,7 @@ using InfoBarUtilities::AddMenuItem;
 // TranslateInfoBarDelegate views specific method:
 InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   TranslateInfoBarControllerBase* infobar_controller = NULL;
-  switch (type_) {
+  switch (infobar_type_) {
     case BEFORE_TRANSLATE:
       infobar_controller =
           [[BeforeTranslateInfobarController alloc] initWithDelegate:this
@@ -128,7 +127,8 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   if (newLanguageIdxSizeT == [self delegate]->original_language_index())
     return;
   [self delegate]->set_original_language_index(newLanguageIdxSizeT);
-  if ([self delegate]->type() == TranslateInfoBarDelegate::AFTER_TRANSLATE)
+  if ([self delegate]->infobar_type() ==
+      TranslateInfoBarDelegate::AFTER_TRANSLATE)
     [self delegate]->Translate();
   int commandId = IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE + newLanguageIdx;
   int newMenuIdx = [fromLanguagePopUp_ indexOfItemWithTag:commandId];
@@ -141,7 +141,8 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   if (newLanguageIdxSizeT == [self delegate]->target_language_index())
     return;
   [self delegate]->set_target_language_index(newLanguageIdxSizeT);
-  if ([self delegate]->type() == TranslateInfoBarDelegate::AFTER_TRANSLATE)
+  if ([self delegate]->infobar_type() ==
+      TranslateInfoBarDelegate::AFTER_TRANSLATE)
     [self delegate]->Translate();
   int commandId = IDC_TRANSLATE_TARGET_LANGUAGE_BASE + newLanguageIdx;
   int newMenuIdx = [toLanguagePopUp_ indexOfItemWithTag:commandId];
@@ -391,11 +392,10 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   if (![self isOwned])
     return;
   TranslateInfoBarDelegate* delegate = [self delegate];
-  TranslateInfoBarDelegate::Type state = delegate->type();
+  TranslateInfoBarDelegate::Type state = delegate->infobar_type();
   DCHECK(state == TranslateInfoBarDelegate::BEFORE_TRANSLATE ||
          state == TranslateInfoBarDelegate::TRANSLATION_ERROR);
   delegate->Translate();
-  UMA_HISTOGRAM_COUNTS("Translate.Translate", 1);
 }
 
 // Called when someone clicks on the "Nope" button.
@@ -403,9 +403,9 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   if (![self isOwned])
     return;
   TranslateInfoBarDelegate* delegate = [self delegate];
-  DCHECK(delegate->type() == TranslateInfoBarDelegate::BEFORE_TRANSLATE);
+  DCHECK_EQ(TranslateInfoBarDelegate::BEFORE_TRANSLATE,
+            delegate->infobar_type());
   delegate->TranslationDeclined();
-  UMA_HISTOGRAM_COUNTS("Translate.DeclineTranslate", 1);
   [super removeSelf];
 }
 

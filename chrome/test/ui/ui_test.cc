@@ -16,16 +16,16 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -33,6 +33,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -46,9 +47,9 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/base/chrome_process_util.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
+#include "chrome/test/base/testing_profile.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "ui/gl/gl_implementation.h"
@@ -160,7 +161,8 @@ ProxyLauncher* UITestBase::CreateProxyLauncher() {
 }
 
 ProxyLauncher::LaunchState UITestBase::DefaultLaunchState() {
-  FilePath browser_executable = browser_directory_.Append(GetExecutablePath());
+  base::FilePath browser_executable =
+      browser_directory_.Append(GetExecutablePath());
   CommandLine command(browser_executable);
   command.AppendArguments(launch_arguments_, false);
   base::Closure setup_profile_callback = base::Bind(&UITestBase::SetUpProfile,
@@ -188,7 +190,8 @@ void UITestBase::SetLaunchSwitches() {
   if (dom_automation_enabled_)
     launch_arguments_.AppendSwitch(switches::kDomAutomationController);
   // Allow off-store extension installs.
-  launch_arguments_.AppendSwitch(switches::kEnableEasyOffStoreExtensionInstall);
+  launch_arguments_.AppendSwitchASCII(
+      switches::kEasyOffStoreExtensionInstall, "1");
   if (!homepage_.empty()) {
     // Pass |homepage_| both as an arg (so that it opens on startup) and to the
     // homepage switch (so that the homepage is set).
@@ -381,7 +384,7 @@ void UITestBase::WaitUntilTabCount(int tab_count) {
   ADD_FAILURE() << "Timeout reached in WaitUntilTabCount";
 }
 
-const FilePath::CharType* UITestBase::GetExecutablePath() {
+const base::FilePath::CharType* UITestBase::GetExecutablePath() {
   if (launch_arguments_.HasSwitch(switches::kEnableChromiumBranding))
     return chrome::kBrowserProcessExecutablePathChromium;
   return chrome::kBrowserProcessExecutablePath;
@@ -412,9 +415,9 @@ bool UITestBase::CloseBrowser(BrowserProxy* browser,
 }
 
 // static
-FilePath UITestBase::ComputeTypicalUserDataSource(
+base::FilePath UITestBase::ComputeTypicalUserDataSource(
     UITestBase::ProfileType profile_type) {
-  FilePath source_history_file;
+  base::FilePath source_history_file;
   EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA,
                                &source_history_file));
   source_history_file = source_history_file.AppendASCII("profiles");
@@ -435,7 +438,7 @@ FilePath UITestBase::ComputeTypicalUserDataSource(
 }
 
 int UITestBase::GetCrashCount() const {
-  FilePath crash_dump_path;
+  base::FilePath crash_dump_path;
   PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
   int actual_crashes = file_util::CountFilesCreatedAfter(
       crash_dump_path, test_start_time_);
@@ -486,7 +489,7 @@ std::string UITestBase::CheckErrorsAndCrashes() const {
   return std::string(wide_result.begin(), wide_result.end());
 }
 
-void UITestBase::SetBrowserDirectory(const FilePath& dir) {
+void UITestBase::SetBrowserDirectory(const base::FilePath& dir) {
   browser_directory_ = dir;
 }
 
@@ -546,7 +549,8 @@ bool UITest::GetBrowserProcessCount(int* count) {
   return true;
 }
 
-static DictionaryValue* LoadDictionaryValueFromPath(const FilePath& path) {
+static DictionaryValue* LoadDictionaryValueFromPath(
+    const base::FilePath& path) {
   if (path.empty())
     return NULL;
 
@@ -559,13 +563,13 @@ static DictionaryValue* LoadDictionaryValueFromPath(const FilePath& path) {
 }
 
 DictionaryValue* UITest::GetLocalState() {
-  FilePath local_state_path;
+  base::FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   return LoadDictionaryValueFromPath(local_state_path);
 }
 
 DictionaryValue* UITest::GetDefaultProfilePreferences() {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.AppendASCII(TestingProfile::kTestUserProfileDir);
   return LoadDictionaryValueFromPath(path.Append(chrome::kPreferencesFilename));
@@ -596,7 +600,7 @@ void UITest::WaitForFinish(const std::string &name,
   EXPECT_EQ(expected_cookie_value, cookie_value);
 }
 
-bool UITest::EvictFileFromSystemCacheWrapper(const FilePath& path) {
+bool UITest::EvictFileFromSystemCacheWrapper(const base::FilePath& path) {
   const int kCycles = 10;
   const TimeDelta kDelay = TestTimeouts::action_timeout() / kCycles;
   for (int i = 0; i < kCycles; i++) {
@@ -712,7 +716,8 @@ void UITest::TerminateBrowser() {
   // Make sure session restore says we didn't crash.
   scoped_ptr<DictionaryValue> profile_prefs(GetDefaultProfilePreferences());
   ASSERT_TRUE(profile_prefs.get());
-  ASSERT_TRUE(profile_prefs->GetBoolean(prefs::kSessionExitedCleanly,
-                                        &exited_cleanly));
-  ASSERT_TRUE(exited_cleanly);
+  std::string exit_type;
+  ASSERT_TRUE(profile_prefs->GetString(prefs::kSessionExitedCleanly,
+                                        &exit_type));
+  EXPECT_EQ(ProfileImpl::kPrefExitTypeNormal, exit_type);
 }

@@ -8,12 +8,15 @@
 #include <pango/pango.h>
 #include <vector>
 
-#include "chrome/browser/autofill/autofill_popup_view.h"
-#include "content/public/browser/keyboard_listener.h"
+#include "base/compiler_specific.h"
+#include "base/string16.h"
+#include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
+#include "ui/gfx/font.h"
 
-class GtkThemeService;
+class AutofillPopupController;
 class Profile;
 
 namespace content {
@@ -25,6 +28,7 @@ class Rect;
 }
 
 typedef struct _GdkEventButton GdkEventButton;
+typedef struct _GdkEventConfigure GdkEventConfigure;
 typedef struct _GdkEventCrossing GdkEventCrossing;
 typedef struct _GdkEventExpose GdkEventExpose;
 typedef struct _GdkEventKey GdkEventKey;
@@ -32,23 +36,22 @@ typedef struct _GdkEventMotion GdkEventMotion;
 typedef struct _GdkColor GdkColor;
 typedef struct _GtkWidget GtkWidget;
 
-class AutofillPopupViewGtk : public AutofillPopupView,
-                             public KeyboardListener {
+// Gtk implementation for AutofillPopupView interface.
+class AutofillPopupViewGtk : public AutofillPopupView {
  public:
-  AutofillPopupViewGtk(content::WebContents* web_contents,
-                       GtkThemeService* theme_service,
-                       AutofillExternalDelegate* external_delegate,
-                       GtkWidget* parent);
-  virtual ~AutofillPopupViewGtk();
-
- protected:
-  // AutofillPopupView implementations.
-  virtual void ShowInternal() OVERRIDE;
-  virtual void HideInternal() OVERRIDE;
-  virtual void InvalidateRow(size_t row) OVERRIDE;
-  virtual void ResizePopup() OVERRIDE;
+  explicit AutofillPopupViewGtk(AutofillPopupController* controller);
 
  private:
+  virtual ~AutofillPopupViewGtk();
+
+  // AutofillPopupView implementation.
+  virtual void Hide() OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void InvalidateRow(size_t row) OVERRIDE;
+  virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
+
+  CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleConfigure,
+                       GdkEventConfigure*);
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleButtonRelease,
                        GdkEventButton*);
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleExpose,
@@ -58,11 +61,8 @@ class AutofillPopupViewGtk : public AutofillPopupView,
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleMotion,
                        GdkEventMotion*);
 
-  //  KeyboardListener implementation.
-  virtual bool HandleKeyPressEvent(GdkEventKey* event) OVERRIDE;
-
   // Set up the pango layout to display the autofill results.
-  void SetupLayout(const gfx::Rect& window_rect);
+  void SetUpLayout();
 
   // Set up the pango layout to print the given text and have it's width match
   // the text's (this gives us better control when placing the text box).
@@ -78,37 +78,16 @@ class AutofillPopupViewGtk : public AutofillPopupView,
                          size_t index,
                          const gfx::Rect& entry_rect);
 
-  // Set the bounds of the popup to show, including the placement of it.
-  void SetBounds();
+  // Set the initial bounds of the popup to show, including the placement
+  // of it.
+  void SetInitialBounds();
 
-  // Get width of popup needed by values.
-  int GetPopupRequiredWidth();
+  AutofillPopupController* controller_;  // Weak reference.
 
-  // Get height of popup needed by values.
-  int GetPopupRequiredHeight();
+  ui::GtkSignalRegistrar signals_;
 
-  // Convert a y-coordinate to the closest line.
-  int LineFromY(int y);
-
-  // Returns the rectangle containing the item at position |index| in the popup.
-  gfx::Rect GetRectForRow(size_t row, int width);
-
-  // Returns true if the given |x| and |y| coordinates refer to a point that
-  // hits the delete icon in the current selected line.
-  bool DeleteIconIsSelected(int x, int y);
-
-  GtkWidget* parent_;  // Weak reference.
   GtkWidget* window_;  // Strong reference.
-  PangoLayout* layout_;  // Strong reference
-  GtkThemeService* theme_service_;
-
-  // The size of the popup.
-  gfx::Rect bounds_;
-
-  content::RenderViewHost* render_view_host_;  // Weak reference.
-
-  // Used to indicate if the delete icon within a row is currently selected.
-  bool delete_icon_selected_;
+  PangoLayout* layout_;  // Strong reference.
 
   DISALLOW_COPY_AND_ASSIGN(AutofillPopupViewGtk);
 };

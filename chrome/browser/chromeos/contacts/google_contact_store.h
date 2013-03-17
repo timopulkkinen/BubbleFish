@@ -24,14 +24,15 @@
 
 class Profile;
 
-namespace gdata {
-class GDataContactsServiceInterface;
-}
+namespace net {
+class URLRequestContextGetter;
+}  // namespace net
 
 namespace contacts {
 
 class Contact;
 class ContactDatabaseInterface;
+class GDataContactsServiceInterface;
 class UpdateMetadata;
 
 // A collection of contacts from a Google account.
@@ -45,7 +46,9 @@ class GoogleContactStore
     ~TestAPI();
 
     bool update_scheduled() { return store_->update_timer_.IsRunning(); }
-
+    base::Time last_contact_update_time() const {
+      return store_->last_contact_update_time_;
+    }
     void set_current_time(const base::Time& time) {
       store_->current_time_for_testing_ = time;
     }
@@ -55,7 +58,7 @@ class GoogleContactStore
 
     // Takes ownership of |service|. Must be called before Init(). The caller is
     // responsible for calling |service|'s Initialize() method.
-    void SetGDataService(gdata::GDataContactsServiceInterface* service);
+    void SetGDataService(GDataContactsServiceInterface* service);
 
     // Triggers an update, similar to what happens when the update timer fires.
     void DoUpdate();
@@ -63,13 +66,19 @@ class GoogleContactStore
     // Notifies the store that the system has gone online or offline.
     void NotifyAboutNetworkStateChange(bool online);
 
+    // Returns pointers to all of the contacts in the store's |contacts_|
+    // member.
+    scoped_ptr<ContactPointers> GetLoadedContacts();
+
    private:
     GoogleContactStore* store_;  // not owned
 
     DISALLOW_COPY_AND_ASSIGN(TestAPI);
   };
 
-  explicit GoogleContactStore(Profile* profile);
+  GoogleContactStore(
+      net::URLRequestContextGetter* url_request_context_getter,
+      Profile* profile);
   virtual ~GoogleContactStore();
 
   // ContactStore implementation:
@@ -127,6 +136,8 @@ class GoogleContactStore
   // being accessed by the database, we schedule an update.
   void OnDatabaseContactsSaved(bool success);
 
+  net::URLRequestContextGetter* url_request_context_getter_;  // not owned
+
   Profile* profile_;  // not owned
 
   ObserverList<ContactStoreObserver> observers_;
@@ -139,7 +150,7 @@ class GoogleContactStore
   base::Time last_contact_update_time_;
 
   // Used to download contacts.
-  scoped_ptr<gdata::GDataContactsServiceInterface> gdata_service_;
+  scoped_ptr<GDataContactsServiceInterface> gdata_service_;
 
   // Used to save contacts to disk and load them at startup. Owns the object.
   ContactDatabaseInterface* db_;

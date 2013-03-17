@@ -6,12 +6,13 @@
 
 #include "base/bind.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "webkit/blob/blob_storage_controller.h"
 
 using base::UserDataAdapter;
-using content::BrowserContext;
-using content::BrowserThread;
 using webkit_blob::BlobStorageController;
+
+namespace content {
 
 static const char* kBlobStorageContextKeyName = "content_blob_storage_context";
 
@@ -51,3 +52,5 @@ void ChromeBlobStorageContext::DeleteOnCorrectThread() const {
   }
   delete this;
 }
+
+}  // namespace content

@@ -95,8 +95,7 @@ class VIEWS_EXPORT NativeWidgetWin : public internal::NativeWidgetPrivate,
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(
-      gfx::Point* offset,
+  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
       ui::Layer** layer_parent) OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
@@ -157,16 +156,19 @@ class VIEWS_EXPORT NativeWidgetWin : public internal::NativeWidgetPrivate,
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
                             const gfx::Point& location,
-                            int operation) OVERRIDE;
+                            int operation,
+                            ui::DragDropTypes::DragEventSource source) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
   virtual Widget::MoveLoopResult RunMoveLoop(
-      const gfx::Point& drag_offset) OVERRIDE;
+      const gfx::Vector2d& drag_offset,
+      Widget::MoveLoopSource source) OVERRIDE;
   virtual void EndMoveLoop() OVERRIDE;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
+  virtual ui::NativeTheme* GetNativeTheme() const OVERRIDE;
 
  protected:
   // Deletes this window as it is destroyed, override to provide different
@@ -208,6 +210,7 @@ class VIEWS_EXPORT NativeWidgetWin : public internal::NativeWidgetPrivate,
   virtual void HandleAppDeactivated() OVERRIDE;
   virtual void HandleActivationChanged(bool active) OVERRIDE;
   virtual bool HandleAppCommand(short command) OVERRIDE;
+  virtual void HandleCancelMode() OVERRIDE;
   virtual void HandleCaptureLost() OVERRIDE;
   virtual void HandleClose() OVERRIDE;
   virtual bool HandleCommand(int command) OVERRIDE;
@@ -229,6 +232,7 @@ class VIEWS_EXPORT NativeWidgetWin : public internal::NativeWidgetPrivate,
   virtual bool HandleMouseEvent(const ui::MouseEvent& event) OVERRIDE;
   virtual bool HandleKeyEvent(const ui::KeyEvent& event) OVERRIDE;
   virtual bool HandleUntranslatedKeyEvent(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool HandleTouchEvent(const ui::TouchEvent& event) OVERRIDE;
   virtual bool HandleIMEMessage(UINT message,
                                 WPARAM w_param,
                                 LPARAM l_param,

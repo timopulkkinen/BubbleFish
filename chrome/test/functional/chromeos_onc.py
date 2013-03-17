@@ -20,7 +20,7 @@ class ChromeosONC(policy_base.PolicyTestBase):
   add the network/certificate to the device.
   """
 
-  ONC_PATH = os.path.join(pyauto.PyUITest.DataDir(), 'chromeos', 'cros')
+  ONC_PATH = os.path.join(pyauto.PyUITest.ChromeOSDataDir(), 'network')
 
   def setUp(self):
     self.CleanupFlimflamDirsOnChromeOS()
@@ -55,14 +55,18 @@ class ChromeosONC(policy_base.PolicyTestBase):
     wifi_expect_temp = dict(wifi_expect)
 
     for service, wifi_dict in networks['remembered_wifi'].iteritems():
-      msg = ('Wifi network %s was in the remembered_network list but '
-             'shouldn\'t be.' % wifi_dict['name'])
+      if isinstance(wifi_dict, dict) and \
+         'encryption' in wifi_dict and \
+         'name' in wifi_dict:
 
-      # wifi_dict['encryption'] will always be a string and not None.
-      self.assertTrue(wifi_expect.get(wifi_dict['name'], None) ==
-                      wifi_dict['encryption'], msg)
+        msg = ('Wifi network %s was in the remembered_network list but '
+               'shouldn\'t be.' % wifi_dict['name'])
 
-      del wifi_expect_temp[wifi_dict['name']]
+        # wifi_dict['encryption'] will always be a string and not None.
+        self.assertTrue(wifi_expect.get(wifi_dict['name'], None) ==
+                        wifi_dict['encryption'], msg)
+
+        del wifi_expect_temp[wifi_dict['name']]
 
     # Error if wifi_expect_temp is not empty.
     self.assertFalse(wifi_expect_temp, 'The following networks '
@@ -74,7 +78,7 @@ class ChromeosONC(policy_base.PolicyTestBase):
         'ssid-none': '',
     }
 
-    self._ReadONCFileAndSet('network-wifi-none.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_open.onc')
     self._VerifyRememberedWifiNetworks(wifi_networks)
 
   def testONCAddWEPWifi(self):
@@ -83,7 +87,7 @@ class ChromeosONC(policy_base.PolicyTestBase):
         'ssid-wep': 'WEP',
     }
 
-    self._ReadONCFileAndSet('network-wifi-wep.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_wep_proxy.onc')
     self._VerifyRememberedWifiNetworks(wifi_networks)
 
   def testONCAddPSKWifi(self):
@@ -91,15 +95,15 @@ class ChromeosONC(policy_base.PolicyTestBase):
     wifi_networks = {
         'ssid-wpa': 'WPA',
     }
-    self._ReadONCFileAndSet('network-wifi-wpa.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_wpa_psk.onc')
     self._VerifyRememberedWifiNetworks(wifi_networks)
 
   def testAddBacktoBackONC(self):
     """Test adding three different ONC files one after the other."""
     test_dict = {
-      'network-wifi-none.onc': { 'ssid-none': '' },
-      'network-wifi-wep.onc': { 'ssid-wep': 'WEP' },
-      'network-wifi-wpa.onc': { 'ssid-wpa': 'WPA' },
+      'toplevel_wifi_open.onc': { 'ssid-none': '' },
+      'toplevel_wifi_wep_proxy.onc': { 'ssid-wep': 'WEP' },
+      'toplevel_wifi_wpa_psk.onc': { 'ssid-wpa': 'WPA' },
     }
 
     for onc, wifi_networks in test_dict.iteritems():
@@ -118,9 +122,9 @@ class ChromeosONC(policy_base.PolicyTestBase):
       'ssid-wpa': 'WPA',
     }
 
-    self._ReadONCFileAndSet('network-wifi-none.onc')
-    self._ReadONCFileAndSet('network-wifi-wep.onc')
-    self._ReadONCFileAndSet('network-wifi-wpa.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_open.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_wep_proxy.onc')
+    self._ReadONCFileAndSet('toplevel_wifi_wpa_psk.onc')
 
     # Verify that only the most recent onc is updated.
     self._VerifyRememberedWifiNetworks(wifi_networks)
@@ -132,7 +136,7 @@ class ChromeosONC(policy_base.PolicyTestBase):
         'ssid-wpa': 'WPA'
     }
 
-    self._ReadONCFileAndSet('network-multiple-unknown.onc')
+    self._ReadONCFileAndSet('toplevel_with_unknown_fields.onc')
     self._VerifyRememberedWifiNetworks(wifi_networks)
 
 

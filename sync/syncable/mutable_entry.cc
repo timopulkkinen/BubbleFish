@@ -1,32 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "sync/syncable/mutable_entry.h"
 
 #include "base/memory/scoped_ptr.h"
+#include "sync/internal_api/public/base/node_ordinal.h"
 #include "sync/syncable/directory.h"
 #include "sync/syncable/scoped_index_updater.h"
 #include "sync/syncable/scoped_kernel_lock.h"
 #include "sync/syncable/syncable-inl.h"
 #include "sync/syncable/syncable_changes_version.h"
 #include "sync/syncable/syncable_util.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 
 using std::string;
 
 namespace syncer {
 namespace syncable {
 
-MutableEntry::MutableEntry(WriteTransaction* trans, Create,
-                           const Id& parent_id, const string& name)
-    : Entry(trans),
-      write_transaction_(trans) {
-  Init(trans, parent_id, name);
-}
-
-
-void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
+void MutableEntry::Init(WriteTransaction* trans,
+                        ModelType model_type,
+                        const Id& parent_id,
                         const string& name) {
   scoped_ptr<EntryKernel> kernel(new EntryKernel);
   kernel_ = NULL;
@@ -41,9 +36,16 @@ void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
   kernel->put(MTIME, now);
   // We match the database defaults here
   kernel->put(BASE_VERSION, CHANGES_VERSION);
-  if (!trans->directory()->InsertEntry(trans, kernel.get())) {
-    return; // We failed inserting, nothing more to do.
-  }
+  kernel->put(SERVER_ORDINAL_IN_PARENT, NodeOrdinal::CreateInitialOrdinal());
+
+  // Normally the SPECIFICS setting code is wrapped in logic to deal with
+  // unknown fields and encryption.  Since all we want to do here is ensure that
+  // GetModelType() returns a correct value from the very beginning, these
+  // few lines are sufficient.
+  sync_pb::EntitySpecifics specifics;
+  AddDefaultFieldValue(model_type, &specifics);
+  kernel->put(SPECIFICS, specifics);
+
   // Because this entry is new, it was originally deleted.
   kernel->put(IS_DEL, true);
   trans->SaveOriginal(kernel.get());
@@ -51,6 +53,18 @@ void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
 
   // Now swap the pointers.
   kernel_ = kernel.release();
+}
+
+MutableEntry::MutableEntry(WriteTransaction* trans,
+                           Create,
+                           ModelType model_type,
+                           const Id& parent_id,
+                           const string& name)
+    : Entry(trans),
+      write_transaction_(trans) {
+  Init(trans, model_type, parent_id, name);
+  bool insert_result = trans->directory()->InsertEntry(trans, kernel_);
+  DCHECK(insert_result);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
@@ -66,6 +80,7 @@ MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
   kernel->put(ID, id);
   kernel->put(META_HANDLE, trans->directory_->NextMetahandle());
   kernel->mark_dirty(trans->directory_->kernel_->dirty_metahandles);
+  kernel->put(SERVER_ORDINAL_IN_PARENT, NodeOrdinal::CreateInitialOrdinal());
   kernel->put(IS_DEL, true);
   // We match the database defaults here
   kernel->put(BASE_VERSION, CHANGES_VERSION);
@@ -146,13 +161,7 @@ bool MutableEntry::Put(Int64Field field, const int64& value) {
   write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     ScopedKernelLock lock(dir());
-    if (SERVER_POSITION_IN_PARENT == field) {
-      ScopedIndexUpdater<ParentIdAndHandleIndexer> updater(lock, kernel_,
-          dir()->kernel_->parent_id_child_index);
-      kernel_->put(field, value);
-    } else {
-      kernel_->put(field, value);
-    }
+    kernel_->put(field, value);
     kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
@@ -182,6 +191,24 @@ bool MutableEntry::Put(IdField field, const Id& value) {
         // TODO(lipalani) : Propagate the error to caller. crbug.com/100444.
         NOTREACHED();
       }
+    } else {
+      kernel_->put(field, value);
+    }
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
+  }
+  return true;
+}
+
+bool MutableEntry::Put(OrdinalField field, const NodeOrdinal& value) {
+  DCHECK(kernel_);
+  DCHECK(value.IsValid());
+  write_transaction_->SaveOriginal(kernel_);
+  if(!kernel_->ref(field).Equals(value)) {
+    ScopedKernelLock lock(dir());
+    if (SERVER_ORDINAL_IN_PARENT == field) {
+      ScopedIndexUpdater<ParentIdAndHandleIndexer> updater(
+          lock, kernel_, dir()->kernel_->parent_id_child_index);
+      kernel_->put(field, value);
     } else {
       kernel_->put(field, value);
     }
@@ -258,10 +285,22 @@ bool MutableEntry::Put(ProtoField field,
 bool MutableEntry::Put(BitField field, bool value) {
   DCHECK(kernel_);
   write_transaction_->SaveOriginal(kernel_);
-  if (kernel_->ref(field) != value) {
+  bool old_value = kernel_->ref(field);
+  if (old_value != value) {
     kernel_->put(field, value);
     kernel_->mark_dirty(GetDirtyIndexHelper());
   }
+
+  // Update delete journal for existence status change on server side here
+  // instead of in PutIsDel() because IS_DEL may not be updated due to
+  // early returns when processing updates. And because
+  // UpdateDeleteJournalForServerDelete() checks for SERVER_IS_DEL, it has
+  // to be called on sync thread.
+  if (field == SERVER_IS_DEL) {
+    dir()->delete_journal()->UpdateDeleteJournalForServerDelete(
+        write_transaction(), old_value, *kernel_);
+  }
+
   return true;
 }
 
@@ -374,7 +413,7 @@ bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
     }
     if (predecessor.Get(PARENT_ID) != Get(PARENT_ID))
       return false;
-    successor_id = predecessor.Get(NEXT_ID);
+    successor_id = predecessor.GetSuccessorId();
     predecessor.Put(NEXT_ID, Get(ID));
   } else {
     syncable::Directory* dir = trans()->directory();

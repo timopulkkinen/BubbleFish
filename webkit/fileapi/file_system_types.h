@@ -5,7 +5,7 @@
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_TYPES_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_TYPES_H_
 
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 
 namespace fileapi {
 
@@ -51,6 +51,11 @@ enum FileSystemType {
   // Indicates a local filesystem where we can access files using native
   // local path.
   kFileSystemTypeNativeLocal,
+
+  // Indicates a local filesystem where we can access files using native
+  // local path, but with restricted access.
+  // Restricted native local file system is in read-only mode.
+  kFileSystemTypeRestrictedNativeLocal,
 
   // Indicates a transient, isolated file system for dragged files (which could
   // contain multiple dragged paths in the virtual root).

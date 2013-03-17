@@ -14,20 +14,24 @@
 
 class GURL;
 
-class ClipboardMessageFilter : public content::BrowserMessageFilter {
+namespace content {
+
+class BrowserContext;
+
+class ClipboardMessageFilter : public BrowserMessageFilter {
  public:
-  ClipboardMessageFilter();
+  ClipboardMessageFilter(BrowserContext* browser_context);
 
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+      BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
  private:
   virtual ~ClipboardMessageFilter();
 
   void OnWriteObjectsAsync(const ui::Clipboard::ObjectMap& objects);
-  void OnWriteObjectsSync(const ui::Clipboard::ObjectMap& objects,
+  void OnWriteObjectsSync(ui::Clipboard::ObjectMap objects,
                           base::SharedMemoryHandle bitmap_handle);
 
   void OnGetSequenceNumber(const ui::Clipboard::Buffer buffer,
@@ -49,6 +53,9 @@ class ClipboardMessageFilter : public content::BrowserMessageFilter {
   void OnReadCustomData(ui::Clipboard::Buffer buffer,
                         const string16& type,
                         string16* result);
+  void OnReadData(const ui::Clipboard::FormatType& format,
+                  std::string* data);
+
 #if defined(OS_MACOSX)
   void OnFindPboardWriteString(const string16& text);
 #endif
@@ -59,7 +66,11 @@ class ClipboardMessageFilter : public content::BrowserMessageFilter {
   // thread.
   static ui::Clipboard* GetClipboard();
 
+  BrowserContext* const browser_context_;
+
   DISALLOW_COPY_AND_ASSIGN(ClipboardMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_CLIPBOARD_MESSAGE_FILTER_H_

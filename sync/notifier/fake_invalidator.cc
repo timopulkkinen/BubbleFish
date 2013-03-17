@@ -23,10 +23,6 @@ const std::string& FakeInvalidator::GetUniqueId() const {
   return unique_id_;
 }
 
-const std::string& FakeInvalidator::GetStateDeprecated() const {
-  return state_;
-}
-
 const std::string& FakeInvalidator::GetCredentialsEmail() const {
   return email_;
 }
@@ -35,8 +31,9 @@ const std::string& FakeInvalidator::GetCredentialsToken() const {
   return token_;
 }
 
-const ObjectIdStateMap& FakeInvalidator::GetLastSentIdStateMap() const {
-  return last_sent_id_state_map_;
+const ObjectIdInvalidationMap&
+FakeInvalidator::GetLastSentInvalidationMap() const {
+  return last_sent_invalidation_map_;
 }
 
 void FakeInvalidator::EmitOnInvalidatorStateChange(InvalidatorState state) {
@@ -44,9 +41,8 @@ void FakeInvalidator::EmitOnInvalidatorStateChange(InvalidatorState state) {
 }
 
 void FakeInvalidator::EmitOnIncomingInvalidation(
-    const ObjectIdStateMap& id_state_map,
-    IncomingInvalidationSource source) {
-  registrar_.DispatchInvalidationsToHandlers(id_state_map, source);
+    const ObjectIdInvalidationMap& invalidation_map) {
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void FakeInvalidator::RegisterHandler(InvalidationHandler* handler) {
@@ -54,12 +50,17 @@ void FakeInvalidator::RegisterHandler(InvalidationHandler* handler) {
 }
 
 void FakeInvalidator::UpdateRegisteredIds(InvalidationHandler* handler,
-                                           const ObjectIdSet& ids) {
+                                          const ObjectIdSet& ids) {
   registrar_.UpdateRegisteredIds(handler, ids);
 }
 
 void FakeInvalidator::UnregisterHandler(InvalidationHandler* handler) {
   registrar_.UnregisterHandler(handler);
+}
+
+void FakeInvalidator::Acknowledge(const invalidation::ObjectId& id,
+                                  const AckHandle& ack_handle) {
+  // Do nothing.
 }
 
 InvalidatorState FakeInvalidator::GetInvalidatorState() const {
@@ -70,18 +71,15 @@ void FakeInvalidator::SetUniqueId(const std::string& unique_id) {
   unique_id_ = unique_id;
 }
 
-void FakeInvalidator::SetStateDeprecated(const std::string& state) {
-  state_ = state;
-}
-
 void FakeInvalidator::UpdateCredentials(
     const std::string& email, const std::string& token) {
   email_ = email;
   token_ = token;
 }
 
-void FakeInvalidator::SendInvalidation(const ObjectIdStateMap& id_state_map) {
-  last_sent_id_state_map_ = id_state_map;
+void FakeInvalidator::SendInvalidation(
+    const ObjectIdInvalidationMap& invalidation_map) {
+  last_sent_invalidation_map_ = invalidation_map;
 }
 
 }  // namespace syncer

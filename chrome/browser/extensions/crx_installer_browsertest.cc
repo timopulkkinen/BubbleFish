@@ -9,13 +9,15 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_switch_utils.h"
+#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/download_test_observer.h"
@@ -32,10 +34,8 @@ namespace {
 
 class MockInstallPrompt : public ExtensionInstallPrompt {
  public:
-  explicit MockInstallPrompt(gfx::NativeWindow parent,
-                             content::PageNavigator* navigator,
-                             Profile* profile) :
-      ExtensionInstallPrompt(parent, navigator, profile),
+  explicit MockInstallPrompt(content::WebContents* web_contents) :
+      ExtensionInstallPrompt(web_contents),
       confirmation_requested_(false),
       extension_(NULL) {}
 
@@ -46,17 +46,19 @@ class MockInstallPrompt : public ExtensionInstallPrompt {
   void set_record_oauth2_grant(bool record) { record_oauth2_grant_ = record; }
 
   // Overriding some of the ExtensionInstallUI API.
-  void ConfirmInstall(Delegate* delegate,
-                      const Extension* extension) {
+  virtual void ConfirmInstall(
+      Delegate* delegate,
+      const Extension* extension,
+      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
     confirmation_requested_ = true;
     delegate->InstallUIProceed();
   }
-  void OnInstallSuccess(const Extension* extension,
-                        SkBitmap* icon) {
+  virtual void OnInstallSuccess(const Extension* extension,
+                                SkBitmap* icon) OVERRIDE {
     extension_ = extension;
     MessageLoopForUI::current()->Quit();
   }
-  void OnInstallFailure(const CrxInstallerError& error) {
+  virtual void OnInstallFailure(const CrxInstallerError& error) OVERRIDE {
     error_ = error.message();
     MessageLoopForUI::current()->Quit();
   }
@@ -68,9 +70,8 @@ class MockInstallPrompt : public ExtensionInstallPrompt {
 };
 
 MockInstallPrompt* CreateMockInstallPromptForBrowser(Browser* browser) {
-  gfx::NativeWindow parent =
-      browser->window() ? browser->window()->GetNativeWindow() : NULL;
-  return new MockInstallPrompt(parent, browser, browser->profile());
+  return new MockInstallPrompt(
+      browser->tab_strip_model()->GetActiveWebContents());
 }
 
 }  // namespace
@@ -83,8 +84,9 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
       const std::string& ext_relpath,
       const std::string& id,
       MockInstallPrompt* mock_install_prompt) {
-    ExtensionService* service = browser()->profile()->GetExtensionService();
-    FilePath ext_path = test_data_dir_.AppendASCII(ext_relpath);
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
+    base::FilePath ext_path = test_data_dir_.AppendASCII(ext_relpath);
 
     std::string error;
     base::DictionaryValue* parsed_manifest =
@@ -106,6 +108,7 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
                              approval.get()       /* keep ownership */));
     installer->set_allow_silent_install(true);
     installer->set_is_gallery_install(true);
+    installer->set_bypass_blacklist_for_test(true);
     installer->InstallCrx(PackExtension(ext_path));
     content::RunMessageLoop();
 
@@ -120,7 +123,8 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExperimentalExtensionApis);
 
-    ExtensionService* service = browser()->profile()->GetExtensionService();
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service();
 
     MockInstallPrompt* mock_prompt =
         CreateMockInstallPromptForBrowser(browser());
@@ -143,7 +147,8 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, MAYBE_Whitelisting) {
   std::string id = "hdgllgikmikobbofgnabhfimcfoopgnd";
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
 
   // Even whitelisted extensions with NPAPI should not prompt.
   MockInstallPrompt* mock_prompt =
@@ -161,7 +166,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   CommandLine old_command_line = *command_line;
   command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
-  FilePath crx_path = PackExtension(
+  base::FilePath crx_path = PackExtension(
       test_data_dir_.AppendASCII("experimental"));
   ASSERT_FALSE(crx_path.empty());
 
@@ -188,13 +193,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, PlatformAppCrx) {
 #endif
 IN_PROC_BROWSER_TEST_F(
     ExtensionCrxInstallerTest, MAYBE_PackAndInstallExtension) {
-  if (!switch_utils::IsEasyOffStoreInstallEnabled())
+  if (!FeatureSwitch::easy_off_store_install()->IsEnabled())
     return;
 
   const int kNumDownloadsExpected = 1;
 
   LOG(ERROR) << "PackAndInstallExtension: Packing extension";
-  FilePath crx_path = PackExtension(
+  base::FilePath crx_path = PackExtension(
       test_data_dir_.AppendASCII("common/background_page"));
   ASSERT_FALSE(crx_path.empty());
   std::string crx_path_string(crx_path.value().begin(), crx_path.value().end());
@@ -226,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(
 // Tests that scopes are only granted if |record_oauth2_grant_| on the prompt is
 // true.
 #if defined(OS_WIN)
-#define MAYBE_GrantScopes FLAKY_GrantScopes
+#define MAYBE_GrantScopes DISABLED_GrantScopes
 #else
 #define MAYBE_GrantScopes GrantScopes
 #endif
@@ -248,7 +253,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DoNotGrantScopes) {
 #endif
 // Crashy: http://crbug.com/140893
 IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DISABLED_AllowOffStore) {
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   const bool kTestData[] = {false, true};
 
   for (size_t i = 0; i < arraysize(kTestData); ++i) {

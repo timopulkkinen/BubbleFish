@@ -9,10 +9,11 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/platform_file.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "webkit/fileapi/file_permission_policy.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace webkit_blob {
 class FileStreamReader;
@@ -20,6 +21,7 @@ class FileStreamReader;
 
 namespace fileapi {
 
+class AsyncFileUtil;
 class FileSystemURL;
 class FileStreamWriter;
 class FileSystemContext;
@@ -30,7 +32,7 @@ class RemoteFileSystemProxyInterface;
 
 // An interface to provide mount-point-specific path-related utilities
 // and specialized FileSystemFileUtil instance.
-class FILEAPI_EXPORT FileSystemMountPointProvider {
+class WEBKIT_STORAGE_EXPORT FileSystemMountPointProvider {
  public:
   // Callback for ValidateFileSystemRoot.
   typedef base::Callback<void(base::PlatformFileError error)>
@@ -51,29 +53,25 @@ class FILEAPI_EXPORT FileSystemMountPointProvider {
       const ValidateFileSystemCallback& callback) = 0;
 
   // Retrieves the root path of the filesystem specified by the given
-  // |origin_url| and |type| on the file thread.
+  // file system url on the file thread.
   // If |create| is true this may also create the root directory for
   // the filesystem if it doesn't exist.
-  virtual FilePath GetFileSystemRootPathOnFileThread(
-      const GURL& origin_url,
-      FileSystemType type,
-      const FilePath& virtual_path,
+  virtual base::FilePath GetFileSystemRootPathOnFileThread(
+      const FileSystemURL& url,
       bool create) = 0;
 
-  // Checks if access to |virtual_path| is allowed from |origin_url|.
-  virtual bool IsAccessAllowed(const FileSystemURL& url) = 0;
-
-  // Checks if a given |name| contains any restricted names/chars in it.
-  // Callable on any thread.
-  virtual bool IsRestrictedFileName(const FilePath& filename) const = 0;
-
   // Returns the specialized FileSystemFileUtil for this mount point.
+  // It is ok to return NULL if the filesystem doesn't support synchronous
+  // version of FileUtil.
   virtual FileSystemFileUtil* GetFileUtil(FileSystemType type) = 0;
 
-  // Returns file path we should use to check access permissions for
-  // |virtual_path|.
-  virtual FilePath GetPathForPermissionsCheck(const FilePath& virtual_path)
-      const = 0;
+  // Returns the specialized AsyncFileUtil for this mount point.
+  virtual AsyncFileUtil* GetAsyncFileUtil(FileSystemType type) = 0;
+
+  // Returns file permission policy we should apply for the given |url|.
+  virtual FilePermissionPolicy GetPermissionPolicy(
+      const FileSystemURL& url,
+      int permissions) const = 0;
 
   // Returns a new instance of the specialized FileSystemOperation for this
   // mount point based on the given triplet of |origin_url|, |file_system_type|
@@ -87,13 +85,18 @@ class FILEAPI_EXPORT FileSystemMountPointProvider {
       base::PlatformFileError* error_code) const = 0;
 
   // Creates a new file stream reader for a given filesystem URL |url| with an
-  // offset |offset|.
+  // offset |offset|. |expected_modification_time| specifies the expected last
+  // modification if the value is non-null, the reader will check the underlying
+  // file's actual modification time to see if the file has been modified, and
+  // if it does any succeeding read operations should fail with
+  // ERR_UPLOAD_FILE_CHANGED error.
   // The returned object must be owned and managed by the caller.
   // This method itself does *not* check if the given path exists and is a
   // regular file.
   virtual webkit_blob::FileStreamReader* CreateFileStreamReader(
     const FileSystemURL& url,
     int64 offset,
+    const base::Time& expected_modification_time,
     FileSystemContext* context) const = 0;
 
   // Creates a new file stream writer for a given filesystem URL |url| with an
@@ -122,34 +125,31 @@ class FILEAPI_EXPORT FileSystemMountPointProvider {
 class ExternalFileSystemMountPointProvider
     : public FileSystemMountPointProvider {
  public:
+  // Returns true if |url| is allowed to be accessed.
+  // This is supposed to perform ExternalFileSystem-specific security
+  // checks. This method is also likely to be called by
+  // FileSystemMountPointProvider::GetPermissionPolicy as
+  // GetPermissionPolicy is supposed to perform fileapi-generic security
+  // checks (which likely need to include ExternalFileSystem-specific checks).
+  virtual bool IsAccessAllowed(const fileapi::FileSystemURL& url) const = 0;
   // Returns the list of top level directories that are exposed by this
   // provider. This list is used to set appropriate child process file access
   // permissions.
-  virtual std::vector<FilePath> GetRootDirectories() const = 0;
+  virtual std::vector<base::FilePath> GetRootDirectories() const = 0;
   // Grants access to all external file system from extension identified with
   // |extension_id|.
   virtual void GrantFullAccessToExtension(const std::string& extension_id) = 0;
   // Grants access to |virtual_path| from |origin_url|.
   virtual void GrantFileAccessToExtension(
       const std::string& extension_id,
-      const FilePath& virtual_path) = 0;
+      const base::FilePath& virtual_path) = 0;
   // Revokes file access from extension identified with |extension_id|.
   virtual void RevokeAccessForExtension(
         const std::string& extension_id) = 0;
-  // Checks if a given |mount_point| already exists.
-  virtual bool HasMountPoint(const FilePath& mount_point) = 0;
-  // Adds a new local mount point.
-  virtual void AddLocalMountPoint(const FilePath& mount_point) = 0;
-  // Adds a new remote mount point.
-  virtual void AddRemoteMountPoint(
-      const FilePath& mount_point,
-      RemoteFileSystemProxyInterface* remote_proxy) = 0;
-  // Removes a mount point.
-  virtual void RemoveMountPoint(const FilePath& mount_point) = 0;
   // Gets virtual path by known filesystem path. Returns false when filesystem
   // path is not exposed by this provider.
-  virtual bool GetVirtualPath(const FilePath& file_system_path,
-                              FilePath* virtual_path) = 0;
+  virtual bool GetVirtualPath(const base::FilePath& file_system_path,
+                              base::FilePath* virtual_path) = 0;
 };
 
 }  // namespace fileapi

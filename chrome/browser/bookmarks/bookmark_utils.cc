@@ -7,54 +7,29 @@
 #include <utility>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/prefs/pref_service_base.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/query_parser.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
-#include "content/public/browser/web_contents.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "grit/ui_strings.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/events/event.h"
 #include "ui/base/models/tree_node_iterator.h"
 
-#if defined(OS_MACOSX)
-#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-#include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/base/events/event.h"
-#include "ui/views/drag_utils.h"
-#include "ui/views/widget/native_widget.h"
-#include "ui/views/widget/widget.h"
-#endif
-
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/ui/gtk/custom_drag.h"
-#endif
-
 using base::Time;
-using content::OpenURLParams;
-using content::PageNavigator;
-using content::WebContents;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -71,79 +46,6 @@ void CloneBookmarkNodeImpl(BookmarkModel* model,
     for (int i = 0; i < static_cast<int>(element.children.size()); ++i)
       CloneBookmarkNodeImpl(model, element.children[i], new_folder, i);
   }
-}
-
-// Returns the number of children of |node| that are of type url.
-int ChildURLCount(const BookmarkNode* node) {
-  int result = 0;
-  for (int i = 0; i < node->child_count(); ++i) {
-    const BookmarkNode* child = node->GetChild(i);
-    if (child->is_url())
-      result++;
-  }
-  return result;
-}
-
-// Returns the total number of descendants nodes.
-int ChildURLCountTotal(const BookmarkNode* node) {
-  int result = 0;
-  for (int i = 0; i < node->child_count(); ++i) {
-    const BookmarkNode* child = node->GetChild(i);
-    result++;
-    if (child->is_folder())
-      result += ChildURLCountTotal(child);
-  }
-  return result;
-}
-
-// Implementation of OpenAll. Opens all nodes of type URL and any children of
-// |node| that are of type URL. |navigator| is the PageNavigator used to open
-// URLs. After the first url is opened |opened_url| is set to true and
-// |navigator| is set to the PageNavigator of the last active tab. This is done
-// to handle a window disposition of new window, in which case we want
-// subsequent tabs to open in that window.
-void OpenAllImpl(const BookmarkNode* node,
-                 WindowOpenDisposition initial_disposition,
-                 PageNavigator** navigator,
-                 bool* opened_url) {
-  if (node->is_url()) {
-    WindowOpenDisposition disposition;
-    if (*opened_url)
-      disposition = NEW_BACKGROUND_TAB;
-    else
-      disposition = initial_disposition;
-    WebContents* opened_tab = (*navigator)->OpenURL(
-        OpenURLParams(node->url(), content::Referrer(), disposition,
-                      content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
-    if (!*opened_url) {
-      *opened_url = true;
-      // We opened the first URL which may have opened a new window or clobbered
-      // the current page, reset the navigator just to be sure.
-      *navigator = opened_tab;
-    }
-  } else {
-    // For folders only open direct children.
-    for (int i = 0; i < node->child_count(); ++i) {
-      const BookmarkNode* child_node = node->GetChild(i);
-      if (child_node->is_url())
-        OpenAllImpl(child_node, initial_disposition, navigator, opened_url);
-    }
-  }
-}
-
-bool ShouldOpenAll(gfx::NativeWindow parent,
-                   const std::vector<const BookmarkNode*>& nodes) {
-  int child_count = 0;
-  for (size_t i = 0; i < nodes.size(); ++i)
-    child_count += ChildURLCount(nodes[i]);
-  if (child_count < bookmark_utils::num_urls_before_prompting)
-    return true;
-
-  return chrome::ShowMessageBox(parent,
-      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-      l10n_util::GetStringFUTF16(IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
-                                 base::IntToString16(child_count)),
-      chrome::MESSAGE_BOX_TYPE_QUESTION) == chrome::MESSAGE_BOX_RESULT_YES;
 }
 
 // Comparison function that compares based on date modified of the two nodes.
@@ -183,10 +85,19 @@ const BookmarkNode* CreateNewNode(BookmarkModel* model,
                                   const string16& new_title,
                                   const GURL& new_url) {
   const BookmarkNode* node;
+  // When create the new one to right-clicked folder, add it to the next to the
+  // folder's position. Because |details.index| has a index of the folder when
+  // it was right-clicked, it might cause out of range exception when another
+  // bookmark manager edits contents of the folder.
+  // So we must check the range.
+  int child_count = parent->child_count();
+  int insert_index = (parent == details.parent_node && details.index >= 0 &&
+                      details.index <= child_count) ?
+                      details.index : child_count;
   if (details.type == BookmarkEditor::EditDetails::NEW_URL) {
-    node = model->AddURL(parent, parent->child_count(), new_title, new_url);
+    node = model->AddURL(parent, insert_index, new_title, new_url);
   } else if (details.type == BookmarkEditor::EditDetails::NEW_FOLDER) {
-    node = model->AddFolder(parent, parent->child_count(), new_title);
+    node = model->AddFolder(parent, insert_index, new_title);
     for (size_t i = 0; i < details.urls.size(); ++i) {
       model->AddURL(node, node->child_count(), details.urls[i].second,
                     details.urls[i].first);
@@ -208,8 +119,6 @@ bool g_bookmark_bar_view_animations_disabled = false;
 
 namespace bookmark_utils {
 
-int num_urls_before_prompting = 15;
-
 int PreferredDropOperation(int source_operations, int operations) {
   int common_ops = (source_operations & operations);
   if (!common_ops)
@@ -223,8 +132,9 @@ int PreferredDropOperation(int source_operations, int operations) {
   return ui::DragDropTypes::DRAG_NONE;
 }
 
-int BookmarkDragOperation(Profile* profile, const BookmarkNode* node) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile);
+int BookmarkDragOperation(content::BrowserContext* browser_context,
+                          const BookmarkNode* node) {
+  PrefService* prefs = PrefServiceFromBrowserContext(browser_context);
 
   int move = ui::DragDropTypes::DRAG_MOVE;
   if (!prefs->GetBoolean(prefs::kEditBookmarksEnabled))
@@ -327,67 +237,6 @@ void CloneBookmarkNode(BookmarkModel* model,
 }
 
 
-// Bookmark dragging
-void DragBookmarks(Profile* profile,
-                   const std::vector<const BookmarkNode*>& nodes,
-                   gfx::NativeView view) {
-  DCHECK(!nodes.empty());
-
-#if defined(TOOLKIT_VIEWS)
-  // Set up our OLE machinery
-  ui::OSExchangeData data;
-  BookmarkNodeData drag_data(nodes);
-  drag_data.Write(profile, &data);
-
-  // Allow nested message loop so we get DnD events as we drag this around.
-  bool was_nested = MessageLoop::current()->IsNested();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-
-  int operation =
-      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
-      ui::DragDropTypes::DRAG_LINK;
-  views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
-  if (widget) {
-    widget->RunShellDrag(NULL, data, gfx::Point(), operation);
-  } else {
-    // We hit this case when we're using WebContentsViewWin or
-    // WebContentsViewAura, instead of TabContentsViewViews.
-    views::RunShellDrag(view, data, gfx::Point(), operation);
-  }
-
-  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
-#elif defined(OS_MACOSX)
-  // Allow nested message loop so we get DnD events as we drag this around.
-  bool was_nested = MessageLoop::current()->IsNested();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-  bookmark_pasteboard_helper_mac::StartDrag(profile, nodes, view);
-  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
-#elif defined(TOOLKIT_GTK)
-  BookmarkDrag::BeginDrag(profile, nodes);
-#endif
-}
-
-void OpenAll(gfx::NativeWindow parent,
-             PageNavigator* navigator,
-             const std::vector<const BookmarkNode*>& nodes,
-             WindowOpenDisposition initial_disposition) {
-  if (!ShouldOpenAll(parent, nodes))
-    return;
-
-  bool opened_url = false;
-  for (size_t i = 0; i < nodes.size(); ++i)
-    OpenAllImpl(nodes[i], initial_disposition, &navigator, &opened_url);
-}
-
-void OpenAll(gfx::NativeWindow parent,
-             PageNavigator* navigator,
-             const BookmarkNode* node,
-             WindowOpenDisposition initial_disposition) {
-  std::vector<const BookmarkNode*> nodes;
-  nodes.push_back(node);
-  OpenAll(parent, navigator, nodes, initial_disposition);
-}
-
 void CopyToClipboard(BookmarkModel* model,
                      const std::vector<const BookmarkNode*>& nodes,
                      bool remove_nodes) {
@@ -425,14 +274,6 @@ bool CanPasteFromClipboard(const BookmarkNode* node) {
   if (!node)
     return false;
   return BookmarkNodeData::ClipboardContainsBookmarks();
-}
-
-string16 GetNameForURL(const GURL& url) {
-  if (url.is_valid()) {
-    return net::GetSuggestedFilename(url, "", "", "", "", std::string());
-  } else {
-    return l10n_util::GetStringUTF16(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
-  }
 }
 
 // This is used with a tree iterator to skip subtrees which are not visible.
@@ -592,41 +433,13 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
   return node;
 }
 
-// Formerly in BookmarkBarView.
-void ToggleWhenVisible(Profile* profile) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile);
-  const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
-
-  // The user changed when the bookmark bar is shown, update the preferences.
-  prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
-}
-
-void RegisterUserPrefs(PrefServiceBase* prefs) {
-  prefs->RegisterBooleanPref(prefs::kShowBookmarkBar,
-                             false,
-                             PrefServiceBase::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
-                             false,
-                             PrefServiceBase::UNSYNCABLE_PREF);
-}
-
-void GetURLAndTitleToBookmark(WebContents* web_contents,
-                              GURL* url,
-                              string16* title) {
-  *url = web_contents->GetURL();
-  *title = web_contents->GetTitle();
-}
-
-void GetURLsForOpenTabs(
-    Browser* browser,
-    std::vector<std::pair<GURL, string16> >* urls) {
-  for (int i = 0; i < browser->tab_count(); ++i) {
-    std::pair<GURL, string16> entry;
-    GetURLAndTitleToBookmark(
-        chrome::GetWebContentsAt(browser, i), &(entry.first),
-        &(entry.second));
-    urls->push_back(entry);
-  }
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kShowBookmarkBar,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 const BookmarkNode* GetParentForNewNodes(
@@ -652,29 +465,6 @@ const BookmarkNode* GetParentForNewNodes(
   }
 
   return real_parent;
-}
-
-bool NodeHasURLs(const BookmarkNode* node) {
-  DCHECK(node);
-
-  if (node->is_url())
-    return true;
-
-  for (int i = 0; i < node->child_count(); ++i) {
-    if (NodeHasURLs(node->GetChild(i)))
-      return true;
-  }
-  return false;
-}
-
-bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
-                               gfx::NativeWindow window) {
-  DCHECK(node && node->is_folder() && !node->empty());
-  return chrome::ShowMessageBox(window,
-      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-      l10n_util::GetStringFUTF16Int(IDS_BOOKMARK_EDITOR_CONFIRM_DELETE,
-                                    ChildURLCountTotal(node)),
-      chrome::MESSAGE_BOX_TYPE_QUESTION) == chrome::MESSAGE_BOX_RESULT_YES;
 }
 
 void DeleteBookmarkFolders(BookmarkModel* model,
@@ -718,13 +508,16 @@ void RemoveAllBookmarks(BookmarkModel* model, const GURL& url) {
   }
 }
 
+void RecordBookmarkFolderOpen(BookmarkLaunchLocation location) {
+  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
+    content::RecordAction(UserMetricsAction("ClickedBookmarkBarFolder"));
+}
+
 void RecordBookmarkLaunch(BookmarkLaunchLocation location) {
-#if defined(OS_WIN)
-  // TODO(estade): do this on other platforms too. For now it's compiled out
-  // so that stats from platforms for which this is incompletely implemented
-  // don't mix in with Windows, where it should be implemented exhaustively.
+  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
+    content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
+
   UMA_HISTOGRAM_ENUMERATION("Bookmarks.LaunchLocation", location, LAUNCH_LIMIT);
-#endif
 }
 
 #if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)

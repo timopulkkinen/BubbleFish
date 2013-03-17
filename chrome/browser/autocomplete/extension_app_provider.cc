@@ -9,11 +9,11 @@
 
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/common/url_database/url_database.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
@@ -56,14 +56,8 @@ void ExtensionAppProvider::LaunchAppFromOmnibox(
   AppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_OMNIBOX_APP);
 
-  // Look at the preferences to find the right launch container.  If no
-  // preference is set, launch as a regular tab.
-  extension_misc::LaunchContainer launch_container =
-      service->extension_prefs()->GetLaunchContainer(
-          extension, extensions::ExtensionPrefs::LAUNCH_REGULAR);
-
-  application_launch::OpenApplication(application_launch::LaunchParams(
-          profile, extension, launch_container, disposition));
+  chrome::OpenApplication(chrome::AppLaunchParams(
+      profile, extension, disposition));
 }
 
 void ExtensionAppProvider::AddExtensionAppForTesting(
@@ -159,8 +153,10 @@ void ExtensionAppProvider::RefreshAppList() {
   for (ExtensionSet::const_iterator iter = extensions->begin();
        iter != extensions->end(); ++iter) {
     const extensions::Extension* app = *iter;
-    if (!app->ShouldDisplayInLauncher())
+    if (!app->ShouldDisplayInAppLauncher())
       continue;
+    // Note: Apps that appear in the NTP only are not added here since this
+    // provider is currently only used in the app launcher.
 
     if (profile_->IsOffTheRecord() &&
         !extension_service->CanLoadInIncognito(app))

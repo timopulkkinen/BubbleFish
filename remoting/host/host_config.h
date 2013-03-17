@@ -25,8 +25,6 @@ extern const char kXmppLoginConfigPath[];
 extern const char kXmppAuthTokenConfigPath[];
 // OAuth refresh token used to fetch an access token for the XMPP network.
 extern const char kOAuthRefreshTokenConfigPath[];
-// Flag to indicate whether the official client ID should be used.
-extern const char kOAuthUseOfficialClientIdConfigPath[];
 // Auth service used to authenticate to XMPP network.
 extern const char kXmppAuthServiceConfigPath[];
 // Unique identifier of the host used to register the host in directory.
@@ -38,6 +36,8 @@ extern const char kHostNameConfigPath[];
 extern const char kHostSecretHashConfigPath[];
 // Private keys used for host authentication.
 extern const char kPrivateKeyConfigPath[];
+// Whether consent is given for usage stats reporting.
+extern const char kUsageStatsConsentConfigPath[];
 
 // HostConfig interace provides read-only access to host configuration.
 class HostConfig {

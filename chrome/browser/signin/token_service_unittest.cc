@@ -119,7 +119,7 @@ void TokenServiceTestHarness::WaitForDBLoadCompletion() {
   done.Wait();
 
   // Notifications should be returned from the DB thread onto the UI thread.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 class TokenServiceTest : public TokenServiceTestHarness {
@@ -320,8 +320,6 @@ TEST_F(TokenServiceTest, LoadTokensIntoMemoryBasic) {
     TestLoadSingleToken(&db_tokens, &memory_tokens, service);
   }
   std::string service = GaiaConstants::kGaiaOAuth2LoginRefreshToken;
-  TestLoadSingleToken(&db_tokens, &memory_tokens, service);
-  service = GaiaConstants::kGaiaOAuth2LoginAccessToken;
   TestLoadSingleToken(&db_tokens, &memory_tokens, service);
 }
 

@@ -66,7 +66,13 @@ namespace views {
 MessageBoxView::InitParams::InitParams(const string16& message)
     : options(NO_OPTIONS),
       message(message),
-      message_width(kDefaultMessageWidth) {
+      message_width(kDefaultMessageWidth),
+      top_inset(kPanelVertMargin),
+      bottom_inset(kPanelVertMargin),
+      left_inset(kPanelHorizMargin),
+      right_inset(kPanelHorizMargin),
+      inter_row_vertical_spacing(kRelatedControlVerticalSpacing)
+{
 }
 
 MessageBoxView::InitParams::~InitParams() {
@@ -162,9 +168,9 @@ void MessageBoxView::Init(const InitParams& params) {
     // first character with strong directionality.
     base::i18n::TextDirection message_direction =
         base::i18n::GetFirstStrongCharacterDirection(params.message);
-    Label::Alignment alignment =
+    gfx::HorizontalAlignment alignment =
         (message_direction == base::i18n::RIGHT_TO_LEFT) ?
-        Label::ALIGN_RIGHT : Label::ALIGN_LEFT;
+        gfx::ALIGN_RIGHT : gfx::ALIGN_LEFT;
     for (size_t i = 0; i < texts.size(); ++i) {
       Label* message_label = new Label(texts[i]);
       // Don't set multi-line to true if the text is empty, else the label will
@@ -179,7 +185,7 @@ void MessageBoxView::Init(const InitParams& params) {
     Label* message_label = new Label(params.message);
     message_label->SetMultiLine(true);
     message_label->SetAllowCharacterBreak(true);
-    message_label->SetHorizontalAlignment(Label::ALIGN_LEFT);
+    message_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     message_labels_.push_back(message_label);
   }
 
@@ -188,12 +194,19 @@ void MessageBoxView::Init(const InitParams& params) {
     prompt_field_->SetText(params.default_prompt);
   }
 
+  top_inset_ = params.top_inset;
+  bottom_inset_ = params.bottom_inset;
+  left_inset_ = params.left_inset;
+  right_inset_ = params.right_inset;
+  inter_row_vertical_spacing_ = params.inter_row_vertical_spacing;
+
   ResetLayoutManager();
 }
 
 void MessageBoxView::ResetLayoutManager() {
   // Initialize the Grid Layout Manager used for this dialog box.
   GridLayout* layout = GridLayout::CreatePanel(this);
+  layout->SetInsets(top_inset_, bottom_inset_, left_inset_, right_inset_);
   SetLayoutManager(layout);
 
   gfx::Size icon_size;
@@ -249,18 +262,18 @@ void MessageBoxView::ResetLayoutManager() {
   }
 
   if (prompt_field_) {
-    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
     layout->StartRow(0, textfield_column_view_set_id);
     layout->AddView(prompt_field_);
   }
 
   if (checkbox_) {
-    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
     layout->StartRow(0, checkbox_column_view_set_id);
     layout->AddView(checkbox_);
   }
 
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, inter_row_vertical_spacing_);
 }
 
 }  // namespace views

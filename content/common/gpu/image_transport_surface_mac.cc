@@ -2,20 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(ENABLE_GPU)
-
 #include "content/common/gpu/image_transport_surface.h"
 
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/texture_image_transport_surface.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_cgl.h"
+#include "ui/gl/gl_surface_osmesa.h"
 #include "ui/surface/io_surface_support_mac.h"
 
+namespace content {
 namespace {
 
 // IOSurface dimensions will be rounded up to a multiple of this value in order
@@ -51,12 +52,13 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
-  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual bool SetBackbufferAllocation(bool allocated) OVERRIDE;
   virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnBufferPresented(uint32 sync_point) OVERRIDE;
+  virtual void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
@@ -149,15 +151,7 @@ bool IOSurfaceImageTransportSurface::Initialize() {
 }
 
 void IOSurfaceImageTransportSurface::Destroy() {
-  if (fbo_id_) {
-    glDeleteFramebuffersEXT(1, &fbo_id_);
-    fbo_id_ = 0;
-  }
-
-  if (texture_id_) {
-    glDeleteTextures(1, &texture_id_);
-    texture_id_ = 0;
-  }
+  UnrefIOSurface();
 
   helper_->Destroy();
   NoOpGLSurfaceCGL::Destroy();
@@ -198,11 +192,12 @@ unsigned int IOSurfaceImageTransportSurface::GetBackingFrameBufferObject() {
   return fbo_id_;
 }
 
-void IOSurfaceImageTransportSurface::SetBackbufferAllocation(bool allocation) {
+bool IOSurfaceImageTransportSurface::SetBackbufferAllocation(bool allocation) {
   if (backbuffer_suggested_allocation_ == allocation)
-    return;
+    return true;
   backbuffer_suggested_allocation_ = allocation;
   AdjustBufferAllocation();
+  return true;
 }
 
 void IOSurfaceImageTransportSurface::SetFrontbufferAllocation(bool allocation) {
@@ -233,6 +228,7 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
 
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_handle = io_surface_handle_;
+  params.size = GetSize();
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
   DCHECK(!is_swap_buffers_pending_);
@@ -253,6 +249,7 @@ bool IOSurfaceImageTransportSurface::PostSubBuffer(
   params.y = y;
   params.width = width;
   params.height = height;
+  params.surface_size = GetSize();
   helper_->SendAcceleratedSurfacePostSubBuffer(params);
 
   DCHECK(!is_swap_buffers_pending_);
@@ -272,7 +269,8 @@ gfx::Size IOSurfaceImageTransportSurface::GetSize() {
   return size_;
 }
 
-void IOSurfaceImageTransportSurface::OnBufferPresented(uint32 sync_point) {
+void IOSurfaceImageTransportSurface::OnBufferPresented(
+    const AcceleratedSurfaceMsg_BufferPresented_Params& /* params */) {
   DCHECK(is_swap_buffers_pending_);
   is_swap_buffers_pending_ = false;
   if (did_unschedule_) {
@@ -299,7 +297,13 @@ void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
 }
 
 void IOSurfaceImageTransportSurface::UnrefIOSurface() {
-  DCHECK(context_->IsCurrent(this));
+  // If we have resources to destroy, then make sure that we have a current
+  // context which we can use to delete the resources.
+  if (context_ || fbo_id_ || texture_id_) {
+    DCHECK(gfx::GLContext::GetCurrent() == context_);
+    DCHECK(context_->IsCurrent(this));
+    DCHECK(CGLGetCurrentContext());
+  }
 
   if (fbo_id_) {
     glDeleteFramebuffersEXT(1, &fbo_id_);
@@ -407,6 +411,27 @@ void IOSurfaceImageTransportSurface::CreateIOSurface() {
   // The FBO remains bound for this GL context.
 }
 
+// A subclass of GLSurfaceOSMesa that doesn't print an error message when
+// SwapBuffers() is called.
+class DRTSurfaceOSMesa : public gfx::GLSurfaceOSMesa {
+ public:
+  // Size doesn't matter, the surface is resized to the right size later.
+  DRTSurfaceOSMesa() : GLSurfaceOSMesa(GL_RGBA, gfx::Size(1, 1)) {}
+
+  // Implement a subset of GLSurface.
+  virtual bool SwapBuffers() OVERRIDE;
+
+ private:
+  virtual ~DRTSurfaceOSMesa() {}
+  DISALLOW_COPY_AND_ASSIGN(DRTSurfaceOSMesa);
+};
+
+bool DRTSurfaceOSMesa::SwapBuffers() {
+  return true;
+}
+
+bool g_allow_os_mesa = false;
+
 }  // namespace
 
 // static
@@ -415,22 +440,34 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     GpuCommandBufferStub* stub,
     const gfx::GLSurfaceHandle& surface_handle) {
   scoped_refptr<gfx::GLSurface> surface;
-  IOSurfaceSupport* io_surface_support = IOSurfaceSupport::Initialize();
+  if (surface_handle.transport_type == gfx::TEXTURE_TRANSPORT) {
+     surface = new TextureImageTransportSurface(manager, stub, surface_handle);
+  } else {
+    DCHECK(surface_handle.transport_type == gfx::NATIVE_TRANSPORT);
+    IOSurfaceSupport* io_surface_support = IOSurfaceSupport::Initialize();
 
-  switch (gfx::GetGLImplementation()) {
-    case gfx::kGLImplementationDesktopGL:
-    case gfx::kGLImplementationAppleGL:
-      if (!io_surface_support) {
-        DLOG(WARNING) << "No IOSurface support";
-        return NULL;
-      } else {
-        surface = new IOSurfaceImageTransportSurface(
-            manager, stub, surface_handle.handle);
-      }
-      break;
-    default:
-      NOTREACHED();
-      return NULL;
+    switch (gfx::GetGLImplementation()) {
+      case gfx::kGLImplementationDesktopGL:
+      case gfx::kGLImplementationAppleGL:
+        if (!io_surface_support) {
+          DLOG(WARNING) << "No IOSurface support";
+          return NULL;
+        } else {
+          surface = new IOSurfaceImageTransportSurface(
+              manager, stub, surface_handle.handle);
+        }
+        break;
+      default:
+        // Content shell in DRT mode spins up a gpu process which needs an
+        // image transport surface, but that surface isn't used to read pixel
+        // baselines. So this is mostly a dummy surface.
+        if (g_allow_os_mesa) {
+          surface = new DRTSurfaceOSMesa();
+        } else {
+          NOTREACHED();
+          return NULL;
+        }
+    }
   }
   if (surface->Initialize())
     return surface;
@@ -438,4 +475,9 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     return NULL;
 }
 
-#endif  // defined(USE_GPU)
+// static
+void ImageTransportSurface::SetAllowOSMesaForTesting(bool allow) {
+  g_allow_os_mesa = allow;
+}
+
+}  // namespace content

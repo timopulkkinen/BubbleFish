@@ -7,9 +7,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller_test.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -20,11 +21,13 @@
 #include "base/mac/mac_util.h"
 #endif
 
+using chrome::kAboutBlankURL;
 using content::WebContents;
+using content::PAGE_TRANSITION_TYPED;
 
 namespace {
 
-const FilePath::CharType* kSimpleFile = FILE_PATH_LITERAL("simple.html");
+const base::FilePath::CharType* kSimpleFile = FILE_PATH_LITERAL("simple.html");
 
 }  // namespace
 
@@ -47,7 +50,7 @@ class FullscreenControllerInteractiveTest
     // Verify that IsMouseLocked is consistent between the
     // Fullscreen Controller and the Render View Host View.
     EXPECT_TRUE(browser()->IsMouseLocked() ==
-                chrome::GetActiveWebContents(browser())->
+                browser()->tab_strip_model()->GetActiveWebContents()->
                     GetRenderViewHost()->GetView()->IsMouseLocked());
     return browser()->IsMouseLocked();
   }
@@ -94,7 +97,7 @@ void FullscreenControllerInteractiveTest::ToggleBrowserFullscreen(
 void
 FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
   GURL url = test_server()->GetURL("simple.html");
-  AddTabAtIndexAndWait(0, url, content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, url, PAGE_TRANSITION_TYPED);
 
   // Validate that going fullscreen for a URL defaults to asking permision.
   ASSERT_FALSE(IsFullscreenPermissionRequested());
@@ -153,76 +156,49 @@ FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
 
 void FullscreenControllerInteractiveTest::ToggleTabFullscreen_Internal(
     bool enter_fullscreen, bool retry_until_success) {
-  WebContents* tab = chrome::GetActiveWebContents(browser());
-  if (IsFullscreenForBrowser()) {
-    // Changing tab fullscreen state will not actually change the window
-    // when browser fullscreen is in effect.
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  do {
+    FullscreenNotificationObserver fullscreen_observer;
     browser()->ToggleFullscreenModeForTab(tab, enter_fullscreen);
-  } else {  // Not in browser fullscreen, expect window to actually change.
-    ASSERT_NE(browser()->window()->IsFullscreen(), enter_fullscreen);
-    do {
-      FullscreenNotificationObserver fullscreen_observer;
-      browser()->ToggleFullscreenModeForTab(tab, enter_fullscreen);
-      fullscreen_observer.Wait();
-      // Repeat ToggleFullscreenModeForTab until the correct state is entered.
-      // This addresses flakiness on test bots running many fullscreen
-      // tests in parallel.
-    } while (retry_until_success &&
-             browser()->window()->IsFullscreen() != enter_fullscreen);
+    fullscreen_observer.Wait();
+    // Repeat ToggleFullscreenModeForTab until the correct state is entered.
+    // This addresses flakiness on test bots running many fullscreen
+    // tests in parallel.
+  } while (retry_until_success &&
+           !IsFullscreenForBrowser() &&
+           browser()->window()->IsFullscreen() != enter_fullscreen);
+  ASSERT_EQ(IsFullscreenForTabOrPending(), enter_fullscreen);
+  if (!IsFullscreenForBrowser())
     ASSERT_EQ(browser()->window()->IsFullscreen(), enter_fullscreen);
-  }
 }
 
 // Tests ///////////////////////////////////////////////////////////////////////
 
-#if defined(OS_MACOSX)
-// http://crbug.com/104265
-#define MAYBE_TestNewTabExitsFullscreen DISABLED_TestNewTabExitsFullscreen
-#elif defined(OS_LINUX)
-// http://crbug.com/137657
-#define MAYBE_TestNewTabExitsFullscreen DISABLED_TestNewTabExitsFullscreen
-#else
-#define MAYBE_TestNewTabExitsFullscreen TestNewTabExitsFullscreen
-#endif
-
 // Tests that while in fullscreen creating a new tab will exit fullscreen.
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestNewTabExitsFullscreen) {
+                       DISABLED_TestNewTabExitsFullscreen) {
   ASSERT_TRUE(test_server()->Start());
 
-  AddTabAtIndexAndWait(
-      0, GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
 
   {
     FullscreenNotificationObserver fullscreen_observer;
-    AddTabAtIndexAndWait(
-        1, GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_TYPED);
+    AddTabAtIndex(1, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
     fullscreen_observer.Wait();
     ASSERT_FALSE(browser()->window()->IsFullscreen());
   }
 }
 
-#if defined(OS_MACOSX)
-// http://crbug.com/100467
-#define MAYBE_TestTabExitsItselfFromFullscreen \
-        FAILS_TestTabExitsItselfFromFullscreen
-#elif defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_TestTabExitsItselfFromFullscreen \
-        DISABLED_TestTabExitsItselfFromFullscreen
-#else
-#define MAYBE_TestTabExitsItselfFromFullscreen TestTabExitsItselfFromFullscreen
-#endif
-
 // Tests a tab exiting fullscreen will bring the browser out of fullscreen.
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestTabExitsItselfFromFullscreen) {
+                       DISABLED_TestTabExitsItselfFromFullscreen) {
   ASSERT_TRUE(test_server()->Start());
 
-  AddTabAtIndexAndWait(
-      0, GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(false));
@@ -230,22 +206,13 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 
 // Tests entering fullscreen and then requesting mouse lock results in
 // buttons for the user, and that after confirming the buttons are dismissed.
-#if defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_TestFullscreenBubbleMouseLockState \
-        DISABLED_TestFullscreenBubbleMouseLockState
-#else
-#define MAYBE_TestFullscreenBubbleMouseLockState \
-        TestFullscreenBubbleMouseLockState
-#endif
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestFullscreenBubbleMouseLockState) {
+                       DISABLED_TestFullscreenBubbleMouseLockState) {
   ASSERT_TRUE(test_server()->Start());
 
-  AddTabAtIndexAndWait(0, GURL(chrome::kAboutBlankURL),
-                content::PAGE_TRANSITION_TYPED);
-  AddTabAtIndexAndWait(1, GURL(chrome::kAboutBlankURL),
-                content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(1, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
 
@@ -258,37 +225,18 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   ASSERT_FALSE(IsFullscreenBubbleDisplayingButtons());
 }
 
-#if defined(OS_MACOSX)
-// http://crbug.com/133831
-#define MAYBE_FullscreenMouseLockContentSettings \
-    FLAKY_FullscreenMouseLockContentSettings
-#elif defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_FullscreenMouseLockContentSettings \
-    DISABLED_FullscreenMouseLockContentSettings
-#else
-#define MAYBE_FullscreenMouseLockContentSettings \
-    FullscreenMouseLockContentSettings
-#endif
 // Tests fullscreen and Mouse Lock with varying content settings ALLOW & BLOCK.
+// http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_FullscreenMouseLockContentSettings) {
+                       DISABLED_FullscreenMouseLockContentSettings) {
   TestFullscreenMouseLockContentSettings();
 }
 
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-// http://crbug.com/103912 Mac
-// http://crbug.com/143930 Linux
-#define MAYBE_BrowserFullscreenMouseLockContentSettings \
-    DISABLED_BrowserFullscreenMouseLockContentSettings
-#else
-#define MAYBE_BrowserFullscreenMouseLockContentSettings \
-    BrowserFullscreenMouseLockContentSettings
-#endif
 // Tests fullscreen and Mouse Lock with varying content settings ALLOW & BLOCK,
 // but with the browser initiated in fullscreen mode first.
+// Test is flaky: http://crbug.com/103912, http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_BrowserFullscreenMouseLockContentSettings) {
+                       DISABLED_BrowserFullscreenMouseLockContentSettings) {
   // Enter browser fullscreen first.
   ASSERT_NO_FATAL_FAILURE(ToggleBrowserFullscreen(true));
   TestFullscreenMouseLockContentSettings();
@@ -296,20 +244,14 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests Fullscreen entered in Browser, then Tab mode, then exited via Browser.
-#if defined(OS_MACOSX)
-// http://crbug.com/103912
-#define MAYBE_BrowserFullscreenExit DISABLED_BrowserFullscreenExit
-#else
-#define MAYBE_BrowserFullscreenExit BrowserFullscreenExit
-#endif
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_BrowserFullscreenExit) {
+                       DISABLED_BrowserFullscreenExit) {
   // Enter browser fullscreen.
   ASSERT_NO_FATAL_FAILURE(ToggleBrowserFullscreen(true));
 
   // Enter tab fullscreen.
-  AddTabAtIndexAndWait(0, GURL(chrome::kAboutBlankURL),
-                content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
 
   // Exit browser fullscreen.
@@ -318,25 +260,14 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests Browser Fullscreen remains active after Tab mode entered and exited.
-#if defined(OS_MACOSX)
-// http://crbug.com/103912
-#define MAYBE_BrowserFullscreenAfterTabFSExit \
-    DISABLED_BrowserFullscreenAfterTabFSExit
-#elif defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_BrowserFullscreenAfterTabFSExit \
-    DISABLED_BrowserFullscreenAfterTabFSExit
-#else
-#define MAYBE_BrowserFullscreenAfterTabFSExit BrowserFullscreenAfterTabFSExit
-#endif
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_BrowserFullscreenAfterTabFSExit) {
+                       DISABLED_BrowserFullscreenAfterTabFSExit) {
   // Enter browser fullscreen.
   ASSERT_NO_FATAL_FAILURE(ToggleBrowserFullscreen(true));
 
   // Enter and then exit tab fullscreen.
-  AddTabAtIndexAndWait(0, GURL(chrome::kAboutBlankURL),
-                content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(false));
 
@@ -345,18 +276,13 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests fullscreen entered without permision prompt for file:// urls.
-#if defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_FullscreenFileURL DISABLED_FullscreenFileURL
-#else
-#define MAYBE_FullscreenFileURL FullscreenFileURL
-#endif
-
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_FullscreenFileURL) {
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kSimpleFile)));
+                       DISABLED_FullscreenFileURL) {
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kSimpleFile)));
 
   // Validate that going fullscreen for a file does not ask permision.
   ASSERT_FALSE(IsFullscreenPermissionRequested());
@@ -366,16 +292,9 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests fullscreen is exited on page navigation.
-#if defined(OS_MACOSX)
-// http://crbug.com/103912
-#define MAYBE_TestTabExitsFullscreenOnNavigation \
-    DISABLED_TestTabExitsFullscreenOnNavigation
-#else
-#define MAYBE_TestTabExitsFullscreenOnNavigation \
-    TestTabExitsFullscreenOnNavigation
-#endif
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestTabExitsFullscreenOnNavigation) {
+                       DISABLED_TestTabExitsFullscreenOnNavigation) {
   ASSERT_TRUE(test_server()->Start());
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
@@ -386,19 +305,9 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests fullscreen is exited when navigating back.
-#if defined(OS_MACOSX)
-// http://crbug.com/103912
-#define MAYBE_TestTabExitsFullscreenOnGoBack \
-    DISABLED_TestTabExitsFullscreenOnGoBack
-#elif defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_TestTabExitsFullscreenOnGoBack \
-    DISABLED_TestTabExitsFullscreenOnGoBack
-#else
-#define MAYBE_TestTabExitsFullscreenOnGoBack TestTabExitsFullscreenOnGoBack
-#endif
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestTabExitsFullscreenOnGoBack) {
+                       DISABLED_TestTabExitsFullscreenOnGoBack) {
   ASSERT_TRUE(test_server()->Start());
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
@@ -412,20 +321,14 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests fullscreen is not exited on sub frame navigation.
-#if defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_TestTabDoesntExitFullscreenOnSubFrameNavigation \
-    DISABLED_TestTabDoesntExitFullscreenOnSubFrameNavigation
-#else
-#define MAYBE_TestTabDoesntExitFullscreenOnSubFrameNavigation \
-    TestTabDoesntExitFullscreenOnSubFrameNavigation
-#endif
-IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_TestTabDoesntExitFullscreenOnSubFrameNavigation) {
+// Test is flaky: http://crbug.com/146006
+IN_PROC_BROWSER_TEST_F(
+    FullscreenControllerInteractiveTest,
+    DISABLED_TestTabDoesntExitFullscreenOnSubFrameNavigation) {
   ASSERT_TRUE(test_server()->Start());
 
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kSimpleFile)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kSimpleFile)));
   GURL url_with_fragment(url.spec() + "#fragment");
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -435,20 +338,10 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests tab fullscreen exits, but browser fullscreen remains, on navigation.
-#if defined(OS_MACOSX)
-// http://crbug.com/103912
-#define MAYBE_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks \
-    DISABLED_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks
-#elif defined(OS_LINUX)
-// http://crbug.com/146008
-#define MAYBE_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks \
-    DISABLED_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks
-#else
-#define MAYBE_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks \
-    TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks
-#endif
-IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-    MAYBE_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks) {
+// Test is flaky: http://crbug.com/146006
+IN_PROC_BROWSER_TEST_F(
+    FullscreenControllerInteractiveTest,
+    DISABLED_TestFullscreenFromTabWhenAlreadyInBrowserFullscreenWorks) {
   ASSERT_TRUE(test_server()->Start());
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
@@ -466,30 +359,32 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 #if defined(OS_MACOSX)
 // http://crbug.com/100467
 IN_PROC_BROWSER_TEST_F(
-    FullscreenControllerTest, FAILS_TabEntersPresentationModeFromWindowed) {
+    FullscreenControllerTest, DISABLED_TabEntersPresentationModeFromWindowed) {
   ASSERT_TRUE(test_server()->Start());
 
-  AddTabAtIndexAndWait(
-      0, GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, GURL(kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
 
   {
     FullscreenNotificationObserver fullscreen_observer;
     EXPECT_FALSE(browser()->window()->IsFullscreen());
-    EXPECT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
     browser()->ToggleFullscreenModeForTab(tab, true);
     fullscreen_observer.Wait();
-    ASSERT_TRUE(browser()->window()->IsFullscreen());
-    ASSERT_TRUE(browser()->window()->InPresentationMode());
+    EXPECT_TRUE(browser()->window()->IsFullscreen());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_TRUE(browser()->window()->IsFullscreenWithoutChrome());
   }
 
   {
     FullscreenNotificationObserver fullscreen_observer;
-    browser()->TogglePresentationMode();
+    chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
-    ASSERT_FALSE(browser()->window()->IsFullscreen());
-    ASSERT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_FALSE(browser()->window()->IsFullscreen());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
   }
 
   if (base::mac::IsOSLionOrLater()) {
@@ -498,8 +393,9 @@ IN_PROC_BROWSER_TEST_F(
     FullscreenNotificationObserver fullscreen_observer;
     chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
-    ASSERT_TRUE(browser()->window()->IsFullscreen());
-    ASSERT_FALSE(browser()->window()->InPresentationMode());
+    EXPECT_TRUE(browser()->window()->IsFullscreen());
+    EXPECT_TRUE(browser()->window()->IsFullscreenWithChrome());
+    EXPECT_FALSE(browser()->window()->IsFullscreenWithoutChrome());
   }
 }
 #endif
@@ -552,17 +448,10 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest, EscapingMouseLock) {
   ASSERT_FALSE(IsMouseLockPermissionRequested());
 }
 
-// Times out sometimes on Linux. http://crbug.com/135115
-// Mac: http://crbug.com/103912
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_EscapingMouseLockAndFullscreen \
-    DISABLED_EscapingMouseLockAndFullscreen
-#else
-#define MAYBE_EscapingMouseLockAndFullscreen EscapingMouseLockAndFullscreen
-#endif
 // Tests mouse lock and fullscreen modes can be escaped with ESC key.
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_EscapingMouseLockAndFullscreen) {
+                       DISABLED_EscapingMouseLockAndFullscreen) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL(kFullscreenMouseLockHTML));
@@ -622,8 +511,9 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 }
 
 // Tests mouse lock then fullscreen.
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MouseLockThenFullscreen) {
+                       DISABLED_MouseLockThenFullscreen) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL(kFullscreenMouseLockHTML));
@@ -677,14 +567,10 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 
 // Times out sometimes on Linux. http://crbug.com/135115
 // Mac: http://crbug.com/103912
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_MouseLockAndFullscreen DISABLED_MouseLockAndFullscreen
-#else
-#define MAYBE_MouseLockAndFullscreen MouseLockAndFullscreen
-#endif
+// Windows: Failing flakily on try jobs also.
 // Tests mouse lock then fullscreen in same request.
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_MouseLockAndFullscreen) {
+                       DISABLED_MouseLockAndFullscreen) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL(kFullscreenMouseLockHTML));
@@ -809,9 +695,23 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   ASSERT_TRUE(IsMouseLocked());
 }
 
+#if defined(OS_WIN)
+// These tests are very flaky on Vista.
+// http://crbug.com/158762
+#define MAYBE_TestTabExitsMouseLockOnNavigation \
+    DISABLED_TestTabExitsMouseLockOnNavigation
+#define MAYBE_TestTabExitsMouseLockOnGoBack \
+    DISABLED_TestTabExitsMouseLockOnGoBack
+#else
+#define MAYBE_TestTabExitsMouseLockOnNavigation \
+    TestTabExitsMouseLockOnNavigation
+#define MAYBE_TestTabExitsMouseLockOnGoBack \
+    TestTabExitsMouseLockOnGoBack
+#endif
+
 // Tests mouse lock is exited on page navigation.
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       TestTabExitsMouseLockOnNavigation) {
+                       MAYBE_TestTabExitsMouseLockOnNavigation) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL(kFullscreenMouseLockHTML));
@@ -836,7 +736,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 
 // Tests mouse lock is exited when navigating back.
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       TestTabExitsMouseLockOnGoBack) {
+                       MAYBE_TestTabExitsMouseLockOnGoBack) {
   ASSERT_TRUE(test_server()->Start());
 
   // Navigate twice to provide a place to go back to.
@@ -892,14 +792,11 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   ASSERT_TRUE(IsMouseLocked());
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+// Tests Mouse Lock and Fullscreen are exited upon reload.
 // http://crbug.com/137486
 // mac: http://crbug.com/103912
-#define ReloadExitsMouseLockAndFullscreen DISABLED_ReloadExitsMouseLockAndFullscreen
-#endif
-// Tests Mouse Lock and Fullscreen are exited upon reload.
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       ReloadExitsMouseLockAndFullscreen) {
+                       DISABLED_ReloadExitsMouseLockAndFullscreen) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL(kFullscreenMouseLockHTML));
@@ -964,15 +861,10 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   }
 }
 
-// Fails sometimes on Linux. http://crbug.com/135115
-#if defined(OS_LINUX)
-#define MAYBE_ToggleFullscreenModeForTab FLAKY_ToggleFullscreenModeForTab
-#else
-#define MAYBE_ToggleFullscreenModeForTab ToggleFullscreenModeForTab
-#endif
 // Tests ToggleFullscreenModeForTab always causes window to change.
+// Test is flaky: http://crbug.com/146006
 IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
-                       MAYBE_ToggleFullscreenModeForTab) {
+                       DISABLED_ToggleFullscreenModeForTab) {
   // Most fullscreen tests run sharded in fullscreen_controller_browsertest.cc
   // but flakiness required a while loop in
   // FullscreenControllerTest::ToggleTabFullscreen. This test verifies that
@@ -982,7 +874,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   // http://crbug.com/133831
 
   GURL url = test_server()->GetURL("simple.html");
-  AddTabAtIndexAndWait(0, url, content::PAGE_TRANSITION_TYPED);
+  AddTabAtIndex(0, url, PAGE_TRANSITION_TYPED);
 
   // Validate that going fullscreen for a URL defaults to asking permision.
   ASSERT_FALSE(IsFullscreenPermissionRequested());

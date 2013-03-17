@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/time.h"
 #include "content/common/content_export.h"
@@ -29,7 +29,7 @@ typedef base::Callback<void(DownloadItem*)>
 // operation.  If the delegate wants notification of the download item created
 // in response to this operation, the SavePackageDownloadCreatedCallback will be
 // non-null.
-typedef base::Callback<void(const FilePath&,
+typedef base::Callback<void(const base::FilePath&,
                             SavePageType,
                             const SavePackageDownloadCreatedCallback&)>
     SavePackagePathPickedCallback;
@@ -41,10 +41,16 @@ typedef base::Callback<void(const FilePath&,
 // same as |target_path|). Both |target_path| and |intermediate_path| are
 // expected to in the same directory.
 typedef base::Callback<void(
-    const FilePath& target_path,
+    const base::FilePath& target_path,
     DownloadItem::TargetDisposition disposition,
     DownloadDangerType danger_type,
-    const FilePath& intermediate_path)> DownloadTargetCallback;
+    const base::FilePath& intermediate_path)> DownloadTargetCallback;
+
+// Called when a download delayed by the delegate has completed.
+typedef base::Callback<void(bool)> DownloadOpenDelayedCallback;
+
+// Called with the reuslt of CheckForFileExistence().
+typedef base::Callback<void(bool result)> CheckForFileExistenceCallback;
 
 // Browser's download manager: manages all downloads and destination view.
 class CONTENT_EXPORT DownloadManagerDelegate {
@@ -77,71 +83,54 @@ class CONTENT_EXPORT DownloadManagerDelegate {
   virtual WebContents* GetAlternativeWebContentsToNotifyForDownload();
 
   // Tests if a file type should be opened automatically.
-  virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path);
+  virtual bool ShouldOpenFileBasedOnExtension(const base::FilePath& path);
 
   // Allows the delegate to delay completion of the download.  This function
-  // will either return true (in which case the download is ready to complete)
-  // or arrange for complete_callback to be called at some point in the future
-  // when the download is ready to complete.
-  //
-  // ShouldCompleteDownload() may be called multiple times; if it is, only the
-  // last callback specified (while the delegate is delaying completion) will be
-  // run.  Calls made after the callback is run are guaranteed to return true.
+  // will either return true (in which case the download may complete)
+  // or will call the callback passed when the download is ready for
+  // completion.  This routine may be called multiple times; once the callback
+  // has been called or the function has returned true for a particular
+  // download it should continue to return true for that download.
   virtual bool ShouldCompleteDownload(
       DownloadItem* item,
       const base::Closure& complete_callback);
 
   // Allows the delegate to override opening the download. If this function
-  // returns false, the delegate needs to call
-  // DownloadItem::DelayedDownloadOpened when it's done with the item,
-  // and is responsible for opening it.  This function is called
+  // returns false, the delegate needs to call callback when it's done
+  // with the item, and is responsible for opening it.  This function is called
   // after the final rename, but before the download state is set to COMPLETED.
-  virtual bool ShouldOpenDownload(DownloadItem* item);
+  virtual bool ShouldOpenDownload(DownloadItem* item,
+                                  const DownloadOpenDelayedCallback& callback);
 
   // Returns true if we need to generate a binary hash for downloads.
   virtual bool GenerateFileHash();
 
-  // Notifies the delegate that a new download item is created. The
-  // DownloadManager waits for the delegate to add information about this
-  // download to its persistent store. When the delegate is done, it calls
-  // DownloadManager::OnDownloadItemAddedToPersistentStore.
-  virtual void AddItemToPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate that information about the given download has change,
-  // so that it can update its persistent store.
-  // Does not update |url|, |start_time|, |total_bytes|; uses |db_handle| only
-  // to select the row in the database table to update.
-  virtual void UpdateItemInPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate that path for the download item has changed, so that
-  // it can update its persistent store.
-  virtual void UpdatePathForItemInPersistentStore(
-      DownloadItem* item,
-      const FilePath& new_path) {}
-
-  // Notifies the delegate that it should remove the download item from its
-  // persistent store.
-  virtual void RemoveItemFromPersistentStore(DownloadItem* item) {}
-
-  // Notifies the delegate to remove downloads from the given time range.
-  virtual void RemoveItemsFromPersistentStoreBetween(
-      base::Time remove_begin,
-      base::Time remove_end) {}
-
   // Retrieve the directories to save html pages and downloads to.
   virtual void GetSaveDir(BrowserContext* browser_context,
-                          FilePath* website_save_dir,
-                          FilePath* download_save_dir,
+                          base::FilePath* website_save_dir,
+                          base::FilePath* download_save_dir,
                           bool* skip_dir_check) {}
 
   // Asks the user for the path to save a page. The delegate calls the callback
   // to give the answer.
-  virtual void ChooseSavePath(WebContents* web_contents,
-                              const FilePath& suggested_path,
-                              const FilePath::StringType& default_extension,
-                              bool can_save_as_complete,
-                              const SavePackagePathPickedCallback& callback) {
+  virtual void ChooseSavePath(
+      WebContents* web_contents,
+      const base::FilePath& suggested_path,
+      const base::FilePath::StringType& default_extension,
+      bool can_save_as_complete,
+      const SavePackagePathPickedCallback& callback) {
   }
+
+  // Opens the file associated with this download.
+  virtual void OpenDownload(DownloadItem* download) {}
+
+  // Shows the download via the OS shell.
+  virtual void ShowDownloadInShell(DownloadItem* download) {}
+
+  // Checks whether a downloaded file still exists.
+  virtual void CheckForFileExistence(
+      DownloadItem* download,
+      const CheckForFileExistenceCallback& callback) {}
 
  protected:
   virtual ~DownloadManagerDelegate();

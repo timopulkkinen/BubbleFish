@@ -85,6 +85,11 @@ bool PlatformContext3DImpl::Init(const int32* attrib_list,
         case PP_GRAPHICS3DATTRIB_HEIGHT:
           surface_size.set_height(attr[1]);
           break;
+        case PP_GRAPHICS3DATTRIB_GPU_PREFERENCE:
+          gpu_preference =
+              (attr[1] == PP_GRAPHICS3DATTRIB_GPU_PREFERENCE_LOW_POWER) ?
+                  gfx::PreferIntegratedGpu : gfx::PreferDiscreteGpu;
+          break;
         case PP_GRAPHICS3DATTRIB_ALPHA_SIZE:
           has_alpha_ = attr[1] > 0;
         // fall-through
@@ -97,7 +102,7 @@ bool PlatformContext3DImpl::Init(const int32* attrib_list,
     attribs.push_back(PP_GRAPHICS3DATTRIB_NONE);
   }
 
-  CommandBufferProxy* share_buffer = NULL;
+  CommandBufferProxyImpl* share_buffer = NULL;
   if (share_context) {
     PlatformContext3DImpl* share_impl =
         static_cast<PlatformContext3DImpl*>(share_context);
@@ -139,7 +144,7 @@ bool PlatformContext3DImpl::Init(const int32* attrib_list,
   parent_gles2->helper()->CommandBufferHelper::Finish();
   parent_texture_id_ = parent_gles2->MakeTextureId();
 
-  CommandBufferProxy* parent_command_buffer =
+  CommandBufferProxyImpl* parent_command_buffer =
       parent_context_->GetCommandBufferProxy();
   if (!command_buffer_->SetParent(parent_command_buffer, parent_texture_id_))
     return false;
@@ -173,7 +178,7 @@ void PlatformContext3DImpl::SetParentContext(
   parent_gles2->helper()->CommandBufferHelper::Flush();
   parent_texture_id_ = parent_gles2->MakeTextureId();
 
-  CommandBufferProxy* parent_command_buffer =
+  CommandBufferProxyImpl* parent_command_buffer =
       parent_context_->GetCommandBufferProxy();
   command_buffer_->SetParent(parent_command_buffer, parent_texture_id_);
 }
@@ -181,6 +186,10 @@ void PlatformContext3DImpl::SetParentContext(
 unsigned PlatformContext3DImpl::GetBackingTextureId() {
   DCHECK(command_buffer_);
   return parent_texture_id_;
+}
+
+WebKit::WebGraphicsContext3D* PlatformContext3DImpl::GetParentContext() {
+  return parent_context_.get();
 }
 
 bool PlatformContext3DImpl::IsOpaque() {

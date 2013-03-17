@@ -4,32 +4,20 @@
 
 #include "ui/gfx/size_f.h"
 
-#include <cmath>
-
-#include "base/logging.h"
 #include "base/stringprintf.h"
-#include "ui/gfx/size.h"
 
 namespace gfx {
 
 template class SizeBase<SizeF, float>;
 
-SizeF::SizeF() : SizeBase<SizeF, float>(0, 0) {}
-
-SizeF::SizeF(float width, float height) : SizeBase<SizeF, float>(0, 0) {
-  set_width(width);
-  set_height(height);
-}
-
-SizeF::~SizeF() {}
-
-Size SizeF::ToSize() const {
-  return Size(static_cast<int>(std::floor(width())),
-              static_cast<int>(std::floor(height())));
-}
-
 std::string SizeF::ToString() const {
   return base::StringPrintf("%fx%f", width(), height());
+}
+
+SizeF ScaleSize(const SizeF& s, float x_scale, float y_scale) {
+  SizeF scaled_s(s);
+  scaled_s.Scale(x_scale, y_scale);
+  return scaled_s;
 }
 
 }  // namespace gfx

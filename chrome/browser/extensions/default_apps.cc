@@ -5,13 +5,12 @@
 #include "chrome/browser/extensions/default_apps.h"
 
 #include "base/command_line.h"
-#include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #if !defined(OS_ANDROID)
 #include "chrome/browser/first_run/first_run.h"
 #endif
-#include "chrome/browser/extensions/default_apps_trial.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -50,17 +49,15 @@ bool IsLocaleSupported() {
 
 namespace default_apps {
 
-void RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterIntegerPref(prefs::kDefaultAppsInstallState, kUnknown,
-                             PrefService::UNSYNCABLE_PREF);
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(prefs::kDefaultAppsInstallState, kUnknown,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 bool Provider::ShouldInstallInProfile() {
   // We decide to install or not install default apps based on the following
   // criteria, from highest priority to lowest priority:
   //
-  // - If this instance of chrome is participating in the default apps
-  //   field trial, then install apps based on the group.
   // - The command line option.  Tests use this option to disable installation
   //   of default apps in some cases.
   // - If the locale is not compatible with the defaults, don't install them.
@@ -115,27 +112,15 @@ bool Provider::ShouldInstallInProfile() {
       NOTREACHED();
   }
 
-  if (install_apps && !IsLocaleSupported()) {
+  if (install_apps && !IsLocaleSupported())
     install_apps = false;
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableDefaultApps)) {
-    install_apps = false;
-  }
-
-  if (base::FieldTrialList::TrialExists(kDefaultAppsTrialName)) {
-    install_apps = base::FieldTrialList::Find(
-        kDefaultAppsTrialName)->group_name() != kDefaultAppsTrialNoAppsGroup;
-  }
 
   // Default apps are only installed on profile creation or a new chrome
   // download.
   if (state == kUnknown) {
     if (install_apps) {
-      profile_->GetPrefs()->SetInteger(
-          prefs::kDefaultAppsInstallState,
-          kAlreadyInstalledDefaultApps);
+      profile_->GetPrefs()->SetInteger(prefs::kDefaultAppsInstallState,
+                                       kAlreadyInstalledDefaultApps);
     } else {
       profile_->GetPrefs()->SetInteger(prefs::kDefaultAppsInstallState,
                                        kNeverInstallDefaultApps);
@@ -148,12 +133,13 @@ bool Provider::ShouldInstallInProfile() {
 Provider::Provider(Profile* profile,
                    VisitorInterface* service,
                    extensions::ExternalLoader* loader,
-                   extensions::Extension::Location crx_location,
-                   extensions::Extension::Location download_location,
+                   extensions::Manifest::Location crx_location,
+                   extensions::Manifest::Location download_location,
                    int creation_flags)
     : extensions::ExternalProviderImpl(service, loader, crx_location,
                                        download_location, creation_flags),
-      profile_(profile) {
+      profile_(profile),
+      is_migration_(false) {
   DCHECK(profile);
   set_auto_acknowledge(true);
 }

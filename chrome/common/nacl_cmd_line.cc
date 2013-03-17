@@ -26,7 +26,9 @@ void CopyNaClCommandLineArguments(CommandLine* cmd_line) {
     switches::kSilentDumpOnDCHECK,
     switches::kMemoryProfiling,
     switches::kNoErrorDialogs,
-    switches::kEnableNaClIPCProxy,
+#if defined(OS_MACOSX)
+    switches::kEnableSandboxLogging,
+#endif
   };
   cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                              arraysize(kSwitchNames));

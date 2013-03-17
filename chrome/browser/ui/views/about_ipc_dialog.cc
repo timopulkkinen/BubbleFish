@@ -9,7 +9,10 @@
 #include "ipc/ipc_message.h"
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
+#include "content/public/common/content_ipc_logging.h"
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
+#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
+    content::RegisterIPCLogger(msg_id, logger)
 
 // We need to do this real early to be sure IPC_MESSAGE_MACROS_LOG_ENABLED
 // doesn't get undefined.
@@ -28,10 +31,10 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/public/browser/content_ipc_logging.h"
+#include "content/public/browser/browser_ipc_logging.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -54,16 +57,6 @@ enum {
   kProcessColumn,
   kParamsColumn,
 };
-
-// This class registers the browser IPC logger functions with IPC::Logging.
-class RegisterLoggerFuncs {
- public:
-  RegisterLoggerFuncs() {
-    IPC::Logging::set_log_function_map(&g_log_function_mapping);
-  }
-};
-
-RegisterLoggerFuncs g_register_logger_funcs;
 
 // The singleton dialog box. This is non-NULL when a dialog is active so we
 // know not to create a new one.
@@ -140,7 +133,7 @@ void CloseDialog() {
   for (std::set<int>::const_iterator itr = disabled_messages_.begin();
        itr != disabled_messages_.end();
        ++itr) {
-    list->Append(Value::CreateIntegerValue(*itr));
+    list->Append(new base::FundamentalValue(*itr));
   }
   */
 }
@@ -225,9 +218,9 @@ void AboutIPCDialog::SetupControls() {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
-  track_toggle_ = new views::TextButton(this, kStartTrackingLabel);
-  clear_button_ = new views::TextButton(this, kClearLabel);
-  filter_button_ = new views::TextButton(this, kFilterLabel);
+  track_toggle_ = new views::LabelButton(this, kStartTrackingLabel);
+  clear_button_ = new views::LabelButton(this, kClearLabel);
+  filter_button_ = new views::LabelButton(this, kFilterLabel);
 
   table_ = new views::NativeViewHost;
 
@@ -256,10 +249,6 @@ void AboutIPCDialog::SetupControls() {
 
 gfx::Size AboutIPCDialog::GetPreferredSize() {
   return gfx::Size(800, 400);
-}
-
-views::View* AboutIPCDialog::GetContentsView() {
-  return this;
 }
 
 int AboutIPCDialog::GetDialogButtons() const {

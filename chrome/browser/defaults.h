@@ -43,7 +43,6 @@ extern const bool kShowImportOnBookmarkBar;
 extern const bool kShowExitMenuItem;
 extern const bool kShowFeedbackMenuItem;
 extern const bool kShowHelpMenuItemIcon;
-extern const bool kShowSyncSetupMenuItem;
 extern const bool kShowUpgradeMenuItem;
 
 // Does the OS support other browsers? If not, operations such as default
@@ -71,10 +70,8 @@ extern const bool kAlwaysOpenIncognitoWindow;
 // Should the close button be shown in the Task Manager dialog?
 extern const bool kShowCancelButtonInTaskManager;
 
-// Preferred height of the bookmarks bar when shown on every page and
-// when shown only on the new tab page.
+// Preferred height of the bookmarks bar when shown on every page.
 extern const int kBookmarkBarHeight;
-extern const int kNewtabBookmarkBarHeight;
 
 // ChromiumOS network menu font
 extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;

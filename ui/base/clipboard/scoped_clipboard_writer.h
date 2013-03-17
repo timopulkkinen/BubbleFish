@@ -30,6 +30,10 @@ class UI_EXPORT ScopedClipboardWriter {
   // Create an instance that is a simple wrapper around clipboard.
   ScopedClipboardWriter(Clipboard* clipboard, Clipboard::Buffer buffer);
 
+  ScopedClipboardWriter(Clipboard* clipboard,
+                        Clipboard::Buffer buffer,
+                        Clipboard::SourceTag source_tag);
+
   ~ScopedClipboardWriter();
 
   // Converts |text| to UTF-8 and adds it to the clipboard.
@@ -61,7 +65,7 @@ class UI_EXPORT ScopedClipboardWriter {
   // Pixel format is assumed to be 32-bit BI_RGB.
   void WriteBitmapFromPixels(const void* pixels, const gfx::Size& size);
 
-  // Adds arbitrary data to clipboard.
+  // Adds arbitrary pickled data to clipboard.
   void WritePickledData(const Pickle& pickle,
                         const Clipboard::FormatType& format);
 
@@ -78,6 +82,7 @@ class UI_EXPORT ScopedClipboardWriter {
   Clipboard::ObjectMap objects_;
   Clipboard* clipboard_;
   Clipboard::Buffer buffer_;
+  Clipboard::SourceTag source_tag_;
 
   // We keep around the UTF-8 text of the URL in order to pass it to
   // Clipboard::DidWriteURL().

@@ -16,13 +16,14 @@
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "base/test/scoped_path_override.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#include "third_party/icu/public/common/unicode/locid.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/base/ui_base_paths.h"
-#include "unicode/locid.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -66,15 +67,18 @@ TEST_F(L10nUtilTest, DISABLED_GetString) {
 }
 #endif  // defined(OS_WIN)
 
-#if !defined(OS_MACOSX)
-// We are disabling this test on MacOS because GetApplicationLocale() as an
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+// On Mac, we are disabling this test because GetApplicationLocale() as an
 // API isn't something that we'll easily be able to unit test in this manner.
 // The meaning of that API, on the Mac, is "the locale used by Cocoa's main
 // nib file", which clearly can't be stubbed by a test app that doesn't use
 // Cocoa.
 
+// On Android, we are disabling this test since GetApplicationLocale() just
+// returns the system's locale, which, similarly, is not easily unit tested.
+
 void SetDefaultLocaleForTest(const std::string& tag, base::Environment* env) {
-#if defined(OS_POSIX) && !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_CHROMEOS)
   env->SetVar("LANGUAGE", tag);
 #else
   base::i18n::SetICUDefaultLocale(tag);
@@ -85,13 +89,9 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   scoped_ptr<base::Environment> env;
   // Use a temporary locale dir so we don't have to actually build the locale
   // pak files for this test.
-  FilePath orig_locale_dir;
-  PathService::Get(ui::DIR_LOCALES, &orig_locale_dir);
-  FilePath new_locale_dir;
-  EXPECT_TRUE(file_util::CreateNewTempDirectory(
-      FILE_PATH_LITERAL("l10n_util_test"),
-      &new_locale_dir));
-  PathService::Override(ui::DIR_LOCALES, new_locale_dir);
+  base::ScopedPathOverride locale_dir_override(ui::DIR_LOCALES);
+  base::FilePath new_locale_dir;
+  ASSERT_TRUE(PathService::Get(ui::DIR_LOCALES, &new_locale_dir));
   // Make fake locale files.
   std::string filenames[] = {
     "en-US",
@@ -110,7 +110,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   };
 
   for (size_t i = 0; i < arraysize(filenames); ++i) {
-    FilePath filename = new_locale_dir.AppendASCII(
+    base::FilePath filename = new_locale_dir.AppendASCII(
         filenames[i] + ".pak");
     file_util::WriteFile(filename, "", 0);
   }
@@ -118,7 +118,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   // Keep a copy of ICU's default locale before we overwrite it.
   icu::Locale locale = icu::Locale::getDefault();
 
-#if defined(OS_POSIX) && !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_CHROMEOS)
   env.reset(base::Environment::Create());
 
   // Test the support of LANGUAGE environment variable.
@@ -170,7 +170,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
 
   SetDefaultLocaleForTest("ca_ES.UTF8@valencia", env.get());
   EXPECT_EQ("ca@valencia", l10n_util::GetApplicationLocale(""));
-#endif  // defined(OS_POSIX) && !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#endif  // defined(OS_POSIX) && !defined(OS_CHROMEOS)
 
   SetDefaultLocaleForTest("en-US", env.get());
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(""));
@@ -178,10 +178,9 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   SetDefaultLocaleForTest("xx", env.get());
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(""));
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
-  // ChromeOS and Android honor preferred locale first in
-  // GetApplicationLocale(), defaulting to en-US, while other
-  // targets first honor other signals.
+#if defined(OS_CHROMEOS)
+  // ChromeOS honors preferred locale first in GetApplicationLocale(),
+  // defaulting to en-US, while other targets first honor other signals.
   base::i18n::SetICUDefaultLocale("en-GB");
   EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(""));
 
@@ -199,7 +198,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
 
   base::i18n::SetICUDefaultLocale("en-US");
   EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-ZA"));
-#else  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#else  // !defined(OS_CHROMEOS)
   SetDefaultLocaleForTest("en-GB", env.get());
   EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale(""));
 
@@ -238,7 +237,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
 
   SetDefaultLocaleForTest("en-ZA", env.get());
   EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale(""));
-#endif  // defined (OS_CHROMEOS) || defined(OS_ANDROID)
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
   // We don't allow user prefs for locale on linux/mac.
@@ -281,8 +280,6 @@ TEST_F(L10nUtilTest, GetAppLocale) {
 #endif  // defined(OS_WIN)
 
   // Clean up.
-  PathService::Override(ui::DIR_LOCALES, orig_locale_dir);
-  file_util::Delete(new_locale_dir, true);
   UErrorCode error_code = U_ZERO_ERROR;
   icu::Locale::setDefault(locale, error_code);
 }
@@ -302,6 +299,38 @@ TEST_F(L10nUtilTest, SortStringsUsingFunction) {
   ASSERT_TRUE(UTF8ToUTF16("C") == strings[2]->string());
   ASSERT_TRUE(UTF8ToUTF16("d") == strings[3]->string());
   STLDeleteElements(&strings);
+}
+
+/**
+ * Helper method for validating strings that require direcitonal markup.
+ * Checks that parentheses are enclosed in appropriate direcitonal markers.
+ */
+void CheckUiDisplayNameForLocale(const std::string& locale,
+                                 const std::string& display_locale,
+                                 bool is_rtl)
+{
+  EXPECT_EQ(true, base::i18n::IsRTL());
+  string16 result = l10n_util::GetDisplayNameForLocale(locale,
+                                                       display_locale,
+                                                       /* is_for_ui */ true);
+
+  bool rtl_direction = true;
+  for (size_t i = 0; i < result.length() - 1; i++) {
+    char16 ch = result.at(i);
+    switch (ch) {
+    case base::i18n::kLeftToRightMark:
+    case base::i18n::kLeftToRightEmbeddingMark:
+      rtl_direction = false;
+      break;
+    case base::i18n::kRightToLeftMark:
+    case base::i18n::kRightToLeftEmbeddingMark:
+      rtl_direction = true;
+      break;
+    case '(':
+    case ')':
+      EXPECT_EQ(is_rtl, rtl_direction);
+    }
+  }
 }
 
 TEST_F(L10nUtilTest, GetDisplayNameForLocale) {
@@ -324,6 +353,22 @@ TEST_F(L10nUtilTest, GetDisplayNameForLocale) {
 
   result = l10n_util::GetDisplayNameForLocale("xyz-xyz", "en", false);
   EXPECT_EQ(ASCIIToUTF16("xyz (XYZ)"), result);
+
+#if !defined(TOOLKIT_GTK)
+  // Check for directional markers when using RTL languages to ensure that
+  // direction neutral characters such as parentheses are properly formatted.
+
+  // Keep a copy of ICU's default locale before we overwrite it.
+  icu::Locale locale = icu::Locale::getDefault();
+
+  base::i18n::SetICUDefaultLocale("he");
+  CheckUiDisplayNameForLocale("en-US", "en", false);
+  CheckUiDisplayNameForLocale("en-US", "he", true);
+
+  // Clean up.
+  UErrorCode error_code = U_ZERO_ERROR;
+  icu::Locale::setDefault(locale, error_code);
+#endif
 
   // ToUpper and ToLower should work with embedded NULLs.
   const size_t length_with_null = 4;

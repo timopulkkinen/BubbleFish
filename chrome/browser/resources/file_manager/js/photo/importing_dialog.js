@@ -8,6 +8,7 @@
  * @param {HTMLElement} parentNode Node to be parent for this dialog.
  * @param {FileCopyManager} copyManager Copy manager isntance.
  * @param {MetadataCache} metadataCache Metadata cache.
+ * @constructor
  */
 function ImportingDialog(parentNode, copyManager, metadataCache) {
   cr.ui.dialogs.BaseDialog.call(this, parentNode);
@@ -31,6 +32,7 @@ ImportingDialog.prototype.initDom_ = function() {
   this.frame_.textContent = '';
 
   this.imageBox_ = util.createChild(this.frame_, 'img-container');
+  this.imageBox_.setAttribute('state', 'progress');
 
   var progressContainer = util.createChild(this.frame_, 'progress-container');
   progressContainer.appendChild(this.text_);
@@ -53,8 +55,7 @@ ImportingDialog.prototype.initDom_ = function() {
  * @param {boolean} move Whether to move files instead of copying them.
  */
 ImportingDialog.prototype.show = function(entries, dir, move) {
-  var message = loadTimeData.getStringF(
-      'PHOTO_IMPORT_IMPORTING', entries.length);
+  var message = loadTimeData.getString('PHOTO_IMPORT_IMPORTING');
   cr.ui.dialogs.BaseDialog.prototype.show.call(this, message, null, null, null);
 
   this.error_ = false;
@@ -87,8 +88,10 @@ ImportingDialog.prototype.previewEntry_ = function(index) {
   var entry = this.entries_[index];
   this.metadataCache_.get(entry, 'thumbnail|filesystem',
       function(metadata) {
-        new ThumbnailLoader(entry.toURL(), metadata).
-            load(box, true /* fill, not fit */);
+        new ThumbnailLoader(entry.toURL(),
+                            ThumbnailLoader.LoaderType.IMAGE,
+                            metadata).
+            load(box, ThumbnailLoader.FillMode.FILL);
       });
 };
 
@@ -153,8 +156,7 @@ ImportingDialog.prototype.onCopyProgress_ = function(event) {
     case 'SUCCESS':
       this.text_.textContent =
           loadTimeData.getString('PHOTO_IMPORT_IMPORT_COMPLETE');
-      this.progress_.querySelector('.progress-track').style.
-          backgroundImage = 'none';
+      this.imageBox_.setAttribute('state', 'success');
       this.frame_.removeChild(this.cancelButton_);
       this.frame_.appendChild(this.okButton_);
       break;
@@ -167,8 +169,7 @@ ImportingDialog.prototype.onCopyProgress_ = function(event) {
       this.error_ = true;
       this.text_.textContent =
           loadTimeData.getString('PHOTO_IMPORT_IMPORTING_ERROR');
-      this.progress_.querySelector('.progress-track').style.
-          backgroundImage = 'none';
+      this.imageBox_.setAttribute('state', 'error');
       this.frame_.removeChild(this.cancelButton_);
       this.frame_.appendChild(this.okButton_);
       break;

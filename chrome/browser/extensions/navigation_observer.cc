@@ -6,6 +6,7 @@
 
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -55,7 +56,8 @@ void NavigationObserver::PromptToEnableExtensionIfNecessary(
   if (!nav_entry)
     return;
 
-  ExtensionService* extension_service = profile_->GetExtensionService();
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   const Extension* extension = extension_service->disabled_extensions()->
       GetExtensionOrAppByURL(ExtensionURLInfo(nav_entry->GetURL()));
   if (!extension)
@@ -74,14 +76,14 @@ void NavigationObserver::PromptToEnableExtensionIfNecessary(
     in_progress_prompt_navigation_controller_ = nav_controller;
 
     extension_install_prompt_.reset(
-        ExtensionInstallUI::CreateInstallPromptWithWebContents(
-            nav_controller->GetWebContents()));
+        new ExtensionInstallPrompt(nav_controller->GetWebContents()));
     extension_install_prompt_->ConfirmReEnable(this, extension);
   }
 }
 
 void NavigationObserver::InstallUIProceed() {
-  ExtensionService* extension_service = profile_->GetExtensionService();
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   const Extension* extension = extension_service->GetExtensionById(
       in_progress_prompt_extension_id_, true);
   NavigationController* nav_controller =
@@ -101,7 +103,8 @@ void NavigationObserver::InstallUIProceed() {
 }
 
 void NavigationObserver::InstallUIAbort(bool user_initiated) {
-  ExtensionService* extension_service = profile_->GetExtensionService();
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   const Extension* extension = extension_service->GetExtensionById(
       in_progress_prompt_extension_id_, true);
 

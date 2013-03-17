@@ -11,12 +11,14 @@
 #include "content/common/dom_storage_messages.h"
 #include "content/renderer/dom_storage/dom_storage_dispatcher.h"
 #include "content/renderer/render_thread_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "webkit/dom_storage/dom_storage_cached_area.h"
 
 using dom_storage::DomStorageCachedArea;
 using WebKit::WebString;
 using WebKit::WebURL;
+
+namespace content {
 
 namespace {
 typedef IDMap<WebStorageAreaImpl> AreaImplMap;
@@ -80,3 +82,5 @@ void WebStorageAreaImpl::clear(const WebURL& page_url) {
 size_t WebStorageAreaImpl::memoryBytesUsedByCache() const {
   return cached_area_->MemoryBytesUsedByCache();
 }
+
+}  // namespace content

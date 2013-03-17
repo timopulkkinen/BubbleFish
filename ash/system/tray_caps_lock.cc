@@ -6,8 +6,10 @@
 
 #include "ash/caps_lock_delegate.h"
 #include "ash/shell.h"
+#include "ash/system/tray/actionable_view.h"
+#include "ash/system/tray/fixed_sized_image_view.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
-#include "ash/system/tray/tray_views.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -38,7 +40,7 @@ class CapsLockDefaultView : public ActionableView {
         ToImageSkia());
     AddChildView(image);
 
-    text_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    text_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     AddChildView(text_label_);
 
     shortcut_label_->SetEnabled(false);
@@ -102,17 +104,20 @@ class CapsLockDefaultView : public ActionableView {
   DISALLOW_COPY_AND_ASSIGN(CapsLockDefaultView);
 };
 
-TrayCapsLock::TrayCapsLock()
-    : TrayImageItem(IDR_AURA_UBER_TRAY_CAPS_LOCK),
+TrayCapsLock::TrayCapsLock(SystemTray* system_tray)
+    : TrayImageItem(system_tray, IDR_AURA_UBER_TRAY_CAPS_LOCK),
       default_(NULL),
       detailed_(NULL),
       search_mapped_to_caps_lock_(false),
       caps_lock_enabled_(
           Shell::GetInstance()->caps_lock_delegate()->IsCapsLockEnabled()),
       message_shown_(false) {
+  Shell::GetInstance()->system_tray_notifier()->AddCapsLockObserver(this);
 }
 
-TrayCapsLock::~TrayCapsLock() {}
+TrayCapsLock::~TrayCapsLock() {
+  Shell::GetInstance()->system_tray_notifier()->RemoveCapsLockObserver(this);
+}
 
 bool TrayCapsLock::GetInitialVisibility() {
   return Shell::GetInstance()->caps_lock_delegate()->IsCapsLockEnabled();
@@ -147,7 +152,7 @@ views::View* TrayCapsLock::CreateDetailedView(user::LoginStatus status) {
       IDS_ASH_STATUS_TRAY_CAPS_LOCK_CANCEL_BY_ALT_SEARCH;
   views::Label* label = new views::Label(bundle.GetLocalizedString(string_id));
   label->SetMultiLine(true);
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   detailed_->AddChildView(label);
 
   return detailed_;

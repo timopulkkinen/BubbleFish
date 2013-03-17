@@ -5,15 +5,13 @@
 #ifndef MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 #define MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 
-#include <windows.h>
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
 #include "media/audio/audio_manager_base.h"
 
 namespace media {
+
+class AudioDeviceListenerWin;
 
 // Windows implementation of the AudioManager singleton. This class is internal
 // to the audio output and only internal users can call methods not exposed by
@@ -21,11 +19,11 @@ namespace media {
 class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
  public:
   AudioManagerWin();
+
   // Implementation of AudioManager.
   virtual bool HasAudioOutputDevices() OVERRIDE;
   virtual bool HasAudioInputDevices() OVERRIDE;
   virtual string16 GetAudioInputDeviceModel() OVERRIDE;
-  virtual bool CanShowAudioInputSettings() OVERRIDE;
   virtual void ShowAudioInputSettings() OVERRIDE;
   virtual void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names)
       OVERRIDE;
@@ -69,6 +67,13 @@ class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
   AudioInputStream* CreatePCMWaveInAudioInputStream(
       const AudioParameters& params,
       const std::string& device_id);
+
+  // Helper methods for constructing AudioDeviceListenerWin on the audio thread.
+  void CreateDeviceListener();
+  void DestroyDeviceListener();
+
+  // Listen for output device changes.
+  scoped_ptr<AudioDeviceListenerWin> output_device_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioManagerWin);
 };

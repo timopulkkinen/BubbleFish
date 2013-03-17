@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/atomic_sequence_num.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -27,24 +28,22 @@
 #include "ui/gfx/size.h"
 #include "ui/gl/gpu_preference.h"
 
-class CommandBufferProxy;
-class CommandBufferProxyImpl;
-struct GPUCreateCommandBufferConfig;
 class GURL;
-class TransportTextureService;
 class MessageLoop;
+class TransportTextureService;
+struct GPUCreateCommandBufferConfig;
 
 namespace base {
 class MessageLoopProxy;
 }
 
-namespace content {
-struct GpuRenderingStats;
-}
-
 namespace IPC {
 class SyncMessageFilter;
 }
+
+namespace content {
+class CommandBufferProxyImpl;
+struct GpuRenderingStats;
 
 struct GpuListenerInfo {
   GpuListenerInfo();
@@ -56,6 +55,8 @@ struct GpuListenerInfo {
 
 class CONTENT_EXPORT GpuChannelHostFactory {
  public:
+  typedef base::Callback<void(const gfx::Size)> CreateImageCallback;
+
   virtual ~GpuChannelHostFactory() {}
 
   virtual bool IsMainThread() = 0;
@@ -63,17 +64,22 @@ class CONTENT_EXPORT GpuChannelHostFactory {
   virtual MessageLoop* GetMainLoop() = 0;
   virtual scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() = 0;
   virtual base::WaitableEvent* GetShutDownEvent() = 0;
-  virtual scoped_ptr<base::SharedMemory> AllocateSharedMemory(uint32 size) = 0;
+  virtual scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t size) = 0;
   virtual int32 CreateViewCommandBuffer(
       int32 surface_id, const GPUCreateCommandBufferConfig& init_params) = 0;
-  virtual GpuChannelHost* EstablishGpuChannelSync(
-      content::CauseForGpuLaunch) = 0;
+  virtual GpuChannelHost* EstablishGpuChannelSync(CauseForGpuLaunch) = 0;
+  virtual void CreateImage(
+      gfx::PluginWindowHandle window,
+      int32 image_id,
+      const CreateImageCallback& callback) = 0;
+  virtual void DeleteImage(int32 image_id, int32 sync_point) = 0;
 };
 
 // Encapsulates an IPC channel between the client and one GPU process.
 // On the GPU process side there's a corresponding GpuChannel.
 class GpuChannelHost : public IPC::Sender,
-                       public base::RefCountedThreadSafe<GpuChannelHost> {
+                       public base::RefCountedThreadSafe<GpuChannelHost>,
+                       public base::SupportsWeakPtr<GpuChannelHost> {
  public:
   enum State {
     // Not yet connected.
@@ -99,27 +105,28 @@ class GpuChannelHost : public IPC::Sender,
   void SetStateLost();
 
   // The GPU stats reported by the GPU process.
-  void set_gpu_info(const content::GPUInfo& gpu_info);
-  const content::GPUInfo& gpu_info() const;
+  void set_gpu_info(const GPUInfo& gpu_info);
+  const GPUInfo& gpu_info() const;
 
+  void OnMessageReceived(const IPC::Message& message);
   void OnChannelError();
 
   // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Create and connect to a command buffer in the GPU process.
-  CommandBufferProxy* CreateViewCommandBuffer(
+  CommandBufferProxyImpl* CreateViewCommandBuffer(
       int32 surface_id,
-      CommandBufferProxy* share_group,
+      CommandBufferProxyImpl* share_group,
       const std::string& allowed_extensions,
       const std::vector<int32>& attribs,
       const GURL& active_url,
       gfx::GpuPreference gpu_preference);
 
   // Create and connect to a command buffer in the GPU process.
-  CommandBufferProxy* CreateOffscreenCommandBuffer(
+  CommandBufferProxyImpl* CreateOffscreenCommandBuffer(
       const gfx::Size& size,
-      CommandBufferProxy* share_group,
+      CommandBufferProxyImpl* share_group,
       const std::string& allowed_extensions,
       const std::vector<int32>& attribs,
       const GURL& active_url,
@@ -133,11 +140,11 @@ class GpuChannelHost : public IPC::Sender,
       media::VideoDecodeAccelerator::Client* client);
 
   // Destroy a command buffer created by this channel.
-  void DestroyCommandBuffer(CommandBufferProxy* command_buffer);
+  void DestroyCommandBuffer(CommandBufferProxyImpl* command_buffer);
 
   // Collect rendering stats from GPU process.
   bool CollectRenderingStatsForSurface(
-      int surface_id, content::GpuRenderingStats* stats);
+      int surface_id, GpuRenderingStats* stats);
 
   // Add a route for the current message loop.
   void AddRoute(int route_id, base::WeakPtr<IPC::Listener> listener);
@@ -145,18 +152,42 @@ class GpuChannelHost : public IPC::Sender,
 
   GpuChannelHostFactory* factory() const { return factory_; }
   int gpu_host_id() const { return gpu_host_id_; }
+
+  // Do not use this function! It does not take the context lock and even
+  // if it did the PID might become invalid immediately after releasing it
+  // TODO(apatrick): Make all callers use ShareToGpuProcess().
   base::ProcessId gpu_pid() const { return channel_->peer_pid(); }
+
   int client_id() const { return client_id_; }
+
+  // Returns a handle to the shared memory that can be sent via IPC to the
+  // GPU process. The caller is responsible for ensuring it is closed. Returns
+  // an invalid handle on failure.
+  base::SharedMemoryHandle ShareToGpuProcess(
+      base::SharedMemory* shared_memory);
+
+  // Generates n unique mailbox names that can be used with
+  // GL_texture_mailbox_CHROMIUM. Unlike genMailboxCHROMIUM, this IPC is
+  // handled only on the GPU process' IO thread, and so is not effectively
+  // a finish.
+  bool GenerateMailboxNames(unsigned num, std::vector<std::string>* names);
+
+  // Reserve one unused transfer buffer ID.
+  int32 ReserveTransferBufferId();
 
  private:
   friend class base::RefCountedThreadSafe<GpuChannelHost>;
   virtual ~GpuChannelHost();
 
+  // Message handlers.
+  void OnGenerateMailboxNamesReply(const std::vector<std::string>& names);
+
   // A filter used internally to route incoming messages from the IO thread
   // to the correct message loop.
   class MessageFilter : public IPC::ChannelProxy::MessageFilter {
    public:
-    explicit MessageFilter(GpuChannelHost* parent);
+    MessageFilter(base::WeakPtr<GpuChannelHost> parent,
+                  GpuChannelHostFactory* factory);
 
     void AddRoute(int route_id,
                   base::WeakPtr<IPC::Listener> listener,
@@ -170,7 +201,12 @@ class GpuChannelHost : public IPC::Sender,
    private:
     virtual ~MessageFilter();
 
-    GpuChannelHost* parent_;
+    // Note: this reference can only be used to post tasks back to the
+    // GpuChannelHost, it is illegal to dereference on the IO thread where the
+    // MessageFilter lives.
+    base::WeakPtr<GpuChannelHost> parent_;
+
+    GpuChannelHostFactory* factory_;
 
     typedef base::hash_map<int, GpuListenerInfo> ListenerMap;
     ListenerMap listeners_;
@@ -182,7 +218,7 @@ class GpuChannelHost : public IPC::Sender,
 
   State state_;
 
-  content::GPUInfo gpu_info_;
+  GPUInfo gpu_info_;
 
   scoped_ptr<IPC::SyncChannel> channel_;
   scoped_refptr<MessageFilter> channel_filter_;
@@ -198,7 +234,15 @@ class GpuChannelHost : public IPC::Sender,
   // A filter for sending messages from thread other than the main thread.
   scoped_refptr<IPC::SyncMessageFilter> sync_filter_;
 
+  // A pool of valid mailbox names.
+  std::vector<std::string> mailbox_name_pool_;
+
+  // Transfer buffer IDs are allocated in sequence.
+  base::AtomicSequenceNumber next_transfer_buffer_id_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuChannelHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_CLIENT_GPU_CHANNEL_HOST_H_

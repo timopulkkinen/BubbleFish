@@ -27,13 +27,15 @@ class MockObserver : public PushClientObserver {
   MOCK_METHOD0(OnNotificationsEnabled, void());
   MOCK_METHOD1(OnNotificationsDisabled, void(NotificationsDisabledReason));
   MOCK_METHOD1(OnIncomingNotification, void(const Notification&));
+  MOCK_METHOD0(OnPingResponse, void());
 };
 
 class XmppPushClientTest : public testing::Test {
  protected:
   XmppPushClientTest() {
     notifier_options_.request_context_getter =
-        new TestURLRequestContextGetter(message_loop_.message_loop_proxy());
+        new net::TestURLRequestContextGetter(
+            message_loop_.message_loop_proxy());
   }
 
   virtual ~XmppPushClientTest() {}
@@ -45,7 +47,7 @@ class XmppPushClientTest : public testing::Test {
 
   virtual void TearDown() OVERRIDE {
     // Clear out any messages posted by XmppPushClient.
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
     xmpp_push_client_->RemoveObserver(&mock_observer_);
     xmpp_push_client_.reset();
   }
@@ -108,6 +110,17 @@ TEST_F(XmppPushClientTest, SendNotification) {
   xmpp_push_client_->OnConnect(fake_base_task_.AsWeakPtr());
   xmpp_push_client_->OnSubscribed();
   xmpp_push_client_->SendNotification(Notification());
+}
+
+// Make sure nothing blows up when the XMPP push client sends a ping.
+//
+// TODO(akalin): Figure out how to test that the ping was actually sent.
+TEST_F(XmppPushClientTest, SendPing) {
+  EXPECT_CALL(mock_observer_, OnNotificationsEnabled());
+
+  xmpp_push_client_->OnConnect(fake_base_task_.AsWeakPtr());
+  xmpp_push_client_->OnSubscribed();
+  xmpp_push_client_->SendPing();
 }
 
 // Make sure nothing blows up when the XMPP push client sends a

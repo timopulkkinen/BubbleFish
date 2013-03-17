@@ -25,54 +25,36 @@ const scoped_refptr<Demuxer>& FilterCollection::GetDemuxer() {
   return demuxer_;
 }
 
-void FilterCollection::AddAudioDecoder(AudioDecoder* audio_decoder) {
-  audio_decoders_.push_back(audio_decoder);
+void FilterCollection::SetAudioRenderer(
+    scoped_ptr<AudioRenderer> audio_renderer) {
+  audio_renderer_ = audio_renderer.Pass();
 }
 
-void FilterCollection::AddAudioRenderer(AudioRenderer* audio_renderer) {
-  audio_renderers_.push_back(audio_renderer);
+scoped_ptr<AudioRenderer> FilterCollection::GetAudioRenderer() {
+  return audio_renderer_.Pass();
 }
 
-void FilterCollection::AddVideoRenderer(VideoRenderer* video_renderer) {
-  video_renderers_.push_back(video_renderer);
+void FilterCollection::SetVideoRenderer(
+    scoped_ptr<VideoRenderer> video_renderer) {
+  video_renderer_ = video_renderer.Pass();
+}
+
+scoped_ptr<VideoRenderer> FilterCollection::GetVideoRenderer() {
+  return video_renderer_.Pass();
 }
 
 void FilterCollection::Clear() {
   audio_decoders_.clear();
   video_decoders_.clear();
-  audio_renderers_.clear();
-  video_renderers_.clear();
+  audio_renderer_.reset();
+  video_renderer_.reset();
 }
 
-void FilterCollection::SelectAudioDecoder(scoped_refptr<AudioDecoder>* out) {
-  if (audio_decoders_.empty()) {
-    *out = NULL;
-    return;
-  }
-  *out = audio_decoders_.front();
-  audio_decoders_.pop_front();
+FilterCollection::AudioDecoderList* FilterCollection::GetAudioDecoders() {
+  return &audio_decoders_;
 }
 
-void FilterCollection::SelectAudioRenderer(scoped_refptr<AudioRenderer>* out) {
-  if (audio_renderers_.empty()) {
-    *out = NULL;
-    return;
-  }
-  *out = audio_renderers_.front();
-  audio_renderers_.pop_front();
-}
-
-void FilterCollection::SelectVideoRenderer(scoped_refptr<VideoRenderer>* out) {
-  if (video_renderers_.empty()) {
-    *out = NULL;
-    return;
-  }
-  *out = video_renderers_.front();
-  video_renderers_.pop_front();
-}
-
-FilterCollection::VideoDecoderList*
-FilterCollection::GetVideoDecoders() {
+FilterCollection::VideoDecoderList* FilterCollection::GetVideoDecoders() {
   return &video_decoders_;
 }
 

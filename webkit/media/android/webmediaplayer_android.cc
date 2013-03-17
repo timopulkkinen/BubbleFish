@@ -4,9 +4,10 @@
 
 #include "webkit/media/android/webmediaplayer_android.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "media/base/android/media_player_bridge.h"
+#include "media/base/video_frame.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
 #include "webkit/media/android/stream_texture_factory_android.h"
@@ -32,7 +33,6 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
     StreamTextureFactory* factory)
     : client_(client),
       buffered_(1u),
-      video_frame_(new WebVideoFrameImpl(VideoFrame::CreateEmptyFrame())),
       main_loop_(MessageLoop::current()),
       pending_seek_(0),
       seeking_(false),
@@ -42,6 +42,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       ready_state_(WebMediaPlayer::ReadyStateHaveNothing),
       is_playing_(false),
       needs_establish_peer_(true),
+      has_size_info_(false),
       stream_texture_factory_(factory) {
   main_loop_->AddDestructionObserver(this);
   if (manager_)
@@ -50,6 +51,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
   if (stream_texture_factory_.get()) {
     stream_texture_proxy_.reset(stream_texture_factory_->CreateProxy());
     stream_id_ = stream_texture_factory_->CreateStreamTexture(&texture_id_);
+    ReallocateVideoFrame();
   }
 }
 
@@ -130,8 +132,8 @@ bool WebMediaPlayerAndroid::totalBytesKnown() {
 
 bool WebMediaPlayerAndroid::hasVideo() const {
   // If we have obtained video size information before, use it.
-  if (!natural_size_.isEmpty())
-    return true;
+  if (has_size_info_)
+    return !natural_size_.isEmpty();
 
   // TODO(qinmin): need a better method to determine whether the current media
   // content contains video. Android does not provide any function to do
@@ -144,7 +146,7 @@ bool WebMediaPlayerAndroid::hasVideo() const {
   if (!url_.has_path())
     return false;
   std::string mime;
-  if(!net::GetMimeTypeFromFile(FilePath(url_.path()), &mime))
+  if(!net::GetMimeTypeFromFile(base::FilePath(url_.path()), &mime))
     return true;
   return mime.find("audio/") == std::string::npos;
 }
@@ -307,15 +309,10 @@ void WebMediaPlayerAndroid::OnSeekComplete(base::TimeDelta current_time) {
 
 void WebMediaPlayerAndroid::OnMediaError(int error_type) {
   switch (error_type) {
-    case MediaPlayerBridge::MEDIA_ERROR_UNKNOWN:
-      // When playing an bogus URL or bad file we fire a MEDIA_ERROR_UNKNOWN.
-      // As WebKit uses FormatError to indicate an error for bogus URL or bad
-      // file we default a MEDIA_ERROR_UNKNOWN to NetworkStateFormatError.
+    case MediaPlayerBridge::MEDIA_ERROR_FORMAT:
       UpdateNetworkState(WebMediaPlayer::NetworkStateFormatError);
       break;
-    case MediaPlayerBridge::MEDIA_ERROR_SERVER_DIED:
-      // TODO(zhenghao): Media server died. In this case, the application must
-      // release the MediaPlayer object and instantiate a new one.
+    case MediaPlayerBridge::MEDIA_ERROR_DECODE:
       UpdateNetworkState(WebMediaPlayer::NetworkStateDecodeError);
       break;
     case MediaPlayerBridge::MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK:
@@ -328,18 +325,13 @@ void WebMediaPlayerAndroid::OnMediaError(int error_type) {
 }
 
 void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
+  has_size_info_ = true;
   if (natural_size_.width == width && natural_size_.height == height)
     return;
 
   natural_size_.width = width;
   natural_size_.height = height;
-  if (texture_id_) {
-    video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
-        texture_id_, kGLTextureExternalOES, natural_size_, natural_size_,
-        base::TimeDelta(),
-        VideoFrame::ReadPixelsCB(),
-        base::Closure())));
-  }
+  ReallocateVideoFrame();
 }
 
 void WebMediaPlayerAndroid::UpdateNetworkState(
@@ -368,6 +360,13 @@ void WebMediaPlayerAndroid::ReleaseMediaResources() {
 }
 
 void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
+  if (manager_)
+    manager_->UnregisterMediaPlayer(player_id_);
+  Detach();
+  main_loop_ = NULL;
+}
+
+void WebMediaPlayerAndroid::Detach() {
   Destroy();
 
   if (stream_id_) {
@@ -375,13 +374,19 @@ void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
     stream_id_ = 0;
   }
 
-  video_frame_.reset(new WebVideoFrameImpl(VideoFrame::CreateEmptyFrame()));
-
-  if (manager_)
-    manager_->UnregisterMediaPlayer(player_id_);
+  video_frame_.reset();
 
   manager_ = NULL;
-  main_loop_ = NULL;
+}
+
+void WebMediaPlayerAndroid::ReallocateVideoFrame() {
+  if (texture_id_) {
+    video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
+        texture_id_, kGLTextureExternalOES, natural_size_,
+        gfx::Rect(natural_size_), natural_size_, base::TimeDelta(),
+        VideoFrame::ReadPixelsCB(),
+        base::Closure())));
+  }
 }
 
 WebVideoFrame* WebMediaPlayerAndroid::getCurrentFrame() {
@@ -408,6 +413,10 @@ void WebMediaPlayerAndroid::EstablishSurfaceTexturePeer() {
   if (stream_texture_factory_.get() && stream_id_)
     stream_texture_factory_->EstablishPeer(stream_id_, player_id_);
   needs_establish_peer_ = false;
+}
+
+void WebMediaPlayerAndroid::SetNeedsEstablishPeer(bool needs_establish_peer) {
+  needs_establish_peer_ = needs_establish_peer;
 }
 
 void WebMediaPlayerAndroid::UpdatePlayingState(bool is_playing) {

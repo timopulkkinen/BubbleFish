@@ -4,25 +4,23 @@
 
 #include "chrome/browser/chromeos/cros/network_library.h"
 
-#include <dbus/dbus-glib.h>
-
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"  // for debug output only.
-#include "base/string_number_conversions.h"
-#include "base/utf_string_conversion_utils.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversion_utils.h"
 #include "chrome/browser/chromeos/cros/certificate_pattern.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_cros.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_stub.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/net/x509_certificate_model.h"
+#include "chromeos/network/cros_network_functions.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
+#include "net/base/url_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -185,6 +183,8 @@ NetworkDevice::NetworkDevice(const std::string& device_path)
       sim_lock_state_(SIM_UNKNOWN),
       sim_retries_left_(kDefaultSimUnlockRetriesCount),
       sim_pin_required_(SIM_PIN_REQUIRE_UNKNOWN),
+      sim_present_(false),
+      powered_(false),
       prl_version_(0),
       data_roaming_allowed_(false),
       support_network_scan_(false),
@@ -218,7 +218,7 @@ Network::Network(const std::string& service_path,
     : state_(STATE_UNKNOWN),
       error_(ERROR_NO_ERROR),
       connectable_(true),
-      connection_started_(false),
+      user_connect_state_(USER_CONNECT_NONE),
       is_active_(false),
       priority_(kPriorityNotSet),
       auto_connect_(false),
@@ -228,7 +228,8 @@ Network::Network(const std::string& service_path,
       notify_failure_(false),
       profile_type_(PROFILE_NONE),
       service_path_(service_path),
-      type_(type) {
+      type_(type),
+      is_behind_portal_for_testing_(false) {
 }
 
 Network::~Network() {
@@ -297,14 +298,15 @@ void Network::SetState(ConnectionState new_state) {
   ConnectionState old_state = state_;
   VLOG(2) << "Entering new state: " << ConnectionStateString(new_state);
   state_ = new_state;
-  if (!IsConnectingState(new_state))
-    set_connection_started(false);
   if (new_state == STATE_FAILURE) {
-    VLOG(2) << "Detected Failure state.";
-    if (old_state != STATE_UNKNOWN && old_state != STATE_IDLE) {
+    VLOG(1) << service_path() << ": Detected Failure state.";
+    if (old_state != STATE_UNKNOWN && old_state != STATE_IDLE &&
+        (type() != TYPE_CELLULAR ||
+         user_connect_state() == USER_CONNECT_STARTED)) {
       // New failure, the user needs to be notified.
       // Transition STATE_IDLE -> STATE_FAILURE sometimes happens on resume
       // but is not an actual failure as network device is not ready yet.
+      // For Cellular we only show failure notifications if user initiated.
       notify_failure_ = true;
       // Normally error_ should be set, but if it is not we need to set it to
       // something here so that the retry logic will be triggered.
@@ -313,11 +315,29 @@ void Network::SetState(ConnectionState new_state) {
         error_ = ERROR_UNKNOWN;
       }
     }
+    if (user_connect_state() == USER_CONNECT_STARTED)
+      set_user_connect_state(USER_CONNECT_FAILED);
+  } else if (new_state == STATE_IDLE && IsConnectingState(old_state) &&
+             user_connect_state() == USER_CONNECT_STARTED) {
+    // If we requested a connect and never went through a connected state,
+    // treat it as a failure.
+    VLOG(1) << service_path() << ": Inferring Failure state.";
+    notify_failure_ = true;
+    error_ = ERROR_UNKNOWN;
+    if (user_connect_state() == USER_CONNECT_STARTED)
+      set_user_connect_state(USER_CONNECT_FAILED);
   } else if (new_state != STATE_UNKNOWN) {
     notify_failure_ = false;
     // State changed, so refresh IP address.
-    // Note: blocking DBus call. TODO(stevenjb): refactor this.
     InitIPAddress();
+    if (user_connect_state() == USER_CONNECT_STARTED) {
+      if (IsConnectedState(new_state)) {
+        set_user_connect_state(USER_CONNECT_CONNECTED);
+      } else if (!IsConnectingState(new_state)) {
+        LOG(WARNING) << "Connection started and State -> " << GetStateString();
+        set_user_connect_state(USER_CONNECT_FAILED);
+      }
+    }
   }
   VLOG(1) << name() << ".State [" << service_path() << "]: " << GetStateString()
           << " (was: " << ConnectionStateString(old_state) << ")";
@@ -354,12 +374,11 @@ bool Network::RequiresUserProfile() const {
 void Network::CopyCredentialsFromRemembered(Network* remembered) {
 }
 
-void Network::SetValueProperty(const char* prop, Value* value) {
+void Network::SetValueProperty(const char* prop, const base::Value& value) {
   DCHECK(prop);
-  DCHECK(value);
   if (!EnsureCrosLoaded())
     return;
-  CrosSetNetworkServiceProperty(service_path_, prop, *value);
+  CrosSetNetworkServiceProperty(service_path_, prop, value);
 }
 
 void Network::ClearProperty(const char* prop) {
@@ -373,8 +392,7 @@ void Network::SetStringProperty(
     const char* prop, const std::string& str, std::string* dest) {
   if (dest)
     *dest = str;
-  scoped_ptr<Value> value(Value::CreateStringValue(str));
-  SetValueProperty(prop, value.get());
+  SetValueProperty(prop, base::StringValue(str));
 }
 
 void Network::SetOrClearStringProperty(const char* prop,
@@ -392,15 +410,13 @@ void Network::SetOrClearStringProperty(const char* prop,
 void Network::SetBooleanProperty(const char* prop, bool b, bool* dest) {
   if (dest)
     *dest = b;
-  scoped_ptr<Value> value(Value::CreateBooleanValue(b));
-  SetValueProperty(prop, value.get());
+  SetValueProperty(prop, base::FundamentalValue(b));
 }
 
 void Network::SetIntegerProperty(const char* prop, int i, int* dest) {
   if (dest)
     *dest = i;
-  scoped_ptr<Value> value(Value::CreateIntegerValue(i));
-  SetValueProperty(prop, value.get());
+  SetValueProperty(prop, base::FundamentalValue(i));
 }
 
 void Network::SetPreferred(bool preferred) {
@@ -490,6 +506,9 @@ std::string Network::GetErrorString() const {
       return l10n_util::GetStringUTF8(
           IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED);
     case ERROR_PPP_AUTH_FAILED:
+    case ERROR_EAP_AUTHENTICATION_FAILED:
+    case ERROR_EAP_LOCAL_TLS_FAILED:
+    case ERROR_EAP_REMOTE_TLS_FAILED:
       return l10n_util::GetStringUTF8(
           IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED);
     case ERROR_UNKNOWN:
@@ -507,17 +526,28 @@ void Network::InitIPAddress() {
   ip_address_.clear();
   if (!EnsureCrosLoaded())
     return;
-  // If connected, get ip config.
+  // If connected, get IPConfig.
   if (connected() && !device_path_.empty()) {
-    NetworkIPConfigVector ipconfigs;
-    if (CrosListIPConfigs(device_path_, &ipconfigs, NULL, NULL)) {
-      for (size_t i = 0; i < ipconfigs.size(); ++i) {
-        const NetworkIPConfig& ipconfig = ipconfigs[i];
-        if (ipconfig.address.size() > 0) {
-          ip_address_ = ipconfig.address;
-          break;
-        }
-      }
+    CrosListIPConfigs(device_path_,
+                      base::Bind(&Network::InitIPAddressCallback,
+                                 service_path_));
+  }
+}
+
+// static
+void Network::InitIPAddressCallback(
+    const std::string& service_path,
+    const NetworkIPConfigVector& ip_configs,
+    const std::string& hardware_address) {
+  Network* network =
+      CrosLibrary::Get()->GetNetworkLibrary()->FindNetworkByPath(service_path);
+  if (!network)
+    return;
+  for (size_t i = 0; i < ip_configs.size(); ++i) {
+    const NetworkIPConfig& ipconfig = ip_configs[i];
+    if (ipconfig.address.size() > 0) {
+      network->ip_address_ = ipconfig.address;
+      break;
     }
   }
 }
@@ -739,7 +769,7 @@ void VirtualNetwork::MatchCertificatePattern(bool allow_enroll,
   // user can't get to the place where a cert is presented for them
   // involuntarily.
   if (client_cert_pattern().Empty() ||
-      ui_data().onc_source() == NetworkUIData::ONC_SOURCE_DEVICE_POLICY) {
+      ui_data().onc_source() == onc::ONC_SOURCE_DEVICE_POLICY) {
     connect.Run();
     return;
   }
@@ -785,11 +815,6 @@ void VirtualNetwork::MatchCertificatePattern(bool allow_enroll,
 CellTower::CellTower() {}
 
 ////////////////////////////////////////////////////////////////////////////////
-// WifiAccessPoint
-
-WifiAccessPoint::WifiAccessPoint() {}
-
-////////////////////////////////////////////////////////////////////////////////
 // CellularApn
 
 CellularApn::CellularApn() {}
@@ -830,11 +855,11 @@ void CellularApn::Set(const DictionaryValue& dict) {
 
 CellularNetwork::CellularNetwork(const std::string& service_path)
     : WirelessNetwork(service_path, TYPE_CELLULAR),
+      activate_over_non_cellular_network_(false),
       activation_state_(ACTIVATION_STATE_UNKNOWN),
       network_technology_(NETWORK_TECHNOLOGY_UNKNOWN),
       roaming_state_(ROAMING_STATE_UNKNOWN),
-      using_post_(false),
-      data_left_(DATA_UNKNOWN) {
+      using_post_(false) {
 }
 
 CellularNetwork::~CellularNetwork() {
@@ -852,11 +877,10 @@ bool CellularNetwork::StartActivation() {
   return true;
 }
 
-void CellularNetwork::RefreshDataPlansIfNeeded() const {
+void CellularNetwork::CompleteActivation() {
   if (!EnsureCrosLoaded())
     return;
-  if (connected() && activated())
-    CrosRequestCellularDataPlanUpdate(service_path());
+  CrosCompleteCellularActivation(service_path());
 }
 
 void CellularNetwork::SetApn(const CellularApn& apn) {
@@ -868,25 +892,19 @@ void CellularNetwork::SetApn(const CellularApn& apn) {
     value.SetString(flimflam::kApnNetworkIdProperty, apn.network_id);
     value.SetString(flimflam::kApnUsernameProperty, apn.username);
     value.SetString(flimflam::kApnPasswordProperty, apn.password);
-    SetValueProperty(flimflam::kCellularApnProperty, &value);
+    SetValueProperty(flimflam::kCellularApnProperty, value);
   } else {
     ClearProperty(flimflam::kCellularApnProperty);
   }
 }
 
 bool CellularNetwork::SupportsActivation() const {
-  return SupportsDataPlan();
+  return !usage_url().empty() || !payment_url().empty();
 }
 
 bool CellularNetwork::NeedsActivation() const {
-  return (activation_state() != ACTIVATION_STATE_ACTIVATED &&
-          activation_state() != ACTIVATION_STATE_UNKNOWN) ||
-          needs_new_plan();
-}
-
-bool CellularNetwork::SupportsDataPlan() const {
-  // TODO(nkostylev): Are there cases when only one of this is defined?
-  return !usage_url().empty() || !payment_url().empty();
+  return (activation_state() == ACTIVATION_STATE_NOT_ACTIVATED ||
+          activation_state() == ACTIVATION_STATE_PARTIALLY_ACTIVATED);
 }
 
 GURL CellularNetwork::GetAccountInfoUrl() const {
@@ -894,12 +912,12 @@ GURL CellularNetwork::GetAccountInfoUrl() const {
     return GURL(payment_url());
 
   GURL base_url(kRedirectExtensionPage);
-  GURL temp_url = chrome_common_net::AppendQueryParameter(base_url,
-                                                           "post_data",
-                                                           post_data_);
-  GURL redir_url = chrome_common_net::AppendQueryParameter(temp_url,
-                                                            "formUrl",
-                                                            payment_url());
+  GURL temp_url = net::AppendQueryParameter(base_url,
+                                            "post_data",
+                                            post_data_);
+  GURL redir_url = net::AppendQueryParameter(temp_url,
+                                             "formUrl",
+                                             payment_url());
   return redir_url;
 }
 
@@ -1224,19 +1242,35 @@ std::string WifiNetwork::GetEncryptionString() const {
 }
 
 bool WifiNetwork::IsPassphraseRequired() const {
-  // TODO(stevenjb): Remove error_ tests when fixed.
-  // (http://crosbug.com/10135).
-  if (error() == ERROR_BAD_PASSPHRASE || error() == ERROR_BAD_WEPKEY)
+  if (encryption_ == SECURITY_NONE)
+    return false;
+  // A connection failure might be due to a bad passphrase.
+  if (error() == ERROR_BAD_PASSPHRASE ||
+      error() == ERROR_BAD_WEPKEY ||
+      error() == ERROR_PPP_AUTH_FAILED ||
+      error() == ERROR_EAP_LOCAL_TLS_FAILED ||
+      error() == ERROR_EAP_REMOTE_TLS_FAILED ||
+      error() == ERROR_EAP_AUTHENTICATION_FAILED ||
+      error() == ERROR_CONNECT_FAILED ||
+      error() == ERROR_UNKNOWN) {
+    VLOG(1) << "Authentication Error: " << GetErrorString();
     return true;
-  // For 802.1x networks, configuration is required if connectable is false
-  // unless we're using a certificate pattern.
-  if (encryption_ == SECURITY_8021X) {
-    if (eap_method_ != EAP_METHOD_TLS ||
-        client_cert_type() != CLIENT_CERT_TYPE_PATTERN)
-      return !connectable();
+  }
+  // If the user initiated a connection and it failed, request credentials in
+  // case it is a credentials error and Shill was unable to detect it.
+  if (user_connect_state() == USER_CONNECT_FAILED)
+    return true;
+  // WEP/WPA/RSN and PSK networks rely on the PassphraseRequired property.
+  if (encryption_ != SECURITY_8021X)
+    return passphrase_required_;
+  // For 802.1x networks, if we are using a certificate pattern we do not
+  // need any credentials.
+  if (eap_method_ == EAP_METHOD_TLS &&
+      client_cert_type() == CLIENT_CERT_TYPE_PATTERN) {
     return false;
   }
-  return passphrase_required_;
+  // Connectable will be false if 802.1x credentials are not set
+  return !connectable();
 }
 
 bool WifiNetwork::RequiresUserProfile() const {
@@ -1305,8 +1339,7 @@ void WifiNetwork::MatchCertificatePattern(bool allow_enroll,
 
 WimaxNetwork::WimaxNetwork(const std::string& service_path)
     : WirelessNetwork(service_path, TYPE_WIMAX),
-      passphrase_required_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_pointer_factory_(this)) {
+      passphrase_required_(false) {
 }
 
 WimaxNetwork::~WimaxNetwork() {
@@ -1339,7 +1372,9 @@ NetworkLibrary::EAPConfigData::EAPConfigData()
 
 NetworkLibrary::EAPConfigData::~EAPConfigData() {}
 
-NetworkLibrary::VPNConfigData::VPNConfigData() {}
+NetworkLibrary::VPNConfigData::VPNConfigData()
+    : save_credentials(false) {
+}
 
 NetworkLibrary::VPNConfigData::~VPNConfigData() {}
 

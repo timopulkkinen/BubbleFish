@@ -111,7 +111,7 @@ void DeriveFontIfNecessary(int font_size,
   const int current_style = (font->GetStyle() & kStyleMask);
   const int current_size = font->GetFontSize();
   if (current_style != target_style || current_size != font_size)
-    *font = font->DeriveFont(font_size - current_size, font_style);
+    *font = font->DeriveFont(font_size - current_size, target_style);
 }
 
 // Returns true if |c| is a Unicode BiDi control character.
@@ -334,11 +334,9 @@ SelectionModel RenderTextWin::AdjacentWordSelectionModel(
 
 void RenderTextWin::SetSelectionModel(const SelectionModel& model) {
   RenderText::SetSelectionModel(model);
-  // TODO(xji): The styles are applied to text inside ItemizeLogicalText(). So,
-  // we need to update layout here in order for the styles, such as selection
-  // foreground, to be picked up. Eventually, we should separate styles from
-  // layout by applying foreground, strike, and underline styles during
-  // DrawVisualText as what RenderTextLinux does.
+  // TODO(xji|msw): The text selection color is applied in ItemizeLogicalText().
+  // So, the layout must be updated in order to draw the proper selection range.
+  // Colors should be applied in DrawVisualText(), as done by RenderTextLinux.
   ResetLayout();
 }
 
@@ -381,7 +379,7 @@ std::vector<Rect> RenderTextWin::GetSubstringBounds(const ui::Range& range) {
       rect.set_origin(ToViewPoint(rect.origin()));
       // Union this with the last rect if they're adjacent.
       if (!bounds.empty() && rect.SharesEdgeWith(bounds.back())) {
-        rect = rect.Union(bounds.back());
+        rect.Union(bounds.back());
         bounds.pop_back();
       }
       bounds.push_back(rect);
@@ -448,9 +446,8 @@ void RenderTextWin::EnsureLayout() {
 void RenderTextWin::DrawVisualText(Canvas* canvas) {
   DCHECK(!needs_layout_);
 
-  Point offset(GetOriginForDrawing());
   // Skia will draw glyphs with respect to the baseline.
-  offset.Offset(0, common_baseline_);
+  Vector2d offset(GetOffsetForDrawing() + Vector2d(0, common_baseline_));
 
   SkScalar x = SkIntToScalar(offset.x());
   SkScalar y = SkIntToScalar(offset.y());
@@ -488,15 +485,8 @@ void RenderTextWin::DrawVisualText(Canvas* canvas) {
     renderer.SetFontFamilyWithStyle(run->font.GetFontName(), run->font_style);
     renderer.SetForegroundColor(run->foreground);
     renderer.DrawPosText(&pos[0], run->glyphs.get(), run->glyph_count);
-    // TODO(oshima|msw): Consider refactoring StyleRange into Style
-    // class and StyleRange containing Style, and use Style class in
-    // TextRun class.  This may conflict with msw's comment in
-    // TextRun, so please consult with msw when refactoring.
-    StyleRange style;
-    style.strike = run->strike;
-    style.diagonal_strike = run->diagonal_strike;
-    style.underline = run->underline;
-    renderer.DrawDecorations(x, y, run->width, style);
+    renderer.DrawDecorations(x, y, run->width, run->underline, run->strike,
+                             run->diagonal_strike);
 
     x = glyph_x;
   }
@@ -517,7 +507,7 @@ void RenderTextWin::ItemizeLogicalText() {
   HRESULT hr = E_OUTOFMEMORY;
   int script_items_count = 0;
   std::vector<SCRIPT_ITEM> script_items;
-  const int text_length = GetLayoutText().length();
+  const size_t text_length = GetLayoutText().length();
   for (size_t n = kGuessItems; hr == E_OUTOFMEMORY && n < kMaxItems; n *= 2) {
     // Derive the array of Uniscribe script items from the logical text.
     // ScriptItemize always adds a terminal array item so that the length of the
@@ -536,36 +526,41 @@ void RenderTextWin::ItemizeLogicalText() {
   if (script_items_count <= 0)
     return;
 
-  // Build the list of runs, merge font/underline styles.
-  // TODO(msw): Only break for font changes, not color etc. See TextRun comment.
-  StyleRanges styles(style_ranges());
-  ApplyCompositionAndSelectionStyles(&styles);
-  StyleRanges::const_iterator style = styles.begin();
+  // Temporarily apply composition underlines and selection colors.
+  ApplyCompositionAndSelectionStyles();
+
+  // Build the list of runs from the script items and ranged colors/styles.
+  // TODO(msw): Only break for bold/italic, not color etc. See TextRun comment.
+  internal::StyleIterator style(colors(), styles());
   SCRIPT_ITEM* script_item = &script_items[0];
-  for (int run_break = 0; run_break < text_length;) {
+  const size_t layout_text_length = GetLayoutText().length();
+  for (size_t run_break = 0; run_break < layout_text_length;) {
     internal::TextRun* run = new internal::TextRun();
     run->range.set_start(run_break);
     run->font = GetFont();
-    run->font_style = style->font_style;
+    run->font_style = (style.style(BOLD) ? Font::BOLD : 0) |
+                      (style.style(ITALIC) ? Font::ITALIC : 0);
     DeriveFontIfNecessary(run->font.GetFontSize(), run->font.GetHeight(),
                           run->font_style, &run->font);
-    run->foreground = style->foreground;
-    run->strike = style->strike;
-    run->diagonal_strike = style->diagonal_strike;
-    run->underline = style->underline;
+    run->foreground = style.color();
+    run->strike = style.style(STRIKE);
+    run->diagonal_strike = style.style(DIAGONAL_STRIKE);
+    run->underline = style.style(UNDERLINE);
     run->script_analysis = script_item->a;
 
-    // Find the range end and advance the structures as needed.
-    const int script_item_end = (script_item + 1)->iCharPos;
-    const int style_range_end = TextIndexToLayoutIndex(style->range.end());
-    run_break = std::min(script_item_end, style_range_end);
-    if (script_item_end <= style_range_end)
+    // Find the next break and advance the iterators as needed.
+    const size_t script_item_break = (script_item + 1)->iCharPos;
+    run_break = std::min(script_item_break,
+                         TextIndexToLayoutIndex(style.GetRange().end()));
+    style.UpdatePosition(LayoutIndexToTextIndex(run_break));
+    if (script_item_break == run_break)
       script_item++;
-    if (script_item_end >= style_range_end)
-      style++;
     run->range.set_end(run_break);
     runs_.push_back(run);
   }
+
+  // Undo the temporarily applied composition underlines and selection colors.
+  UndoCompositionAndSelectionStyles();
 }
 
 void RenderTextWin::LayoutVisualText() {
@@ -601,7 +596,7 @@ void RenderTextWin::LayoutVisualText() {
   }
 
   // Build the array of bidirectional embedding levels.
-  scoped_array<BYTE> levels(new BYTE[runs_.size()]);
+  scoped_ptr<BYTE[]> levels(new BYTE[runs_.size()]);
   for (size_t i = 0; i < runs_.size(); ++i)
     levels[i] = runs_[i]->script_analysis.s.uBidiLevel;
 
@@ -698,7 +693,7 @@ void RenderTextWin::LayoutTextRun(internal::TextRun* run) {
   }
 
   // If a font was able to partially display the run, use that now.
-  if (best_partial_font_missing_char_count != INT_MAX) {
+  if (best_partial_font_missing_char_count < static_cast<int>(run_length)) {
     // Re-shape the run only if |best_partial_font| differs from the last font.
     if (best_partial_font.GetNativeFont() != run->font.GetNativeFont())
       ShapeTextRunWithFont(run, best_partial_font);
@@ -706,13 +701,30 @@ void RenderTextWin::LayoutTextRun(internal::TextRun* run) {
   }
 
   // If no font was able to partially display the run, replace all glyphs
-  // with |wgDefault| to ensure they don't hold garbage values.
+  // with |wgDefault| from the original font to ensure to they don't hold
+  // garbage values.
+  // First, clear the cache and select the original font on the HDC.
+  ScriptFreeCache(&run->script_cache);
+  run->font = original_font;
+  SelectObject(cached_hdc_, run->font.GetNativeFont());
+
+  // Now, get the font's properties.
   SCRIPT_FONTPROPERTIES properties;
   memset(&properties, 0, sizeof(properties));
   properties.cBytes = sizeof(properties);
-  ScriptGetFontProperties(cached_hdc_, &run->script_cache, &properties);
-  for (int i = 0; i < run->glyph_count; ++i)
-    run->glyphs[i] = properties.wgDefault;
+  HRESULT hr = ScriptGetFontProperties(cached_hdc_, &run->script_cache,
+                                       &properties);
+  if (hr == S_OK) {
+    // Finally, initialize |glyph_count|, |glyphs| and |visible_attributes| on
+    // the run (since they may not have been set yet).
+    run->glyph_count = run_length;
+    memset(run->visible_attributes.get(), 0,
+           run->glyph_count * sizeof(SCRIPT_VISATTR));
+    for (int i = 0; i < run->glyph_count; ++i) {
+      run->glyphs[i] = IsWhitespace(run_text[i]) ? properties.wgBlank :
+                                                   properties.wgDefault;
+    }
+  }
 
   // TODO(msw): Don't use SCRIPT_UNDEFINED. Apparently Uniscribe can
   //            crash on certain surrogate pairs with SCRIPT_UNDEFINED.

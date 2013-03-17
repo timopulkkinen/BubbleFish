@@ -4,12 +4,13 @@
 
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 
+#include "base/lazy_instance.h"
 #include "base/values.h"
-#include "chrome/common/extensions/api/experimental_identity.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -17,11 +18,15 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
+#include "chrome/common/extensions/api/experimental_identity.h"
+#include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace extensions {
 
@@ -33,11 +38,11 @@ const char kNoGrant[] = "OAuth2 not granted or revoked.";
 const char kUserRejected[] = "The user did not approve access.";
 const char kUserNotSignedIn[] = "The user is not signed in.";
 const char kInvalidRedirect[] = "Did not redirect to the right URL.";
-}
+}  // namespace identity_constants
 
-namespace GetAuthToken = extensions::api::experimental_identity::GetAuthToken;
-namespace LaunchWebAuthFlow =
-    extensions::api::experimental_identity::LaunchWebAuthFlow;
+namespace GetAuthToken = api::experimental_identity::GetAuthToken;
+namespace LaunchWebAuthFlow = api::experimental_identity::LaunchWebAuthFlow;
+namespace identity = api::experimental_identity;
 
 IdentityGetAuthTokenFunction::IdentityGetAuthTokenFunction()
     : interactive_(false) {}
@@ -49,7 +54,7 @@ bool IdentityGetAuthTokenFunction::RunImpl() {
   if (params->details.get() && params->details->interactive.get())
     interactive_ = *params->details->interactive;
 
-  const Extension::OAuth2Info& oauth2_info = GetExtension()->oauth2_info();
+  const OAuth2Info& oauth2_info = OAuth2Info::GetOAuth2Info(GetExtension());
 
   // Check that the necessary information is present in the manfist.
   if (oauth2_info.client_id.empty()) {
@@ -102,8 +107,7 @@ void IdentityGetAuthTokenFunction::OnIssueAdviceSuccess(
   // Existing grant was revoked and we used NO_FORCE, so we got info back
   // instead.
   if (interactive_) {
-    install_ui_.reset(
-        chrome::CreateExtensionInstallPromptWithBrowser(GetCurrentBrowser()));
+    install_ui_.reset(new ExtensionInstallPrompt(GetAssociatedWebContents()));
     ShowOAuthApprovalDialog(issue_advice);
   } else {
     error_ = identity_constants::kNoGrant;
@@ -173,24 +177,7 @@ void IdentityGetAuthTokenFunction::ShowLoginPopup() {
 
   LoginUIService* login_ui_service =
       LoginUIServiceFactory::GetForProfile(profile());
-  LoginUIService::LoginUI* login_ui = login_ui_service->current_login_ui();
-  if (login_ui) {
-    login_ui->FocusUI();
-  } else {
-    Browser* browser =
-        new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile()));
-    // TODO(munjal): Change the source from SOURCE_NTP_LINK to something else
-    // once we have added a new source for extension API.
-    GURL signin_url(SyncPromoUI::GetSyncPromoURL(GURL(),
-                                                 SyncPromoUI::SOURCE_NTP_LINK,
-                                                 true));
-    chrome::NavigateParams params(browser,
-                                  signin_url,
-                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
-    params.disposition = CURRENT_TAB;
-    params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-    chrome::Navigate(&params);
-  }
+  login_ui_service->ShowLoginPopup();
 }
 
 void IdentityGetAuthTokenFunction::ShowOAuthApprovalDialog(
@@ -200,7 +187,7 @@ void IdentityGetAuthTokenFunction::ShowOAuthApprovalDialog(
 
 OAuth2MintTokenFlow* IdentityGetAuthTokenFunction::CreateMintTokenFlow(
     OAuth2MintTokenFlow::Mode mode) {
-  const Extension::OAuth2Info& oauth2_info = GetExtension()->oauth2_info();
+  const OAuth2Info& oauth2_info = OAuth2Info::GetOAuth2Info(GetExtension());
   TokenService* token_service = TokenServiceFactory::GetForProfile(profile());
   return new OAuth2MintTokenFlow(
       profile()->GetRequestContext(),
@@ -225,15 +212,33 @@ bool IdentityLaunchWebAuthFlowFunction::RunImpl() {
   scoped_ptr<LaunchWebAuthFlow::Params> params(
       LaunchWebAuthFlow::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
+  const identity::WebAuthFlowDetails& details = params->details;
 
-  GURL auth_url(params->details.url);
+  GURL auth_url(details.url);
   WebAuthFlow::Mode mode =
-      params->details.interactive.get() && *params->details.interactive ?
+      details.interactive && *details.interactive ?
       WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
 
+  // The bounds attributes are optional, but using 0 when they're not available
+  // does the right thing.
+  gfx::Rect initial_bounds;
+  if (details.width)
+    initial_bounds.set_width(*details.width);
+  if (details.height)
+    initial_bounds.set_height(*details.height);
+  if (details.left)
+    initial_bounds.set_x(*details.left);
+  if (details.top)
+    initial_bounds.set_y(*details.top);
+
   AddRef();  // Balanced in OnAuthFlowSuccess/Failure.
+
+  Browser* current_browser = this->GetCurrentBrowser();
+  chrome::HostDesktopType host_desktop_type = current_browser ?
+      current_browser->host_desktop_type() : chrome::GetActiveDesktop();
   auth_flow_.reset(new WebAuthFlow(
-      this, profile(), GetExtension()->id(), auth_url, mode));
+      this, profile(), GetExtension()->id(), auth_url, mode, initial_bounds,
+      host_desktop_type));
   auth_flow_->Start();
   return true;
 }
@@ -249,6 +254,21 @@ void IdentityLaunchWebAuthFlowFunction::OnAuthFlowFailure() {
   error_ = identity_constants::kInvalidRedirect;
   SendResponse(false);
   Release();  // Balanced in RunImpl.
+}
+
+IdentityAPI::IdentityAPI(Profile* profile) {
+  (new OAuth2ManifestHandler)->Register();
+}
+
+IdentityAPI::~IdentityAPI() {
+}
+
+static base::LazyInstance<ProfileKeyedAPIFactory<IdentityAPI> >
+    g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+ProfileKeyedAPIFactory<IdentityAPI>* IdentityAPI::GetFactoryInstance() {
+  return &g_factory.Get();
 }
 
 }  // namespace extensions

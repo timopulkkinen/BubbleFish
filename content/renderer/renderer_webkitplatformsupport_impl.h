@@ -10,23 +10,22 @@
 #include "base/platform_file.h"
 #include "content/common/content_export.h"
 #include "content/common/webkitplatformsupport_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
-
-class RendererClipboardClient;
-class WebSharedWorkerRepositoryImpl;
-class WebFileSystemImpl;
-
-namespace content {
-class GamepadSharedMemoryReader;
-class Hyphenator;
-}
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerRepository.h"
 
 namespace webkit_glue {
 class WebClipboardImpl;
 }
 
+namespace content {
+class GamepadSharedMemoryReader;
+class RendererClipboardClient;
+class WebFileSystemImpl;
+class WebSharedWorkerRepositoryImpl;
+
 class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
-    : public content::WebKitPlatformSupportImpl {
+    : public WebKitPlatformSupportImpl {
  public:
   RendererWebKitPlatformSupportImpl();
   virtual ~RendererWebKitPlatformSupportImpl();
@@ -34,64 +33,78 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   void set_plugin_refresh_allowed(bool plugin_refresh_allowed) {
     plugin_refresh_allowed_ = plugin_refresh_allowed;
   }
-  // WebKitPlatformSupport methods:
-  virtual WebKit::WebClipboard* clipboard() OVERRIDE;
-  virtual WebKit::WebMimeRegistry* mimeRegistry() OVERRIDE;
-  virtual WebKit::WebFileUtilities* fileUtilities() OVERRIDE;
-  virtual WebKit::WebSandboxSupport* sandboxSupport() OVERRIDE;
-  virtual WebKit::WebCookieJar* cookieJar() OVERRIDE;
-  virtual bool sandboxEnabled() OVERRIDE;
+  // Platform methods:
+  virtual WebKit::WebClipboard* clipboard();
+  virtual WebKit::WebMimeRegistry* mimeRegistry();
+  virtual WebKit::WebFileUtilities* fileUtilities();
+  virtual WebKit::WebSandboxSupport* sandboxSupport();
+  virtual WebKit::WebCookieJar* cookieJar();
+  virtual WebKit::WebHyphenator* hyphenator();
+  virtual bool sandboxEnabled();
   virtual unsigned long long visitedLinkHash(
-      const char* canonicalURL, size_t length) OVERRIDE;
-  virtual bool isLinkVisited(unsigned long long linkHash) OVERRIDE;
-  virtual WebKit::WebMessagePortChannel* createMessagePortChannel() OVERRIDE;
-  virtual void prefetchHostName(const WebKit::WebString&) OVERRIDE;
+      const char* canonicalURL, size_t length);
+  virtual bool isLinkVisited(unsigned long long linkHash);
+  virtual WebKit::WebMessagePortChannel* createMessagePortChannel();
+  virtual void prefetchHostName(const WebKit::WebString&);
   virtual void cacheMetadata(
-      const WebKit::WebURL&, double, const char*, size_t) OVERRIDE;
-  virtual WebKit::WebString defaultLocale() OVERRIDE;
-  virtual void suddenTerminationChanged(bool enabled) OVERRIDE;
+      const WebKit::WebURL&, double, const char*, size_t);
+  virtual WebKit::WebString defaultLocale();
+  virtual void suddenTerminationChanged(bool enabled);
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
-      const WebKit::WebString& path, unsigned quota) OVERRIDE;
-  virtual WebKit::WebKitPlatformSupport::FileHandle databaseOpenFile(
-      const WebKit::WebString& vfs_file_name, int desired_flags) OVERRIDE;
+      const WebKit::WebString& path, unsigned quota);
+  virtual WebKit::Platform::FileHandle databaseOpenFile(
+      const WebKit::WebString& vfs_file_name, int desired_flags);
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
-                                 bool sync_dir) OVERRIDE;
+                                 bool sync_dir);
   virtual long databaseGetFileAttributes(
-      const WebKit::WebString& vfs_file_name) OVERRIDE;
+      const WebKit::WebString& vfs_file_name);
   virtual long long databaseGetFileSize(
-      const WebKit::WebString& vfs_file_name) OVERRIDE;
+      const WebKit::WebString& vfs_file_name);
   virtual long long databaseGetSpaceAvailableForOrigin(
-      const WebKit::WebString& origin_identifier) OVERRIDE;
+      const WebKit::WebString& origin_identifier);
   virtual WebKit::WebString signedPublicKeyAndChallengeString(
       unsigned key_size_index,
       const WebKit::WebString& challenge,
-      const WebKit::WebURL& url) OVERRIDE;
-  virtual void screenColorProfile(WebKit::WebVector<char>* to_profile) OVERRIDE;
-  virtual WebKit::WebIDBFactory* idbFactory() OVERRIDE;
-  virtual WebKit::WebFileSystem* fileSystem() OVERRIDE;
-  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository() OVERRIDE;
+      const WebKit::WebURL& url);
+  virtual void screenColorProfile(WebKit::WebVector<char>* to_profile);
+  virtual WebKit::WebIDBFactory* idbFactory();
+  virtual WebKit::WebFileSystem* fileSystem();
+  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual bool canAccelerate2dCanvas();
-  virtual double audioHardwareSampleRate() OVERRIDE;
-  virtual size_t audioHardwareBufferSize() OVERRIDE;
+  virtual bool isThreadedCompositingEnabled();
+  virtual double audioHardwareSampleRate();
+  virtual size_t audioHardwareBufferSize();
+
+  // TODO(crogers): remove deprecated API as soon as WebKit calls new API.
   virtual WebKit::WebAudioDevice* createAudioDevice(
       size_t buffer_size, unsigned channels, double sample_rate,
-      WebKit::WebAudioDevice::RenderCallback* callback) OVERRIDE;
-  virtual WebKit::WebBlobRegistry* blobRegistry() OVERRIDE;
-  virtual void sampleGamepads(WebKit::WebGamepads&) OVERRIDE;
-  virtual WebKit::WebString userAgent(const WebKit::WebURL& url) OVERRIDE;
+      WebKit::WebAudioDevice::RenderCallback* callback);
+  // TODO(crogers): remove deprecated API as soon as WebKit calls new API.
+  virtual WebKit::WebAudioDevice* createAudioDevice(
+      size_t buffer_size, unsigned input_channels, unsigned channels,
+      double sample_rate, WebKit::WebAudioDevice::RenderCallback* callback);
+
+  virtual WebKit::WebAudioDevice* createAudioDevice(
+      size_t buffer_size, unsigned input_channels, unsigned channels,
+      double sample_rate, WebKit::WebAudioDevice::RenderCallback* callback,
+      const WebKit::WebString& input_device_id);
+
+  virtual WebKit::WebBlobRegistry* blobRegistry();
+  virtual void sampleGamepads(WebKit::WebGamepads&);
+  virtual WebKit::WebString userAgent(const WebKit::WebURL& url);
   virtual void GetPlugins(bool refresh,
                           std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
-  virtual WebKit::WebPeerConnection00Handler* createPeerConnection00Handler(
-      WebKit::WebPeerConnection00HandlerClient* client) OVERRIDE;
   virtual WebKit::WebRTCPeerConnectionHandler* createRTCPeerConnectionHandler(
-      WebKit::WebRTCPeerConnectionHandlerClient* client) OVERRIDE;
+      WebKit::WebRTCPeerConnectionHandlerClient* client);
   virtual WebKit::WebMediaStreamCenter* createMediaStreamCenter(
-      WebKit::WebMediaStreamCenterClient* client) OVERRIDE;
-  virtual bool canHyphenate(const WebKit::WebString& locale) OVERRIDE;
+      WebKit::WebMediaStreamCenterClient* client);
+  virtual bool canHyphenate(const WebKit::WebString& locale);
   virtual size_t computeLastHyphenLocation(const char16* characters,
       size_t length,
       size_t before_index,
-      const WebKit::WebString& locale) OVERRIDE;
+      const WebKit::WebString& locale);
+  virtual bool processMemorySizesInBytes(
+      size_t* private_bytes, size_t* shared_bytes);
 
   // Disables the WebSandboxSupport implementation for testing.
   // Tests that do not set up a full sandbox environment should call
@@ -101,6 +114,9 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   //
   // Returns the previous |enable| value.
   static bool SetSandboxEnabledForTesting(bool enable);
+
+  // Set WebGamepads to return when sampleGamepads() is invoked.
+  static void SetMockGamepadsForTesting(const WebKit::WebGamepads& pads);
 
  protected:
   virtual GpuChannelHostFactory* GetGpuChannelHostFactory() OVERRIDE;
@@ -119,6 +135,9 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
 
   class SandboxSupport;
   scoped_ptr<SandboxSupport> sandbox_support_;
+
+  class Hyphenator;
+  scoped_ptr<Hyphenator> hyphenator_;
 
   // This counter keeps track of the number of times sudden termination is
   // enabled or disabled. It starts at 0 (enabled) and for every disable
@@ -139,9 +158,9 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
 
   scoped_ptr<WebKit::WebBlobRegistry> blob_registry_;
 
-  scoped_ptr<content::GamepadSharedMemoryReader> gamepad_shared_memory_reader_;
-
-  scoped_ptr<content::Hyphenator> hyphenator_;
+  scoped_ptr<GamepadSharedMemoryReader> gamepad_shared_memory_reader_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_RENDERER_WEBKITPLATFORMSUPPORT_IMPL_H_

@@ -11,10 +11,37 @@
 
 namespace views {
 
+namespace {
+
 const int kCheckboxLabelSpacing = 4;
+
+const int kFocusBorderWidth = 1;
+
+}  // namespace
 
 // static
 const char Checkbox::kViewClassName[] = "views/Checkbox";
+
+////////////////////////////////////////////////////////////////////////////////
+// CheckboxNativeThemeBorder, public:
+
+gfx::Insets CheckboxNativeThemeBorder::GetInsets() const {
+  if (use_custom_insets_)
+    return custom_insets_;
+
+  const gfx::Insets& insets = TextButtonNativeThemeBorder::GetInsets();
+  return gfx::Insets(insets.top(), 0, insets.bottom(), 0);
+}
+
+void CheckboxNativeThemeBorder::SetCustomInsets(
+    const gfx::Insets& custom_insets) {
+ custom_insets_ = custom_insets;
+ use_custom_insets_ = true;
+}
+
+void CheckboxNativeThemeBorder::UseDefaultInsets() {
+  use_custom_insets_ = false;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Checkbox, public:
@@ -22,7 +49,7 @@ const char Checkbox::kViewClassName[] = "views/Checkbox";
 Checkbox::Checkbox(const string16& label)
     : TextButtonBase(NULL, label),
       checked_(false) {
-  set_border(new TextButtonNativeThemeBorder(this));
+  set_border(new CheckboxNativeThemeBorder(this));
   set_focusable(true);
 }
 
@@ -38,9 +65,8 @@ gfx::Size Checkbox::GetPreferredSize() {
   gfx::Size prefsize(TextButtonBase::GetPreferredSize());
   ui::NativeTheme::ExtraParams extra;
   ui::NativeTheme::State state = GetThemeState(&extra);
-  gfx::Size size = ui::NativeTheme::instance()->GetPartSize(GetThemePart(),
-                                                            state, extra);
-  prefsize.Enlarge(size.width(), 0);
+  gfx::Size size = GetNativeTheme()->GetPartSize(GetThemePart(), state, extra);
+  prefsize.Enlarge(size.width() + kCheckboxLabelSpacing + kFocusBorderWidth, 0);
   prefsize.set_height(std::max(prefsize.height(), size.height()));
 
   if (max_width_ > 0)
@@ -64,7 +90,10 @@ void Checkbox::OnPaintFocusBorder(gfx::Canvas* canvas) {
     gfx::Rect bounds(GetTextBounds());
     // Increate the bounding box by one on each side so that that focus border
     // does not draw on top of the letters.
-    bounds.Inset(-1, -1, -1, -1);
+    bounds.Inset(-kFocusBorderWidth,
+                 -kFocusBorderWidth,
+                 -kFocusBorderWidth,
+                 -kFocusBorderWidth);
     canvas->DrawFocusRect(bounds);
   }
 }
@@ -82,8 +111,7 @@ ui::NativeTheme::Part Checkbox::GetThemePart() const {
 gfx::Rect Checkbox::GetThemePaintRect() const {
   ui::NativeTheme::ExtraParams extra;
   ui::NativeTheme::State state = GetThemeState(&extra);
-  gfx::Size size(ui::NativeTheme::instance()->GetPartSize(GetThemePart(), state,
-                                                          extra));
+  gfx::Size size(GetNativeTheme()->GetPartSize(GetThemePart(), state, extra));
   gfx::Insets insets = GetInsets();
   int y_offset = (height() - size.height()) / 2;
   gfx::Rect rect(insets.left(), y_offset, size.width(), size.height());
@@ -100,8 +128,7 @@ gfx::Rect Checkbox::GetTextBounds() const {
   gfx::Rect bounds(TextButtonBase::GetTextBounds());
   ui::NativeTheme::ExtraParams extra;
   ui::NativeTheme::State state = GetThemeState(&extra);
-  gfx::Size size(ui::NativeTheme::instance()->GetPartSize(GetThemePart(), state,
-                                                          extra));
+  gfx::Size size(GetNativeTheme()->GetPartSize(GetThemePart(), state, extra));
   bounds.Offset(size.width() + kCheckboxLabelSpacing, 0);
   return bounds;
 }

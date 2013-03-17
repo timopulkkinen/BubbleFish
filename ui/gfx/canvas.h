@@ -11,15 +11,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "skia/ext/platform_canvas.h"
+#include "skia/ext/refptr.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/shadow_value.h"
-
-class SkBitmap;
-
-namespace ui {
-class Transform;
-}
 
 namespace gfx {
 
@@ -27,6 +22,7 @@ class Rect;
 class Font;
 class Point;
 class Size;
+class Transform;
 
 // Canvas is a SkCanvas wrapper that provides a number of methods for
 // common operations used throughout an application built using ui/gfx.
@@ -53,28 +49,25 @@ class UI_EXPORT Canvas {
   enum {
     TEXT_ALIGN_LEFT = 1 << 0,
     TEXT_ALIGN_CENTER = 1 << 1,
-    TEXT_ALIGN_RIGHT = 1 << 2 ,
-    TEXT_VALIGN_TOP = 1 << 3,
-    TEXT_VALIGN_MIDDLE = 1 << 4,
-    TEXT_VALIGN_BOTTOM = 1 << 5,
+    TEXT_ALIGN_RIGHT = 1 << 2,
 
     // Specifies the text consists of multiple lines.
-    MULTI_LINE = 1 << 6,
+    MULTI_LINE = 1 << 3,
 
     // By default DrawStringInt does not process the prefix ('&') character
     // specially. That is, the string "&foo" is rendered as "&foo". When
     // rendering text from a resource that uses the prefix character for
     // mnemonics, the prefix should be processed and can be rendered as an
     // underline (SHOW_PREFIX), or not rendered at all (HIDE_PREFIX).
-    SHOW_PREFIX = 1 << 7,
-    HIDE_PREFIX = 1 << 8,
+    SHOW_PREFIX = 1 << 4,
+    HIDE_PREFIX = 1 << 5,
 
     // Prevent ellipsizing
-    NO_ELLIPSIS = 1 << 9,
+    NO_ELLIPSIS = 1 << 6,
 
     // Specifies if words can be split by new lines.
     // This only works with MULTI_LINE.
-    CHARACTER_BREAK = 1 << 10,
+    CHARACTER_BREAK = 1 << 7,
 
     // Instructs DrawStringInt() to render the text using RTL directionality.
     // In most cases, passing this flag is not necessary because information
@@ -84,16 +77,16 @@ class UI_EXPORT Canvas {
     // platforms (for example, an English Windows XP with no RTL fonts
     // installed) don't support these characters. Thus, this flag should be
     // used to render text using RTL directionality when the locale is LTR.
-    FORCE_RTL_DIRECTIONALITY = 1 << 11,
+    FORCE_RTL_DIRECTIONALITY = 1 << 8,
 
     // Similar to FORCE_RTL_DIRECTIONALITY, but left-to-right.
     // See FORCE_RTL_DIRECTIONALITY for details.
-    FORCE_LTR_DIRECTIONALITY = 1 << 12,
+    FORCE_LTR_DIRECTIONALITY = 1 << 9,
 
     // Instructs DrawStringInt() to not use subpixel rendering.  This is useful
     // when rendering text onto a fully- or partially-transparent background
     // that will later be blended with another image.
-    NO_SUBPIXEL_RENDERING = 1 << 13,
+    NO_SUBPIXEL_RENDERING = 1 << 10,
   };
 
   // Creates an empty canvas with scale factor of 1x.
@@ -185,7 +178,7 @@ class UI_EXPORT Canvas {
 
   // Restores the drawing state after a call to Save*(). It is an error to
   // call Restore() more times than Save*().
-  void Restore() ;
+  void Restore();
 
   // Adds |rect| to the current clip. Returns true if the resulting clip is
   // non-empty.
@@ -199,7 +192,7 @@ class UI_EXPORT Canvas {
   // |bounds| parameter, and returns true if it is non empty.
   bool GetClipBounds(gfx::Rect* bounds);
 
-  void Translate(const gfx::Point& point);
+  void Translate(const gfx::Vector2d& offset);
 
   void Scale(int x_scale, int y_scale);
 
@@ -261,6 +254,10 @@ class UI_EXPORT Canvas {
   // Parameters are specified relative to current canvas scale not in pixels.
   // Thus, x is 2 pixels if canvas scale = 2 & |x| = 1.
   void DrawImageInt(const gfx::ImageSkia&, int x, int y);
+
+  // Helper for DrawImageInt(..., paint) that constructs a temporary paint and
+  // calls paint.setAlpha(alpha).
+  void DrawImageInt(const gfx::ImageSkia&, int x, int y, uint8 alpha);
 
   // Draws an image with the origin at the specified location, using the
   // specified paint. The upper left corner of the bitmap is rendered at the
@@ -358,7 +355,7 @@ class UI_EXPORT Canvas {
   void EndPlatformPaint();
 
   // Apply transformation on the canvas.
-  void Transform(const ui::Transform& transform);
+  void Transform(const gfx::Transform& transform);
 
   // Draws the given string with the beginning and/or the end using a fade
   // gradient. When truncating the head
@@ -400,7 +397,7 @@ class UI_EXPORT Canvas {
   // Canvas::Scale() does not affect |scale_factor_|.
   ui::ScaleFactor scale_factor_;
 
-  scoped_ptr<skia::PlatformCanvas> owned_canvas_;
+  skia::RefPtr<skia::PlatformCanvas> owned_canvas_;
   SkCanvas* canvas_;
 
   DISALLOW_COPY_AND_ASSIGN(Canvas);

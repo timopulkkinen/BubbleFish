@@ -18,10 +18,15 @@ LauncherItemController::LauncherItemController(
     : type_(type),
       app_id_(app_id),
       launcher_id_(0),
-      launcher_controller_(launcher_controller) {
+      launcher_controller_(launcher_controller),
+      locked_(0) {
 }
 
 LauncherItemController::~LauncherItemController() {
+}
+
+const std::string& LauncherItemController::app_id() const {
+  return app_id_;
 }
 
 string16 LauncherItemController::GetAppTitle() const {
@@ -36,11 +41,12 @@ string16 LauncherItemController::GetAppTitle() const {
 ash::LauncherItemType LauncherItemController::GetLauncherItemType() const {
   switch (type_) {
     case LauncherItemController::TYPE_SHORTCUT:
+    case LauncherItemController::TYPE_WINDOWED_APP:
       return ash::TYPE_APP_SHORTCUT;
     case LauncherItemController::TYPE_APP:
+    case LauncherItemController::TYPE_EXTENSION_PANEL:
       return ash::TYPE_PLATFORM_APP;
     case LauncherItemController::TYPE_APP_PANEL:
-    case LauncherItemController::TYPE_EXTENSION_PANEL:
       return ash::TYPE_APP_PANEL;
     case LauncherItemController::TYPE_TABBED:
       return ash::TYPE_TABBED;

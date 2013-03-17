@@ -9,13 +9,12 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/text_input_client_mac.h"
 #include "content/common/text_input_client_messages.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/rect.h"
 
-using content::BrowserMessageFilter;
+namespace content {
 
 TextInputClientMessageFilter::TextInputClientMessageFilter(int child_id)
     : BrowserMessageFilter(),
@@ -66,3 +65,5 @@ void TextInputClientMessageFilter::OnGotStringFromRange(
     string = nil;
   service->SetSubstringAndSignal(string);
 }
+
+}  // namespace content

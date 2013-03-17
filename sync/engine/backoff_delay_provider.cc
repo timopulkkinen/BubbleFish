@@ -17,14 +17,14 @@ namespace syncer {
 BackoffDelayProvider* BackoffDelayProvider::FromDefaults() {
   return new BackoffDelayProvider(
       TimeDelta::FromSeconds(kInitialBackoffRetrySeconds),
-      TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds));
+      TimeDelta::FromSeconds(kInitialBackoffImmediateRetrySeconds));
 }
 
 // static
 BackoffDelayProvider* BackoffDelayProvider::WithShortInitialRetryOverride() {
   return new BackoffDelayProvider(
       TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds),
-      TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds));
+      TimeDelta::FromSeconds(kInitialBackoffImmediateRetrySeconds));
 }
 
 BackoffDelayProvider::BackoffDelayProvider(
@@ -61,8 +61,32 @@ TimeDelta BackoffDelayProvider::GetDelay(const base::TimeDelta& last_delay) {
 
 TimeDelta BackoffDelayProvider::GetInitialDelay(
     const sessions::ModelNeutralState& state) const {
+  // NETWORK_CONNECTION_UNAVAILABLE implies we did not even manage to hit the
+  // wire; the failure occurred locally. Note that if commit_result is *not*
+  // UNSET, this implies download_updates_result succeeded.  Also note that
+  // last_get_key_result is coupled to last_download_updates_result in that
+  // they are part of the same GetUpdates request, so we only check if
+  // the download request is CONNECTION_UNAVAILABLE.
+  //
+  // TODO(tim): Should we treat NETWORK_IO_ERROR similarly? It's different
+  // from CONNECTION_UNAVAILABLE in that a request may well have succeeded
+  // in contacting the server (e.g we got a 200 back), but we failed
+  // trying to parse the response (actual content length != HTTP response
+  // header content length value).  For now since we're considering
+  // merging this code to branches and I haven't audited all the
+  // NETWORK_IO_ERROR cases carefully, I'm going to target the fix
+  // very tightly (see bug chromium-os:35073). DIRECTORY_LOOKUP_FAILED is
+  // another example of something that shouldn't backoff, though the
+  // scheduler should probably be handling these cases differently. See
+  // the TODO(rlarocque) in ScheduleNextSync.
+  if (state.commit_result == NETWORK_CONNECTION_UNAVAILABLE ||
+      state.last_download_updates_result == NETWORK_CONNECTION_UNAVAILABLE) {
+    return short_initial_backoff_;
+  }
+
   if (SyncerErrorIsError(state.last_get_key_result))
     return default_initial_backoff_;
+
   // Note: If we received a MIGRATION_DONE on download updates, then commit
   // should not have taken place.  Moreover, if we receive a MIGRATION_DONE
   // on commit, it means that download updates succeeded.  Therefore, we only
@@ -70,6 +94,18 @@ TimeDelta BackoffDelayProvider::GetInitialDelay(
   // and not if there were any more serious errors requiring the long retry.
   if (state.last_download_updates_result == SERVER_RETURN_MIGRATION_DONE ||
       state.commit_result == SERVER_RETURN_MIGRATION_DONE) {
+    return short_initial_backoff_;
+  }
+
+  // When the server tells us we have a conflict, then we should download the
+  // latest updates so we can see the conflict ourselves, resolve it locally,
+  // then try again to commit.  Running another sync cycle will do all these
+  // things.  There's no need to back off, we can do this immediately.
+  //
+  // TODO(sync): We shouldn't need to handle this in BackoffDelayProvider.
+  // There should be a way to deal with protocol errors before we get to this
+  // point.
+  if (state.commit_result == SERVER_RETURN_CONFLICT) {
     return short_initial_backoff_;
   }
 

@@ -6,7 +6,7 @@
 #define CONTENT_BROWSER_RENDERER_HOST_FILE_UTILITIES_MESSAGE_FILTER_H_
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "ipc/ipc_platform_file.h"
 
@@ -18,14 +18,16 @@ namespace IPC {
 class Message;
 }
 
-class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
+namespace content {
+
+class FileUtilitiesMessageFilter : public BrowserMessageFilter {
  public:
   explicit FileUtilitiesMessageFilter(int process_id);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+      BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
  private:
@@ -34,10 +36,10 @@ class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
   typedef void (*FileInfoWriteFunc)(IPC::Message* reply_msg,
                                     const base::PlatformFileInfo& file_info);
 
-  void OnGetFileInfo(const FilePath& path,
+  void OnGetFileInfo(const base::FilePath& path,
                      base::PlatformFileInfo* result,
                      base::PlatformFileError* status);
-  void OnOpenFile(const FilePath& path,
+  void OnOpenFile(const base::FilePath& path,
                   int mode,
                   IPC::PlatformFileForTransit* result);
 
@@ -46,5 +48,7 @@ class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FileUtilitiesMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_FILE_UTILITIES_MESSAGE_FILTER_H_

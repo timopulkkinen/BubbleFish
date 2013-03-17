@@ -7,7 +7,6 @@
 
 #include <deque>
 #include <string>
-#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
@@ -28,9 +27,7 @@
 #include "content/common/android/surface_texture_peer.h"
 #endif
 
-class GpuChannelManager;
 struct GPUCreateCommandBufferConfig;
-class GpuWatchdog;
 
 namespace base {
 class MessageLoopProxy;
@@ -38,7 +35,10 @@ class WaitableEvent;
 }
 
 namespace gpu {
-struct RefCountedCounter;
+class PreemptionFlag;
+namespace gles2 {
+class ImageManager;
+}
 }
 
 #if defined(OS_ANDROID)
@@ -46,6 +46,12 @@ namespace content {
 class StreamTextureManagerAndroid;
 }
 #endif
+
+namespace content {
+class GpuChannelManager;
+struct GpuRenderingStats;
+class GpuWatchdog;
+class SyncPointMessageFilter;
 
 // Encapsulates an IPC channel between the GPU process and one renderer
 // process. On the renderer side there's a corresponding GpuChannelHost.
@@ -85,8 +91,10 @@ class GpuChannel : public IPC::Listener,
   // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
-  virtual void AppendAllCommandBufferStubs(
-      std::vector<GpuCommandBufferStubBase*>& stubs);
+  // Requeue the message that is currently being processed to the beginning of
+  // the queue. Used when the processing of a message gets aborted because of
+  // unscheduling conditions.
+  void RequeueMessage();
 
   // This is called when a command buffer transitions from the unscheduled
   // state to the scheduled state, which potentially means the channel
@@ -94,11 +102,22 @@ class GpuChannel : public IPC::Listener,
   // deferred IPC messaged are handled.
   void OnScheduled();
 
+  // This is called when a command buffer transitions between scheduled and
+  // descheduled states. When any stub is descheduled, we stop preempting
+  // other channels.
+  void StubSchedulingChanged(bool scheduled);
+
   void CreateViewCommandBuffer(
       const gfx::GLSurfaceHandle& window,
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params,
       int32* route_id);
+
+  void CreateImage(
+      gfx::PluginWindowHandle window,
+      int32 image_id,
+      gfx::Size* size);
+  void DeleteImage(int32 image_id);
 
   gfx::GLShareGroup* share_group() const { return share_group_.get(); }
 
@@ -116,17 +135,15 @@ class GpuChannel : public IPC::Listener,
   void AddRoute(int32 route_id, IPC::Listener* listener);
   void RemoveRoute(int32 route_id);
 
-  gpu::RefCountedCounter* MessagesPendingCount() {
-    return unprocessed_messages_.get();
-  }
+  gpu::PreemptionFlag* GetPreemptionFlag();
 
-  // If preempt_by_counter->count is non-zero, any stub on this channel
+  // If |preemption_flag->IsSet()|, any stub on this channel
   // should stop issuing GL commands. Setting this to NULL stops deferral.
-  void SetPreemptByCounter(
-      scoped_refptr<gpu::RefCountedCounter> preempt_by_counter);
+  void SetPreemptByFlag(
+      scoped_refptr<gpu::PreemptionFlag> preemption_flag);
 
 #if defined(OS_ANDROID)
-  content::StreamTextureManagerAndroid* stream_texture_manager() {
+  StreamTextureManagerAndroid* stream_texture_manager() {
     return stream_texture_manager_.get();
   }
 #endif
@@ -136,6 +153,7 @@ class GpuChannel : public IPC::Listener,
 
  private:
   friend class base::RefCountedThreadSafe<GpuChannel>;
+  friend class SyncPointMessageFilter;
 
   void OnDestroy();
 
@@ -147,8 +165,8 @@ class GpuChannel : public IPC::Listener,
   void OnCreateOffscreenCommandBuffer(
       const gfx::Size& size,
       const GPUCreateCommandBufferConfig& init_params,
-      IPC::Message* reply_message);
-  void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
+      int32* route_id);
+  void OnDestroyCommandBuffer(int32 route_id);
 
 #if defined(OS_ANDROID)
   // Register the StreamTextureProxy class with the gpu process so that all
@@ -159,13 +177,16 @@ class GpuChannel : public IPC::Listener,
   // Create a java surface texture object and send it to the renderer process
   // through binder thread.
   void OnEstablishStreamTexture(
-      int32 stream_id, content::SurfaceTexturePeer::SurfaceTextureTarget type,
+      int32 stream_id, SurfaceTexturePeer::SurfaceTextureTarget type,
       int32 primary_id, int32 secondary_id);
 #endif
 
   // Collect rendering stats.
   void OnCollectRenderingStatsForSurface(
-      int32 surface_id, IPC::Message* reply_message);
+      int32 surface_id, GpuRenderingStats* stats);
+
+  // Decrement the count of unhandled IPC messages and defer preemption.
+  void MessageProcessed();
 
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they
@@ -174,13 +195,15 @@ class GpuChannel : public IPC::Listener,
 
   scoped_ptr<IPC::SyncChannel> channel_;
 
-  // Number of routed messages for pending processing on a stub.
-  scoped_refptr<gpu::RefCountedCounter> unprocessed_messages_;
+  uint64 messages_processed_;
+
+  // Whether the processing of IPCs on this channel is stalled and we should
+  // preempt other GpuChannels.
+  scoped_refptr<gpu::PreemptionFlag> preempting_flag_;
 
   // If non-NULL, all stubs on this channel should stop processing GL
-  // commands (via their GpuScheduler) when preempt_by_counter_->count
-  // is non-zero.
-  scoped_refptr<gpu::RefCountedCounter> preempt_by_counter_;
+  // commands (via their GpuScheduler) when preempted_flag_->IsSet()
+  scoped_refptr<gpu::PreemptionFlag> preempted_flag_;
 
   std::deque<IPC::Message*> deferred_messages_;
 
@@ -198,6 +221,7 @@ class GpuChannel : public IPC::Listener,
   scoped_refptr<gfx::GLShareGroup> share_group_;
 
   scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
+  scoped_refptr<gpu::gles2::ImageManager> image_manager_;
 
 #if defined(ENABLE_GPU)
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;
@@ -210,14 +234,22 @@ class GpuChannel : public IPC::Listener,
   bool software_;
   bool handle_messages_scheduled_;
   bool processed_get_state_fast_;
+  IPC::Message* currently_processing_message_;
 
 #if defined(OS_ANDROID)
-  scoped_ptr<content::StreamTextureManagerAndroid> stream_texture_manager_;
+  scoped_ptr<StreamTextureManagerAndroid> stream_texture_manager_;
 #endif
 
   base::WeakPtrFactory<GpuChannel> weak_factory_;
 
+  scoped_refptr<SyncPointMessageFilter> filter_;
+  scoped_refptr<base::MessageLoopProxy> io_message_loop_;
+
+  size_t num_stubs_descheduled_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuChannel);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_GPU_CHANNEL_H_

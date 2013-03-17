@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_cycler/page_cycler.h"
@@ -40,7 +40,7 @@ class PageCyclerBrowserTest : public content::NotificationObserver,
 
   // Initialize file paths within a temporary directory; this should be
   // empty and nonexistent.
-  virtual void InitFilePaths(FilePath temp_path) {
+  virtual void InitFilePaths(base::FilePath temp_path) {
     temp_path_ = temp_path;
     urls_file_ = temp_path.AppendASCII("urls_file");
     errors_file_ = temp_path.AppendASCII("errors");
@@ -59,9 +59,9 @@ class PageCyclerBrowserTest : public content::NotificationObserver,
     page_cycler_->set_stats_file(stats_file());
   }
 
-  void InitPageCycler(FilePath urls_file,
-                      FilePath errors_file,
-                      FilePath stats_file) {
+  void InitPageCycler(base::FilePath urls_file,
+                      base::FilePath errors_file,
+                      base::FilePath stats_file) {
     page_cycler_ = new PageCycler(browser(), urls_file);
     page_cycler_->set_errors_file(errors_file);
     page_cycler_->set_stats_file(stats_file);
@@ -109,7 +109,7 @@ class PageCyclerBrowserTest : public content::NotificationObserver,
   // content::NotificationObserver.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_BROWSER_CLOSED:
         MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
@@ -120,16 +120,16 @@ class PageCyclerBrowserTest : public content::NotificationObserver,
     }
   }
 
-  FilePath urls_file() { return urls_file_; }
-  FilePath errors_file() { return errors_file_; }
-  FilePath stats_file() { return stats_file_; }
+  base::FilePath urls_file() { return urls_file_; }
+  base::FilePath errors_file() { return errors_file_; }
+  base::FilePath stats_file() { return stats_file_; }
   PageCycler* page_cycler() { return page_cycler_; }
 
  protected:
-  FilePath temp_path_;
-  FilePath urls_file_;
-  FilePath errors_file_;
-  FilePath stats_file_;
+  base::FilePath temp_path_;
+  base::FilePath urls_file_;
+  base::FilePath errors_file_;
+  base::FilePath stats_file_;
   PageCycler* page_cycler_;
   content::NotificationRegistrar registrar_;
 };
@@ -141,16 +141,16 @@ class PageCyclerCachedBrowserTest : public PageCyclerBrowserTest {
   // For a cached test, we use the provided user data directory from the test
   // directory.
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    FilePath test_dir;
+    base::FilePath test_dir;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
     test_dir = test_dir.AppendASCII("page_cycler");
 
-    FilePath source_data_dir = test_dir.AppendASCII("cached_data_dir");
+    base::FilePath source_data_dir = test_dir.AppendASCII("cached_data_dir");
     CHECK(file_util::PathExists(source_data_dir));
 
     CHECK(user_data_dir_.CreateUniqueTempDir());
 
-    FilePath dest_data_dir =
+    base::FilePath dest_data_dir =
         user_data_dir_.path().AppendASCII("cached_data_dir");
     CHECK(!file_util::PathExists(dest_data_dir));
 
@@ -166,7 +166,7 @@ class PageCyclerCachedBrowserTest : public PageCyclerBrowserTest {
 
   // Initialize the file paths to use the UserDataDir's urls file, instead
   // of one to be written.
-  virtual void InitFilePaths(FilePath temp_path) OVERRIDE {
+  virtual void InitFilePaths(base::FilePath temp_path) OVERRIDE {
     urls_file_ = user_data_dir_.path().AppendASCII("cached_data_dir")
                                       .AppendASCII("urls");
     errors_file_ = temp_path.AppendASCII("errors");
@@ -179,13 +179,13 @@ class PageCyclerCachedBrowserTest : public PageCyclerBrowserTest {
 
  private:
   // The directory storing the copy of the UserDataDir.
-  ScopedTempDir user_data_dir_;
+  base::ScopedTempDir user_data_dir_;
 };
 
 // Sanity check; iterate through a series of URLs and make sure there are no
 // errors.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, BasicTest) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
@@ -212,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, UnvisitableURL) {
   const size_t kNumErrors = 1;
   const char kFakeURL[] = "http://www.pleasenoonehavethisurlanytimeinthenext"
                           "century.com/gibberish";
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
@@ -247,7 +247,7 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, UnvisitableURL) {
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, InvalidURL) {
   const char kBadURL[] = "notarealurl";
 
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
@@ -279,7 +279,7 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, InvalidURL) {
 
 // Test that PageCycler will remove a Chrome Error URL prior to running.
 IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, ChromeErrorURL) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
@@ -311,20 +311,23 @@ IN_PROC_BROWSER_TEST_F(PageCyclerBrowserTest, ChromeErrorURL) {
   ASSERT_FALSE(errors[0].compare(expected_error));
 }
 
-// Test that PageCycler will visit all the urls from a cache directory
-// successfully while in playback mode.
-#if defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS)
 // TODO(rdevlin.cronin): Perhaps page cycler isn't completely implemented on
 // ChromeOS?
-#else
+
+// Test that PageCycler will visit all the urls from a cache directory
+// successfully while in playback mode.
+#if defined(OS_LINUX)
+// Bug 159026: Fails on Linux in both debug and release mode.
+#define MAYBE_PlaybackMode DISABLED_PlaybackMode
+#elif (defined(OS_WIN) || defined(OS_MACOSX) ) && !defined(NDEBUG)
 // Bug 131333: This test fails on a XP debug bot since Build 17609.
-#if (defined(OS_WIN) || defined(OS_MACOSX)) && !defined(NDEBUG)
 #define MAYBE_PlaybackMode DISABLED_PlaybackMode
 #else
 #define MAYBE_PlaybackMode PlaybackMode
 #endif
 IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
@@ -338,6 +341,11 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
   ASSERT_TRUE(file_util::PathExists(stats_file()));
   ASSERT_FALSE(file_util::PathExists(errors_file()));
 }
+#endif  // !defined(OS_CHROMEOS)
+
+#if !defined(OS_CHROMEOS)
+// TODO(rdevlin.cronin): Perhaps page cycler isn't completely implemented on
+// ChromeOS?
 
 // Test that PageCycler will have a cache miss if a URL is missing from the
 // cache directory while in playback mode.
@@ -350,22 +358,21 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_PlaybackMode) {
 IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_URLNotInCache) {
   const char kCacheMissURL[] = "http://www.images.google.com/";
 
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
   RegisterForNotifications();
   InitFilePaths(temp.path());
 
-  std::string urls_string;
-  ASSERT_TRUE(file_util::ReadFileToString(urls_file(),
-                                          &urls_string));
+  // Only use a single URL that is not in cache. That's sufficient for the test
+  // scenario, and makes things faster than needlessly cycling through all the
+  // other URLs.
 
-  urls_string.append("\n").append(kCacheMissURL);
-  FilePath new_urls_file = temp.path().AppendASCII("urls");
+  base::FilePath new_urls_file = temp.path().AppendASCII("urls");
   ASSERT_FALSE(file_util::PathExists(new_urls_file));
 
-  ASSERT_TRUE(file_util::WriteFile(new_urls_file, urls_string.c_str(),
-                                   urls_string.size()));
+  ASSERT_TRUE(file_util::WriteFile(new_urls_file, kCacheMissURL,
+                                   sizeof(kCacheMissURL)));
 
   InitPageCycler(new_urls_file, errors_file(), stats_file());
   page_cycler()->Run();
@@ -384,4 +391,4 @@ IN_PROC_BROWSER_TEST_F(PageCyclerCachedBrowserTest, MAYBE_URLNotInCache) {
 
   ASSERT_FALSE(errors[0].compare(expected_error));
 }
-#endif
+#endif  // !defined(OS_CHROMEOS)

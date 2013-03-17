@@ -10,6 +10,7 @@
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill_property_changed_observer.h"
+#include "chromeos/dbus/shill_service_client_stub.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_proxy.h"
@@ -100,6 +101,21 @@ class ShillServiceClientImpl : public ShillServiceClient {
                                                              error_callback);
   }
 
+
+  virtual void ClearProperties(const dbus::ObjectPath& service_path,
+                               const std::vector<std::string>& names,
+                               const ListValueCallback& callback,
+                               const ErrorCallback& error_callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamServiceInterface,
+                                 shill::kClearPropertiesFunction);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendArrayOfStrings(names);
+    GetHelper(service_path)->CallListValueMethodWithErrorCallback(
+        &method_call,
+        callback,
+        error_callback);
+  }
+
   virtual void Connect(const dbus::ObjectPath& service_path,
                        const base::Closure& callback,
                        const ErrorCallback& error_callback) OVERRIDE {
@@ -143,6 +159,18 @@ class ShillServiceClientImpl : public ShillServiceClient {
                                                              error_callback);
   }
 
+  virtual void CompleteCellularActivation(
+      const dbus::ObjectPath& service_path,
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) OVERRIDE {
+    dbus::MethodCall method_call(flimflam::kFlimflamServiceInterface,
+                                 shill::kCompleteCellularActivationFunction);
+    dbus::MessageWriter writer(&method_call);
+    GetHelper(service_path)->CallVoidMethodWithErrorCallback(&method_call,
+                                                             callback,
+                                                             error_callback);
+  }
+
   virtual bool CallActivateCellularModemAndBlock(
       const dbus::ObjectPath& service_path,
       const std::string& carrier) OVERRIDE {
@@ -151,6 +179,10 @@ class ShillServiceClientImpl : public ShillServiceClient {
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(carrier);
     return GetHelper(service_path)->CallVoidMethodAndBlock(&method_call);
+  }
+
+  virtual ShillServiceClient::TestInterface* GetTestInterface() OVERRIDE {
+    return NULL;
   }
 
  private:
@@ -178,92 +210,6 @@ class ShillServiceClientImpl : public ShillServiceClient {
   DISALLOW_COPY_AND_ASSIGN(ShillServiceClientImpl);
 };
 
-// A stub implementation of ShillServiceClient.
-class ShillServiceClientStubImpl : public ShillServiceClient {
- public:
-  ShillServiceClientStubImpl() : weak_ptr_factory_(this) {}
-
-  virtual ~ShillServiceClientStubImpl() {}
-
-  ///////////////////////////////////
-  // ShillServiceClient overrides.
-  virtual void AddPropertyChangedObserver(
-      const dbus::ObjectPath& service_path,
-      ShillPropertyChangedObserver* observer) OVERRIDE {}
-
-  virtual void RemovePropertyChangedObserver(
-      const dbus::ObjectPath& service_path,
-      ShillPropertyChangedObserver* observer) OVERRIDE {}
-
-  virtual void GetProperties(const dbus::ObjectPath& service_path,
-                             const DictionaryValueCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ShillServiceClientStubImpl::PassEmptyDictionaryValue,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   callback));
-  }
-
-  virtual void SetProperty(const dbus::ObjectPath& service_path,
-                           const std::string& name,
-                           const base::Value& value,
-                           const base::Closure& callback,
-                           const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual void ClearProperty(const dbus::ObjectPath& service_path,
-                             const std::string& name,
-                             const base::Closure& callback,
-                             const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual void Connect(const dbus::ObjectPath& service_path,
-                       const base::Closure& callback,
-                       const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual void Disconnect(const dbus::ObjectPath& service_path,
-                          const base::Closure& callback,
-                          const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual void Remove(const dbus::ObjectPath& service_path,
-                      const base::Closure& callback,
-                      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual void ActivateCellularModem(
-      const dbus::ObjectPath& service_path,
-      const std::string& carrier,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-
-  virtual bool CallActivateCellularModemAndBlock(
-      const dbus::ObjectPath& service_path,
-      const std::string& carrier) OVERRIDE {
-    return true;
-  }
-
- private:
-  void PassEmptyDictionaryValue(const DictionaryValueCallback& callback) const {
-    base::DictionaryValue dictionary;
-    callback.Run(DBUS_METHOD_CALL_SUCCESS, dictionary);
-  }
-
-  // Note: This should remain the last member so it'll be destroyed and
-  // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<ShillServiceClientStubImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShillServiceClientStubImpl);
-};
-
 }  // namespace
 
 ShillServiceClient::ShillServiceClient() {}
@@ -277,7 +223,7 @@ ShillServiceClient* ShillServiceClient::Create(
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
     return new ShillServiceClientImpl(bus);
   DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
-  return new ShillServiceClientStubImpl();
+  return new ShillServiceClientStub();
 }
 
 }  // namespace chromeos

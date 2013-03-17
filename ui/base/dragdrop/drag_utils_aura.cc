@@ -6,22 +6,19 @@
 
 #include "base/logging.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/base/dragdrop/os_exchange_data_provider_aura.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/vector2d.h"
 
 namespace drag_utils {
 
 void SetDragImageOnDataObject(const gfx::ImageSkia& image,
                               const gfx::Size& size,
-                              const gfx::Point& cursor_offset,
+                              const gfx::Vector2d& cursor_offset,
                               ui::OSExchangeData* data_object) {
-  ui::OSExchangeDataProviderAura& provider(
-      static_cast<ui::OSExchangeDataProviderAura&>(data_object->provider()));
-  provider.set_drag_image(image);
-  provider.set_drag_image_offset(cursor_offset);
+
+  data_object->provider().SetDragImage(image, cursor_offset);
 }
 
 }  // namespace drag_utils

@@ -5,25 +5,43 @@
 #ifndef CHROME_BROWSER_CHROMEOS_DISPLAY_DISPLAY_PREFERENCES_H_
 #define CHROME_BROWSER_CHROMEOS_DISPLAY_DISPLAY_PREFERENCES_H_
 
-class PrefService;
+#include "base/basictypes.h"
+
+class PrefRegistrySimple;
+
 namespace gfx {
 class Display;
+class Insets;
 }
 
 namespace chromeos {
 
-// Registers the prefs associated with display settings.
-void RegisterDisplayPrefs(PrefService* pref_service);
+// Registers the prefs associated with display settings and stored
+// into Local State.
+void RegisterDisplayLocalStatePrefs(PrefRegistrySimple* registry);
 
-// Sets or updates the display layout data to the specified |display| and
-// |pref_service|.
-void SetDisplayLayoutPref(PrefService* pref_service,
-                          const gfx::Display& display,
-                          int layout,
-                          int offset);
+// Stores the current displays prefereces (both primary display id and
+// dispay layout).
+void StoreDisplayPrefs();
 
-// Checks the current display settings values and notifies them to the system.
-void NotifyDisplayPrefChanged(PrefService* pref_service);
+// Sets the display layout for the current displays and store them.
+void SetAndStoreDisplayLayoutPref(int layout, int offset);
+
+// Stores the display layout for given display pairs.
+void StoreDisplayLayoutPref(int64 id1, int64 id2, int layout, int offset);
+
+// Sets and stores the primary display device by its ID, and notifies
+// the update to the system.
+void SetAndStorePrimaryDisplayIDPref(int64 display_id);
+
+// Sets and saves the overscan preference for the specified |display| to Local
+// State.
+void SetAndStoreDisplayOverscan(const gfx::Display& display,
+                                const gfx::Insets& insets);
+
+// Checks the current display settings in Local State and notifies them to the
+// system.
+void NotifyDisplayLocalStatePrefChanged();
 
 }  // namespace chromeos
 

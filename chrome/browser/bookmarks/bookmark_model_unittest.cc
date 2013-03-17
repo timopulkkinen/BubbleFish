@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/bookmarks/bookmark_model.h"
+
 #include <set>
 #include <string>
 
@@ -13,27 +15,21 @@
 #include "base/hash_tables.h"
 #include "base/path_service.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/model_test_utils.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "ui/base/models/tree_node_model.h"
@@ -49,7 +45,7 @@ namespace {
 static struct {
   const std::string input_title;
   const std::string expected_title;
-} whitespace_test_cases[] = {
+} url_whitespace_test_cases[] = {
   {"foobar", "foobar"},
   // Newlines.
   {"foo\nbar", "foo bar"},
@@ -71,6 +67,35 @@ static struct {
   {"  foo\tbar\n", "foo bar"},
   {"\t foo \t  bar  \t", "foo bar"},
   {"\n foo\r\n\tbar\n \t", "foo bar"},
+};
+
+// Test cases used to test the removal of extra whitespace when adding
+// a new folder/bookmark or updating a title of a folder/bookmark.
+static struct {
+  const std::string input_title;
+  const std::string expected_title;
+} title_whitespace_test_cases[] = {
+  {"foobar", "foobar"},
+  // Newlines.
+  {"foo\nbar", "foo bar"},
+  {"foo\n\nbar", "foo  bar"},
+  {"foo\n\n\nbar", "foo   bar"},
+  {"foo\r\nbar", "foo  bar"},
+  {"foo\r\n\r\nbar", "foo    bar"},
+  {"\nfoo\nbar\n", " foo bar "},
+  // Spaces.
+  {"foo  bar", "foo  bar"},
+  {" foo bar ", " foo bar "},
+  {"  foo  bar  ", "  foo  bar  "},
+  // Tabs.
+  {"\tfoo\tbar\t", " foo bar "},
+  {"\tfoo bar\t", " foo bar "},
+  // Mixed cases.
+  {"\tfoo\nbar\t", " foo bar "},
+  {"\tfoo\r\nbar\t", " foo  bar "},
+  {"  foo\tbar\n", "  foo bar "},
+  {"\t foo \t  bar  \t", "  foo    bar   "},
+  {"\n foo\r\n\tbar\n \t", "  foo   bar   "},
 };
 
 // Helper to get a mutable bookmark node.
@@ -125,7 +150,7 @@ class BookmarkModelTest : public testing::Test,
     ClearCounts();
   }
 
-  void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {
     // We never load from the db, so that this should never get invoked.
     NOTREACHED();
   }
@@ -286,16 +311,17 @@ TEST_F(BookmarkModelTest, AddURLWithUnicodeTitle) {
 }
 
 TEST_F(BookmarkModelTest, AddURLWithWhitespaceTitle) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(url_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_.bookmark_bar_node();
-    const string16 title(ASCIIToUTF16(whitespace_test_cases[i].input_title));
+    const string16 title(
+        ASCIIToUTF16(url_whitespace_test_cases[i].input_title));
     const GURL url("http://foo.com");
 
     const BookmarkNode* new_node = model_.AddURL(root, i, title, url);
 
     int size = i + 1;
     EXPECT_EQ(size, root->child_count());
-    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+    EXPECT_EQ(ASCIIToUTF16(url_whitespace_test_cases[i].expected_title),
               new_node->GetTitle());
     EXPECT_EQ(BookmarkNode::URL, new_node->type());
   }
@@ -345,15 +371,16 @@ TEST_F(BookmarkModelTest, AddFolder) {
 }
 
 TEST_F(BookmarkModelTest, AddFolderWithWhitespaceTitle) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(title_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_.bookmark_bar_node();
-    const string16 title(ASCIIToUTF16(whitespace_test_cases[i].input_title));
+    const string16 title(
+        ASCIIToUTF16(title_whitespace_test_cases[i].input_title));
 
     const BookmarkNode* new_node = model_.AddFolder(root, i, title);
 
     int size = i + 1;
     EXPECT_EQ(size, root->child_count());
-    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+    EXPECT_EQ(ASCIIToUTF16(title_whitespace_test_cases[i].expected_title),
               new_node->GetTitle());
     EXPECT_EQ(BookmarkNode::FOLDER, new_node->type());
   }
@@ -414,15 +441,15 @@ TEST_F(BookmarkModelTest, SetTitle) {
 }
 
 TEST_F(BookmarkModelTest, SetTitleWithWhitespace) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(title_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_.bookmark_bar_node();
     string16 title(ASCIIToUTF16("dummy"));
     const GURL url("http://foo.com");
     const BookmarkNode* node = model_.AddURL(root, 0, title, url);
 
-    title = ASCIIToUTF16(whitespace_test_cases[i].input_title);
+    title = ASCIIToUTF16(title_whitespace_test_cases[i].input_title);
     model_.SetTitle(node, title);
-    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+    EXPECT_EQ(ASCIIToUTF16(title_whitespace_test_cases[i].expected_title),
               node->GetTitle());
   }
 }
@@ -440,6 +467,21 @@ TEST_F(BookmarkModelTest, SetURL) {
   AssertObserverCount(0, 0, 0, 1, 0);
   observer_details_.ExpectEquals(node, NULL, -1, -1);
   EXPECT_EQ(url, node->url());
+}
+
+TEST_F(BookmarkModelTest, SetDateAdded) {
+  const BookmarkNode* root = model_.bookmark_bar_node();
+  const string16 title(ASCIIToUTF16("foo"));
+  GURL url("http://foo.com");
+  const BookmarkNode* node = model_.AddURL(root, 0, title, url);
+
+  ClearCounts();
+
+  base::Time new_time = base::Time::Now() + base::TimeDelta::FromMinutes(20);
+  model_.SetDateAdded(node, new_time);
+  AssertObserverCount(0, 0, 0, 0, 0);
+  EXPECT_EQ(new_time, node->date_added());
+  EXPECT_EQ(new_time, model_.bookmark_bar_node()->date_folder_modified());
 }
 
 TEST_F(BookmarkModelTest, Move) {
@@ -467,6 +509,22 @@ TEST_F(BookmarkModelTest, Move) {
   observer_details_.ExpectEquals(root, NULL, 0, -1);
   EXPECT_TRUE(model_.GetMostRecentlyAddedNodeForURL(url) == NULL);
   EXPECT_EQ(0, root->child_count());
+}
+
+TEST_F(BookmarkModelTest, NonMovingMoveCall) {
+  const BookmarkNode* root = model_.bookmark_bar_node();
+  const string16 title(ASCIIToUTF16("foo"));
+  const GURL url("http://foo.com");
+  const base::Time old_date(base::Time::Now() - base::TimeDelta::FromDays(1));
+
+  const BookmarkNode* node = model_.AddURL(root, 0, title, url);
+  model_.SetDateFolderModified(root, old_date);
+
+  // Since |node| is already at the index 0 of |root|, this is no-op.
+  model_.Move(node, root, 0);
+
+  // Check that the modification date is kept untouched.
+  EXPECT_EQ(old_date, root->date_folder_modified());
 }
 
 TEST_F(BookmarkModelTest, Copy) {
@@ -658,80 +716,6 @@ TEST_F(BookmarkModelTest, HasBookmarks) {
   model_.AddURL(model_.bookmark_bar_node(), 0, ASCIIToUTF16("bar"), url);
 
   EXPECT_TRUE(model_.HasBookmarks());
-}
-
-// content::NotificationObserver implementation used in verifying we've received
-// the NOTIFY_URLS_STARRED method correctly.
-class StarredListener : public content::NotificationObserver {
- public:
-  StarredListener() : notification_count_(0), details_(false) {
-    registrar_.Add(this, chrome::NOTIFICATION_URLS_STARRED,
-                   content::Source<Profile>(NULL));
-  }
-
-  // NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
-    if (type == chrome::NOTIFICATION_URLS_STARRED) {
-      notification_count_++;
-      details_ =
-          *(content::Details<history::URLsStarredDetails>(details).ptr());
-    }
-  }
-
-  // Number of times NOTIFY_URLS_STARRED has been observed.
-  int notification_count_;
-
-  // Details from the last NOTIFY_URLS_STARRED.
-  history::URLsStarredDetails details_;
-
- private:
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(StarredListener);
-};
-
-// Makes sure NOTIFY_URLS_STARRED is sent correctly.
-TEST_F(BookmarkModelTest, NotifyURLsStarred) {
-  StarredListener listener;
-  const GURL url("http://foo.com/0");
-  const BookmarkNode* n1 = model_.AddURL(
-      model_.bookmark_bar_node(), 0, ASCIIToUTF16("blah"), url);
-
-  // Starred notification should be sent.
-  EXPECT_EQ(1, listener.notification_count_);
-  ASSERT_TRUE(listener.details_.starred);
-  ASSERT_EQ(1U, listener.details_.changed_urls.size());
-  EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
-  listener.notification_count_ = 0;
-  listener.details_.changed_urls.clear();
-
-  // Add another bookmark for the same URL. This should not send any
-  // notification.
-  const BookmarkNode* n2 = model_.AddURL(
-      model_.bookmark_bar_node(), 1, ASCIIToUTF16("blah"), url);
-
-  EXPECT_EQ(0, listener.notification_count_);
-
-  // Remove n2.
-  model_.Remove(n2->parent(), 1);
-  n2 = NULL;
-
-  // Shouldn't have received any notification as n1 still exists with the same
-  // URL.
-  EXPECT_EQ(0, listener.notification_count_);
-
-  EXPECT_TRUE(model_.GetMostRecentlyAddedNodeForURL(url) == n1);
-
-  // Remove n1.
-  model_.Remove(n1->parent(), 0);
-
-  // Now we should get the notification.
-  EXPECT_EQ(1, listener.notification_count_);
-  ASSERT_FALSE(listener.details_.starred);
-  ASSERT_EQ(1U, listener.details_.changed_urls.size());
-  EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
 }
 
 // See comment in PopulateNodeFromString.
@@ -1046,6 +1030,30 @@ TEST_F(BookmarkModelTest, MultipleExtensiveChangesObserver) {
   model_.EndExtensiveChanges();
   EXPECT_FALSE(model_.IsDoingExtensiveChanges());
   AssertExtensiveChangesObserverCount(1, 1);
+}
+
+TEST(BookmarkNodeTest, NodeMetaInfo) {
+  GURL url;
+  BookmarkNode node(url);
+  EXPECT_TRUE(node.meta_info_str().empty());
+
+  EXPECT_TRUE(node.SetMetaInfo("key1", "value1"));
+  std::string out_value;
+  EXPECT_TRUE(node.GetMetaInfo("key1", &out_value));
+  EXPECT_EQ("value1", out_value);
+  EXPECT_FALSE(node.SetMetaInfo("key1", "value1"));
+
+  EXPECT_FALSE(node.GetMetaInfo("key2", &out_value));
+  EXPECT_TRUE(node.SetMetaInfo("key2", "value2"));
+  EXPECT_TRUE(node.GetMetaInfo("key2", &out_value));
+  EXPECT_EQ("value2", out_value);
+
+  EXPECT_TRUE(node.DeleteMetaInfo("key1"));
+  EXPECT_TRUE(node.DeleteMetaInfo("key2"));
+  EXPECT_FALSE(node.DeleteMetaInfo("key3"));
+  EXPECT_FALSE(node.GetMetaInfo("key1", &out_value));
+  EXPECT_FALSE(node.GetMetaInfo("key2", &out_value));
+  EXPECT_TRUE(node.meta_info_str().empty());
 }
 
 }  // namespace

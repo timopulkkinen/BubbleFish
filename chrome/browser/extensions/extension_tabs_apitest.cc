@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -32,16 +32,24 @@
 #define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
 
-#if defined(USE_AURA) || defined(OS_MACOSX)
+#if defined(USE_AURA) || defined(OS_MACOSX) || defined(OS_WIN)
 // Maximizing/fullscreen popup window doesn't work on aura's managed mode.
 // See bug crbug.com/116305.
 // Mac: http://crbug.com/103912
+// Failing on Win7: http://crbug.com/176683
 #define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
 #define MAYBE_UpdateWindowShowState UpdateWindowShowState
-#endif  // defined(USE_AURA) || defined(OS_MACOSX)
+#endif  // defined(USE_AURA) || defined(OS_MACOSX) || defined(OS_WIN)
 
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
+#define MAYBE_FocusWindowDoesNotExitFullscreen \
+  DISABLED_FocusWindowDoesNotExitFullscreen
+#else
 #define MAYBE_FocusWindowDoesNotExitFullscreen FocusWindowDoesNotExitFullscreen
+#endif
+
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
 #define MAYBE_UpdateWindowResize UpdateWindowResize
 #endif  // defined(OS_LINUX) && !defined(USE_AURA)
@@ -80,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Tabs2) {
 }
 
 // crbug.com/149924
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_TabDuplicate) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabDuplicate) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "duplicate.html")) << message_;
 }
 
@@ -121,10 +129,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabOpener) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "opener.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabCurrentWindow) {
-  ASSERT_TRUE(RunExtensionTest("tabs/current_window")) << message_;
-}
-
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabGetCurrent) {
   ASSERT_TRUE(RunExtensionTest("tabs/get_current")) << message_;
 }
@@ -143,7 +147,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabReload) {
   ASSERT_TRUE(RunExtensionTest("tabs/reload")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleTabJpeg) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_CaptureVisibleTabJpeg) {
   host_resolver()->AddRule("a.com", "127.0.0.1");
   host_resolver()->AddRule("b.com", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
@@ -186,6 +190,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleDisabled) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsOnUpdated) {
   ASSERT_TRUE(RunExtensionTest("tabs/on_updated")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsNoPermissions) {
+  ASSERT_TRUE(RunExtensionTest("tabs/no_permissions")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,

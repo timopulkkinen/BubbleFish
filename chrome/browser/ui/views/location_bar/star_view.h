@@ -10,10 +10,6 @@
 
 class CommandUpdater;
 
-namespace views {
-class MouseEvent;
-}
-
 class StarView : public views::ImageView,
                  public TouchableLocationBarView {
  public:
@@ -33,12 +29,18 @@ class StarView : public views::ImageView,
                               string16* tooltip) const OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+
+  // ui::EventHandler overrides:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // The CommandUpdater for the Browser object that owns the location bar.
   CommandUpdater* command_updater_;
+
+  // This is used to check if the bookmark bubble was showing during the mouse
+  // pressed event. If this is true then the mouse released event is ignored to
+  // prevent the bubble from reshowing.
+  bool suppress_mouse_released_action_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(StarView);
 };

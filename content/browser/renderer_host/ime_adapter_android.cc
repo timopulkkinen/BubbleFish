@@ -20,9 +20,8 @@
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
-using content::NativeWebKeyboardEvent;
-using content::RenderWidgetHostImpl;
 
+namespace content {
 namespace {
 
 // Maps a java KeyEvent into a NativeWebKeyboardEvent.
@@ -51,8 +50,6 @@ NativeWebKeyboardEvent NativeWebKeyboardEventFromKeyEvent(
 
 }  // anonymous namespace
 
-namespace content {
-
 bool RegisterImeAdapter(JNIEnv* env) {
   if (!RegisterNativesImpl(env))
     return false;
@@ -66,6 +63,8 @@ bool RegisterImeAdapter(JNIEnv* env) {
                                            WebKit::WebInputEvent::ControlKey,
                                            WebKit::WebInputEvent::CapsLockOn,
                                            WebKit::WebInputEvent::NumLockOn);
+  // TODO(miguelg): remove date time related enums after
+  // https://bugs.webkit.org/show_bug.cgi?id=100935.
   Java_ImeAdapter_initializeTextInputTypes(
       env,
       ui::TEXT_INPUT_TYPE_NONE,
@@ -154,6 +153,16 @@ void ImeAdapterAndroid::SetComposingText(JNIEnv* env, jobject, jstring text,
   rwhi->ImeSetComposition(text16, underlines, new_cursor_pos, new_cursor_pos);
 }
 
+void ImeAdapterAndroid::ImeBatchStateChanged(JNIEnv* env,
+                                             jobject,
+                                             jboolean is_begin) {
+  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(
+      rwhva_->GetRenderWidgetHost());
+  if (!rwhi)
+    return;
+
+  rwhi->Send(new ViewMsg_ImeBatchStateChanged(rwhi->GetRoutingID(), is_begin));
+}
 
 void ImeAdapterAndroid::CommitText(JNIEnv* env, jobject, jstring text) {
   RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(
@@ -171,25 +180,6 @@ void ImeAdapterAndroid::AttachImeAdapter(JNIEnv* env, jobject java_object) {
 
 void ImeAdapterAndroid::CancelComposition() {
   Java_ImeAdapter_cancelComposition(AttachCurrentThread(), java_ime_adapter_);
-}
-
-void ImeAdapterAndroid::ReplaceText(JNIEnv* env, jobject, jstring text) {
-  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(
-      rwhva_->GetRenderWidgetHost());
-  if (!rwhi)
-    return;
-
-  string16 text16 = ConvertJavaStringToUTF16(env, text);
-  rwhi->Send(new ViewMsg_ReplaceAll(rwhi->GetRoutingID(), text16));
-}
-
-void ImeAdapterAndroid::ClearFocus(JNIEnv* env, jobject) {
-  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(
-      rwhva_->GetRenderWidgetHost());
-  if (!rwhi)
-    return;
-
-  rwhi->Send(new ViewMsg_ClearFocusedNode(rwhi->GetRoutingID()));
 }
 
 void ImeAdapterAndroid::SetEditableSelectionOffsets(JNIEnv*, jobject,

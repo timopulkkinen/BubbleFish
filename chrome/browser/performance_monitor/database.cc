@@ -4,14 +4,14 @@
 
 #include "chrome/browser/performance_monitor/database.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/performance_monitor/key_builder.h"
@@ -84,7 +84,7 @@ base::Time Database::SystemClock::GetTime() {
 }
 
 // Static
-scoped_ptr<Database> Database::Create(FilePath path) {
+scoped_ptr<Database> Database::Create(base::FilePath path) {
   CHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (path.empty()) {
     CHECK(PathService::Get(chrome::DIR_USER_DATA, &path));
@@ -346,13 +346,13 @@ bool Database::GetRecentStatsForActivityAndMetric(const std::string& activity,
   return status.ok();
 }
 
-Database::MetricVector Database::GetStatsForActivityAndMetric(
+scoped_ptr<Database::MetricVector> Database::GetStatsForActivityAndMetric(
     const std::string& activity,
     MetricType metric_type,
     const base::Time& start,
     const base::Time& end) {
   CHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  MetricVector results;
+  scoped_ptr<MetricVector> results(new MetricVector());
   std::string start_key =
       key_builder_->CreateMetricKey(start, metric_type, activity);
   std::string end_key =
@@ -374,11 +374,11 @@ Database::MetricVector Database::GetStatsForActivityAndMetric(
                    << ". Erasing metric from database.";
         continue;
       }
-      results.push_back(metric);
+      results->push_back(metric);
     }
   }
   metric_db_->Write(write_options_, &invalid_entries);
-  return results;
+  return results.Pass();
 }
 
 Database::MetricVectorMap Database::GetStatsForMetricByActivity(
@@ -416,7 +416,7 @@ Database::MetricVectorMap Database::GetStatsForMetricByActivity(
   return results;
 }
 
-Database::Database(const FilePath& path)
+Database::Database(const base::FilePath& path)
     : key_builder_(new KeyBuilder()),
       path_(path),
       read_options_(leveldb::ReadOptions()),

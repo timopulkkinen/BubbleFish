@@ -7,6 +7,7 @@
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -14,6 +15,23 @@
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+
+
+ExtensionInfoBarDelegate::~ExtensionInfoBarDelegate() {
+  if (observer_)
+    observer_->OnDelegateDeleted();
+}
+
+// static
+void ExtensionInfoBarDelegate::Create(InfoBarService* infobar_service,
+                                      Browser* browser,
+                                      const extensions::Extension* extension,
+                                      const GURL& url,
+                                      int height) {
+  infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
+      new ExtensionInfoBarDelegate(browser, infobar_service, extension, url,
+                                   height)));
+}
 
 ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(
     Browser* browser,
@@ -27,7 +45,7 @@ ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(
           extension_(extension),
           closing_(false) {
   ExtensionProcessManager* manager =
-      browser->profile()->GetExtensionProcessManager();
+      extensions::ExtensionSystem::Get(browser->profile())->process_manager();
   extension_host_.reset(manager->CreateInfobarHost(url, browser));
   extension_host_->SetAssociatedWebContents(infobar_service->GetWebContents());
 
@@ -51,11 +69,6 @@ ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(
   height_ = std::min(2 * default_height, height_);
   if (height_ == 0)
     height_ = default_height;
-}
-
-ExtensionInfoBarDelegate::~ExtensionInfoBarDelegate() {
-  if (observer_)
-    observer_->OnDelegateDeleted();
 }
 
 bool ExtensionInfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {

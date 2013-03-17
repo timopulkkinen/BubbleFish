@@ -22,7 +22,6 @@ class ContentSettingsObserver;
 class ExternalHostBindings;
 class SkBitmap;
 class TranslateHelper;
-struct ThumbnailScore;
 class WebViewColorOverlay;
 class WebViewAnimatingOverlay;
 
@@ -39,10 +38,6 @@ namespace safe_browsing {
 class PhishingClassifierDelegate;
 }
 
-namespace webkit_glue {
-class MultiResolutionImageResourceFetcher;
-}
-
 // This class holds the Chrome specific parts of RenderView, and has the same
 // lifetime.
 class ChromeRenderViewObserver : public content::RenderViewObserver,
@@ -53,8 +48,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
       content::RenderView* render_view,
       ContentSettingsObserver* content_settings,
       ChromeRenderProcessObserver* chrome_render_process_observer,
-      extensions::Dispatcher* extension_dispatcher,
-      TranslateHelper* translate_helper);
+      extensions::Dispatcher* extension_dispatcher);
   virtual ~ChromeRenderViewObserver();
 
  private:
@@ -71,12 +65,11 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidStartLoading() OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
-  virtual void DidChangeIcon(WebKit::WebFrame* frame,
-                             WebKit::WebIconURL::Type icon_type) OVERRIDE;
   virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) OVERRIDE;
+  virtual void DidHandleGestureEvent(
+      const WebKit::WebGestureEvent& event) OVERRIDE;
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowDatabase(WebKit::WebFrame* frame,
@@ -114,6 +107,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
       const WebKit::WebDocument& document) OVERRIDE;
   virtual bool allowMutationEvents(const WebKit::WebDocument&,
                                    bool default_value) OVERRIDE;
+  virtual bool allowPushState(const WebKit::WebDocument&) OVERRIDE;
   virtual void didNotAllowPlugins(WebKit::WebFrame* frame) OVERRIDE;
   virtual void didNotAllowScript(WebKit::WebFrame* frame) OVERRIDE;
   virtual bool allowDisplayingInsecureContent(
@@ -137,7 +131,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
                                        const std::string& origin,
                                        const std::string& target);
   void OnJavaScriptStressTestControl(int cmd, int param);
-  void OnDownloadFavicon(int id, const GURL& image_url, int image_size);
   void OnSetIsPrerendering(bool is_prerendering);
   void OnSetAllowDisplayingInsecureContent(bool allow);
   void OnSetAllowRunningInsecureContent(bool allow);
@@ -157,39 +150,11 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // maximum amount kMaxIndexChars will be placed into the given buffer.
   void CaptureText(WebKit::WebFrame* frame, string16* contents);
 
-  void CaptureThumbnail();
-
-  // Creates a thumbnail of |frame|'s contents resized to (|w|, |h|)
-  // and puts that in |thumbnail|. Thumbnail metadata goes in |score|.
-  bool CaptureFrameThumbnail(WebKit::WebView* view, int w, int h,
-                             SkBitmap* thumbnail,
-                             ThumbnailScore* score);
-
   // Capture a snapshot of a view.  This is used to allow an extension
   // to get a snapshot of a tab using chrome.tabs.captureVisibleTab().
   bool CaptureSnapshot(WebKit::WebView* view, SkBitmap* snapshot);
 
   ExternalHostBindings* GetExternalHostBindings();
-
-  // This callback is triggered when DownloadFavicon completes, either
-  // succesfully or with a failure. See DownloadFavicon for more
-  // details.
-  void DidDownloadFavicon(
-      int requested_size,
-      webkit_glue::MultiResolutionImageResourceFetcher* fetcher,
-      const std::vector<SkBitmap>& images);
-
-  // Requests to download a favicon image. When done, the RenderView
-  // is notified by way of DidDownloadFavicon. Returns true if the
-  // request was successfully started, false otherwise. id is used to
-  // uniquely identify the request and passed back to the
-  // DidDownloadFavicon method. If the image has multiple frames, the
-  // frame whose size is image_size is returned. If the image doesn't
-  // have a frame at the specified size, the first is returned.
-  bool DownloadFavicon(int id, const GURL& image_url, int image_size);
-
-  // Decodes a data: URL image or returns an empty image in case of failure.
-  SkBitmap ImageFromDataUrl(const GURL&) const;
 
   // Determines if a host is in the strict security host set.
   bool IsStrictSecurityHost(const std::string& host);
@@ -227,18 +192,8 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // External host exposed through automation controller.
   scoped_ptr<ExternalHostBindings> external_host_bindings_;
 
-  typedef std::vector<
-      linked_ptr<webkit_glue::MultiResolutionImageResourceFetcher> >
-    ImageResourceFetcherList;
-
-  // ImageResourceFetchers schedule via DownloadImage.
-  ImageResourceFetcherList image_fetchers_;
-
   // A color page overlay when visually de-emaphasized.
   scoped_ptr<WebViewColorOverlay> dimmed_color_overlay_;
-
-  // A animating page overlay when visually de-emaphasized.
-  scoped_ptr<WebViewAnimatingOverlay> dimmed_animating_overlay_;
 
   // Used to delay calling CapturePageInfo.
   base::Timer capture_timer_;

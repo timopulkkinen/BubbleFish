@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -35,12 +35,12 @@ class ChildHistogramMessageFilter : public base::HistogramFlattener,
   void SendHistograms(int sequence_number);
 
   // HistogramFlattener interface (override) methods.
-  virtual void RecordDelta(const base::Histogram& histogram,
+  virtual void RecordDelta(const base::HistogramBase& histogram,
                            const base::HistogramSamples& snapshot) OVERRIDE;
   virtual void InconsistencyDetected(
-      base::Histogram::Inconsistencies problem) OVERRIDE;
+      base::HistogramBase::Inconsistency problem) OVERRIDE;
   virtual void UniqueInconsistencyDetected(
-      base::Histogram::Inconsistencies problem) OVERRIDE;
+      base::HistogramBase::Inconsistency problem) OVERRIDE;
   virtual void InconsistencyDetectedInLoggedCount(int amount) OVERRIDE;
 
  private:
@@ -53,7 +53,7 @@ class ChildHistogramMessageFilter : public base::HistogramFlattener,
 
   // Extract snapshot data and then send it off the the Browser process.
   // Send only a delta to what we have already sent.
-  void UploadAllHistrograms(int sequence_number);
+  void UploadAllHistograms(int sequence_number);
 
   IPC::Channel* channel_;
 

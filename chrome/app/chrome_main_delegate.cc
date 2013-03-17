@@ -17,6 +17,7 @@
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
+#include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
@@ -25,6 +26,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
+#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
@@ -39,9 +41,6 @@
 #include <atlbase.h>
 #include <malloc.h>
 #include "base/string_util.h"
-#include "base/win/registry.h"
-#include "chrome/browser/policy/policy_path_parser.h"
-#include "policy/policy_constants.h"
 #include "sandbox/win/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -74,10 +73,8 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #endif
 
-#if defined(TOOLKIT_GTK)
-#include <gdk/gdk.h>
-#include <glib.h>
-#include <gtk/gtk.h>
+#if defined(OS_ANDROID)
+#include "chrome/common/descriptors_android.h"
 #endif
 
 #if defined(USE_X11)
@@ -124,56 +121,6 @@ bool HasDeprecatedArguments(const std::wstring& command_line) {
   StringToLowerASCII(&command_line_lower);
   std::wstring::size_type pos = command_line_lower.find(kChromeHtml);
   return (pos != std::wstring::npos);
-}
-
-// Checks if the registry key exists in the given hive and expands any
-// variables in the string.
-bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
-                                       const std::wstring& key_name,
-                                       FilePath* user_data_dir) {
-  std::wstring value;
-
-  base::win::RegKey policy_key(hive,
-                               policy::kRegistryMandatorySubKey,
-                               KEY_READ);
-  if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
-    *user_data_dir = FilePath(policy::path_parser::ExpandPathVariables(value));
-    return true;
-  }
-  return false;
-}
-
-void CheckUserDataDirPolicy(FilePath* user_data_dir) {
-  DCHECK(user_data_dir);
-  // We are running as Chrome Frame if we were invoked with user-data-dir,
-  // chrome-frame, and automation-channel switches.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  const bool is_chrome_frame =
-      !user_data_dir->empty() &&
-      command_line->HasSwitch(switches::kChromeFrame) &&
-      command_line->HasSwitch(switches::kAutomationClientChannelID);
-
-  // In the case of Chrome Frame, the last path component of the user-data-dir
-  // provided on the command line must be preserved since it is specific to
-  // CF's host.
-  FilePath cf_host_dir;
-  if (is_chrome_frame)
-    cf_host_dir = user_data_dir->BaseName();
-
-  // Policy from the HKLM hive has precedence over HKCU so if we have one here
-  // we don't have to try to load HKCU.
-  const char* key_name_ascii = (is_chrome_frame ? policy::key::kGCFUserDataDir :
-                                policy::key::kUserDataDir);
-  std::wstring key_name(ASCIIToWide(key_name_ascii));
-  if (LoadUserDataDirPolicyFromRegistry(HKEY_LOCAL_MACHINE, key_name,
-                                        user_data_dir) ||
-      LoadUserDataDirPolicyFromRegistry(HKEY_CURRENT_USER, key_name,
-                                        user_data_dir)) {
-    // A Group Policy value was loaded.  Append the Chrome Frame host directory
-    // if relevant.
-    if (is_chrome_frame)
-      *user_data_dir = user_data_dir->Append(cf_host_dir);
-  }
 }
 
 // If we try to access a path that is not currently available, we want the call
@@ -336,7 +283,7 @@ bool HandleVersionSwitches(const CommandLine& command_line) {
 void HandleHelpSwitches(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kHelp) ||
       command_line.HasSwitch(switches::kHelpShort)) {
-    FilePath binary(command_line.argv()[0]);
+    base::FilePath binary(command_line.argv()[0]);
     execlp("man", "man", binary.BaseName().value().c_str(), NULL);
     PLOG(FATAL) << "execlp failed";
   }
@@ -372,6 +319,7 @@ struct MainFunction {
 }  // namespace
 
 ChromeMainDelegate::ChromeMainDelegate() {
+  startup_metric_utils::RecordMainEntryPointTime();
 }
 
 ChromeMainDelegate::~ChromeMainDelegate() {
@@ -407,12 +355,15 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #endif
 #endif  // OS_POSIX
 
+  // No support for ANDROID yet as DiagnosticsMain needs wchar support.
+#if !defined(OS_ANDROID)
   // If we are in diagnostics mode this is the end of the line. After the
   // diagnostics are run the process will invariably exit.
   if (command_line.HasSwitch(switches::kDiagnostics)) {
     *exit_code = DiagnosticsMain(command_line);
     return true;
   }
+#endif
 
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
@@ -485,7 +436,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
         << "Helper application requires --type.";
 
     // In addition, some helper flavors only work with certain process types.
-    FilePath executable;
+    base::FilePath executable;
     if (PathService::Get(base::FILE_EXE, &executable) &&
         executable.value().size() >= 3) {
       std::string last_three =
@@ -538,10 +489,10 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #endif
 
   // Notice a user data directory override if any
-  FilePath user_data_dir =
+  base::FilePath user_data_dir =
       command_line.GetSwitchValuePath(switches::kUserDataDir);
 #if defined(OS_MACOSX) || defined(OS_WIN)
-  CheckUserDataDirPolicy(&user_data_dir);
+  policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
 #endif
   if (!user_data_dir.empty()) {
     CHECK(PathService::OverrideAndCreateIfNeeded(
@@ -550,9 +501,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
         chrome::ProcessNeedsProfileDir(process_type)));
   }
 
-  base::StatsCounterTimer stats_counter_timer("Chrome.Init");
+  stats_counter_timer_.reset(new base::StatsCounterTimer("Chrome.Init"));
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
-                       (stats_counter_timer));
+                       (*stats_counter_timer_));
 
   // Enable the heap profiler as early as possible!
   EnableHeapProfiler(command_line);
@@ -561,12 +512,15 @@ void ChromeMainDelegate::PreSandboxStartup() {
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
 
+#if !defined(OS_ANDROID)
+  // Android does InitLogging when library is loaded. Skip here.
   logging::OldFileDeletionState file_state =
       logging::APPEND_TO_OLD_LOG_FILE;
   if (process_type.empty()) {
     file_state = logging::DELETE_OLD_LOG_FILE;
   }
   logging::InitChromeLogging(command_line, file_state);
+#endif
 
 #if defined(OS_WIN)
   // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
@@ -591,8 +545,38 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // this value could be passed in a different way.
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
+#if defined(OS_ANDROID)
+    // The renderer sandbox prevents us from accessing our .pak files directly.
+    // Therefore file descriptors to the .pak files that we need are passed in
+    // at process creation time.
+    int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
+        kAndroidLocalePakDescriptor);
+    CHECK(locale_pak_fd != -1);
+    ResourceBundle::InitSharedInstanceWithPakFile(locale_pak_fd, false);
+
+    int extra_pak_keys[] = {
+      kAndroidChromePakDescriptor,
+      kAndroidChrome100PercentPakDescriptor,
+      kAndroidUIResourcesPakDescriptor,
+    };
+    for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
+      int pak_fd =
+          base::GlobalDescriptors::GetInstance()->MaybeGet(extra_pak_keys[i]);
+      CHECK(pak_fd != -1);
+      ResourceBundle::GetSharedInstance().AddDataPackFromFile(
+          pak_fd, ui::SCALE_FACTOR_100P);
+    }
+
+    const std::string loaded_locale = locale;
+#else
     const std::string loaded_locale =
         ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
+
+    base::FilePath resources_pack_path;
+    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+    ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        resources_pack_path, ui::SCALE_FACTOR_NONE);
+#endif
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
 
@@ -607,8 +591,13 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain
   // sets this up for the browser process in a different manner. Zygotes
   // need to call InitCrashReporter() in RunZygote().
-  if (!process_type.empty() && process_type != switches::kZygoteProcess)
+  if (!process_type.empty() && process_type != switches::kZygoteProcess) {
+#if defined(OS_ANDROID)
+    InitNonBrowserCrashReporterForAndroid();
+#else
     InitCrashReporter();
+#endif
+  }
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -662,8 +651,12 @@ int ChromeMainDelegate::RunProcess(
 void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
   if (SubprocessNeedsResourceBundle(process_type))
     ResourceBundle::CleanupSharedInstance();
-
+#if !defined(OS_ANDROID)
   logging::CleanupChromeLogging();
+#else
+  // Android doesn't use InitChromeLogging, so we close the log file manually.
+  logging::CloseLogFile();
+#endif  // !defined(OS_ANDROID)
 }
 
 #if defined(OS_MACOSX)

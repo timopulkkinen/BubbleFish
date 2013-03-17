@@ -3,10 +3,16 @@
   "name": "Chrome",
   "version": "0.1",
   "description": "Chrome as an app",
+  "icons": {
+    "16": "product_logo_16.png",
+    "128": "product_logo_128.png"
+  },
   "app": {
     "launch": {
       // Note this will be changed by special case to become chrome://newtab.
       "web_url": "http://THIS-WILL-BE-REPLACED"
     }
-  }
+  },
+  "display_in_launcher": true,
+  "display_in_new_tab_page": false
 }

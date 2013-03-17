@@ -2,120 +2,99 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
-#include "base/bind.h"
-#include "base/file_util.h"
-#include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
-#include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
+#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
-#include "webkit/fileapi/mock_file_system_options.h"
-#include "webkit/quota/mock_special_storage_policy.h"
+#include "webkit/fileapi/syncable/canned_syncable_file_system.h"
+#include "webkit/fileapi/syncable/local_file_change_tracker.h"
+#include "webkit/fileapi/syncable/local_file_sync_context.h"
+#include "webkit/fileapi/syncable/syncable_file_system_util.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/quota_types.h"
 
+using base::PlatformFileError;
+using fileapi::FileSystemContext;
+using fileapi::FileSystemOperationContext;
+using fileapi::FileSystemURL;
+using fileapi::FileSystemURLSet;
+using fileapi::LocalFileSystemTestOriginHelper;
 using quota::QuotaManager;
 using quota::QuotaStatusCode;
 
-namespace fileapi {
+namespace sync_file_system {
 
 class SyncableFileSystemTest : public testing::Test {
  public:
   SyncableFileSystemTest()
-      : test_helper_(GURL("http://example.com/"), kFileSystemTypeSyncable),
-        quota_status_(quota::kQuotaStatusUnknown),
-        usage_(-1),
-        quota_(-1),
+      : file_system_(GURL("http://example.com/"), "test",
+                     base::MessageLoopProxy::current(),
+                     base::MessageLoopProxy::current()),
         weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
 
-  void SetUp() {
-    ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
+  virtual void SetUp() {
+    file_system_.SetUp();
 
-    scoped_refptr<quota::SpecialStoragePolicy> storage_policy =
-        new quota::MockSpecialStoragePolicy();
-
-    quota_manager_ = new QuotaManager(
-        false /* is_incognito */,
-        data_dir_.path(),
-        base::MessageLoopProxy::current(),
-        base::MessageLoopProxy::current(),
-        storage_policy);
-
-    file_system_context_ = new FileSystemContext(
-        FileSystemTaskRunners::CreateMockTaskRunners(),
-        storage_policy,
-        quota_manager_->proxy(),
-        data_dir_.path(),
-        CreateAllowFileAccessOptions());
-
-    test_helper_.SetUp(file_system_context_.get(), NULL);
+    sync_context_ = new LocalFileSyncContext(base::MessageLoopProxy::current(),
+                                             base::MessageLoopProxy::current());
+    ASSERT_EQ(sync_file_system::SYNC_STATUS_OK,
+              file_system_.MaybeInitializeFileSystemContext(sync_context_));
   }
 
-  void TearDown() {
-    quota_manager_ = NULL;
-    test_helper_.TearDown();
-  }
+  virtual void TearDown() {
+    if (sync_context_)
+      sync_context_->ShutdownOnUIThread();
+    sync_context_ = NULL;
 
-  void DidGetUsageAndQuota(QuotaStatusCode status, int64 usage, int64 quota) {
-    quota_status_ = status;
-    usage_ = usage;
-    quota_ = quota;
-  }
+    file_system_.TearDown();
 
-  void DidOpenFileSystem(base::PlatformFileError result,
-                         const std::string& name,
-                         const GURL& root) {
-    result_ = result;
-    root_url_ = root;
-  }
-
-  void StatusCallback(base::PlatformFileError result) {
-    result_ = result;
+    // Make sure we don't leave the external filesystem.
+    // (CannedSyncableFileSystem::TearDown does not do this as there may be
+    // multiple syncable file systems registered for the name)
+    RevokeSyncableFileSystem("test");
   }
 
  protected:
-  FileSystemOperationContext* NewOperationContext() {
-    FileSystemOperationContext* context = test_helper_.NewOperationContext();
-    context->set_allowed_bytes_growth(kint64max);
-    return context;
-  }
+  void VerifyAndClearChange(const FileSystemURL& url,
+                            const FileChange& expected_change) {
+    SCOPED_TRACE(testing::Message() << url.DebugString() <<
+                 " expecting:" << expected_change.DebugString());
+    // Get the changes for URL and verify.
+    FileChangeList changes;
+    change_tracker()->GetChangesForURL(url, &changes);
+    ASSERT_EQ(1U, changes.size());
+    SCOPED_TRACE(testing::Message() << url.DebugString() <<
+                 " actual:" << changes.DebugString());
+    EXPECT_EQ(expected_change, changes.front());
 
-  void GetUsageAndQuota(int64* usage, int64* quota) {
-    quota_manager_->GetUsageAndQuota(
-        test_helper_.origin(),
-        test_helper_.storage_type(),
-        base::Bind(&SyncableFileSystemTest::DidGetUsageAndQuota,
-                   weak_factory_.GetWeakPtr()));
-    MessageLoop::current()->RunAllPending();
-    EXPECT_EQ(quota::kQuotaStatusOk, quota_status_);
-    if (usage)
-      *usage = usage_;
-    if (quota)
-      *quota = quota_;
+    // Clear the URL from the change tracker.
+    change_tracker()->ClearChangesForURL(url);
   }
 
   FileSystemURL URL(const std::string& path) {
-    return FileSystemURL(GURL(root_url_.spec() + path));
+    return file_system_.URL(path);
   }
 
-  ScopedTempDir data_dir_;
+  FileSystemContext* file_system_context() {
+    return file_system_.file_system_context();
+  }
+
+  LocalFileChangeTracker* change_tracker() {
+    return file_system_context()->change_tracker();
+  }
+
+  base::ScopedTempDir data_dir_;
   MessageLoop message_loop_;
-  scoped_refptr<QuotaManager> quota_manager_;
-  scoped_refptr<FileSystemContext> file_system_context_;
-  LocalFileSystemTestOriginHelper test_helper_;
-  GURL root_url_;
-  base::PlatformFileError result_;
-  QuotaStatusCode quota_status_;
-  int64 usage_;
-  int64 quota_;
+
+  CannedSyncableFileSystem file_system_;
+  scoped_refptr<LocalFileSyncContext> sync_context_;
+
   base::WeakPtrFactory<SyncableFileSystemTest> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncableFileSystemTest);
@@ -124,34 +103,22 @@ class SyncableFileSystemTest : public testing::Test {
 // Brief combined testing. Just see if all the sandbox feature works.
 TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
   // Opens a syncable file system.
-  file_system_context_->OpenSyncableFileSystem(
-      "syncable-test",
-      test_helper_.origin(), test_helper_.type(),
-      true /* create */,
-      base::Bind(&SyncableFileSystemTest::DidOpenFileSystem,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_OK, result_);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.OpenFileSystem());
 
   // Do some operations.
-  test_helper_.NewOperation()->CreateDirectory(
-      URL("dir"), false /* exclusive */, false /* recursive */,
-      base::Bind(&SyncableFileSystemTest::StatusCallback,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_OK, result_);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateDirectory(URL("dir")));
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateFile(URL("dir/foo")));
 
-  test_helper_.NewOperation()->CreateFile(
-      URL("dir/foo"), false /* exclusive */,
-      base::Bind(&SyncableFileSystemTest::StatusCallback,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_OK, result_);
+  const int64 kOriginalQuota = QuotaManager::kSyncableStorageDefaultHostQuota;
 
   const int64 kQuota = 12345 * 1024;
   QuotaManager::kSyncableStorageDefaultHostQuota = kQuota;
   int64 usage, quota;
-  GetUsageAndQuota(&usage, &quota);
+  EXPECT_EQ(quota::kQuotaStatusOk,
+            file_system_.GetUsageAndQuota(&usage, &quota));
 
   // Returned quota must be what we overrode. Usage must be greater than 0
   // as creating a file or directory consumes some space.
@@ -160,42 +127,158 @@ TEST_F(SyncableFileSystemTest, SyncableLocalSandboxCombined) {
 
   // Truncate to extend an existing file and see if the usage reflects it.
   const int64 kFileSizeToExtend = 333;
-  test_helper_.NewOperation()->Truncate(
-      URL("dir/foo"), kFileSizeToExtend,
-      base::Bind(&SyncableFileSystemTest::StatusCallback,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_OK, result_);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateFile(URL("dir/foo")));
+
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.TruncateFile(URL("dir/foo"), kFileSizeToExtend));
 
   int64 new_usage;
-  GetUsageAndQuota(&new_usage, NULL);
+  EXPECT_EQ(quota::kQuotaStatusOk,
+            file_system_.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(kFileSizeToExtend, new_usage - usage);
 
   // Shrink the quota to the current usage, try to extend the file further
   // and see if it fails.
   QuotaManager::kSyncableStorageDefaultHostQuota = new_usage;
-  test_helper_.NewOperation()->Truncate(
-      URL("dir/foo"), kFileSizeToExtend + 1,
-      base::Bind(&SyncableFileSystemTest::StatusCallback,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NO_SPACE, result_);
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NO_SPACE,
+            file_system_.TruncateFile(URL("dir/foo"), kFileSizeToExtend + 1));
 
   usage = new_usage;
-  GetUsageAndQuota(&new_usage, NULL);
+  EXPECT_EQ(quota::kQuotaStatusOk,
+            file_system_.GetUsageAndQuota(&new_usage, &quota));
   EXPECT_EQ(usage, new_usage);
 
   // Deletes the file system.
-  file_system_context_->DeleteFileSystem(
-      test_helper_.origin(), test_helper_.type(),
-      base::Bind(&SyncableFileSystemTest::StatusCallback,
-                 weak_factory_.GetWeakPtr()));
-  MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_OK, result_);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.DeleteFileSystem());
 
   // Now the usage must be zero.
-  GetUsageAndQuota(&usage, NULL);
+  EXPECT_EQ(quota::kQuotaStatusOk,
+            file_system_.GetUsageAndQuota(&usage, &quota));
   EXPECT_EQ(0, usage);
+
+  // Restore the system default quota.
+  QuotaManager::kSyncableStorageDefaultHostQuota = kOriginalQuota;
 }
 
-}  // namespace fileapi
+// Combined testing with LocalFileChangeTracker.
+TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.OpenFileSystem());
+
+  const char kPath0[] = "dir a";
+  const char kPath1[] = "dir a/dir";   // child of kPath0
+  const char kPath2[] = "dir a/file";  // child of kPath0
+  const char kPath3[] = "dir b";
+
+  // Do some operations.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateDirectory(URL(kPath0)));  // Creates a dir.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateDirectory(URL(kPath1)));  // Creates another.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateFile(URL(kPath2)));       // Creates a file.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.TruncateFile(URL(kPath2), 1));  // Modifies the file.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.TruncateFile(URL(kPath2), 2));  // Modifies it again.
+
+  FileSystemURLSet urls;
+  file_system_.GetChangedURLsInTracker(&urls);
+
+  EXPECT_EQ(3U, urls.size());
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath0)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath1)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath2)));
+
+  VerifyAndClearChange(URL(kPath0),
+                       FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+  VerifyAndClearChange(URL(kPath1),
+                       FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+  VerifyAndClearChange(URL(kPath2),
+                       FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
+                                  sync_file_system::SYNC_FILE_TYPE_FILE));
+
+  // Creates and removes a same directory.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.CreateDirectory(URL(kPath3)));
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.Remove(URL(kPath3), false /* recursive */));
+
+  // The changes will be offset.
+  urls.clear();
+  file_system_.GetChangedURLsInTracker(&urls);
+  EXPECT_TRUE(urls.empty());
+
+  // Recursively removes the kPath0 directory.
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.Remove(URL(kPath0), true /* recursive */));
+
+  urls.clear();
+  file_system_.GetChangedURLsInTracker(&urls);
+
+  // kPath0 and its all chidren (kPath1 and kPath2) must have been deleted.
+  EXPECT_EQ(3U, urls.size());
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath0)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath1)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath2)));
+
+  VerifyAndClearChange(URL(kPath0),
+                       FileChange(FileChange::FILE_CHANGE_DELETE,
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+  VerifyAndClearChange(URL(kPath1),
+                       FileChange(FileChange::FILE_CHANGE_DELETE,
+                                  sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+  VerifyAndClearChange(URL(kPath2),
+                       FileChange(FileChange::FILE_CHANGE_DELETE,
+                                  sync_file_system::SYNC_FILE_TYPE_FILE));
+}
+
+// Make sure directory operation is disabled (when it's configured so).
+TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
+  file_system_.EnableDirectoryOperations(false);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.OpenFileSystem());
+
+  // Try some directory operations (which should fail).
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
+            file_system_.CreateDirectory(URL("dir")));
+
+  // Set up another (non-syncable) local file system.
+  LocalFileSystemTestOriginHelper other_file_system_(
+      GURL("http://foo.com/"), fileapi::kFileSystemTypeTemporary);
+  other_file_system_.SetUp(file_system_.file_system_context());
+
+  // Create directory '/a' and file '/a/b' in the other file system.
+  const FileSystemURL kSrcDir = other_file_system_.CreateURLFromUTF8("/a");
+  const FileSystemURL kSrcChild = other_file_system_.CreateURLFromUTF8("/a/b");
+
+  bool created = false;
+  scoped_ptr<FileSystemOperationContext> operation_context;
+
+  operation_context.reset(other_file_system_.NewOperationContext());
+  operation_context->set_allowed_bytes_growth(1024);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            other_file_system_.file_util()->CreateDirectory(
+                operation_context.get(),
+                kSrcDir, false /* exclusive */, false /* recursive */));
+
+  operation_context.reset(other_file_system_.NewOperationContext());
+  operation_context->set_allowed_bytes_growth(1024);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            other_file_system_.file_util()->EnsureFileExists(
+                operation_context.get(), kSrcChild, &created));
+  EXPECT_TRUE(created);
+
+  // Now try copying the directory into the syncable file system, which should
+  // fail if directory operation is disabled. (http://crbug.com/161442)
+  EXPECT_NE(base::PLATFORM_FILE_OK,
+            file_system_.Copy(kSrcDir, URL("dest")));
+
+  other_file_system_.TearDown();
+}
+
+}  // namespace sync_file_system

@@ -103,7 +103,7 @@ bool KioskModeSettings::is_initialized() const {
 void KioskModeSettings::GetScreensaverPath(
     policy::AppPackUpdater::ScreenSaverUpdateCallback callback) const {
   if (!is_initialized_) {
-    callback.Run(FilePath());
+    callback.Run(base::FilePath());
     return;
   }
 
@@ -111,7 +111,7 @@ void KioskModeSettings::GetScreensaverPath(
   // for testing and dev workflows.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kKioskModeScreensaverPath)) {
-    callback.Run(FilePath(
+    callback.Run(base::FilePath(
         CommandLine::ForCurrentProcess()->
             GetSwitchValueASCII(switches::kKioskModeScreensaverPath)));
     return;
@@ -165,11 +165,9 @@ KioskModeSettings::KioskModeSettings() : is_initialized_(false) {
       is_kiosk_mode_ = true;
       return;
     } else if (device_mode == policy::DEVICE_MODE_PENDING){
-      content::BrowserThread::PostDelayedTask(
-          content::BrowserThread::UI, FROM_HERE,
+      DeviceSettingsService::Get()->GetOwnershipStatusAsync(
           base::Bind(&KioskModeSettings::VerifyModeIsKnown,
-                     base::Unretained(this)),
-          base::TimeDelta::FromMilliseconds(kDeviceModeFetchRetryDelayMs));
+                     base::Unretained(this)));
     }
   }
   is_kiosk_mode_ = false;
@@ -178,7 +176,12 @@ KioskModeSettings::KioskModeSettings() : is_initialized_(false) {
 KioskModeSettings::~KioskModeSettings() {
 }
 
-void KioskModeSettings::VerifyModeIsKnown() {
+void KioskModeSettings::VerifyModeIsKnown(
+    DeviceSettingsService::OwnershipStatus status,
+    bool is_owner) {
+  if (status != DeviceSettingsService::OWNERSHIP_TAKEN)
+    return;
+
   if (g_browser_process) {
     policy::BrowserPolicyConnector* bpc =
         g_browser_process->browser_policy_connector();
@@ -189,11 +192,11 @@ void KioskModeSettings::VerifyModeIsKnown() {
         content::BrowserThread::PostDelayedTask(
             content::BrowserThread::UI, FROM_HERE,
             base::Bind(&KioskModeSettings::VerifyModeIsKnown,
-                       base::Unretained(this)),
+                       base::Unretained(this), status, is_owner),
             base::TimeDelta::FromMilliseconds(kDeviceModeFetchRetryDelayMs));
         break;
       case policy::DEVICE_MODE_KIOSK:
-        browser::ExitCleanly();
+        chrome::ExitCleanly();
         break;
       default:
         break;

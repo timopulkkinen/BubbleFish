@@ -27,8 +27,6 @@ class FrameNavigationState {
     FrameID();
     FrameID(int64 frame_num, content::RenderViewHost* render_view_host);
 
-    bool IsValid() const;
-
     bool operator<(const FrameID& other) const;
     bool operator==(const FrameID& other) const;
     bool operator!=(const FrameID& other) const;
@@ -53,9 +51,14 @@ class FrameNavigationState {
 
   // Starts to track a frame identified by its |frame_id| showing the URL |url|.
   void TrackFrame(FrameID frame_id,
+                  FrameID parent_frame_id,
                   const GURL& url,
                   bool is_main_frame,
-                  bool is_error_page);
+                  bool is_error_page,
+                  bool is_iframe_srcdoc);
+
+  // Marks the frame as detached and stops tracking it.
+  void FrameDetached(FrameID frame_id);
 
   // Stops tracking all frames but the frame with |id_to_skip| for a given
   // RenderViewHost.
@@ -78,6 +81,9 @@ class FrameNavigationState {
   // Returns the frame ID of the last comitted main frame, or -1 if the frame
   // ID is not known.
   FrameID GetMainFrameID() const;
+
+  // Get the parent frame ID (or an invalid ID, if |frame_id| is a main frame).
+  FrameID GetParentFrameID(FrameID frame_id) const;
 
   // Marks a frame as in an error state, i.e. the onErrorOccurred event was
   // fired for this frame, and no further events should be sent for it.
@@ -114,11 +120,15 @@ class FrameNavigationState {
 
  private:
   struct FrameState {
+    FrameState();
+
     bool error_occurred;  // True if an error has occurred in this frame.
     bool is_main_frame;  // True if this is a main frame.
+    bool is_iframe_srcdoc;  // True if the frame is displaying its srcdoc.
     bool is_navigating;  // True if there is a navigation going on.
     bool is_committed;  // True if the navigation is already committed.
     bool is_server_redirected;  // True if a server redirect happened.
+    int64 parent_frame_num;
     GURL url;  // URL of this frame.
   };
   typedef std::map<FrameID, FrameState> FrameIdToStateMap;

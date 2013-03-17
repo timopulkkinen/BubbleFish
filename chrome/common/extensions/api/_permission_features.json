@@ -4,7 +4,7 @@
 
 {
   "activeTab": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "min_manifest_version": 2
   },
@@ -21,9 +21,20 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
+  "developerPrivate": {
+    "channel": "dev",
+    "extension_types": ["packaged_app"],
+    "location": "component",
+    "whitelist": "lphgohfeebnhcpiohjndkgbhhkoapkjc" // Apps Debugger
+  },
   "appNotifications": {
     "channel": "stable",
     "extension_types": ["packaged_app", "hosted_app"]
+  },
+  "autotestPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app"],
+    "location": "component"
   },
   "audioCapture": {
     "channel": "stable",
@@ -32,8 +43,16 @@
   "background": {
     "channel": "stable",
     "extension_types": [
-      "extension", "packaged_app", "hosted_app", "platform_app"
+      "extension", "packaged_app", "hosted_app"
     ]
+  },
+  "bluetooth": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
+  },
+  "bluetoothDevices": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
   },
   "bookmarkManagerPrivate": {
     "channel": "stable",
@@ -43,10 +62,6 @@
   "bookmarks": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
-  },
-  "browserTag": {
-    "channel": "dev",
-    "extension_types": ["extension", "platform_app"]
   },
   "browsingData": {
     "channel": "stable",
@@ -104,14 +119,35 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
-  "declarativeWebRequest": {
-    "channel": "beta",
-    "extension_types": ["extension", "packaged_app"]
+  "declarativeContent": {
+    "channel": "trunk",
+    "extension_types": ["extension"]
   },
+  "declarativeWebRequest": [
+    {
+      "channel": "beta",
+      "extension_types": ["extension", "packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "packaged_app"],
+      // Legacy Browser Support (remove once this API hits stable).
+      "whitelist": ["heildphpnddilhkemkielfhnkaagiabh"]
+    }
+  ],
   "downloads": {
     "channel": "dev",
     "extension_types": [
       "extension", "packaged_app"
+    ]
+  },
+  "dial": {
+    "channel": "stable",
+    "extension_types": ["extension"],
+    "whitelist": [
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
     ]
   },
   "experimental": {
@@ -133,9 +169,17 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
+  "fileSystem.write": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "fontSettings": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "fullscreen": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
   },
   "geolocation": {
     "channel": "stable",
@@ -180,13 +224,23 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
-  // TODO(thestig) Remove this after M23.
+  "mediaGalleries.allAutoDetected": {
+    "channel": "stable",
+    "extension_types": [ "platform_app" ]
+  },
+  "mediaGalleries.read": {
+    "channel": "stable",
+    "extension_types": [ "platform_app" ]
+  },
+  // TODO(thestig) Remove this as part of http://crbug.com/144496
   "mediaGalleriesPrivate": {
     "channel": "stable",
     "extension_types": [ "platform_app" ],
     "whitelist": [
-      "ebpbnabdhheoknfklmpddcdijjkmklkp",
-      "ejegoaikibpmikoejfephaneibodccma"
+      "dhgjflpimlbndbpamnkoepaacagejgda",
+      "ebpbnabdhheoknfklmpddcdijjkmklkp",  // G+ Photos staging
+      "efjnaogkjbogokcnohkmnjdojkikgobo",  // G+ Photos prod
+      "ejegoaikibpmikoejfephaneibodccma"   // G+ Photos dev
     ]
   },
   "mediaPlayerPrivate": {
@@ -196,8 +250,25 @@
   },
   "metricsPrivate": {
     "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "whitelist": [
+      // The file manager is a component extension, and it can currently use
+      // whitelisted interfaces without being on the corresponding whitelist.
+      // Adding it to this whitelist documents its dependency, however, and also
+      // doesn't hurt anything.
+      "hhaomjibdihmijegdhdafkllkbggdgoj",  // File manager
+      "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // Quickoffice
+      "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
+    ]
+  },
+  "networkingPrivate": {
+    "channel": "dev",
     "extension_types": ["extension", "packaged_app"],
-    "location": "component"
+    "whitelist": [
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
+    ]
   },
   "notifications": {
     "channel": "stable",
@@ -214,6 +285,10 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "pointerLock": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
+  },
   "plugin": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
@@ -227,7 +302,7 @@
     "extension_types": ["extension", "packaged_app"]
   },
   "pushMessaging": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "platform_app"]
   },
   "rtcPrivate": {
@@ -247,22 +322,38 @@
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
   },
+  "screensaver": {
+    "channel": "stable",
+    "extension_types": ["packaged_app", "hosted_app", "platform_app"]
+  },
   "serial": {
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
-  "socket": {
+  "sessionRestore": {
     "channel": "dev",
+    "extension_types": ["extension", "packaged_app"]
+  },
+  "socket": {
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "syncFileSystem": {
-    "channel": "trunk",
+    "channel": "dev",
     "extension_types": ["platform_app"]
+  },
+  "systemIndicator": {
+    "channel": "dev",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "storage": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
+  },
+  "systemInfo.display": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "systemPrivate": {
     "channel": "stable",
@@ -273,6 +364,18 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "tabCapture": [{
+    "channel": "dev",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
+  }, {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app"],
+    "whitelist": [
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // CV
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // CV Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah"   // CV Canary
+    ]
+  }],
   "terminalPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
@@ -299,13 +402,21 @@
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
+  "usb": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
+  "usbDevices": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "videoCapture": {
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "wallpaperPrivate": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app"],
+    "extension_types": ["platform_app"],
     "location": "component"
   },
   "webNavigation": {
@@ -338,5 +449,9 @@
   "webRequestBlocking": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "webview": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
   }
 }

@@ -17,8 +17,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
-// TODO(nona): Remove ibus namespace after complete libibus removale.
-namespace ibus {
 
 TEST(IBusLookupTable, WriteReadTest) {
   const char kSampleText1[] = "Sample Text 1";
@@ -29,7 +27,7 @@ TEST(IBusLookupTable, WriteReadTest) {
   const uint32 kCursorPosition = 12;
   const bool kIsCursorVisible = true;
   const IBusLookupTable::Orientation kOrientation =
-      IBusLookupTable::IBUS_LOOKUP_TABLE_ORIENTATION_VERTICAL;
+      IBusLookupTable::VERTICAL;
 
   // Create IBusLookupTable.
   IBusLookupTable lookup_table;
@@ -78,7 +76,7 @@ TEST(IBusLookupTable, WriteReadWithoutLableTest) {
   const uint32 kCursorPosition = 12;
   const bool kIsCursorVisible = true;
   const IBusLookupTable::Orientation kOrientation =
-      IBusLookupTable::IBUS_LOOKUP_TABLE_ORIENTATION_VERTICAL;
+      IBusLookupTable::VERTICAL;
 
   // Create IBusLookupTable.
   IBusLookupTable lookup_table;
@@ -129,9 +127,8 @@ TEST(IBusLookupTable, ReadMozcCandidateTest) {
   const uint32 kCursorPosition = 12;
   const bool kIsCursorVisible = true;
   const IBusLookupTable::Orientation kOrientation =
-      IBusLookupTable::IBUS_LOOKUP_TABLE_ORIENTATION_VERTICAL;
-  const uint8 kSampleBuffer[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-  const size_t kSampleBufferLength = 6UL;
+      IBusLookupTable::VERTICAL;
+  const bool kShowWindowAtComposition = false;
 
   // Create IBusLookupTable.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -147,12 +144,12 @@ TEST(IBusLookupTable, ReadMozcCandidateTest) {
   contents_writer.OpenArray("{sv}", &attachment_array_writer);
   dbus::MessageWriter entry_writer(NULL);
   attachment_array_writer.OpenDictEntry(&entry_writer);
-  entry_writer.AppendString("mozc.candidates");
+  entry_writer.AppendString("show_window_at_composition");
   dbus::MessageWriter variant_writer(NULL);
   entry_writer.OpenVariant("v", &variant_writer);
   dbus::MessageWriter sub_variant_writer(NULL);
-  variant_writer.OpenVariant("ay", &sub_variant_writer);
-  sub_variant_writer.AppendArrayOfBytes(kSampleBuffer, kSampleBufferLength);
+  variant_writer.OpenVariant("b", &sub_variant_writer);
+  sub_variant_writer.AppendBool(kShowWindowAtComposition);
 
   // Close attachment field container.
   variant_writer.CloseContainer(&sub_variant_writer);
@@ -198,11 +195,128 @@ TEST(IBusLookupTable, ReadMozcCandidateTest) {
   EXPECT_EQ(kSampleText2, target_lookup_table.candidates().at(1).value);
   EXPECT_EQ(kSampleLabel1, target_lookup_table.candidates().at(0).label);
   EXPECT_EQ(kSampleLabel2, target_lookup_table.candidates().at(1).label);
-  const std::string expected_binary(
-      reinterpret_cast<const char*>(kSampleBuffer), kSampleBufferLength);
-  EXPECT_EQ(expected_binary,
-            target_lookup_table.serialized_mozc_candidates_data());
+  EXPECT_EQ(kShowWindowAtComposition,
+            target_lookup_table.show_window_at_composition());
 }
 
-}  // namespace ibus
+TEST(IBusLookupTable, IsEqualTest) {
+  IBusLookupTable table1;
+  IBusLookupTable table2;
+
+  const char kSampleString1[] = "Sample 1";
+  const char kSampleString2[] = "Sample 2";
+
+  EXPECT_TRUE(table1.IsEqual(table2));
+  EXPECT_TRUE(table2.IsEqual(table1));
+
+  table1.set_page_size(1);
+  table2.set_page_size(2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.set_page_size(1);
+
+  table1.set_cursor_position(1);
+  table2.set_cursor_position(2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.set_cursor_position(1);
+
+  table1.set_is_cursor_visible(true);
+  table2.set_is_cursor_visible(false);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.set_is_cursor_visible(true);
+
+  table1.set_orientation(IBusLookupTable::HORIZONTAL);
+  table2.set_orientation(IBusLookupTable::VERTICAL);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.set_orientation(IBusLookupTable::HORIZONTAL);
+
+  table1.set_show_window_at_composition(true);
+  table2.set_show_window_at_composition(false);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.set_show_window_at_composition(true);
+
+  // Check equality for candidates member variable.
+  IBusLookupTable::Entry entry1;
+  IBusLookupTable::Entry entry2;
+
+  table1.mutable_candidates()->push_back(entry1);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_TRUE(table1.IsEqual(table2));
+  EXPECT_TRUE(table2.IsEqual(table1));
+
+  entry1.value = kSampleString1;
+  entry2.value = kSampleString2;
+  table1.mutable_candidates()->push_back(entry1);
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table1.mutable_candidates()->clear();
+  table2.mutable_candidates()->clear();
+
+  entry1.label = kSampleString1;
+  entry2.label = kSampleString2;
+  table1.mutable_candidates()->push_back(entry1);
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table1.mutable_candidates()->clear();
+  table2.mutable_candidates()->clear();
+
+  entry1.annotation = kSampleString1;
+  entry2.annotation = kSampleString2;
+  table1.mutable_candidates()->push_back(entry1);
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table1.mutable_candidates()->clear();
+  table2.mutable_candidates()->clear();
+
+  entry1.description_title = kSampleString1;
+  entry2.description_title = kSampleString2;
+  table1.mutable_candidates()->push_back(entry1);
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table1.mutable_candidates()->clear();
+  table2.mutable_candidates()->clear();
+
+  entry1.description_body = kSampleString1;
+  entry2.description_body = kSampleString2;
+  table1.mutable_candidates()->push_back(entry1);
+  table2.mutable_candidates()->push_back(entry2);
+  EXPECT_FALSE(table1.IsEqual(table2));
+  EXPECT_FALSE(table2.IsEqual(table1));
+  table1.mutable_candidates()->clear();
+  table2.mutable_candidates()->clear();
+}
+
+TEST(IBusLookupTable, CopyFromTest) {
+  IBusLookupTable table1;
+  IBusLookupTable table2;
+
+  const char kSampleString[] = "Sample";
+
+  table1.set_page_size(1);
+  table1.set_cursor_position(2);
+  table1.set_is_cursor_visible(false);
+  table1.set_orientation(IBusLookupTable::HORIZONTAL);
+  table1.set_show_window_at_composition(false);
+
+  IBusLookupTable::Entry entry;
+  entry.value = kSampleString;
+  entry.label = kSampleString;
+  entry.annotation = kSampleString;
+  entry.description_title = kSampleString;
+  entry.description_body = kSampleString;
+  table1.mutable_candidates()->push_back(entry);
+
+  table2.CopyFrom(table1);
+  EXPECT_TRUE(table1.IsEqual(table2));
+}
 }  // namespace chromeos

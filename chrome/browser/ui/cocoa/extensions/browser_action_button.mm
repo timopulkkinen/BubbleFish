@@ -9,11 +9,13 @@
 
 #include "base/logging.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -35,8 +37,9 @@ NSString* const kBrowserActionButtonDraggingNotification =
 NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
-const CGFloat kBrowserActionBadgeOriginYOffset = 5;
-const CGFloat kAnimationDuration = 0.2;
+static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
+static const CGFloat kAnimationDuration = 0.2;
+static const CGFloat kMinimumDragDistance = 5;
 
 // A helper class to bridge the asynchronous Skia bitmap loading mechanism to
 // the extension's button.
@@ -45,10 +48,11 @@ class ExtensionActionIconFactoryBridge
       public ExtensionActionIconFactory::Observer {
  public:
   ExtensionActionIconFactoryBridge(BrowserActionButton* owner,
+                                   Profile* profile,
                                    const Extension* extension)
       : owner_(owner),
-        icon_factory_(extension, extension->browser_action(), this),
-        browser_action_(extension->browser_action()) {
+        browser_action_([[owner cell] extensionAction]),
+        icon_factory_(profile, extension, browser_action_, this) {
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
         content::Source<ExtensionAction>(browser_action_));
@@ -56,15 +60,16 @@ class ExtensionActionIconFactoryBridge
 
   virtual ~ExtensionActionIconFactoryBridge() {}
 
-  // ImageLoadingTracker::Observer implementation.
-  void OnIconUpdated() OVERRIDE {
+  // ExtensionActionIconFactory::Observer implementation.
+  virtual void OnIconUpdated() OVERRIDE {
     [owner_ updateState];
   }
 
   // Overridden from content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED)
       [owner_ updateState];
     else
@@ -79,14 +84,14 @@ class ExtensionActionIconFactoryBridge
   // Weak. Owns us.
   BrowserActionButton* owner_;
 
+  // The browser action whose images we're loading.
+  ExtensionAction* const browser_action_;
+
   // The object that will be used to get the browser action icon for us.
   // It may load the icon asynchronously (in which case the initial icon
   // returned by the factory will be transparent), so we have to observe it for
   // updates to the icon.
   ExtensionActionIconFactory icon_factory_;
-
-  // The browser action whose images we're loading.
-  ExtensionAction* const browser_action_;
 
   // Used for registering to receive notifications and automatic clean up.
   content::NotificationRegistrar registrar_;
@@ -125,7 +130,10 @@ class ExtensionActionIconFactoryBridge
     // NSButton between alloc/init and setCell:.
     [self setCell:cell];
     [cell setTabId:tabId];
-    [cell setExtensionAction:extension->browser_action()];
+    ExtensionAction* browser_action =
+        extensions::ExtensionActionManager::Get(browser->profile())->
+        GetBrowserAction(*extension);
+    [cell setExtensionAction:browser_action];
     [cell
         accessibilitySetOverrideValue:base::SysUTF8ToNSString(extension->name())
         forAttribute:NSAccessibilityDescriptionAttribute];
@@ -145,12 +153,12 @@ class ExtensionActionIconFactoryBridge
     [self setMenu:[[[ExtensionActionContextMenu alloc]
         initWithExtension:extension
                   browser:browser
-          extensionAction:extension->browser_action()] autorelease]];
+          extensionAction:browser_action] autorelease]];
 
     tabId_ = tabId;
     extension_ = extension;
-    iconFactoryBridge_.reset(
-        new ExtensionActionIconFactoryBridge(self, extension));
+    iconFactoryBridge_.reset(new ExtensionActionIconFactoryBridge(
+        self, browser->profile(), extension));
 
     moveAnimation_.reset([[NSViewAnimation alloc] init]);
     [moveAnimation_ gtm_setDuration:kAnimationDuration
@@ -170,6 +178,7 @@ class ExtensionActionIconFactoryBridge
 - (void)mouseDown:(NSEvent*)theEvent {
   [[self cell] setHighlighted:YES];
   dragCouldStart_ = YES;
+  dragStartPoint_ = [theEvent locationInWindow];
 }
 
 - (void)mouseDragged:(NSEvent*)theEvent {
@@ -177,6 +186,13 @@ class ExtensionActionIconFactoryBridge
     return;
 
   if (!isBeingDragged_) {
+    // Don't initiate a drag until it moves at least kMinimumDragDistance.
+    NSPoint currentPoint = [theEvent locationInWindow];
+    CGFloat dx = currentPoint.x - dragStartPoint_.x;
+    CGFloat dy = currentPoint.y - dragStartPoint_.y;
+    if (dx*dx + dy*dy < kMinimumDragDistance*kMinimumDragDistance)
+      return;
+
     // The start of a drag. Position the button above all others.
     [[self superview] addSubview:self positioned:NSWindowAbove relativeTo:nil];
   }
@@ -242,7 +258,7 @@ class ExtensionActionIconFactoryBridge
   if (tabId_ < 0)
     return;
 
-  std::string tooltip = extension_->browser_action()->GetTitle(tabId_);
+  std::string tooltip = [[self cell] extensionAction]->GetTitle(tabId_);
   if (tooltip.empty()) {
     [self setToolTip:nil];
   } else {
@@ -256,7 +272,7 @@ class ExtensionActionIconFactoryBridge
 
   [[self cell] setTabId:tabId_];
 
-  bool enabled = extension_->browser_action()->GetIsVisible(tabId_);
+  bool enabled = [[self cell] extensionAction]->GetIsVisible(tabId_);
   [self setEnabled:enabled];
 
   [self setNeedsDisplay:YES];

@@ -8,22 +8,15 @@ import logging
 import re
 
 import compiled_file_system as compiled_fs
+from file_system import FileNotFoundError
 import third_party.json_schema_compiler.json_comment_eater as json_comment_eater
 import third_party.json_schema_compiler.model as model
 import url_constants
 
 DEFAULT_ICON_PATH = '/images/sample-default-icon.png'
 
-def _MakeAPILink(prefix, item, api_list):
-  item = item.replace('chrome.', '')
-  parts = item.split('.')
-  api_name = []
-  for i in range(1, len(parts) + 1):
-    if '.'.join(parts[:i]) in api_list:
-      return '%s.html#%s-%s' % ('.'.join(parts[:i]),
-                                prefix,
-                                '.'.join(parts[i:]))
-  return None
+# See api_data_source.py for more info on _VERSION.
+_VERSION = 3
 
 class SamplesDataSource(object):
   """Constructs a list of samples and their respective files and api calls.
@@ -39,18 +32,19 @@ class SamplesDataSource(object):
                  github_file_system,
                  cache_factory,
                  github_cache_factory,
-                 api_list_data_source_factory,
+                 ref_resolver_factory,
                  samples_path):
       self._file_system = file_system
       self._github_file_system = github_file_system
-      self._static_path = ((('/' + channel) if channel != 'local' else '') +
-                           '/static')
+      self._static_path = '/%s/static' % channel
       self._extensions_cache = cache_factory.Create(self._MakeSamplesList,
-                                                    compiled_fs.EXTENSIONS)
+                                                    compiled_fs.EXTENSIONS,
+                                                    version=_VERSION)
       self._apps_cache = github_cache_factory.Create(
-          lambda x: self._MakeSamplesList(x, is_apps=True),
-          compiled_fs.APPS)
-      self._api_list_data_source = api_list_data_source_factory.Create()
+          lambda x, y: self._MakeSamplesList(x, y, is_apps=True),
+          compiled_fs.APPS,
+          version=_VERSION)
+      self._ref_resolver = ref_resolver_factory.Create()
       self._samples_path = samples_path
 
     def Create(self, request):
@@ -61,16 +55,16 @@ class SamplesDataSource(object):
                                self._samples_path,
                                request)
 
-    def _GetAllAPINames(self):
-      apis = []
-      for k1 in ['apps', 'extensions']:
-        for k2 in ['chrome', 'experimental']:
-          apis.extend(
-              [api['name'] for api in self._api_list_data_source[k1][k2]])
-      return apis
-
     def _GetAPIItems(self, js_file):
-      return set(re.findall('(chrome\.[a-zA-Z0-9\.]+)', js_file))
+      chrome_regex = '(chrome\.[a-zA-Z0-9\.]+)'
+      calls = set(re.findall(chrome_regex, js_file))
+      # Find APIs that have been assigned into variables.
+      assigned_vars = dict(re.findall('var\s*([^\s]+)\s*=\s*%s;' % chrome_regex,
+                                      js_file))
+      # Replace the variable name with the full API name.
+      for var_name, value in assigned_vars.iteritems():
+        js_file = js_file.replace(var_name, value)
+      return calls.union(re.findall(chrome_regex, js_file))
 
     def _GetDataFromManifest(self, path, file_system):
       manifest = file_system.ReadSingle(path + '/manifest.json')
@@ -81,7 +75,7 @@ class SamplesDataSource(object):
         return None
       l10n_data = {
         'name': manifest_json.get('name', ''),
-        'description': manifest_json.get('description', ''),
+        'description': manifest_json.get('description', None),
         'icon': manifest_json.get('icons', {}).get('128', None),
         'default_locale': manifest_json.get('default_locale', None),
         'locales': {}
@@ -104,10 +98,9 @@ class SamplesDataSource(object):
             l10n_data['locales'][path[len(locales_path):].split('/')[0]] = json_
       return l10n_data
 
-    def _MakeSamplesList(self, files, is_apps=False):
+    def _MakeSamplesList(self, base_dir, files, is_apps=False):
       file_system = self._github_file_system if is_apps else self._file_system
       samples_list = []
-      api_list = self._GetAllAPINames()
       for filename in sorted(files):
         if filename.rsplit('/')[-1] != 'manifest.json':
           continue
@@ -116,36 +109,41 @@ class SamplesDataSource(object):
         sample_files = [path for path in files
                         if path.startswith(sample_path + '/')]
         js_files = [path for path in sample_files if path.endswith('.js')]
-        js_contents = file_system.Read(js_files).Get()
+        try:
+          js_contents = file_system.Read(js_files).Get()
+        except FileNotFoundError as e:
+          logging.warning('Error fetching samples files: %s. Was a file '
+                          'deleted from a sample? This warning should go away '
+                          'in 5 minutes.' % e)
+          continue
         api_items = set()
         for js in js_contents.values():
           api_items.update(self._GetAPIItems(js))
 
         api_calls = []
-        for item in api_items:
+        for item in sorted(api_items):
           if len(item.split('.')) < 3:
             continue
           if item.endswith('.removeListener') or item.endswith('.hasListener'):
             continue
           if item.endswith('.addListener'):
             item = item[:-len('.addListener')]
-            link = _MakeAPILink('event', item, api_list)
-            if link is None:
-              continue
-            api_calls.append({
-              'name': item,
-              'link': link
-            })
-          else:
-            # TODO(cduvall): this might be a property or a type.
-            link = _MakeAPILink('method', item, api_list)
-            if link is None:
-              continue
-            api_calls.append({
-              'name': item,
-              'link': link
-            })
-        manifest_data = self._GetDataFromManifest(sample_path, file_system)
+          if item.startswith('chrome.'):
+            item = item[len('chrome.'):]
+          ref_data = self._ref_resolver.GetLink(item, 'samples')
+          if ref_data is None:
+            continue
+          api_calls.append({
+            'name': ref_data['text'],
+            'link': ref_data['href']
+          })
+        try:
+          manifest_data = self._GetDataFromManifest(sample_path, file_system)
+        except FileNotFoundError as e:
+          logging.warning('Error getting data from samples manifest: %s. If '
+                          'this file was deleted from a sample this message '
+                          'should go away in 5 minutes.' % e)
+          continue
         if manifest_data is None:
           continue
 
@@ -193,14 +191,14 @@ class SamplesDataSource(object):
     only the samples that use the API |api_name|. |key| is either 'apps' or
     'extensions'.
     """
-    api_search = '_' + api_name + '_'
+    api_search = api_name + '_'
     samples_list = []
     try:
       for sample in self.get(key):
         api_calls_unix = [model.UnixName(call['name'])
                           for call in sample['api_calls']]
         for call in api_calls_unix:
-          if api_search in call:
+          if call.startswith(api_search):
             samples_list.append(sample)
             break
     except NotImplementedError:
@@ -219,6 +217,8 @@ class SamplesDataSource(object):
     for dict_ in samples_list:
       name = dict_['name']
       description = dict_['description']
+      if description is None:
+        description = ''
       if name.startswith('__MSG_') or description.startswith('__MSG_'):
         try:
           # Copy the sample dict so we don't change the dict in the cache.
@@ -241,9 +241,6 @@ class SamplesDataSource(object):
       else:
         return_list.append(dict_)
     return return_list
-
-  def __getitem__(self, key):
-    return self.get(key)
 
   def get(self, key):
     return {

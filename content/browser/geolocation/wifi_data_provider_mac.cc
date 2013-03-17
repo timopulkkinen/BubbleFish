@@ -16,6 +16,7 @@
 #include "content/browser/geolocation/osx_wifi.h"
 #include "content/browser/geolocation/wifi_data_provider_common.h"
 
+namespace content {
 namespace {
 // The time periods, in milliseconds, between successive polls of the wifi data.
 const int kDefaultPollingInterval = 120000;  // 2 mins
@@ -36,7 +37,7 @@ class Apple80211Api : public WifiDataProviderCommon::WlanApiInterface {
   bool Init();
 
   // WlanApiInterface
-  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data);
+  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data) OVERRIDE;
 
  private:
   // Handle, context and function pointers for Apple80211 library.
@@ -190,3 +191,5 @@ PollingPolicyInterface* MacWifiDataProvider::NewPollingPolicy() {
                                   kTwoNoChangePollingInterval,
                                   kNoWifiPollingIntervalMilliseconds>;
 }
+
+}  // namespace content

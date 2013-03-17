@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/common/chrome_switches.h"
+#include "media/base/media_switches.h"
 
 namespace {
 
@@ -31,12 +32,6 @@ void SetCommandLineSwitchASCII(const std::string& switch_string,
 }  // namespace
 
 void SetChromeSpecificCommandLineFlags() {
-  // Always enable SPDY.
-  SetCommandLineSwitch(switches::kEnableNpn);
-
-  // Turn on autofill.
-  SetCommandLineSwitch(switches::kExternalAutofillPopup);
-
   // Turn on autologin.
   SetCommandLineSwitch(switches::kEnableAutologin);
 
@@ -46,4 +41,7 @@ void SetChromeSpecificCommandLineFlags() {
   SetCommandLineSwitchASCII(
       switches::kPrerenderFromOmnibox,
       switches::kPrerenderFromOmniboxSwitchValueEnabled);
+#if !defined(GOOGLE_TV)
+  SetCommandLineSwitch(switches::kDisableEncryptedMedia);
+#endif
 }

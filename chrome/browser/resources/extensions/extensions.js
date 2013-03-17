@@ -38,6 +38,7 @@ cr.define('extensions', function() {
     },
     // @inheritdoc
     doDragOver: function(e) {
+      e.preventDefault();
     },
     // @inheritdoc
     doDrop: function(e) {
@@ -86,6 +87,14 @@ cr.define('extensions', function() {
       $('dev-controls').addEventListener('webkitTransitionEnd',
           this.handleDevControlsTransitionEnd_.bind(this));
 
+      $('unlock-button').addEventListener('click', function() {
+        chrome.send('setElevated', [true]);
+      });
+
+      $('lock-button').addEventListener('click', function() {
+        chrome.send('setElevated', [false]);
+      });
+
       // Set up the three dev mode buttons (load unpacked, pack and update).
       $('load-unpacked').addEventListener('click',
           this.handleLoadUnpackedExtension_.bind(this));
@@ -124,7 +133,7 @@ cr.define('extensions', function() {
           this.showExtensionCommandsConfigUi_();
       }
 
-      preventDefaultOnPoundLinkClicks();  // From shared/js/util.js.
+      preventDefaultOnPoundLinkClicks();  // From webui/js/util.js.
     },
 
     /**
@@ -242,17 +251,31 @@ cr.define('extensions', function() {
     }
 
     var pageDiv = $('extension-settings');
-    if (extensionsData.managedMode) {
+    var marginTop = 0;
+    if (extensionsData.profileIsManaged) {
+      pageDiv.classList.add('profile-is-managed');
+    } else {
+      pageDiv.classList.remove('profile-is-managed');
+    }
+    if (extensionsData.profileIsManaged && !extensionsData.profileIsElevated) {
       pageDiv.classList.add('showing-banner');
-      pageDiv.classList.add('managed-mode');
+      pageDiv.classList.add('managed-user-locked');
       $('toggle-dev-on').disabled = true;
+      marginTop += 45;
     } else {
       pageDiv.classList.remove('showing-banner');
-      pageDiv.classList.remove('managed-mode');
+      pageDiv.classList.remove('managed-user-locked');
       $('toggle-dev-on').disabled = false;
     }
 
-    if (extensionsData.developerMode && !extensionsData.managedMode) {
+    if (extensionsData.showDisabledExtensionsWarning) {
+      pageDiv.classList.add('showing-banner');
+      pageDiv.classList.add('sideload-wipeout');
+      marginTop += 60;
+    }
+    pageDiv.style.marginTop = marginTop + 'px';
+
+    if (extensionsData.developerMode) {
       pageDiv.classList.add('dev-mode');
       $('toggle-dev-on').checked = true;
       $('dev-controls').hidden = false;

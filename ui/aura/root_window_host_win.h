@@ -7,21 +7,17 @@
 
 #include "base/compiler_specific.h"
 #include "ui/aura/root_window_host.h"
+#include "ui/base/ui_export.h"
 #include "ui/base/win/window_impl.h"
-
-namespace ui {
-class ViewProp;
-}
 
 namespace aura {
 
 class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
  public:
-  RootWindowHostWin(RootWindowHostDelegate* delegate,
-                    const gfx::Rect& bounds);
+  RootWindowHostWin(const gfx::Rect& bounds);
   virtual ~RootWindowHostWin();
-
   // RootWindowHost:
+  virtual void SetDelegate(RootWindowHostDelegate* delegate) OVERRIDE;
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -33,12 +29,15 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual void ShowCursor(bool show) OVERRIDE;
   virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
+  virtual void OnCursorVisibilityChanged(bool show) OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                  const gfx::Point& dest_offset,
+                                  SkCanvas* canvas) OVERRIDE;
   virtual bool GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) OVERRIDE;
@@ -63,8 +62,10 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
     MESSAGE_HANDLER_EX(WM_CHAR, OnKeyEvent)
     MESSAGE_HANDLER_EX(WM_SYSCHAR, OnKeyEvent)
     MESSAGE_HANDLER_EX(WM_IME_CHAR, OnKeyEvent)
+    MESSAGE_HANDLER_EX(WM_NCACTIVATE, OnNCActivate)
 
     MSG_WM_CLOSE(OnClose)
+    MSG_WM_MOVE(OnMove)
     MSG_WM_PAINT(OnPaint)
     MSG_WM_SIZE(OnSize)
   END_MSG_MAP()
@@ -73,6 +74,8 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   LRESULT OnKeyEvent(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnCaptureChanged(UINT message, WPARAM w_param, LPARAM l_param);
+  LRESULT OnNCActivate(UINT message, WPARAM w_param, LPARAM l_param);
+  void OnMove(const CPoint& point);
   void OnPaint(HDC dc);
   void OnSize(UINT param, const CSize& size);
 
@@ -84,10 +87,17 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   DWORD saved_window_style_;
   DWORD saved_window_ex_style_;
 
-  scoped_ptr<ui::ViewProp> prop_;
-
   DISALLOW_COPY_AND_ASSIGN(RootWindowHostWin);
 };
+
+namespace test {
+
+// Set true to let RootWindowHostWin use a popup window
+// with no frame/title so that the window size and test's
+// expectations matches.
+AURA_EXPORT void SetUsePopupAsRootWindowForTest(bool use);
+
+}  // namespace
 
 }  // namespace aura
 

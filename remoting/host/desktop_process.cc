@@ -7,133 +7,148 @@
 
 #include "remoting/host/desktop_process.h"
 
-#include "base/at_exit.h"
-#include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/scoped_native_library.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
-#include "base/win/windows_version.h"
-#include "remoting/host/branding.h"
-#include "remoting/host/host_exit_codes.h"
-#include "remoting/host/usage_stats_consent.h"
-
-#if defined(OS_MACOSX)
-#include "base/mac/scoped_nsautorelease_pool.h"
-#endif  // defined(OS_MACOSX)
-
-#if defined(OS_WIN)
-#include <commctrl.h>
-#endif  // defined(OS_WIN)
-
-namespace {
-
-// "--help" or "--?" prints the usage message.
-const char kHelpSwitchName[] = "help";
-const char kQuestionSwitchName[] = "?";
-
-const wchar_t kUsageMessage[] =
-  L"\n"
-  L"Usage: %ls [options]\n"
-  L"\n"
-  L"Options:\n"
-  L"  --help, --?     - Print this message.\n";
-
-void usage(const FilePath& program_name) {
-  LOG(INFO) << StringPrintf(kUsageMessage,
-                            UTF16ToWide(program_name.value()).c_str());
-}
-
-}  // namespace
+#include "base/memory/ref_counted.h"
+#include "base/message_loop.h"
+#include "ipc/ipc_channel_proxy.h"
+#include "remoting/base/auto_thread.h"
+#include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/host/chromoting_messages.h"
+#include "remoting/host/desktop_environment.h"
+#include "remoting/host/desktop_session_agent.h"
 
 namespace remoting {
 
-DesktopProcess::DesktopProcess() {
+DesktopProcess::DesktopProcess(
+    scoped_refptr<AutoThreadTaskRunner> caller_task_runner,
+    const std::string& daemon_channel_name)
+    : caller_task_runner_(caller_task_runner),
+      daemon_channel_name_(daemon_channel_name) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 }
 
 DesktopProcess::~DesktopProcess() {
+  DCHECK(!daemon_channel_);
+  DCHECK(!desktop_agent_);
 }
 
-int DesktopProcess::Run() {
-  NOTIMPLEMENTED();
-  return 0;
+DesktopEnvironmentFactory& DesktopProcess::desktop_environment_factory() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  return *desktop_environment_factory_;
+}
+
+void DesktopProcess::OnNetworkProcessDisconnected() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  OnChannelError();
+}
+
+void DesktopProcess::InjectSas() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  daemon_channel_->Send(new ChromotingDesktopDaemonMsg_InjectSas());
+}
+
+bool DesktopProcess::OnMessageReceived(const IPC::Message& message) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(DesktopProcess, message)
+    IPC_MESSAGE_HANDLER(ChromotingDaemonDesktopMsg_Crash, OnCrash)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void DesktopProcess::OnChannelConnected(int32 peer_pid) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  VLOG(1) << "IPC: desktop <- daemon (" << peer_pid << ")";
+}
+
+void DesktopProcess::OnChannelError() {
+  // Shutdown the desktop process.
+  daemon_channel_.reset();
+  if (desktop_agent_) {
+    desktop_agent_->Stop();
+    desktop_agent_ = NULL;
+  }
+
+  caller_task_runner_ = NULL;
+}
+
+bool DesktopProcess::Start(
+    scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!desktop_environment_factory_);
+  DCHECK(desktop_environment_factory);
+
+  desktop_environment_factory_ = desktop_environment_factory.Pass();
+
+  // Launch the audio capturing thread.
+  scoped_refptr<AutoThreadTaskRunner> audio_task_runner;
+#if defined(OS_WIN)
+  // On Windows the AudioCapturer requires COM, so we run a single-threaded
+  // apartment, which requires a UI thread.
+  audio_task_runner = AutoThread::CreateWithLoopAndComInitTypes(
+      "ChromotingAudioThread", caller_task_runner_, MessageLoop::TYPE_UI,
+      AutoThread::COM_INIT_STA);
+#else // !defined(OS_WIN)
+  audio_task_runner = AutoThread::CreateWithType(
+      "ChromotingAudioThread", caller_task_runner_, MessageLoop::TYPE_IO);
+#endif // !defined(OS_WIN)
+
+  // Launch the input thread.
+  scoped_refptr<AutoThreadTaskRunner> input_task_runner =
+      AutoThread::CreateWithType("Input thread", caller_task_runner_,
+                                 MessageLoop::TYPE_IO);
+
+  // Launch the I/O thread.
+  scoped_refptr<AutoThreadTaskRunner> io_task_runner =
+      AutoThread::CreateWithType("I/O thread", caller_task_runner_,
+                                 MessageLoop::TYPE_IO);
+
+  // Launch the video capture thread.
+  scoped_refptr<AutoThreadTaskRunner> video_capture_task_runner =
+      AutoThread::Create("Video capture thread", caller_task_runner_);
+
+  // Create a desktop agent.
+  desktop_agent_ = DesktopSessionAgent::Create(audio_task_runner,
+                                               caller_task_runner_,
+                                               input_task_runner,
+                                               io_task_runner,
+                                               video_capture_task_runner);
+
+  // Start the agent and create an IPC channel to talk to it.
+  IPC::PlatformFileForTransit desktop_pipe;
+  if (!desktop_agent_->Start(AsWeakPtr(), &desktop_pipe)) {
+    desktop_agent_ = NULL;
+    caller_task_runner_ = NULL;
+    return false;
+  }
+
+  // Connect to the daemon.
+  daemon_channel_.reset(new IPC::ChannelProxy(daemon_channel_name_,
+                                              IPC::Channel::MODE_CLIENT,
+                                              this,
+                                              io_task_runner));
+
+  // Pass |desktop_pipe| to the daemon.
+  daemon_channel_->Send(
+      new ChromotingDesktopDaemonMsg_DesktopAttached(desktop_pipe));
+
+  return true;
+}
+
+void DesktopProcess::OnCrash(const std::string& function_name,
+                             const std::string& file_name,
+                             const int& line_number) {
+  // The daemon requested us to crash the process.
+  CHECK(false);
 }
 
 } // namespace remoting
-
-int main(int argc, char** argv) {
-#if defined(OS_MACOSX)
-  // Needed so we don't leak objects when threads are created.
-  base::mac::ScopedNSAutoreleasePool pool;
-#endif
-
-  CommandLine::Init(argc, argv);
-
-  // This object instance is required by Chrome code (for example,
-  // LazyInstance, MessageLoop).
-  base::AtExitManager exit_manager;
-
-  // Initialize logging with an appropriate log-file location, and default to
-  // log to that on Windows, or to standard error output otherwise.
-  FilePath debug_log = remoting::GetConfigDir().
-      Append(FILE_PATH_LITERAL("debug.log"));
-  InitLogging(debug_log.value().c_str(),
-#if defined(OS_WIN)
-              logging::LOG_ONLY_TO_FILE,
-#else
-              logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-#endif
-              logging::DONT_LOCK_LOG_FILE,
-              logging::APPEND_TO_OLD_LOG_FILE,
-              logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
-
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(kHelpSwitchName) ||
-      command_line->HasSwitch(kQuestionSwitchName)) {
-    usage(command_line->GetProgram());
-    return remoting::kSuccessExitCode;
-  }
-
-  remoting::DesktopProcess desktop_process;
-  return desktop_process.Run();
-}
-
-#if defined(OS_WIN)
-
-int CALLBACK WinMain(HINSTANCE instance,
-                     HINSTANCE previous_instance,
-                     LPSTR raw_command_line,
-                     int show_command) {
-#ifdef OFFICIAL_BUILD
-  if (remoting::IsUsageStatsAllowed()) {
-    remoting::InitializeCrashReporting();
-  }
-#endif  // OFFICIAL_BUILD
-
-  // Register and initialize common controls.
-  INITCOMMONCONTROLSEX info;
-  info.dwSize = sizeof(info);
-  info.dwICC = ICC_STANDARD_CLASSES;
-  InitCommonControlsEx(&info);
-
-  // Mark the process as DPI-aware, so Windows won't scale coordinates in APIs.
-  // N.B. This API exists on Vista and above.
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    FilePath path(base::GetNativeLibraryName(UTF8ToUTF16("user32")));
-    base::ScopedNativeLibrary user32(path);
-    CHECK(user32.is_valid());
-
-    typedef BOOL (WINAPI * SetProcessDPIAwareFn)();
-    SetProcessDPIAwareFn set_process_dpi_aware =
-        static_cast<SetProcessDPIAwareFn>(
-            user32.GetFunctionPointer("SetProcessDPIAware"));
-    set_process_dpi_aware();
-  }
-
-  // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
-  // the command line from GetCommandLineW(), so we can safely pass NULL here.
-  return main(0, NULL);
-}
-
-#endif  // defined(OS_WIN)

@@ -5,29 +5,30 @@
 #ifndef WEBKIT_FILEAPI_ISOLATED_FILE_UTIL_H_
 #define WEBKIT_FILEAPI_ISOLATED_FILE_UTIL_H_
 
-#include "webkit/fileapi/fileapi_export.h"
+#include "base/memory/scoped_ptr.h"
 #include "webkit/fileapi/local_file_util.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
 
 class FileSystemOperationContext;
 
-class FILEAPI_EXPORT_PRIVATE IsolatedFileUtil : public LocalFileUtil {
+class WEBKIT_STORAGE_EXPORT_PRIVATE IsolatedFileUtil : public LocalFileUtil {
  public:
   IsolatedFileUtil();
   virtual ~IsolatedFileUtil() {}
 
   // LocalFileUtil overrides.
-  virtual PlatformFileError GetLocalFilePath(
+  virtual base::PlatformFileError GetLocalFilePath(
       FileSystemOperationContext* context,
       const FileSystemURL& file_system_url,
-      FilePath* local_file_path) OVERRIDE;
+      base::FilePath* local_file_path) OVERRIDE;
 };
 
 // Dragged file system is a specialized IsolatedFileUtil where read access to
 // the virtual root directory (i.e. empty cracked path case) is allowed
 // and single isolated context may be associated with multiple file paths.
-class FILEAPI_EXPORT_PRIVATE DraggedFileUtil : public IsolatedFileUtil {
+class WEBKIT_STORAGE_EXPORT_PRIVATE DraggedFileUtil : public IsolatedFileUtil {
  public:
   DraggedFileUtil();
   virtual ~DraggedFileUtil() {}
@@ -37,14 +38,11 @@ class FILEAPI_EXPORT_PRIVATE DraggedFileUtil : public IsolatedFileUtil {
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       base::PlatformFileInfo* file_info,
-      FilePath* platform_path) OVERRIDE;
-  virtual AbstractFileEnumerator* CreateFileEnumerator(
+      base::FilePath* platform_path) OVERRIDE;
+  virtual scoped_ptr<AbstractFileEnumerator> CreateFileEnumerator(
       FileSystemOperationContext* context,
       const FileSystemURL& root_url,
       bool recursive) OVERRIDE;
-  virtual bool IsDirectoryEmpty(
-      FileSystemOperationContext* context,
-      const FileSystemURL& url) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DraggedFileUtil);

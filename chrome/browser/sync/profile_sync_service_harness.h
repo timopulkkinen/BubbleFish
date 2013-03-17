@@ -60,6 +60,12 @@ class ProfileSyncServiceHarness
   // in |synced_datatypes|.
   bool SetupSync(syncer::ModelTypeSet synced_datatypes);
 
+  // Prepare for setting up to sync, but without clearing the existing items.
+  bool InitializeSync();
+
+  // Returns true if the sync client has no unsynced items.
+  bool IsDataSynced();
+
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
 
@@ -105,7 +111,7 @@ class ProfileSyncServiceHarness
 
   // Blocks the caller until this harness has observed that the sync engine
   // has downloaded all the changes seen by the |partner| harness's client.
-  bool WaitUntilTimestampMatches(
+  bool WaitUntilProgressMarkersMatch(
       ProfileSyncServiceHarness* partner, const std::string& reason);
 
   // Calling this acts as a barrier and blocks the caller until |this| and
@@ -125,9 +131,9 @@ class ProfileSyncServiceHarness
       std::vector<ProfileSyncServiceHarness*>& partners);
 
   // Blocks the caller until every client in |clients| completes its ongoing
-  // sync cycle and all the clients' timestamps match.  Note: Use this method
-  // when more than one client makes local change(s), and more than one client
-  // is waiting to receive those changes.
+  // sync cycle and all the clients' progress markers match.  Note: Use this
+  // method when more than one client makes local change(s), and more than one
+  // client is waiting to receive those changes.
   static bool AwaitQuiescence(
       std::vector<ProfileSyncServiceHarness*>& clients);
 
@@ -256,6 +262,9 @@ class ProfileSyncServiceHarness
     // The sync client needs a passphrase in order to decrypt data.
     SET_PASSPHRASE_FAILED,
 
+    // The sync client's credentials were rejected.
+    CREDENTIALS_REJECTED,
+
     // The sync client cannot reach the server.
     SERVER_UNREACHABLE,
 
@@ -291,9 +300,6 @@ class ProfileSyncServiceHarness
   bool IsDataSyncedImpl(
       const syncer::sessions::SyncSessionSnapshot& snapshot);
 
-  // Returns true if the sync client has no unsynced items.
-  bool IsDataSynced();
-
   // Returns true if the sync client has no unsynced items and its progress
   // markers are believed to be up to date.
   //
@@ -314,9 +320,10 @@ class ProfileSyncServiceHarness
   // available), annotated with |message|. Useful for logging.
   std::string GetClientInfoString(const std::string& message);
 
-  // Gets the current progress indicator of the current sync session
-  // for a particular datatype.
-  std::string GetUpdatedTimestamp(syncer::ModelType model_type);
+  // Gets the current progress marker of the current sync session for a
+  // particular datatype. Returns an empty string if the progress marker isn't
+  // found.
+  std::string GetSerializedProgressMarker(syncer::ModelType model_type) const;
 
   // Gets detailed status from |service_| in pretty-printable form.
   std::string GetServiceStatus();
@@ -337,7 +344,7 @@ class ProfileSyncServiceHarness
 
   // The harness of the client whose update progress marker we're expecting
   // eventually match.
-  ProfileSyncServiceHarness* timestamp_match_partner_;
+  ProfileSyncServiceHarness* progress_marker_partner_;
 
   // Credentials used for GAIA authentication.
   std::string username_;

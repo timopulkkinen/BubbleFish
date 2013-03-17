@@ -7,6 +7,7 @@
 
 #include <list>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,8 +18,8 @@
 class ServiceProcessPrefs;
 
 namespace cloud_print {
+
 struct CloudPrintProxyInfo;
-}  // namespace cloud_print
 
 // CloudPrintProxy is the layer between the service process UI thread
 // and the cloud print proxy backend.
@@ -44,11 +45,13 @@ class CloudPrintProxy : public CloudPrintProxyFrontend,
   void EnableForUserWithRobot(
       const std::string& robot_auth_code,
       const std::string& robot_email,
-      const std::string& user_email);
+      const std::string& user_email,
+      bool connect_new_printers,
+      const std::vector<std::string>& printer_blacklist);
   void UnregisterPrintersAndDisableForUser();
   void DisableForUser();
   // Returns the proxy info.
-  void GetProxyInfo(cloud_print::CloudPrintProxyInfo* info);
+  void GetProxyInfo(CloudPrintProxyInfo* info);
 
   // Launches a browser to see if the proxy policy has been set.
   void CheckCloudPrintProxyPolicy();
@@ -96,5 +99,7 @@ class CloudPrintProxy : public CloudPrintProxyFrontend,
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxy);
 };
+
+}  // namespace cloud_print
 
 #endif  // CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_PROXY_H_

@@ -5,10 +5,11 @@
 #include "gpu/command_buffer/service/feature_info.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_mock.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -56,7 +57,7 @@ class FeatureInfoTest : public testing::Test {
   }
 
   scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
-  FeatureInfo::Ref info_;
+  scoped_refptr<FeatureInfo> info_;
 };
 
 namespace {
@@ -76,7 +77,6 @@ TEST_F(FeatureInfoTest, Basic) {
   EXPECT_FALSE(info_->feature_flags().npot_ok);
   EXPECT_FALSE(info_->feature_flags().enable_texture_float_linear);
   EXPECT_FALSE(info_->feature_flags().enable_texture_half_float_linear);
-  EXPECT_FALSE(info_->feature_flags().chromium_webglsl);
   EXPECT_FALSE(info_->feature_flags().oes_egl_image_external);
   EXPECT_FALSE(info_->feature_flags().chromium_stream_texture);
   EXPECT_FALSE(info_->feature_flags().angle_translated_shader_source);
@@ -88,9 +88,13 @@ TEST_F(FeatureInfoTest, Basic) {
       ).use_arb_occlusion_query2_for_occlusion_query_boolean);
   EXPECT_FALSE(info_->feature_flags(
       ).use_arb_occlusion_query_for_occlusion_query_boolean);
-  EXPECT_FALSE(info_->feature_flags().is_intel);
-  EXPECT_FALSE(info_->feature_flags().is_nvidia);
-  EXPECT_FALSE(info_->feature_flags().is_amd);
+  EXPECT_FALSE(info_->feature_flags().native_vertex_array_object);
+  EXPECT_FALSE(info_->workarounds().reverse_point_sprite_coord_origin);
+  EXPECT_FALSE(
+      info_->workarounds().set_texture_filter_before_generating_mipmap);
+  EXPECT_FALSE(info_->workarounds().clear_alpha_in_readpixels);
+  EXPECT_EQ(0, info_->workarounds().max_texture_size);
+  EXPECT_EQ(0, info_->workarounds().max_cube_map_texture_size);
 
   // Test good types.
   {
@@ -194,7 +198,6 @@ TEST_F(FeatureInfoTest, InitializeNoExtensions) {
               HasSubstr("GL_ANGLE_translated_shader_source"));
 
   // Check a couple of random extensions that should not be there.
-  EXPECT_THAT(info_->extensions(), Not(HasSubstr("GL_CHROMIUM_webglsl")));
   EXPECT_THAT(info_->extensions(), Not(HasSubstr("GL_OES_texture_npot")));
   EXPECT_THAT(info_->extensions(),
               Not(HasSubstr("GL_EXT_texture_compression_dxt1")));
@@ -206,8 +209,9 @@ TEST_F(FeatureInfoTest, InitializeNoExtensions) {
               Not(HasSubstr("GL_ANGLE_texture_usage")));
   EXPECT_THAT(info_->extensions(),
               Not(HasSubstr("GL_EXT_texture_storage")));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_OES_compressed_ETC1_RGB8_texture")));
   EXPECT_FALSE(info_->feature_flags().npot_ok);
-  EXPECT_FALSE(info_->feature_flags().chromium_webglsl);
   EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
       GL_COMPRESSED_RGB_S3TC_DXT1_EXT));
   EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
@@ -216,6 +220,8 @@ TEST_F(FeatureInfoTest, InitializeNoExtensions) {
       GL_COMPRESSED_RGBA_S3TC_DXT3_EXT));
   EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
       GL_COMPRESSED_RGBA_S3TC_DXT5_EXT));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ETC1_RGB8_OES));
   EXPECT_FALSE(info_->validators()->read_pixel_format.IsValid(
       GL_BGRA_EXT));
   EXPECT_FALSE(info_->validators()->texture_parameter.IsValid(
@@ -668,13 +674,6 @@ TEST_F(FeatureInfoTest, InitializeOES_standard_derivatives) {
       GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES));
 }
 
-TEST_F(FeatureInfoTest, InitializeCHROMIUM_webglsl) {
-  SetupInitExpectations("");
-  info_->Initialize("GL_CHROMIUM_webglsl");
-  EXPECT_THAT(info_->extensions(), HasSubstr("GL_CHROMIUM_webglsl"));
-  EXPECT_TRUE(info_->feature_flags().chromium_webglsl);
-}
-
 TEST_F(FeatureInfoTest, InitializeOES_rgb8_rgba8) {
   SetupInitExpectations("GL_OES_rgb8_rgba8");
   info_->Initialize(NULL);
@@ -700,6 +699,17 @@ TEST_F(FeatureInfoTest, InitializeOES_EGL_image_external) {
       GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES));
   EXPECT_TRUE(info_->validators()->g_l_state.IsValid(
       GL_TEXTURE_BINDING_EXTERNAL_OES));
+}
+
+TEST_F(FeatureInfoTest, InitializeOES_compressed_ETC1_RGB8_texture) {
+  SetupInitExpectations("GL_OES_compressed_ETC1_RGB8_texture");
+  info_->Initialize(NULL);
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_OES_compressed_ETC1_RGB8_texture"));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ETC1_RGB8_OES));
+  EXPECT_FALSE(info_->validators()->texture_internal_format.IsValid(
+      GL_ETC1_RGB8_OES));
 }
 
 TEST_F(FeatureInfoTest, InitializeCHROMIUM_stream_texture) {
@@ -750,24 +760,24 @@ TEST_F(FeatureInfoTest, InitializeOES_vertex_array_object) {
   SetupInitExpectations("GL_OES_vertex_array_object");
   info_->Initialize(NULL);
   EXPECT_THAT(info_->extensions(),
-              HasSubstr("GL_OES_vertex_array_object"));
-  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object_);
+      HasSubstr("GL_OES_vertex_array_object"));
+  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object);
 }
 
 TEST_F(FeatureInfoTest, InitializeARB_vertex_array_object) {
   SetupInitExpectations("GL_ARB_vertex_array_object");
   info_->Initialize(NULL);
   EXPECT_THAT(info_->extensions(),
-              HasSubstr("GL_OES_vertex_array_object"));
-  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object_);
+      HasSubstr("GL_OES_vertex_array_object"));
+  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object);
 }
 
 TEST_F(FeatureInfoTest, InitializeAPPLE_vertex_array_object) {
   SetupInitExpectations("GL_APPLE_vertex_array_object");
   info_->Initialize(NULL);
   EXPECT_THAT(info_->extensions(),
-              HasSubstr("GL_OES_vertex_array_object"));
-  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object_);
+      HasSubstr("GL_OES_vertex_array_object"));
+  EXPECT_TRUE(info_->feature_flags().native_vertex_array_object);
 }
 
 TEST_F(FeatureInfoTest, InitializeNo_vertex_array_object) {
@@ -776,82 +786,18 @@ TEST_F(FeatureInfoTest, InitializeNo_vertex_array_object) {
   // Even if the native extensions are not available the implementation
   // may still emulate the GL_OES_vertex_array_object functionality. In this
   // scenario native_vertex_array_object must be false.
-  EXPECT_FALSE(info_->feature_flags().native_vertex_array_object_);
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_OES_vertex_array_object"));
+  EXPECT_FALSE(info_->feature_flags().native_vertex_array_object);
 }
 
-TEST_F(FeatureInfoTest, IsIntel) {
-  SetupInitExpectationsWithVendor("", "iNTel", "");
+TEST_F(FeatureInfoTest, InitializeOES_element_index_uint) {
+  SetupInitExpectations("GL_OES_element_index_uint");
   info_->Initialize(NULL);
-  EXPECT_TRUE(info_->feature_flags().is_intel);
-  EXPECT_FALSE(info_->feature_flags().is_nvidia);
-  EXPECT_FALSE(info_->feature_flags().is_amd);
-
-  SetupInitExpectationsWithVendor("", "", "IntEl");
-  FeatureInfo::Ref feature_info(new FeatureInfo());
-  feature_info->Initialize(NULL);
-  EXPECT_TRUE(feature_info->feature_flags().is_intel);
-  EXPECT_FALSE(feature_info->feature_flags().is_nvidia);
-  EXPECT_FALSE(feature_info->feature_flags().is_amd);
-}
-
-TEST_F(FeatureInfoTest, IsNvidia) {
-  SetupInitExpectationsWithVendor("", "nvIdIa", "");
-  info_->Initialize(NULL);
-  EXPECT_FALSE(info_->feature_flags().is_intel);
-  EXPECT_TRUE(info_->feature_flags().is_nvidia);
-  EXPECT_FALSE(info_->feature_flags().is_amd);
-
-  SetupInitExpectationsWithVendor("", "", "NViDiA");
-  {
-    FeatureInfo::Ref feature_info(new FeatureInfo());
-    feature_info->Initialize(NULL);
-    EXPECT_FALSE(feature_info->feature_flags().is_intel);
-    EXPECT_TRUE(feature_info->feature_flags().is_nvidia);
-    EXPECT_FALSE(feature_info->feature_flags().is_amd);
-  }
-
-  SetupInitExpectationsWithVendor("", "NVIDIA Corporation", "");
-  {
-    FeatureInfo::Ref feature_info(new FeatureInfo());
-    feature_info->Initialize(NULL);
-    EXPECT_FALSE(feature_info->feature_flags().is_intel);
-    EXPECT_TRUE(feature_info->feature_flags().is_nvidia);
-    EXPECT_FALSE(feature_info->feature_flags().is_amd);
-  }
-}
-
-TEST_F(FeatureInfoTest, IsAMD) {
-  SetupInitExpectationsWithVendor("", "aMd", "");
-  info_->Initialize(NULL);
-  EXPECT_FALSE(info_->feature_flags().is_intel);
-  EXPECT_FALSE(info_->feature_flags().is_nvidia);
-  EXPECT_TRUE(info_->feature_flags().is_amd);
-
-  SetupInitExpectationsWithVendor("", "", "AmD");
-  FeatureInfo::Ref feature_info(new FeatureInfo());
-  feature_info->Initialize(NULL);
-  EXPECT_FALSE(feature_info->feature_flags().is_intel);
-  EXPECT_FALSE(feature_info->feature_flags().is_nvidia);
-  EXPECT_TRUE(feature_info->feature_flags().is_amd);
-}
-
-TEST_F(FeatureInfoTest, IsAMDATI) {
-  SetupInitExpectationsWithVendor("", "aTI", "");
-  info_->Initialize(NULL);
-  EXPECT_FALSE(info_->feature_flags().is_intel);
-  EXPECT_FALSE(info_->feature_flags().is_nvidia);
-  EXPECT_TRUE(info_->feature_flags().is_amd);
-
-  SetupInitExpectationsWithVendor("", "", "AtI");
-  FeatureInfo::Ref feature_info(new FeatureInfo());
-  feature_info->Initialize(NULL);
-  EXPECT_FALSE(feature_info->feature_flags().is_intel);
-  EXPECT_FALSE(feature_info->feature_flags().is_nvidia);
-  EXPECT_TRUE(feature_info->feature_flags().is_amd);
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_OES_element_index_uint"));
+  EXPECT_TRUE(info_->validators()->index_type.IsValid(GL_UNSIGNED_INT));
 }
 
 }  // namespace gles2
 }  // namespace gpu
-
-
-

@@ -9,7 +9,7 @@
 #include "base/time.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/form_structure.h"
-#include "webkit/forms/form_data.h"
+#include "chrome/common/form_data.h"
 
 namespace {
 
@@ -52,6 +52,7 @@ enum FieldTypeGroupForMetrics {
   CREDIT_CARD_NAME,
   CREDIT_CARD_NUMBER,
   CREDIT_CARD_DATE,
+  CREDIT_CARD_TYPE,
   NUM_FIELD_TYPE_GROUPS_FOR_METRICS
 };
 
@@ -137,6 +138,8 @@ int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
         case ::CREDIT_CARD_NUMBER:
           group = CREDIT_CARD_NUMBER;
           break;
+        case ::CREDIT_CARD_TYPE:
+          group = CREDIT_CARD_TYPE;
         default:
           group = CREDIT_CARD_DATE;
       }
@@ -157,17 +160,30 @@ int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
 void LogUMAHistogramEnumeration(const std::string& name,
                                 int sample,
                                 int boundary_value) {
-  // We can't use the UMA_HISTOGRAM_ENUMERATION macro here because the histogram
-  // name can vary over the duration of the program.
-  // Note that this leaks memory; that is expected behavior.
-  base::Histogram* counter =
+  // Note: This leaks memory, which is expected behavior.
+  base::HistogramBase* histogram =
       base::LinearHistogram::FactoryGet(
           name,
           1,
           boundary_value,
           boundary_value + 1,
-          base::Histogram::kUmaTargetedHistogramFlag);
-  counter->Add(sample);
+          base::HistogramBase::kUmaTargetedHistogramFlag);
+  histogram->Add(sample);
+}
+
+// A version of the UMA_HISTOGRAM_LONG_TIMES macro that allows the |name|
+// to vary over the program's runtime.
+void LogUMAHistogramLongTimes(const std::string& name,
+                              const base::TimeDelta& duration) {
+  // Note: This leaks memory, which is expected behavior.
+  base::HistogramBase* histogram =
+      base::Histogram::FactoryTimeGet(
+          name,
+          base::TimeDelta::FromMilliseconds(1),
+          base::TimeDelta::FromHours(1),
+          50,
+          base::HistogramBase::kUmaTargetedHistogramFlag);
+  histogram->AddTime(duration);
 }
 
 // Logs a type quality metric.  The primary histogram name is constructed based
@@ -203,7 +219,7 @@ void LogServerExperimentId(const std::string& histogram_name,
   ServerExperiment metric = UNKNOWN_EXPERIMENT;
 
   const std::string default_experiment_name =
-      FormStructure(webkit::forms::FormData()).server_experiment_id();
+      FormStructure(FormData(), std::string()).server_experiment_id();
   if (experiment_id.empty())
     metric = NO_EXPERIMENT;
   else if (experiment_id == "ar06")
@@ -251,11 +267,73 @@ AutofillMetrics::AutofillMetrics() {
 AutofillMetrics::~AutofillMetrics() {
 }
 
+void AutofillMetrics::LogAutocheckoutBubbleMetric(BubbleMetric metric) const {
+  DCHECK(metric < NUM_BUBBLE_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autocheckout.Bubble", metric, NUM_BUBBLE_METRICS);
+}
+
 void AutofillMetrics::LogCreditCardInfoBarMetric(InfoBarMetric metric) const {
   DCHECK(metric < NUM_INFO_BAR_METRICS);
 
   UMA_HISTOGRAM_ENUMERATION("Autofill.CreditCardInfoBar", metric,
                             NUM_INFO_BAR_METRICS);
+}
+
+void AutofillMetrics::LogRequestAutocompleteUiDuration(
+    const base::TimeDelta& duration,
+    autofill::DialogType dialog_type,
+    DialogDismissalAction dismissal_action) const {
+  std::string prefix;
+  switch (dialog_type) {
+    case autofill::DIALOG_TYPE_AUTOCHECKOUT:
+      prefix = "Autocheckout";
+      break;
+
+    case autofill::DIALOG_TYPE_REQUEST_AUTOCOMPLETE:
+      prefix = "RequestAutocomplete";
+      break;
+  }
+
+  std::string suffix;
+  switch (dismissal_action) {
+    case DIALOG_ACCEPTED:
+      suffix = "Submit";
+      break;
+
+    case DIALOG_CANCELED:
+      suffix = "Cancel";
+      break;
+  }
+
+  LogUMAHistogramLongTimes(prefix + ".UiDuration", duration);
+  LogUMAHistogramLongTimes(prefix + ".UiDuration." + suffix, duration);
+}
+
+void AutofillMetrics::LogAutocheckoutDuration(
+    const base::TimeDelta& duration,
+    AutocheckoutCompletionStatus status) const {
+  std::string suffix;
+  switch (status) {
+    case AUTOCHECKOUT_FAILED:
+      suffix = "Failed";
+      break;
+
+    case AUTOCHECKOUT_SUCCEEDED:
+      suffix = "Succeeded";
+      break;
+  }
+
+  LogUMAHistogramLongTimes("Autocheckout.FlowDuration", duration);
+  LogUMAHistogramLongTimes("Autocheckout.FlowDuration." + suffix, duration);
+}
+
+void AutofillMetrics::LogDeveloperEngagementMetric(
+    DeveloperEngagementMetric metric) const {
+  DCHECK(metric < NUM_DEVELOPER_ENGAGEMENT_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autofill.DeveloperEngagement", metric,
+                            NUM_DEVELOPER_ENGAGEMENT_METRICS);
 }
 
 void AutofillMetrics::LogHeuristicTypePrediction(

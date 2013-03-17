@@ -13,9 +13,11 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
+#include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
@@ -23,7 +25,6 @@
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 #include "ui/gfx/rect.h"
 
 using content::WebContents;
@@ -73,9 +74,6 @@ NSColor* HostTextColor() {
 }
 NSColor* BaseTextColor() {
   return [NSColor darkGrayColor];
-}
-NSColor* SuggestTextColor() {
-  return [NSColor grayColor];
 }
 NSColor* SecureSchemeColor() {
   return ColorWithRGBBytes(0x07, 0x95, 0x00);
@@ -127,23 +125,23 @@ NSImage* OmniboxViewMac::ImageForResource(int resource_id) {
   return rb.GetNativeImageNamed(resource_id).ToNSImage();
 }
 
+// static
+NSColor* OmniboxViewMac::SuggestTextColor() {
+  return [NSColor colorWithCalibratedWhite:0.0 alpha:0.5];
+}
+
 OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                AutocompleteTextField* field)
     : OmniboxView(profile, controller, toolbar_model, command_updater),
-      popup_view_(new OmniboxPopupViewMac(this, model(), field)),
+      popup_view_(OmniboxPopupViewMac::Create(this, model(), field)),
       field_(field),
       suggest_text_length_(0),
       delete_was_pressed_(false),
       delete_at_end_pressed_(false),
       line_height_(0) {
-  DCHECK(controller);
-  DCHECK(toolbar_model);
-  DCHECK(profile);
-  DCHECK(command_updater);
-  DCHECK(field);
   [field_ setObserver:this];
 
   // Needed so that editing doesn't lose the styling.
@@ -269,7 +267,7 @@ void OmniboxViewMac::SetWindowTextAndCaretPos(const string16& text,
                                               bool update_popup,
                                               bool notify_text_changed) {
   DCHECK_LE(caret_pos, text.size());
-  SetTextAndSelectedRange(text, NSMakeRange(caret_pos, caret_pos));
+  SetTextAndSelectedRange(text, NSMakeRange(caret_pos, 0));
 
   if (update_popup)
     UpdatePopup();
@@ -360,6 +358,13 @@ void OmniboxViewMac::CloseOmniboxPopup() {
 }
 
 void OmniboxViewMac::SetFocus() {
+  FocusLocation(false);
+  model()->SetCaretVisibility(true);
+}
+
+void OmniboxViewMac::ApplyCaretVisibility() {
+  [[field_ cell] setHideFocusState:!model()->is_caret_visible()
+                            ofView:field_];
 }
 
 void OmniboxViewMac::SetText(const string16& display_text) {
@@ -372,6 +377,13 @@ void OmniboxViewMac::SetTextInternal(const string16& display_text) {
   NSString* ss = base::SysUTF16ToNSString(display_text);
   NSMutableAttributedString* as =
       [[[NSMutableAttributedString alloc] initWithString:ss] autorelease];
+
+  // |ApplyTextAttributes()| may call |GetText()|, expecting the current text
+  // to be consistent with |suggest_text_length_|, which may not be the case
+  // when |SetTextInternal()| is called after updating |suggest_text_length_|.
+  // To work around this, set the non-attributed string first, before applying
+  // styles to it.
+  [field_ setAttributedStringValue:as];
 
   ApplyTextAttributes(display_text, as);
 
@@ -486,8 +498,8 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
       toolbar_model()->GetSecurityLevel();
 
   // Emphasize the scheme for security UI display purposes (if necessary).
-  if (!model()->user_input_in_progress() && scheme.is_nonempty() &&
-      (security_level != ToolbarModel::NONE)) {
+  if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
+      scheme.is_nonempty() && (security_level != ToolbarModel::NONE)) {
     NSColor* color;
     if (security_level == ToolbarModel::EV_SECURE ||
         security_level == ToolbarModel::SECURE) {
@@ -510,13 +522,15 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
 }
 
 void OmniboxViewMac::OnTemporaryTextMaybeChanged(const string16& display_text,
-                                                 bool save_original_selection) {
+                                                 bool save_original_selection,
+                                                 bool notify_text_changed) {
   if (save_original_selection)
     saved_temporary_selection_ = GetSelectedRange();
 
   suggest_text_length_ = 0;
   SetWindowTextAndCaretPos(display_text, display_text.size(), false, false);
-  model()->OnChanged();
+  if (notify_text_changed)
+    model()->OnChanged();
   [field_ clearUndoChain];
 }
 
@@ -524,7 +538,7 @@ void OmniboxViewMac::OnStartingIME() {
   // Reset the suggest text just before starting an IME composition session,
   // otherwise the IME composition may be interrupted when the suggest text
   // gets reset by the IME composition change.
-  SetInstantSuggestion(string16(), false);
+  SetInstantSuggestion(string16());
 }
 
 bool OmniboxViewMac::OnInlineAutocompleteTextMaybeChanged(
@@ -624,8 +638,7 @@ gfx::NativeView OmniboxViewMac::GetRelativeWindowForPopup() const {
   return NULL;
 }
 
-void OmniboxViewMac::SetInstantSuggestion(const string16& suggest_text,
-                                          bool animate_to_complete) {
+void OmniboxViewMac::SetInstantSuggestion(const string16& suggest_text) {
   NSString* text = GetNonSuggestTextSubstring();
   bool needs_update = (suggest_text_length_ > 0);
 
@@ -682,37 +695,49 @@ void OmniboxViewMac::OnDidEndEditing() {
 }
 
 bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
-  // We should only arrive here when the field is focussed.
-  DCHECK(IsFirstResponder());
-
   if (cmd != @selector(moveRight:) &&
       cmd != @selector(insertTab:) &&
       cmd != @selector(insertTabIgnoringFieldEditor:)) {
     // Reset the suggest text for any change other than key right or tab.
     // TODO(rohitrao): This is here to prevent complications when editing text.
     // See if this can be removed.
-    SetInstantSuggestion(string16(), false);
+    SetInstantSuggestion(string16());
   }
 
   if (cmd == @selector(deleteForward:))
     delete_was_pressed_ = true;
 
-  // Don't intercept up/down-arrow or backtab if the popup isn't open.
-  if (popup_view_->IsOpen()) {
-    if (cmd == @selector(moveDown:)) {
-      model()->OnUpOrDownKeyPressed(1);
-      return true;
-    }
+  if (cmd == @selector(moveDown:)) {
+    model()->OnUpOrDownKeyPressed(1);
+    return true;
+  }
 
-    if (cmd == @selector(moveUp:)) {
-      model()->OnUpOrDownKeyPressed(-1);
-      return true;
-    }
+  if (cmd == @selector(moveUp:)) {
+    model()->OnUpOrDownKeyPressed(-1);
+    return true;
+  }
 
-    if (cmd == @selector(insertBacktab:) &&
-        model()->popup_model()->selected_line_state() ==
+  if (model()->popup_model()->IsOpen()) {
+    // If instant extended is enabled then allow users to press tab to select
+    // results from the omnibox popup.
+    BOOL enableTabAutocomplete =
+        chrome::search::IsInstantExtendedAPIEnabled(model()->profile());
+
+    if (cmd == @selector(insertBacktab:)) {
+      if (model()->popup_model()->selected_line_state() ==
             OmniboxPopupModel::KEYWORD) {
-      model()->ClearKeyword(GetText());
+        model()->ClearKeyword(GetText());
+        return true;
+      } else if (enableTabAutocomplete) {
+        model()->OnUpOrDownKeyPressed(-1);
+        return true;
+      }
+    }
+
+    if ((cmd == @selector(insertTab:) ||
+        cmd == @selector(insertTabIgnoringFieldEditor:)) &&
+        !model()->is_keyword_hint() && enableTabAutocomplete) {
+      model()->OnUpOrDownKeyPressed(1);
       return true;
     }
   }
@@ -811,6 +836,14 @@ void OmniboxViewMac::OnKillFocus() {
   model()->OnWillKillFocus(NULL);
   model()->OnKillFocus();
   controller()->OnKillFocus();
+}
+
+void OmniboxViewMac::OnMouseDown(NSInteger button_number) {
+  // Restore caret visibility whenever the user clicks in the the omnibox. This
+  // is not always covered by OnSetFocus() because when clicking while the
+  // omnibox has invisible focus does not trigger a new OnSetFocus() call.
+  if (button_number == 0 || button_number == 1)
+    model()->SetCaretVisibility(true);
 }
 
 bool OmniboxViewMac::CanCopy() {
@@ -923,7 +956,7 @@ void OmniboxViewMac::OnFrameChanged() {
   // things even cheaper by refactoring between the popup-placement
   // code and the matrix-population code.
   popup_view_->UpdatePopupAppearance();
-  model()->PopupBoundsChangedTo(popup_view_->GetTargetBounds());
+  model()->OnPopupBoundsChanged(popup_view_->GetTargetBounds());
 
   // Give controller a chance to rearrange decorations.
   model()->OnChanged();

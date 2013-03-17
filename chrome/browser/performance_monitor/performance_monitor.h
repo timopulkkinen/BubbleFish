@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -65,7 +65,7 @@ class PerformanceMonitor : public content::NotificationObserver {
   // PerformanceMonitor. Returns true on success, false on failure (failure
   // likely indicates that PerformanceMonitor has already been started at the
   // time of the call).
-  bool SetDatabasePath(const FilePath& path);
+  bool SetDatabasePath(const base::FilePath& path);
 
   // Returns the current PerformanceMonitor instance if one exists; otherwise
   // constructs a new PerformanceMonitor.
@@ -88,7 +88,7 @@ class PerformanceMonitor : public content::NotificationObserver {
                        const content::NotificationDetails& details) OVERRIDE;
 
   Database* database() { return database_.get(); }
-  FilePath database_path() { return database_path_; }
+  base::FilePath database_path() { return database_path_; }
   static bool initialized() { return initialized_; }
 
  private:
@@ -131,9 +131,8 @@ class PerformanceMonitor : public content::NotificationObserver {
   void AddEventOnBackgroundThread(scoped_ptr<Event> event);
 
   // Since Database::AddMetric() is overloaded, base::Bind() does not work and
-  // we need a helper function. Deliberately not const & so that we will
-  // construct a new metric on the background thread.
-  void AddMetricOnBackgroundThread(Metric metric);
+  // we need a helper function.
+  void AddMetricOnBackgroundThread(const Metric& metric);
 
   // Notify any listeners that PerformanceMonitor has finished the initializing.
   void NotifyInitialized();
@@ -165,9 +164,10 @@ class PerformanceMonitor : public content::NotificationObserver {
   void AddExtensionEvent(EventType type,
                          const extensions::Extension* extension);
 
-  // Generate an appropriate CrashEvent for a renderer crash and insert it in
-  // the database.
-  void AddCrashEvent(
+  // Generate an appropriate RendererFailure for a renderer crash and insert it
+  // in the database.
+  void AddRendererClosedEvent(
+      content::RenderProcessHost* host,
       const content::RenderProcessHost::RendererClosedDetails& details);
 
   // Called on the IO thread, this will call InsertIOData on the background
@@ -175,9 +175,9 @@ class PerformanceMonitor : public content::NotificationObserver {
   // any possible race conditions.
   void CallInsertIOData();
 
-  // Insert the collected IO data into the database (deliberately not const & so
-  // we create a copy and it becomes thread-safe).
-  void InsertIOData(PerformanceDataForIOThread performance_data_for_io_thread);
+  // Insert the collected IO data into the database.
+  void InsertIOData(
+      const PerformanceDataForIOThread& performance_data_for_io_thread);
 
   // The store for all performance data that must be gathered from the IO
   // thread.
@@ -185,7 +185,7 @@ class PerformanceMonitor : public content::NotificationObserver {
 
   // The location at which the database files are stored; if empty, the database
   // will default to '<user_data_dir>/performance_monitor_dbs'.
-  FilePath database_path_;
+  base::FilePath database_path_;
 
   scoped_ptr<Database> database_;
 

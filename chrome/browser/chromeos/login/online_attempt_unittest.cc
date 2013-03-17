@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/login/mock_url_fetchers.h"
 #include "chrome/browser/chromeos/login/online_attempt.h"
 #include "chrome/browser/chromeos/login/test_attempt_state.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -34,14 +35,14 @@ class OnlineAttemptTest : public testing::Test {
   OnlineAttemptTest()
       : message_loop_(MessageLoop::TYPE_UI),
         ui_thread_(BrowserThread::UI, &message_loop_),
-        state_("", "", "", "", "", false),
+        state_("", "", "", "", "", User::USER_TYPE_REGULAR, false),
         resolver_(new MockAuthAttemptStateResolver) {
   }
 
   virtual ~OnlineAttemptTest() {}
 
   virtual void SetUp() {
-    attempt_.reset(new OnlineAttempt(false, &state_, resolver_.get()));
+    attempt_.reset(new OnlineAttempt(&state_, resolver_.get()));
   }
 
   virtual void TearDown() {
@@ -58,7 +59,7 @@ class OnlineAttemptTest : public testing::Test {
                    attempt_->weak_factory_.GetWeakPtr(),
                    error));
     // Force UI thread to finish tasks so I can verify |state_|.
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
     EXPECT_TRUE(error == state_.online_outcome().error());
   }
 
@@ -75,7 +76,7 @@ class OnlineAttemptTest : public testing::Test {
   }
 
   static void RunThreadTest() {
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
   }
 
   MessageLoop message_loop_;
@@ -99,7 +100,7 @@ TEST_F(OnlineAttemptTest, LoginSuccess) {
                  attempt_->weak_factory_.GetWeakPtr(),
                  GaiaAuthConsumer::ClientLoginResult()));
   // Force UI thread to finish tasks so I can verify |state_|.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(OnlineAttemptTest, LoginCancelRetry) {
@@ -167,8 +168,9 @@ TEST_F(OnlineAttemptTest, HostedLoginRejected) {
   // This is how we inject fake URLFetcher objects, with a factory.
   MockURLFetcherFactory<HostedFetcher> factory;
 
-  TestAttemptState local_state("", "", "", "", "", true);
-  attempt_.reset(new OnlineAttempt(false, &local_state, resolver_.get()));
+  TestAttemptState local_state("", "", "", "", "",
+                               User::USER_TYPE_REGULAR, true);
+  attempt_.reset(new OnlineAttempt(&local_state, resolver_.get()));
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -191,8 +193,9 @@ TEST_F(OnlineAttemptTest, FullLogin) {
   // This is how we inject fake URLFetcher objects, with a factory.
   MockURLFetcherFactory<SuccessFetcher> factory;
 
-  TestAttemptState local_state("", "", "", "", "", true);
-  attempt_.reset(new OnlineAttempt(false, &local_state, resolver_.get()));
+  TestAttemptState local_state("", "", "", "", "",
+                               User::USER_TYPE_REGULAR, true);
+  attempt_.reset(new OnlineAttempt(&local_state, resolver_.get()));
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -249,7 +252,7 @@ TEST_F(OnlineAttemptTest, TwoFactorSuccess) {
                  error));
 
   // Force UI thread to finish tasks so I can verify |state_|.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   EXPECT_TRUE(GoogleServiceAuthError::None() ==
               state_.online_outcome().error());
 }

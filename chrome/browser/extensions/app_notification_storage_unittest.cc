@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/app_notification.h"
 #include "chrome/browser/extensions/app_notification_storage.h"
@@ -46,8 +46,8 @@ class AppNotificationStorageTest : public testing::Test {
 
   MessageLoop message_loop_;
   content::TestBrowserThread file_thread_;
-  ScopedTempDir dir_;
-  FilePath storage_path_;
+  base::ScopedTempDir dir_;
+  base::FilePath storage_path_;
   scoped_ptr<AppNotificationStorage> storage_;
 };
 

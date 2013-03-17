@@ -126,9 +126,9 @@ void SpeechRecognitionBubbleView::OnWidgetActivationChanged(
 
 gfx::Rect SpeechRecognitionBubbleView::GetAnchorRect() {
   gfx::Rect container_rect;
-  web_contents_->GetContainerBounds(&container_rect);
+  web_contents_->GetView()->GetContainerBounds(&container_rect);
   gfx::Rect anchor(element_rect_);
-  anchor.Offset(container_rect.origin());
+  anchor.Offset(container_rect.OffsetFromOrigin());
   if (!container_rect.Intersects(anchor))
     return BubbleDelegateView::GetAnchorRect();
   return anchor;
@@ -143,14 +143,13 @@ void SpeechRecognitionBubbleView::Init() {
   heading_->set_border(views::Border::CreateEmptyBorder(
       kBubbleHeadingVertMargin, 0, kBubbleHeadingVertMargin, 0));
   heading_->SetFont(font);
-  heading_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
+  heading_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
   heading_->SetText(
       l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING));
   AddChildView(heading_);
 
   message_ = new views::Label();
   message_->SetFont(font);
-  message_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
   message_->SetMultiLine(true);
   AddChildView(message_);
 
@@ -228,7 +227,7 @@ void SpeechRecognitionBubbleView::ButtonPressed(views::Button* source,
 
 void SpeechRecognitionBubbleView::LinkClicked(views::Link* source,
                                               int event_flags) {
-  DCHECK_EQ(source, mic_settings_);
+  DCHECK_EQ(mic_settings_, source);
   content::SpeechRecognitionManager::GetInstance()->ShowAudioInputSettings();
 }
 
@@ -358,13 +357,28 @@ SpeechRecognitionBubbleImpl::~SpeechRecognitionBubbleImpl() {
 
 void SpeechRecognitionBubbleImpl::Show() {
   if (!bubble_) {
+    views::View* icon = NULL;
+
     // Anchor to the location icon view, in case |element_rect| is offscreen.
-    Browser* browser = browser::FindBrowserWithWebContents(GetWebContents());
-    BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-    views::View* icon = browser_view->GetLocationBarView() ?
-        browser_view->GetLocationBarView()->location_icon_view() : NULL;
+    WebContents* web_contents = GetWebContents();
+    Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+    if (browser) {
+      BrowserView* browser_view =
+          BrowserView::GetBrowserViewForBrowser(browser);
+      icon = browser_view->GetLocationBarView() ?
+          browser_view->GetLocationBarView()->location_icon_view() : NULL;
+    }
+
     bubble_ = new SpeechRecognitionBubbleView(delegate_, icon, element_rect_,
-                                              GetWebContents());
+                                              web_contents);
+
+    if (!icon) {
+      // We dont't have an icon to attach to. Manually specify the web contents
+      // window as the parent.
+      bubble_->set_parent_window(
+          web_contents->GetView()->GetTopLevelNativeWindow());
+    }
+
     views::BubbleDelegateView::CreateBubble(bubble_);
     UpdateLayout();
   }

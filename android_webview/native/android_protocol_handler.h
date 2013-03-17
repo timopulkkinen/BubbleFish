@@ -6,13 +6,15 @@
 #define ANDROID_WEBVIEW_NATIVE_ANDROID_PROTOCOL_HANDLER_H_
 
 #include "base/android/jni_android.h"
-#include "net/url_request/url_request.h"
+#include "base/memory/scoped_ptr.h"
 
 namespace net {
+class URLRequestContext;
+class URLRequestJobFactory;
+}  // namespace net
 
-class URLRequestContextGetter;
-
-}
+namespace android_webview {
+class AwURLRequestJobFactory;
 
 // This class adds support for Android WebView-specific protocol schemes:
 //
@@ -24,19 +26,11 @@ class URLRequestContextGetter;
 //    (file:///android_asset/ and file:///android_res/), see
 //    http://developer.android.com/reference/android/webkit/
 //      WebSettings.html#setAllowFileAccess(boolean)
-//
-class AndroidProtocolHandler {
- public:
-  static net::URLRequest::ProtocolFactory Factory;
-
-  // Register handlers for all supported Android protocol schemes.
-  static void RegisterProtocols(
-      net::URLRequestContextGetter* context_getter);
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(AndroidProtocolHandler);
-};
+scoped_ptr<net::URLRequestJobFactory> CreateAndroidRequestJobFactory(
+    scoped_ptr<AwURLRequestJobFactory> job_factory);
 
 bool RegisterAndroidProtocolHandler(JNIEnv* env);
+
+}  // namespace android_webview
 
 #endif  // ANDROID_WEBVIEW_NATIVE_ANDROID_PROTOCOL_HANDLER_H_

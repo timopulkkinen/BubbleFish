@@ -5,62 +5,81 @@
 #ifndef WEBKIT_FILEAPI_MEDIA_NATIVE_MEDIA_FILE_UTIL_H_
 #define WEBKIT_FILEAPI_MEDIA_NATIVE_MEDIA_FILE_UTIL_H_
 
-#include "webkit/fileapi/fileapi_export.h"
+#include "base/memory/scoped_ptr.h"
 #include "webkit/fileapi/isolated_file_util.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
 
 // This class handles native file system operations with media type filtering
 // which is passed to each method via FileSystemOperationContext as
 // MediaPathFilter.
-class FILEAPI_EXPORT_PRIVATE NativeMediaFileUtil : public IsolatedFileUtil {
+class WEBKIT_STORAGE_EXPORT_PRIVATE NativeMediaFileUtil
+    : public IsolatedFileUtil {
  public:
   NativeMediaFileUtil();
 
-  virtual PlatformFileError CreateOrOpen(
+  virtual base::PlatformFileError CreateOrOpen(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       int file_flags,
-      PlatformFile* file_handle,
+      base::PlatformFile* file_handle,
       bool* created) OVERRIDE;
-  virtual PlatformFileError EnsureFileExists(
+  virtual base::PlatformFileError EnsureFileExists(
       FileSystemOperationContext* context,
       const FileSystemURL& url, bool* created) OVERRIDE;
-  virtual AbstractFileEnumerator* CreateFileEnumerator(
+  virtual scoped_ptr<AbstractFileEnumerator> CreateFileEnumerator(
       FileSystemOperationContext* context,
       const FileSystemURL& root_url,
       bool recursive) OVERRIDE;
-  virtual PlatformFileError Touch(
+  virtual base::PlatformFileError Touch(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       const base::Time& last_access_time,
       const base::Time& last_modified_time) OVERRIDE;
-  virtual PlatformFileError Truncate(
+  virtual base::PlatformFileError Truncate(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       int64 length) OVERRIDE;
-  virtual bool IsDirectoryEmpty(
-      FileSystemOperationContext* context,
-      const FileSystemURL& url) OVERRIDE;
-  virtual PlatformFileError CopyOrMoveFile(
+  virtual base::PlatformFileError CopyOrMoveFile(
       FileSystemOperationContext* context,
       const FileSystemURL& src_url,
       const FileSystemURL& dest_url,
       bool copy) OVERRIDE;
-  virtual PlatformFileError CopyInForeignFile(
+  virtual base::PlatformFileError CopyInForeignFile(
         FileSystemOperationContext* context,
-        const FilePath& src_file_path,
+        const base::FilePath& src_file_path,
         const FileSystemURL& dest_url) OVERRIDE;
-  virtual PlatformFileError DeleteFile(
+  virtual base::PlatformFileError DeleteFile(
       FileSystemOperationContext* context,
       const FileSystemURL& url) OVERRIDE;
-  virtual PlatformFileError GetFileInfo(
+  virtual base::PlatformFileError GetFileInfo(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       base::PlatformFileInfo* file_info,
-      FilePath* platform_path) OVERRIDE;
+      base::FilePath* platform_path) OVERRIDE;
 
  private:
+  // Like GetLocalFilePath(), but always take media_path_filter() into
+  // consideration. If the media_path_filter() check fails, return
+  // PLATFORM_FILE_ERROR_SECURITY. |local_file_path| does not have to exist.
+  base::PlatformFileError GetFilteredLocalFilePath(
+      FileSystemOperationContext* context,
+      const FileSystemURL& file_system_url,
+      base::FilePath* local_file_path);
+
+  // Like GetLocalFilePath(), but if the file does not exist, then return
+  // |failure_error|.
+  // If |local_file_path| is a file, then take media_path_filter() into
+  // consideration.
+  // If the media_path_filter() check fails, return |failure_error|.
+  // If |local_file_path| is a directory, return PLATFORM_FILE_OK.
+  base::PlatformFileError GetFilteredLocalFilePathForExistingFileOrDirectory(
+      FileSystemOperationContext* context,
+      const FileSystemURL& file_system_url,
+      base::PlatformFileError failure_error,
+      base::FilePath* local_file_path);
+
   DISALLOW_COPY_AND_ASSIGN(NativeMediaFileUtil);
 };
 

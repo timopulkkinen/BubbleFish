@@ -12,6 +12,7 @@
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_client_view.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // JavaScriptAppModalDialogViews, public:
@@ -161,6 +162,9 @@ NativeAppModalDialog* NativeAppModalDialog::CreateNativeJavaScriptPrompt(
     JavaScriptAppModalDialog* dialog,
     gfx::NativeWindow parent_window) {
   JavaScriptAppModalDialogViews* d = new JavaScriptAppModalDialogViews(dialog);
-  views::Widget::CreateWindowWithParent(d, parent_window);
+  if (parent_window)
+    views::Widget::CreateWindowWithParent(d, parent_window);
+  else
+    views::Widget::CreateWindow(d);
   return d;
 }

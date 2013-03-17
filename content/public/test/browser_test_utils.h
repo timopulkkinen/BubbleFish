@@ -11,9 +11,9 @@
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/process.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -50,7 +50,8 @@ class RenderViewHost;
 class WebContents;
 
 // Generate a URL for a file path including a query string.
-GURL GetFileUrlWithQuery(const FilePath& path, const std::string& query_string);
+GURL GetFileUrlWithQuery(const base::FilePath& path,
+                         const std::string& query_string);
 
 // Waits for a load stop for the specified |web_contents|'s controller, if the
 // tab is currently web_contents.  Otherwise returns immediately.
@@ -59,8 +60,18 @@ void WaitForLoadStop(WebContents* web_contents);
 // Causes the specified web_contents to crash. Blocks until it is crashed.
 void CrashTab(WebContents* web_contents);
 
-// Simulates clicking at the center of the given tab asynchronously.
-void SimulateMouseClick(WebContents* web_contents);
+// Simulates clicking at the center of the given tab asynchronously; modifiers
+// may contain bits from WebInputEvent::Modifiers.
+void SimulateMouseClick(WebContents* web_contents,
+                        int modifiers,
+                        WebKit::WebMouseEvent::Button button);
+
+// Simulates clicking at the point |point| of the given tab asynchronously;
+// modifiers may contain bits from WebInputEvent::Modifiers.
+void SimulateMouseClickAt(WebContents* web_contents,
+                          int modifiers,
+                          WebKit::WebMouseEvent::Button button,
+                          const gfx::Point& point);
 
 // Simulates asynchronously a mouse enter/move/leave event.
 void SimulateMouseEvent(WebContents* web_contents,
@@ -75,33 +86,66 @@ void SimulateKeyPress(WebContents* web_contents,
                       bool alt,
                       bool command);
 
+// Allow ExecuteScript* methods to target either a WebContents or a
+// RenderViewHost.  Targetting a WebContents means executing script in the
+// RenderViewHost returned by WebContents::GetRenderViewHost(), which is the
+// "current" RenderViewHost.  Pass a specific RenderViewHost to target, for
+// example, a "swapped-out" RenderViewHost.
+namespace internal {
+class ToRenderViewHost {
+ public:
+  ToRenderViewHost(WebContents* web_contents);
+  ToRenderViewHost(RenderViewHost* render_view_host);
+
+  RenderViewHost* render_view_host() const { return render_view_host_; }
+
+ private:
+  RenderViewHost* render_view_host_;
+};
+}  // namespace internal
+
 // Executes the passed |script| in the frame pointed to by |frame_xpath| (use
 // empty string for main frame).  The |script| should not invoke
 // domAutomationController.send(); otherwise, your test will hang or be flaky.
 // If you want to extract a result, use one of the below functions.
 // Returns true on success.
-bool ExecuteJavaScript(RenderViewHost* render_view_host,
-                       const std::wstring& frame_xpath,
-                       const std::wstring& script) WARN_UNUSED_RESULT;
+bool ExecuteScriptInFrame(const internal::ToRenderViewHost& adapter,
+                          const std::string& frame_xpath,
+                          const std::string& script) WARN_UNUSED_RESULT;
 
 // The following methods executes the passed |script| in the frame pointed to by
 // |frame_xpath| (use empty string for main frame) and sets |result| to the
-// value returned by the script evaluation.
-// They return true on success, false if the script evaluation failed or did not
+// value passed to "window.domAutomationController.send" by the executed script.
+// They return true on success, false if the script execution failed or did not
 // evaluate to the expected type.
-bool ExecuteJavaScriptAndExtractInt(RenderViewHost* render_view_host,
-                                    const std::wstring& frame_xpath,
-                                    const std::wstring& script,
-                                    int* result) WARN_UNUSED_RESULT;
-bool ExecuteJavaScriptAndExtractBool(RenderViewHost* render_view_host,
-                                     const std::wstring& frame_xpath,
-                                     const std::wstring& script,
-                                     bool* result) WARN_UNUSED_RESULT;
-bool ExecuteJavaScriptAndExtractString(
-    RenderViewHost* render_view_host,
-    const std::wstring& frame_xpath,
-    const std::wstring& script,
+bool ExecuteScriptInFrameAndExtractInt(
+    const internal::ToRenderViewHost& adapter,
+    const std::string& frame_xpath,
+    const std::string& script,
+    int* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptInFrameAndExtractBool(
+    const internal::ToRenderViewHost& adapter,
+    const std::string& frame_xpath,
+    const std::string& script,
+    bool* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptInFrameAndExtractString(
+    const internal::ToRenderViewHost& adapter,
+    const std::string& frame_xpath,
+    const std::string& script,
     std::string* result) WARN_UNUSED_RESULT;
+
+// Top-frame script execution helpers (a.k.a., the common case):
+bool ExecuteScript(const internal::ToRenderViewHost& adapter,
+                   const std::string& script) WARN_UNUSED_RESULT;
+bool ExecuteScriptAndExtractInt(const internal::ToRenderViewHost& adapter,
+                                const std::string& script,
+                                int* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptAndExtractBool(const internal::ToRenderViewHost& adapter,
+                                 const std::string& script,
+                                 bool* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptAndExtractString(const internal::ToRenderViewHost& adapter,
+                                   const std::string& script,
+                                   std::string* result) WARN_UNUSED_RESULT;
 
 // Returns the cookies for the given url.
 std::string GetCookies(BrowserContext* browser_context, const GURL& url);
@@ -147,70 +191,6 @@ class TitleWatcher : public NotificationObserver {
   bool quit_loop_on_observation_;
 
   DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
-};
-
-// This is a utility class for running a python websocket server
-// during tests. The server is started during the construction of the
-// object, and is stopped when the destructor is called. Note that
-// because of the underlying script that is used:
-//
-//    third_paty/WebKit/Tools/Scripts/new-run-webkit-websocketserver
-//
-// Only *_wsh.py handlers found under "http/tests/websocket/tests" from the
-// |root_directory| will be found and active while running the test
-// server.
-class TestWebSocketServer {
- public:
-  TestWebSocketServer();
-
-  // Stops the python websocket server if it was already started.
-  ~TestWebSocketServer();
-
-  // Use a random port, useful for tests that are sharded. Returns the port.
-  int UseRandomPort();
-
-  // Serves with TLS.
-  void UseTLS();
-
-  // Starts the python websocket server using |root_directory|. Returns whether
-  // the server was successfully started.
-  bool Start(const FilePath& root_directory);
-
- private:
-  // Sets up PYTHONPATH to run websocket_server.py.
-  void SetPythonPath();
-
-  // Creates a CommandLine for invoking the python interpreter.
-  CommandLine* CreatePythonCommandLine();
-
-  // Creates a CommandLine for invoking the python websocker server.
-  CommandLine* CreateWebSocketServerCommandLine();
-
-  // Has the server been started?
-  bool started_;
-
-  // A Scoped temporary directory for holding the python pid file.
-  ScopedTempDir temp_dir_;
-
-  // Used to close the same python interpreter when server falls out
-  // scope.
-  FilePath websocket_pid_file_;
-
-#if defined(OS_POSIX)
-  // ProcessHandle used to terminate child process.
-  base::ProcessHandle process_group_id_;
-#elif defined(OS_WIN)
-  // JobObject used to clean up orphaned child process.
-  base::win::ScopedHandle job_handle_;
-#endif
-
-  // Holds port number which the python websocket server uses.
-  int port_;
-
-  // If the python websocket server serves with TLS.
-  bool secure_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWebSocketServer);
 };
 
 // Watches for responses from the DOMAutomationController and keeps them in a

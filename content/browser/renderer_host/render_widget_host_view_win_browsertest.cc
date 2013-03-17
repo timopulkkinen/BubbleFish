@@ -12,11 +12,11 @@
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/content_browser_test.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/base/win/mock_tsf_bridge.h"
-#include "ui/base/win/tsf_bridge.h"
+#include "ui/base/ime/win/mock_tsf_bridge.h"
+#include "ui/base/ime/win/tsf_bridge.h"
 
-namespace {
-class RenderWidgetHostViewWinTest : public content::ContentBrowserTest {
+namespace content {
+class RenderWidgetHostViewWinTest : public ContentBrowserTest {
  public:
   RenderWidgetHostViewWinTest() {}
 
@@ -28,117 +28,115 @@ class RenderWidgetHostViewWinTest : public content::ContentBrowserTest {
 // crbug.com/151798
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewWinTest,
                        DISABLED_SwichToPasswordField) {
-  ui::MockTsfBridge mock_bridge;
-  ui::TsfBridge* old_bridge = ui::TsfBridge::ReplaceForTesting(&mock_bridge);
-  GURL test_url = content::GetTestUrl("textinput",
-                                      "ime_enable_disable_test.html");
+  ui::MockTSFBridge mock_bridge;
+  ui::TSFBridge* old_bridge = ui::TSFBridge::ReplaceForTesting(&mock_bridge);
+  GURL test_url = GetTestUrl("textinput", "ime_enable_disable_test.html");
 
-  content::NavigateToURL(shell(), test_url);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  NavigateToURL(shell(), test_url);
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
 
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, mock_bridge.latest_text_iput_type());
 
   // Focus to the text field, the IME should be enabled.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(text01_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(text01_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, mock_bridge.latest_text_iput_type());
 
   // Focus to the password field, the IME should be disabled.
   success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(password02_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(password02_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, mock_bridge.latest_text_iput_type());
 
-  ui::TsfBridge::ReplaceForTesting(old_bridge);
+  ui::TSFBridge::ReplaceForTesting(old_bridge);
 }
 
 // crbug.com/151798
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewWinTest,
                        DISABLED_SwitchToSameField) {
-  ui::MockTsfBridge mock_bridge;
-  ui::TsfBridge* old_bridge = ui::TsfBridge::ReplaceForTesting(&mock_bridge);
-  GURL test_url = content::GetTestUrl("textinput",
-                                      "ime_enable_disable_test.html");
+  ui::MockTSFBridge mock_bridge;
+  ui::TSFBridge* old_bridge = ui::TSFBridge::ReplaceForTesting(&mock_bridge);
+  GURL test_url = GetTestUrl("textinput", "ime_enable_disable_test.html");
 
-  content::NavigateToURL(shell(), test_url);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  NavigateToURL(shell(), test_url);
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
 
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, mock_bridge.latest_text_iput_type());
 
   // Focus to the text field, the IME should be enabled.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(text01_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(text01_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, mock_bridge.latest_text_iput_type());
 
   // Focus to another text field, the IME should be enabled.
   success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(text02_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(text02_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, mock_bridge.latest_text_iput_type());
 
-  ui::TsfBridge::ReplaceForTesting(old_bridge);
+  ui::TSFBridge::ReplaceForTesting(old_bridge);
 }
 
 // crbug.com/151798
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewWinTest,
                        DISABLED_SwitchToSamePasswordField) {
-  ui::MockTsfBridge mock_bridge;
-  ui::TsfBridge* old_bridge = ui::TsfBridge::ReplaceForTesting(&mock_bridge);
-  GURL test_url = content::GetTestUrl("textinput",
-                                      "ime_enable_disable_test.html");
+  ui::MockTSFBridge mock_bridge;
+  ui::TSFBridge* old_bridge = ui::TSFBridge::ReplaceForTesting(&mock_bridge);
+  GURL test_url = GetTestUrl("textinput", "ime_enable_disable_test.html");
 
-  content::NavigateToURL(shell(), test_url);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  NavigateToURL(shell(), test_url);
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
 
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, mock_bridge.latest_text_iput_type());
 
   // Focus to the password field, the IME should be disabled.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(password01_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(password01_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, mock_bridge.latest_text_iput_type());
 
   // Focus to the another password field, the IME should be disabled.
   success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(), L"",
-      L"window.domAutomationController.send(password02_focus());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(password02_focus());",
       &success));
   EXPECT_TRUE(success);
-  content::WaitForLoadStop(shell()->web_contents());
-  content::RunAllPendingInMessageLoop();
+  WaitForLoadStop(shell()->web_contents());
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, mock_bridge.latest_text_iput_type());
 
-  ui::TsfBridge::ReplaceForTesting(old_bridge);
+  ui::TSFBridge::ReplaceForTesting(old_bridge);
 }
-}  // namespace
+
+}  // namespace content

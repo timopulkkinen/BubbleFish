@@ -20,8 +20,6 @@ class AutofillScanner;
 // name, phone number, or address field.
 class FormField {
  public:
-  typedef FormField* ParseFunction(AutofillScanner* scanner);
-
   virtual ~FormField() {}
 
   // Classifies each field in |fields| with its heuristically detected type.
@@ -87,6 +85,10 @@ class FormField {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(FormFieldTest, Match);
+
+  // Function pointer type for the parsing function that should be passed to the
+  // ParseFormFieldsPass() helper function.
+  typedef FormField* ParseFunction(AutofillScanner* scanner);
 
   // Matches |pattern| to the contents of the field at the head of the
   // |scanner|.

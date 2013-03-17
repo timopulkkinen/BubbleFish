@@ -1,38 +1,70 @@
 #!/bin/bash
-
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 # Sets up environment for building Chromium on Android.  It can either be
 # compiled with the Android tree or using the Android SDK/NDK. To build with
-# NDK/SDK: ". build/android/envsetup.sh --sdk".  Environment variable
+# NDK/SDK: ". build/android/envsetup.sh".  Environment variable
 # ANDROID_SDK_BUILD=1 will then be defined and used in the rest of the setup to
 # specifiy build type.
 
-# NOTE(yfriedman): This looks unnecessary but downstream the default value
-# should be 0 until all builds switch to SDK/NDK.
-export ANDROID_SDK_BUILD=1
-# Loop over args in case we add more arguments in the future.
-while [ "$1" != "" ]; do
-  case $1 in
-    -s | --sdk  ) export ANDROID_SDK_BUILD=1 ; shift ;;
-    *  )          shift ; break ;;
-  esac
-done
+# TODO(ilevy): Figure out the right check here. This breaks the webkit build as
+# is since it's sourced from another script:
+# http://build.webkit.org/builders/Chromium%20Android%20Release/builds/34681
+#if [ "$_" == "$0" ]; then
+#  echo "ERROR: envsetup must be sourced."
+#  exit 1
+#fi
 
-if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
-  echo "Using SDK build"
+# Source functions script.  The file is in the same directory as this script.
+. "$(dirname $BASH_SOURCE)"/envsetup_functions.sh
+
+export ANDROID_SDK_BUILD=1  # Default to SDK build.
+
+process_options "$@"
+
+# When building WebView as part of Android we can't use the SDK. Other builds
+# default to using the SDK.
+if [[ "${CHROME_ANDROID_BUILD_WEBVIEW}" -eq 1 ]]; then
+  export ANDROID_SDK_BUILD=0
 fi
 
-host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
+if [[ "${ANDROID_SDK_BUILD}" -ne 1 ]]; then
+  echo "Initializing for non-SDK build."
+fi
+
+# Get host architecture, and abort if it is 32-bit, unless --try-32
+# is also used.
+host_arch=$(uname -m)
+case "${host_arch}" in
+  x86_64)  # pass
+    ;;
+  i?86)
+    if [[ -z "${try_32bit_host_build}" ]]; then
+      echo "ERROR: Android build requires a 64-bit host build machine."
+      echo "If you really want to try it on this machine, use the \
+--try-32bit-host flag."
+      echo "Be warned that this may fail horribly at link time, due \
+very large binaries."
+      return 1
+    else
+      echo "WARNING: 32-bit host build enabled. Here be dragons!"
+      host_arch=x86
+    fi
+    ;;
+  *)
+    echo "ERROR: Unsupported host architecture (${host_arch})."
+    echo "Try running this script on a Linux/x86_64 machine instead."
+    return 1
+esac
 
 case "${host_os}" in
   "linux")
-    toolchain_dir="linux-x86_64"
+    toolchain_dir="linux-${host_arch}"
     ;;
   "mac")
-    toolchain_dir="darwin-x86"
+    toolchain_dir="darwin-${host_arch}"
     ;;
   *)
     echo "Host platform ${host_os} is not supported" >& 2
@@ -56,12 +88,12 @@ the one you want."
 fi
 
 # Android sdk platform version to use
-export ANDROID_SDK_VERSION=16
-
-# Source functions script.  The file is in the same directory as this script.
-. "$(dirname $BASH_SOURCE)"/envsetup_functions.sh
+export ANDROID_SDK_VERSION=17
 
 if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
+  if [[ -z "${TARGET_ARCH}" ]]; then
+    return 1
+  fi
   sdk_build_init
 # Sets up environment for building Chromium for Android with source. Expects
 # android environment setup and lunch.
@@ -73,10 +105,30 @@ elif [[ -z "$ANDROID_BUILD_TOP" || \
   echo "  . build/envsetup.sh"
   echo "  lunch"
   echo "Then try this again."
-  echo "Or did you mean NDK/SDK build. Run envsetup.sh with --sdk argument."
+  echo "Or did you mean NDK/SDK build. Run envsetup.sh without any arguments."
   return 1
-else
-  non_sdk_build_init
+elif [[ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]]; then
+  webview_build_init
+fi
+
+java -version 2>&1 | grep -qs "Java HotSpot"
+if [ $? -ne 0 ]; then
+  echo "Please check and make sure you are using the Oracle Java SDK, and it"
+  echo "appears before other Java SDKs in your path."
+  echo "Refer to the \"Install prerequisites\" section here:"
+  echo "https://code.google.com/p/chromium/wiki/AndroidBuildInstructions"
+  return 1
+fi
+
+if [[ -n "$JAVA_HOME" && -x "$JAVA_HOME/bin/java" ]]; then
+  "$JAVA_HOME/bin/java" -version 2>&1 | grep -qs "Java HotSpot"
+  if [ $? -ne 0 ]; then
+    echo "If JAVA_HOME is defined then it must refer to the install location"
+    echo "of the Oracle Java SDK."
+    echo "Refer to the \"Install prerequisites\" section here:"
+    echo "https://code.google.com/p/chromium/wiki/AndroidBuildInstructions"
+    return 1
+  fi
 fi
 
 # Workaround for valgrind build
@@ -99,24 +151,12 @@ export ANDROID_GOMA_WRAPPER
 # Declare Android are cross compile.
 export GYP_CROSSCOMPILE=1
 
-export CXX_target="${ANDROID_GOMA_WRAPPER} \
-    $(echo -n ${ANDROID_TOOLCHAIN}/*-g++)"
-
 # Performs a gyp_chromium run to convert gyp->Makefile for android code.
 android_gyp() {
+  # This is just a simple wrapper of gyp_chromium, please don't add anything
+  # in this function.
   echo "GYP_GENERATORS set to '$GYP_GENERATORS'"
-  # http://crbug.com/143889.
-  # In case we are doing a Clang build, we have to unset CC_target and
-  # CXX_target. Otherwise GYP ends up generating a gcc build (although we set
-  # 'clang' to 1). This behavior was introduced by
-  # 54d2f6fe6d8a7b9d9786bd1f8540df6b4f46b83f in GYP.
   (
-    # Fork to avoid side effects on the user's environment variables.
-    if echo "$GYP_DEFINES" | grep -q clang; then
-      if echo "$CXX_target" | grep -q g++; then
-        unset CXX_target
-      fi
-    fi
     "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}" --check "$@"
   )
 }

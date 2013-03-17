@@ -8,10 +8,11 @@
 #include "ash/ash_export.h"
 #include "ash/launcher/background_animator.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/wm/shelf_types.h"
+#include "ash/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/gfx/size.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace aura {
 class Window;
@@ -38,11 +39,22 @@ class LauncherIconObserver;
 class LauncherDelegate;
 class LauncherModel;
 
-class ASH_EXPORT Launcher  {
+class ASH_EXPORT Launcher: public views::WidgetObserver  {
  public:
-  Launcher(aura::Window* window_container,
+  Launcher(LauncherModel* launcher_model,
+           LauncherDelegate* launcher_delegate,
+           aura::Window* window_container,
            internal::ShelfLayoutManager* shelf_layout_manager);
   virtual ~Launcher();
+
+  // Return the launcher for the primary display. NULL if no user is
+  // logged in yet.
+  static Launcher* ForPrimaryDisplay();
+
+  // Return the launcher for the display that |window| is currently on,
+  // or a launcher on primary display if the launcher per display feature
+  // is disabled. NULL if no user is logged in yet.
+  static Launcher* ForWindow(aura::Window* window);
 
   // Sets the focus cycler.  Also adds the launcher to the cycle.
   void SetFocusCycler(internal::FocusCycler* focus_cycler);
@@ -85,6 +97,9 @@ class ASH_EXPORT Launcher  {
   // Returns true if the Launcher is showing a context menu.
   bool IsShowingMenu() const;
 
+  // Show the context menu for the Launcher.
+  void ShowContextMenu(const gfx::Point& location);
+
   bool IsShowingOverflowBubble() const;
 
   void SetVisible(bool visible) const;
@@ -94,23 +109,33 @@ class ASH_EXPORT Launcher  {
   // Sets the bounds of the launcher widget, and the dimmer if visible.
   void SetWidgetBounds(const gfx::Rect bounds);
 
+  // Switches to a 0-indexed (in order of creation) window.
+  // A negative index switches to the last window in the list.
+  void SwitchToWindow(int window_index);
+
   // Only to be called for testing. Retrieves the LauncherView.
   // TODO(sky): remove this!
   internal::LauncherView* GetLauncherViewForTest();
 
-  LauncherDelegate* delegate() { return delegate_.get(); }
+  LauncherDelegate* delegate() { return delegate_; }
 
-  LauncherModel* model() { return model_.get(); }
   views::Widget* widget() { return widget_.get(); }
 
   views::Widget* GetDimmerWidgetForTest() { return dimmer_.get(); }
 
   aura::Window* window_container() { return window_container_; }
 
+  // Called by the activation delegate, before the launcher is activated
+  // when no other windows are visible.
+  void WillActivateAsFallback() { activating_as_fallback_ = true; }
+
+  // Overridden from views::WidgetObserver:
+  virtual void OnWidgetActivationChanged(
+      views::Widget* widget, bool active) OVERRIDE;
+
  private:
   class DelegateView;
-
-  scoped_ptr<LauncherModel> model_;
+  class DimmerView;
 
   // Widget hosting the view.
   scoped_ptr<views::Widget> widget_;
@@ -126,13 +151,16 @@ class ASH_EXPORT Launcher  {
 
   ShelfAlignment alignment_;
 
-  scoped_ptr<LauncherDelegate> delegate_;
+  LauncherDelegate* delegate_;
 
   // Size reserved for the status area.
   gfx::Size status_size_;
 
   // Used to animate the background.
   internal::BackgroundAnimator background_animator_;
+
+  // Used then activation is forced from the activation delegate.
+  bool activating_as_fallback_;
 
   DISALLOW_COPY_AND_ASSIGN(Launcher);
 };

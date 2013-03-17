@@ -18,8 +18,16 @@ class ActionBoxButtonView : public views::MenuButton,
                             public views::MenuButtonListener,
                             public ActionBoxButtonController::Delegate {
  public:
+  // Thickness of the top transparent area on a button image that overlaps
+  // location bar border.
+  static const int kBorderOverlap;
+
   ActionBoxButtonView(Browser* browser, const gfx::Point& menu_offset);
   virtual ~ActionBoxButtonView();
+
+  ActionBoxButtonController* action_box_button_controller() {
+   return &controller_;
+  }
 
  private:
   // Overridden from views::CustomButton:
@@ -28,6 +36,10 @@ class ActionBoxButtonView : public views::MenuButton,
   // Overridden from views::MenuButtonListener:
   virtual void OnMenuButtonClicked(View* source,
                                    const gfx::Point& point) OVERRIDE;
+
+  // Overridden from views::View:
+  virtual bool HasHitTestMask() const  OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Overridden from ActionBoxButtonController::Delegate:
   virtual void ShowMenu(scoped_ptr<ActionBoxMenuModel> menu_model) OVERRIDE;

@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -40,10 +40,10 @@ void ManageDrmIdentifierOnFileThread(bool enable, const std::string& email) {
 
   // Drop the file under <data>/<profile>/<drm id file>.
   // TODO(wad) get the profile directory in a more succinct fashion.
-  FilePath drm_id_file;
+  base::FilePath drm_id_file;
   PathService::Get(chrome::DIR_USER_DATA, &drm_id_file);
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
-  FilePath profile = cmd_line.GetSwitchValuePath(switches::kLoginProfile);
+  base::FilePath profile = cmd_line.GetSwitchValuePath(switches::kLoginProfile);
   if (profile.empty()) {
     LOG(ERROR) << "called with no login-profile!";
     return;
@@ -111,10 +111,10 @@ void ToggleDrm(bool enable) {
 
   // The user email address is included in the hash to keep the identifier
   // from being the same across users.
-  std::string email = user_manager->GetLoggedInUser().email();
+  std::string email = user_manager->GetLoggedInUser()->email();
   // If there is no real user then there's nothing to do here.
-  if (email.length() == 0) {
-    LOG(WARNING) << "Unexpected 0 length user email.";
+  if (email.empty()) {
+    LOG(WARNING) << "Unexpected empty user email.";
     return;
   }
 

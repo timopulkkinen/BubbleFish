@@ -7,8 +7,8 @@
 
 #include <windows.h>
 
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/file_path.h"
 #include "base/string16.h"
 
 namespace base {
@@ -18,6 +18,8 @@ enum ShortcutOperation {
   // Create a new shortcut (overwriting if necessary).
   SHORTCUT_CREATE_ALWAYS = 0,
   // Overwrite an existing shortcut (fails if the shortcut doesn't exist).
+  // If the arguments are not specified on the new shortcut, keep the old
+  // shortcut's arguments.
   SHORTCUT_REPLACE_EXISTING,
   // Update specified properties only on an existing shortcut.
   SHORTCUT_UPDATE_EXISTING,
@@ -38,7 +40,7 @@ struct ShortcutProperties {
     PROPERTIES_DUAL_MODE = 1 << 6,
   };
 
-  ShortcutProperties() : options(0U) {}
+  ShortcutProperties() : icon_index(-1), dual_mode(false), options(0U) {}
 
   void set_target(const FilePath& target_in) {
     target = target_in;

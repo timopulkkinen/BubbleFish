@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/string_piece.h"
 #include "base/time.h"
+#include "dbus/dbus_export.h"
 #include "dbus/object_path.h"
 
 namespace dbus {
@@ -32,7 +33,8 @@ class Signal;
 // object is is alive when callbacks referencing |this| are called; the
 // bus always holds at least one of those references so object proxies
 // always last as long as the bus that created them.
-class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
+class CHROME_DBUS_EXPORT ObjectProxy
+    : public base::RefCountedThreadSafe<ObjectProxy> {
  public:
   // Client code should use Bus::GetObjectProxy() or
   // Bus::GetObjectProxyWithOptions() instead of this constructor.
@@ -79,11 +81,10 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
 
   // Calls the method of the remote object and blocks until the response
   // is returned. Returns NULL on error.
-  // The caller is responsible to delete the returned object.
   //
   // BLOCKING CALL.
-  virtual Response* CallMethodAndBlock(MethodCall* method_call,
-                                       int timeout_ms);
+  virtual scoped_ptr<Response> CallMethodAndBlock(MethodCall* method_call,
+                                                  int timeout_ms);
 
   // Requests to call the method of the remote object.
   //
@@ -139,6 +140,11 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
                                const std::string& signal_name,
                                SignalCallback signal_callback,
                                OnConnectedCallback on_connected_callback);
+
+  // Sets a callback for "NameOwnerChanged" signal. The callback is called on
+  // the origin thread when D-Bus system sends "NameOwnerChanged" for the name
+  // represented by |service_name_|.
+  virtual void SetNameOwnerChangedCallback(SignalCallback callback);
 
   // Detaches from the remote object. The Bus object will take care of
   // detaching so you don't have to do this manually.
@@ -236,6 +242,24 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
                          ResponseCallback response_callback,
                          ErrorResponse* error_response);
 
+  // Adds the match rule to the bus and associate the callback with the signal.
+  bool AddMatchRuleWithCallback(const std::string& match_rule,
+                                const std::string& absolute_signal_name,
+                                SignalCallback signal_callback);
+
+  // Adds the match rule to the bus so that HandleMessage can see the signal.
+  bool AddMatchRuleWithoutCallback(const std::string& match_rule,
+                                   const std::string& absolute_signal_name);
+
+  // Calls D-Bus's GetNameOwner method synchronously to update
+  // |service_name_owner_| with the current owner of |service_name_|.
+  //
+  // BLOCKING CALL.
+  void UpdateNameOwnerAndBlock();
+
+  // Handles NameOwnerChanged signal from D-Bus's special message bus.
+  DBusHandlerResult HandleNameOwnerChanged(scoped_ptr<dbus::Signal> signal);
+
   scoped_refptr<Bus> bus_;
   std::string service_name_;
   ObjectPath object_path_;
@@ -248,9 +272,15 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
   typedef std::map<std::string, SignalCallback> MethodTable;
   MethodTable method_table_;
 
+  // The callback called when NameOwnerChanged signal is received.
+  SignalCallback name_owner_changed_callback_;
+
   std::set<std::string> match_rules_;
 
   const bool ignore_service_unknown_errors_;
+
+  // Known name owner of the well-known bus name represnted by |service_name_|.
+  std::string service_name_owner_;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectProxy);
 };

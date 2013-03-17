@@ -9,10 +9,12 @@
 
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "ui/gfx/native_widget_types.h"
+#include "webkit/gpu/webkit_gpu_export.h"
 
 #if defined(USE_SKIA)
 #define FLIP_FRAMEBUFFER_VERTICALLY
@@ -44,8 +46,8 @@ namespace gpu {
 
 class GLInProcessContext;
 
-class WebGraphicsContext3DInProcessCommandBufferImpl
-    : public WebKit::WebGraphicsContext3D {
+class WEBKIT_GPU_EXPORT WebGraphicsContext3DInProcessCommandBufferImpl
+    : public NON_EXPORTED_BASE(WebKit::WebGraphicsContext3D) {
  public:
 
   WebGraphicsContext3DInProcessCommandBufferImpl();
@@ -428,7 +430,8 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual void discardFramebufferEXT(WGC3Denum target,
                                      WGC3Dsizei numAttachments,
                                      const WGC3Denum* attachments);
-  virtual void ensureFramebufferCHROMIUM();
+  virtual void discardBackbufferCHROMIUM();
+  virtual void ensureBackbufferCHROMIUM();
 
   virtual void copyTextureToParentTextureCHROMIUM(
       WebGLId texture, WebGLId parentTexture);
@@ -460,6 +463,9 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual void texImageIOSurface2DCHROMIUM(
       WGC3Denum target, WGC3Dint width, WGC3Dint height,
       WGC3Duint ioSurfaceId, WGC3Duint plane);
+
+  virtual void bindTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint imageId);
+  virtual void releaseTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint imageId);
 
   virtual void texStorage2DEXT(
       WGC3Denum target, WGC3Dint levels, WGC3Duint internalformat,
@@ -494,6 +500,9 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual void pushGroupMarkerEXT(const WGC3Dchar* marker);
   virtual void popGroupMarkerEXT();
 
+  virtual void* mapBufferCHROMIUM(WGC3Denum target, WGC3Denum access);
+  virtual WGC3Dboolean unmapBufferCHROMIUM(WGC3Denum target);
+
  protected:
   virtual GrGLInterface* onCreateGrGLInterface();
 
@@ -524,7 +533,7 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   std::vector<WGC3Denum> synthetic_errors_;
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
-  scoped_array<uint8> scanline_;
+  std::vector<uint8> scanline_;
   void FlipVertically(uint8* framebuffer,
                       unsigned int width,
                       unsigned int height);

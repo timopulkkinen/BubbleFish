@@ -13,17 +13,18 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/common/chrome_switches.h"
@@ -72,8 +73,10 @@ const int Predictor::kMaxSpeculativeResolveQueueDelayMs =
     (kExpectedResolutionTimeMs * Predictor::kTypicalSpeculativeGroupSize) /
     Predictor::kMaxSpeculativeParallelResolves;
 
-static int g_max_queueing_delay_ms = 0;
-static size_t g_max_parallel_resolves = 0u;
+static int g_max_queueing_delay_ms =
+    Predictor::kMaxSpeculativeResolveQueueDelayMs;
+static size_t g_max_parallel_resolves =
+    Predictor::kMaxSpeculativeParallelResolves;
 
 // A version number for prefs that are saved. This should be incremented when
 // we change the format so that we discard old data.
@@ -152,11 +155,11 @@ Predictor* Predictor::CreatePredictor(bool preconnect_enabled,
   return new Predictor(preconnect_enabled);
 }
 
-void Predictor::RegisterUserPrefs(PrefService* user_prefs) {
-  user_prefs->RegisterListPref(prefs::kDnsPrefetchingStartupList,
-                               PrefService::UNSYNCABLE_PREF);
-  user_prefs->RegisterListPref(prefs::kDnsPrefetchingHostReferralList,
-                               PrefService::UNSYNCABLE_PREF);
+void Predictor::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterListPref(prefs::kDnsPrefetchingStartupList,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kDnsPrefetchingHostReferralList,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // --------------------- Start UI methods. ------------------------------------
@@ -178,6 +181,13 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
   base::ListValue* referral_list =
       static_cast<base::ListValue*>(user_prefs->GetList(
           prefs::kDnsPrefetchingHostReferralList)->DeepCopy());
+
+  // Now that we have the statistics in memory, wipe them from the Preferences
+  // file. They will be serialized back on a clean shutdown. This way we only
+  // have to worry about clearing our in-memory state when Clearing Browsing
+  // Data.
+  user_prefs->ClearPref(prefs::kDnsPrefetchingStartupList);
+  user_prefs->ClearPref(prefs::kDnsPrefetchingHostReferralList);
 
   BrowserThread::PostTask(
       BrowserThread::IO,

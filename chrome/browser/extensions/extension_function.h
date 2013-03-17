@@ -14,12 +14,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "chrome/browser/extensions/extension_function_histogram_value.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/common/console_message_level.h"
 #include "ipc/ipc_message.h"
 
 class Browser;
@@ -38,6 +40,7 @@ class Value;
 
 namespace content {
 class RenderViewHost;
+class WebContents;
 }
 
 namespace extensions {
@@ -61,8 +64,14 @@ class WindowController;
     return false; \
   } while (0)
 
-#define DECLARE_EXTENSION_FUNCTION_NAME(name) \
-  public: static const char* function_name() { return name; }
+// Declares a callable extension function with the given |name|. You must also
+// supply a unique |histogramvalue| used for histograms of extension function
+// invocation (add new ones at the end of the enum in
+// extension_function_histogram_value.h).
+#define DECLARE_EXTENSION_FUNCTION(name, histogramvalue) \
+  public: static const char* function_name() { return name; } \
+  public: static extensions::functions::HistogramValue histogram_value() \
+    { return extensions::functions::histogramvalue; }
 
 // Traits that describe how ExtensionFunction should be deleted. This just calls
 // the virtual "Destruct" method on ExtensionFunction, allowing derived classes
@@ -163,6 +172,12 @@ class ExtensionFunction
   void set_user_gesture(bool user_gesture) { user_gesture_ = user_gesture; }
   bool user_gesture() const { return user_gesture_; }
 
+  void set_histogram_value(
+      extensions::functions::HistogramValue histogram_value) {
+    histogram_value_ = histogram_value; }
+  extensions::functions::HistogramValue histogram_value() const {
+    return histogram_value_; }
+
  protected:
   friend struct ExtensionFunctionDeleteTraits;
 
@@ -237,6 +252,10 @@ class ExtensionFunction
   // returning.  The calling renderer process will be killed.
   bool bad_message_;
 
+  // The sample value to record with the histogram API when the function
+  // is invoked.
+  extensions::functions::HistogramValue histogram_value_;
+
   DISALLOW_COPY_AND_ASSIGN(ExtensionFunction);
 };
 
@@ -302,6 +321,10 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   // TODO(stevenjb): Replace this with GetExtensionWindowController().
   Browser* GetCurrentBrowser();
 
+  // Gets the "current" web contents if any. If there is no associated web
+  // contents then defaults to the foremost one.
+  content::WebContents* GetAssociatedWebContents();
+
   // Same as above but uses WindowControllerList instead of BrowserList.
   extensions::WindowController* GetExtensionWindowController();
 
@@ -311,6 +334,10 @@ class UIThreadExtensionFunction : public ExtensionFunction {
       const extensions::WindowController* window_controller) const;
 
  protected:
+  // Emits a message to the extension's devtools console.
+  void WriteToConsole(content::ConsoleMessageLevel level,
+                      const std::string& message);
+
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<UIThreadExtensionFunction>;

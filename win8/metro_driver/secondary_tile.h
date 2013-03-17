@@ -4,13 +4,24 @@
 #ifndef CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_
 #define CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_
 
+#include "base/files/file_path.h"
 #include "base/string16.h"
+#include "base/win/metro.h"
 
 extern "C" __declspec(dllexport)
-BOOL MetroIsPinnedToStartScreen(const string16& url);
+BOOL MetroIsPinnedToStartScreen(const string16& tile_id);
 
 extern "C" __declspec(dllexport)
-void MetroTogglePinnedToStartScreen(const string16& title, const string16& url);
+void MetroUnPinFromStartScreen(
+    const string16& tile_id,
+    const base::win::MetroPinUmaResultCallback& callback);
+
+extern "C" __declspec(dllexport)
+void MetroPinToStartScreen(
+    const string16& tile_id,
+    const string16& title,
+    const string16& url,
+    const base::FilePath& logo_path,
+    const base::win::MetroPinUmaResultCallback& callback);
 
 #endif  // CHROME_BROWSER_UI_METRO_DRIVER_SECONDARY_TILE_H_
-

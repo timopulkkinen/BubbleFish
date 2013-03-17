@@ -2,21 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/bookmarks/bookmark_index.h"
+
 #include <string>
 #include <vector>
 
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/history/history_database.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/in_memory_database.h"
+#include "chrome/browser/history/url_database.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -135,6 +136,9 @@ TEST_F(BookmarkIndexTest, Tests) {
 
     // Make sure quotes don't do a prefix match.
     { "think",                      "\"thi\"",  ""},
+
+    // Prefix matches against multiple candidates.
+    { "abc1 abc2 abc3 abc4", "abc", "abc1 abc2 abc3 abc4"},
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     std::vector<std::string> titles;
@@ -162,6 +166,11 @@ TEST_F(BookmarkIndexTest, MatchPositions) {
     { "a",                        "A",        "0,1" },
     { "foo bar",                  "bar",      "4,7" },
     { "fooey bark",               "bar foo",  "0,3:6,9"},
+    // Non-trivial tests.
+    { "foobar foo",               "foobar foo",   "0,6:7,10" },
+    { "foobar foo",               "foo foobar",   "0,6:7,10" },
+    { "foobar foobar",            "foobar foo",   "0,6:7,13" },
+    { "foobar foobar",            "foo foobar",   "0,6:7,13" },
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     std::vector<std::string> titles;

@@ -30,7 +30,7 @@ ZoomView::~ZoomView() {
 
 void ZoomView::Update(ZoomController* zoom_controller) {
   if (!zoom_controller || zoom_controller->IsAtDefaultZoom() ||
-      toolbar_model_->input_in_progress()) {
+      toolbar_model_->GetInputInProgress()) {
     SetVisible(false);
     ZoomBubbleView::CloseBubble();
     return;
@@ -53,14 +53,6 @@ bool ZoomView::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
   return !ZoomBubbleView::IsShowing() && ImageView::GetTooltipText(p, tooltip);
 }
 
-ui::EventResult ZoomView::OnGestureEvent(const ui::GestureEvent& event) {
-  if (event.type() != ui::ET_GESTURE_TAP)
-    return ui::ER_UNHANDLED;
-
-  ActivateBubble();
-  return ui::ER_CONSUMED;
-}
-
 bool ZoomView::OnMousePressed(const ui::MouseEvent& event) {
   // Do nothing until mouse is released.
   return true;
@@ -81,11 +73,17 @@ bool ZoomView::OnKeyPressed(const ui::KeyEvent& event) {
   return true;
 }
 
+void ZoomView::OnGestureEvent(ui::GestureEvent* event) {
+  if (event->type() == ui::ET_GESTURE_TAP) {
+    ActivateBubble();
+    event->SetHandled();
+  }
+}
+
 int ZoomView::GetBuiltInHorizontalPadding() const {
   return GetBuiltInHorizontalPaddingImpl();
 }
 
 void ZoomView::ActivateBubble() {
-  ZoomBubbleView::ShowBubble(
-      this, location_bar_delegate_->GetTabContents(), false);
+  ZoomBubbleView::ShowBubble(location_bar_delegate_->GetWebContents(), false);
 }

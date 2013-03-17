@@ -8,19 +8,23 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile_impl.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/url_util.h"
 
 #if defined(OS_ANDROID)
 #include "base/command_line.h"
@@ -52,7 +56,6 @@ const char kPrefPromoMaxViews[] = "max_views";
 const char kPrefPromoGroup[] = "group";
 const char kPrefPromoViews[] = "views";
 const char kPrefPromoClosed[] = "closed";
-const char kPrefPromoGPlusRequired[] = "gplus_required";
 
 // Returns a string suitable for the Promo Server URL 'osname' value.
 std::string PlatformString() {
@@ -122,95 +125,6 @@ const char* PromoTypeToString(NotificationPromo::PromoType promo_type) {
   return "";
 }
 
-// TODO(achuith): http://crbug.com/143773 remove this by m24
-void ClearDeprecatedPrefs(PrefService* prefs) {
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  const char kNtpPromoLineLong[] = "ntp.promo_line_long";
-  const char kNtpPromoActionType[] = "ntp.promo_action_type";
-  const char kNtpPromoActionArgs[] = "ntp.promo_action_args";
-  prefs->RegisterStringPref(kNtpPromoLineLong,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(kNtpPromoActionType,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(kNtpPromoActionArgs,
-                          new base::ListValue,
-                          PrefService::UNSYNCABLE_PREF);
-  prefs->ClearPref(kNtpPromoLineLong);
-  prefs->ClearPref(kNtpPromoActionType);
-  prefs->ClearPref(kNtpPromoActionArgs);
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
-
-  const char kNtpPromoLine[] = "ntp.promo_line";
-  const char kNtpPromoStart[] = "ntp.promo_start";
-  const char kNtpPromoEnd[] = "ntp.promo_end";
-  const char kNtpPromoNumGroups[] = "ntp.promo_num_groups";
-  const char kNtpPromoInitialSegment[] = "ntp.promo_initial_segment";
-  const char kNtpPromoIncrement[] = "ntp.promo_increment";
-  const char kNtpPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
-  const char kNtpPromoGroupMax[] = "ntp.promo_group_max";
-  const char kNtpPromoClosed[] = "ntp.promo_closed";
-  const char kNtpPromoGroup[] = "ntp.promo_group";
-  const char kNtpPromoViews[] = "ntp.promo_views";
-  const char kNtpPromoViewsMax[] = "ntp.promo_views_max";
-  const char kNtpPromoGplusRequired[] = "ntp.gplus_required";
-
-  prefs->RegisterStringPref(kNtpPromoLine,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDoublePref(kNtpPromoStart,
-                            0,
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDoublePref(kNtpPromoEnd,
-                            0,
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoNumGroups,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoInitialSegment,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoIncrement,
-                             1,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoGroupTimeSlice,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoGroupMax,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoViewsMax,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoGroup,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kNtpPromoViews,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(kNtpPromoClosed,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(kNtpPromoGplusRequired,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
-
-  prefs->ClearPref(kNtpPromoLine);
-  prefs->ClearPref(kNtpPromoStart);
-  prefs->ClearPref(kNtpPromoEnd);
-  prefs->ClearPref(kNtpPromoNumGroups);
-  prefs->ClearPref(kNtpPromoInitialSegment);
-  prefs->ClearPref(kNtpPromoIncrement);
-  prefs->ClearPref(kNtpPromoGroupTimeSlice);
-  prefs->ClearPref(kNtpPromoGroupMax);
-  prefs->ClearPref(kNtpPromoViewsMax);
-  prefs->ClearPref(kNtpPromoGroup);
-  prefs->ClearPref(kNtpPromoViews);
-  prefs->ClearPref(kNtpPromoClosed);
-  prefs->ClearPref(kNtpPromoGplusRequired);
-}
-
 // Deep-copies a node, replacing any "value" that is a key
 // into "strings" dictionary with its value from "strings".
 // E.g. for
@@ -229,7 +143,8 @@ base::Value* DeepCopyAndResolveStrings(
       const base::ListValue* list = static_cast<const base::ListValue*>(node);
       base::ListValue* copy = new base::ListValue;
       for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
+           it != list->end();
+           ++it) {
         base::Value* child_copy = DeepCopyAndResolveStrings(*it, strings);
         copy->Append(child_copy);
       }
@@ -240,22 +155,19 @@ base::Value* DeepCopyAndResolveStrings(
       const base::DictionaryValue* dict =
           static_cast<const base::DictionaryValue*>(node);
       base::DictionaryValue* copy = new base::DictionaryValue;
-      for (base::DictionaryValue::key_iterator it = dict->begin_keys();
-           it != dict->end_keys(); ++it) {
-        const base::Value* child = NULL;
-        bool rv = dict->GetWithoutPathExpansion(*it, &child);
-        DCHECK(rv);
-        base::Value* child_copy = DeepCopyAndResolveStrings(child, strings);
-        copy->SetWithoutPathExpansion(*it, child_copy);
+      for (base::DictionaryValue::Iterator it(*dict);
+           !it.IsAtEnd();
+           it.Advance()) {
+        base::Value* child_copy = DeepCopyAndResolveStrings(&it.value(),
+                                                            strings);
+        copy->SetWithoutPathExpansion(it.key(), child_copy);
       }
       return copy;
     }
 
     case Value::TYPE_STRING: {
-      const base::StringValue* str =
-          static_cast<const base::StringValue*>(node);
       std::string value;
-      bool rv = str->GetAsString(&value);
+      bool rv = node->GetAsString(&value);
       DCHECK(rv);
       std::string actual_value;
       if (!strings || !strings->GetString(value, &actual_value))
@@ -269,11 +181,16 @@ base::Value* DeepCopyAndResolveStrings(
   }
 }
 
+void AppendQueryParameter(GURL* url,
+                          const std::string& param,
+                          const std::string& value) {
+  *url = net::AppendQueryParameter(*url, param, value);
+}
+
 }  // namespace
 
-NotificationPromo::NotificationPromo(Profile* profile)
-    : profile_(profile),
-      prefs_(profile_->GetPrefs()),
+NotificationPromo::NotificationPromo()
+    : prefs_(g_browser_process->local_state()),
       promo_type_(NO_PROMO),
       promo_payload_(new base::DictionaryValue()),
       start_(0.0),
@@ -287,9 +204,7 @@ NotificationPromo::NotificationPromo(Profile* profile)
       group_(0),
       views_(0),
       closed_(false),
-      gplus_required_(false),
       new_notification_(false) {
-  DCHECK(profile);
   DCHECK(prefs_);
 }
 
@@ -353,9 +268,6 @@ void NotificationPromo::InitFromJson(const DictionaryValue& json,
   // Payload.
   const DictionaryValue* payload = NULL;
   if (promo->GetDictionary("payload", &payload)) {
-    payload->GetBoolean("gplus_required", &gplus_required_);
-    DVLOG(1) << "gplus_required_ = " << gplus_required_;
-
     base::Value* ppcopy = DeepCopyAndResolveStrings(payload, strings);
     DCHECK(ppcopy && ppcopy->IsType(base::Value::TYPE_DICTIONARY));
     promo_payload_.reset(static_cast<base::DictionaryValue*>(ppcopy));
@@ -378,7 +290,7 @@ void NotificationPromo::InitFromJson(const DictionaryValue& json,
 }
 
 void NotificationPromo::CheckForNewNotification() {
-  NotificationPromo old_promo(profile_);
+  NotificationPromo old_promo;
   old_promo.InitFromPrefs(promo_type_);
   const double old_start = old_promo.start_;
   const double old_end = old_promo.end_;
@@ -398,11 +310,22 @@ void NotificationPromo::OnNewNotification() {
 }
 
 // static
-void NotificationPromo::RegisterUserPrefs(PrefService* prefs) {
-  ClearDeprecatedPrefs(prefs);
-  prefs->RegisterDictionaryPref(kPrefPromoObject,
-                                new base::DictionaryValue,
-                                PrefService::UNSYNCABLE_PREF);
+void NotificationPromo::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(kPrefPromoObject);
+}
+
+// static
+void NotificationPromo::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  // TODO(dbeam): Registered only for migration. Remove in M28 when
+  // we're reasonably sure all prefs are gone.
+  // http://crbug.com/168887
+  registry->RegisterDictionaryPref(kPrefPromoObject,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+}
+
+// static
+void NotificationPromo::MigrateUserPrefs(PrefService* user_prefs) {
+  user_prefs->ClearPref(kPrefPromoObject);
 }
 
 void NotificationPromo::WritePrefs() {
@@ -423,8 +346,6 @@ void NotificationPromo::WritePrefs() {
   ntp_promo->SetInteger(kPrefPromoGroup, group_);
   ntp_promo->SetInteger(kPrefPromoViews, views_);
   ntp_promo->SetBoolean(kPrefPromoClosed, closed_);
-
-  ntp_promo->SetBoolean(kPrefPromoGPlusRequired, gplus_required_);
 
   base::ListValue* promo_list = new base::ListValue;
   promo_list->Set(0, ntp_promo);  // Only support 1 promo for now.
@@ -472,8 +393,6 @@ void NotificationPromo::InitFromPrefs(PromoType promo_type) {
   ntp_promo->GetInteger(kPrefPromoGroup, &group_);
   ntp_promo->GetInteger(kPrefPromoViews, &views_);
   ntp_promo->GetBoolean(kPrefPromoClosed, &closed_);
-
-  ntp_promo->GetBoolean(kPrefPromoGPlusRequired, &gplus_required_);
 }
 
 bool NotificationPromo::CanShow() const {
@@ -482,14 +401,13 @@ bool NotificationPromo::CanShow() const {
          !ExceedsMaxGroup() &&
          !ExceedsMaxViews() &&
          base::Time::FromDoubleT(StartTimeForGroup()) < base::Time::Now() &&
-         base::Time::FromDoubleT(EndTime()) > base::Time::Now() &&
-         IsGPlusRequired();
+         base::Time::FromDoubleT(EndTime()) > base::Time::Now();
 }
 
 // static
-void NotificationPromo::HandleClosed(Profile* profile, PromoType promo_type) {
+void NotificationPromo::HandleClosed(PromoType promo_type) {
   content::RecordAction(UserMetricsAction("NTPPromoClosed"));
-  NotificationPromo promo(profile);
+  NotificationPromo promo;
   promo.InitFromPrefs(promo_type);
   if (!promo.closed_) {
     promo.closed_ = true;
@@ -498,9 +416,9 @@ void NotificationPromo::HandleClosed(Profile* profile, PromoType promo_type) {
 }
 
 // static
-bool NotificationPromo::HandleViewed(Profile* profile, PromoType promo_type) {
+bool NotificationPromo::HandleViewed(PromoType promo_type) {
   content::RecordAction(UserMetricsAction("NTPPromoShown"));
-  NotificationPromo promo(profile);
+  NotificationPromo promo;
   promo.InitFromPrefs(promo_type);
   ++promo.views_;
   promo.WritePrefs();
@@ -515,19 +433,13 @@ bool NotificationPromo::ExceedsMaxViews() const {
   return (max_views_ == 0) ? false : views_ >= max_views_;
 }
 
-bool NotificationPromo::IsGPlusRequired() const {
-  return !gplus_required_ || prefs_->GetBoolean(prefs::kIsGooglePlusUser);
-}
-
 // static
 GURL NotificationPromo::PromoServerURL() {
   GURL url(promo_server_url);
-  url = chrome_common_net::AppendQueryParameter(
-      url, "dist", ChannelString());
-  url = chrome_common_net::AppendQueryParameter(
-      url, "osname", PlatformString());
-  url = chrome_common_net::AppendQueryParameter(
-      url, "branding", chrome::VersionInfo().Version());
+  AppendQueryParameter(&url, "dist", ChannelString());
+  AppendQueryParameter(&url, "osname", PlatformString());
+  AppendQueryParameter(&url, "branding", chrome::VersionInfo().Version());
+  AppendQueryParameter(&url, "osver", base::SysInfo::OperatingSystemVersion());
   DVLOG(1) << "PromoServerURL=" << url.spec();
   // Note that locale param is added by WebResourceService.
   return url;

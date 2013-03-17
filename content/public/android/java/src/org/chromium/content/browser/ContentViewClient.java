@@ -7,15 +7,10 @@ package org.chromium.content.browser;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Rect;
-import android.graphics.RectF;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.KeyEvent;
 
-import org.chromium.base.AccessedByNative;
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
 
 import java.net.URISyntaxException;
@@ -36,14 +31,41 @@ public class ContentViewClient {
     // Tag used for logging.
     private static final String TAG = "ContentViewClient";
 
-    // Native class pointer which will be set by nativeInit()
-    @AccessedByNative
-    private int mNativeClazz = 0;
-
     public void onUpdateTitle(String title) {
     }
 
-    public void onTabCrash(int pid) {
+    /**
+     * Called whenever the background color of the page changes as notified by WebKit.
+     * @param color The new ARGB color of the page background.
+     */
+    public void onBackgroundColorChanged(int color) {
+    }
+
+    /**
+     * Notifies that the content size has changed.
+     * @param widthCss The width of the content in CSS pixels.
+     * @param heightCss The height of the content in CSS pixels.
+     */
+    public void onContentSizeChanged(float widthCss, float heightCss) {
+    }
+
+    /**
+      * Lets client listen on the scaling changes on delayed, throttled
+      * and best-effort basis. Used for WebView.onScaleChanged.
+      */
+    public void onScaleChanged(float oldScale, float newScale) {
+    }
+
+    /**
+     * Notifies the client that the position of the top controls has changed.
+     * @param topControlsOffsetYPix The Y offset of the top controls in physical pixels.
+     * @param contentOffsetYPix The Y offset of the content in physical pixels.
+     */
+    public void onOffsetsForFullscreenChanged(
+            float topControlsOffsetYPix, float contentOffsetYPix) {
+    }
+
+    public void onTabCrash() {
     }
 
     public boolean shouldOverrideKeyEvent(KeyEvent event) {
@@ -87,22 +109,22 @@ public class ContentViewClient {
     }
 
     /**
-     * A callback invoked after the JavaScript code passed to evaluateJavaScript
-     * has finished execution.
-     * Used in automation tests.
-     * @hide
+     * Notified when a change to the IME was requested.
+     *
+     * @param requestShow Whether the IME was requested to be shown (may already be showing
+     *                    though).
      */
-    public void onEvaluateJavaScriptResult(int id, String jsonResult) {
+    public void onImeStateChangeRequested(boolean requestShow) {
     }
 
     // TODO (dtrainor): Should expose getScrollX/Y from ContentView or make
     // computeHorizontalScrollOffset()/computeVerticalScrollOffset() public.
     /**
      * Gives the UI the chance to override each scroll event.
-     * @param dx The amount scrolled in the X direction.
-     * @param dy The amount scrolled in the Y direction.
-     * @param scrollX The current X scroll offset.
-     * @param scrollY The current Y scroll offset.
+     * @param dx The amount scrolled in the X direction (in physical pixels).
+     * @param dy The amount scrolled in the Y direction (in physical pixels).
+     * @param scrollX The current X scroll offset (in physical pixels).
+     * @param scrollY The current Y scroll offset (in physical pixels).
      * @return Whether or not the UI consumed and handled this event.
      */
     public boolean shouldOverrideScroll(float dx, float dy, float scrollX, float scrollY) {
@@ -132,20 +154,20 @@ public class ContentViewClient {
     /**
      * Called when a new content intent is requested to be started.
      */
-    public void onStartContentIntent(Context context, String contentUrl) {
+    public void onStartContentIntent(Context context, String intentUrl) {
         Intent intent;
         // Perform generic parsing of the URI to turn it into an Intent.
         try {
-            intent = Intent.parseUri(contentUrl, Intent.URI_INTENT_SCHEME);
+            intent = Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME);
         } catch (URISyntaxException ex) {
-            Log.w(TAG, "Bad URI " + contentUrl + ": " + ex.getMessage());
+            Log.w(TAG, "Bad URI " + intentUrl + ": " + ex.getMessage());
             return;
         }
 
         try {
             context.startActivity(intent);
         } catch (ActivityNotFoundException ex) {
-            Log.w(TAG, "No application can handle " + contentUrl);
+            Log.w(TAG, "No application can handle " + intentUrl);
         }
     }
 }

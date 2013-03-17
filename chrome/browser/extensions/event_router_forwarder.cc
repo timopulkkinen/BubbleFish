@@ -8,6 +8,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/event_router.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "googleurl/src/gurl.h"
 
@@ -71,8 +72,8 @@ void EventRouterForwarder::HandleEvent(const std::string& extension_id,
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&EventRouterForwarder::HandleEvent, this,
-                   extension_id, event_name, Passed(&event_args), profile_ptr,
-                   use_profile_to_restrict_events, event_url));
+                   extension_id, event_name, base::Passed(&event_args),
+                   profile_ptr, use_profile_to_restrict_events, event_url));
     return;
   }
 
@@ -92,8 +93,9 @@ void EventRouterForwarder::HandleEvent(const std::string& extension_id,
   } else {
     std::vector<Profile*> profiles(profile_manager->GetLoadedProfiles());
     for (size_t i = 0; i < profiles.size(); ++i) {
+      scoped_ptr<ListValue> per_profile_event_args(event_args->DeepCopy());
       CallEventRouter(
-          profiles[i], extension_id, event_name, event_args.Pass(),
+          profiles[i], extension_id, event_name, per_profile_event_args.Pass(),
           use_profile_to_restrict_events ? profiles[i] : NULL, event_url);
     }
   }
@@ -108,19 +110,17 @@ void EventRouterForwarder::CallEventRouter(Profile* profile,
   // We may not have an extension in cases like chromeos login
   // (crosbug.com/12856), chrome_frame_net_tests.exe which reuses the chrome
   // browser single process framework.
-  if (!profile->GetExtensionEventRouter())
+  if (!extensions::ExtensionSystem::Get(profile)->event_router())
     return;
 
+  scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
+  event->restrict_to_profile = restrict_to_profile;
+  event->event_url = event_url;
   if (extension_id.empty()) {
-    profile->GetExtensionEventRouter()->
-        DispatchEventToRenderers(
-            event_name, event_args.Pass(), restrict_to_profile, event_url,
-            EventFilteringInfo());
+    ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
   } else {
-    profile->GetExtensionEventRouter()->
-        DispatchEventToExtension(
-            extension_id,
-            event_name, event_args.Pass(), restrict_to_profile, event_url);
+    ExtensionSystem::Get(profile)->event_router()->
+        DispatchEventToExtension(extension_id, event.Pass());
   }
 }
 

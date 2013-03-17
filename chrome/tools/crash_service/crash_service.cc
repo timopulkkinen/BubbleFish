@@ -6,14 +6,15 @@
 
 #include <windows.h>
 
+#include <sddl.h>
 #include <fstream>
 #include <map>
-#include <sddl.h>
 
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/win/windows_version.h"
 #include "breakpad/src/client/windows/crash_generation/client_info.h"
 #include "breakpad/src/client/windows/crash_generation/crash_generation_server.h"
@@ -146,11 +147,14 @@ struct DumpJobInfo {
 }  // namespace
 
 // Command line switches:
-const char CrashService::kMaxReports[]  = "max-reports";
-const char CrashService::kNoWindow[]    = "no-window";
-const char CrashService::kReporterTag[] = "reporter";
-const char CrashService::kDumpsDir[]    = "dumps-dir";
-const char CrashService::kPipeName[]    = "pipe-name";
+const char CrashService::kMaxReports[]        = "max-reports";
+const char CrashService::kNoWindow[]          = "no-window";
+const char CrashService::kReporterTag[]       = "reporter";
+const char CrashService::kDumpsDir[]          = "dumps-dir";
+const char CrashService::kPipeName[]          = "pipe-name";
+const char CrashService::kArchiveDumpsByPid[] = "archive-dumps-by-pid";
+
+bool CrashService::archive_dumps_by_pid_ = false;
 
 CrashService::CrashService(const std::wstring& report_dir)
     : report_path_(report_dir),
@@ -179,12 +183,12 @@ bool CrashService::Initialize(const std::wstring& command_line) {
 
   // The checkpoint file allows CrashReportSender to enforce the the maximum
   // reports per day quota. Does not seem to serve any other purpose.
-  FilePath checkpoint_path = report_path_.Append(kCheckPointFile);
+  base::FilePath checkpoint_path = report_path_.Append(kCheckPointFile);
 
   // The dumps path is typically : '<user profile>\Local settings\
   // Application data\Goggle\Chrome\Crash Reports' and the report path is
   // Application data\Google\Chrome\Reported Crashes.txt
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
     LOG(ERROR) << "could not get DIR_USER_DATA";
     return false;
@@ -193,15 +197,18 @@ bool CrashService::Initialize(const std::wstring& command_line) {
 
   CommandLine cmd_line = CommandLine::FromString(command_line);
 
-  FilePath dumps_path;
+  base::FilePath dumps_path;
   if (cmd_line.HasSwitch(kDumpsDir)) {
-    dumps_path = FilePath(cmd_line.GetSwitchValueNative(kDumpsDir));
+    dumps_path = base::FilePath(cmd_line.GetSwitchValueNative(kDumpsDir));
   } else {
     if (!PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path)) {
       LOG(ERROR) << "could not get DIR_CRASH_DUMPS";
       return false;
     }
   }
+
+  if (cmd_line.HasSwitch(kArchiveDumpsByPid))
+    archive_dumps_by_pid_ = true;
 
   // We can override the send reports quota with a command line switch.
   if (cmd_line.HasSwitch(kMaxReports))
@@ -371,12 +378,23 @@ void CrashService::OnClientDumpRequest(void* context,
     LOG(ERROR) << "could not write custom info file";
   }
 
+  // Move dump file to the directory under client pid.
+  base::FilePath dump_path = base::FilePath(*file_path);
+  if (archive_dumps_by_pid_) {
+    base::FilePath dump_path_with_pid(dump_path.DirName());
+    dump_path_with_pid = dump_path_with_pid.Append(base::Int64ToString16(pid));
+    file_util::CreateDirectoryW(dump_path_with_pid);
+    dump_path_with_pid = dump_path_with_pid.Append(dump_path.BaseName());
+    file_util::Move(dump_path, dump_path_with_pid);
+  }
+
   if (!self->sender_)
     return;
 
   // Send the crash dump using a worker thread. This operation has retry
   // logic in case there is no internet connection at the time.
-  DumpJobInfo* dump_job = new DumpJobInfo(pid, self, map, *file_path);
+  DumpJobInfo* dump_job = new DumpJobInfo(pid, self, map,
+                                          dump_path.value());
   if (!::QueueUserWorkItem(&CrashService::AsyncSendDump,
                            dump_job, WT_EXECUTELONGFUNCTION)) {
     LOG(ERROR) << "could not queue job";

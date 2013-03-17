@@ -16,19 +16,18 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 
-class DragDropThread;
 class SkBitmap;
-class WebDragDest;
-class WebDragSource;
 struct WebDropData;
-
-namespace content {
-class WebContents;
-}
 
 namespace gfx {
 class ImageSkia;
 }
+
+namespace content {
+class DragDropThread;
+class WebContents;
+class WebDragDest;
+class WebDragSource;
 
 // Windows-specific drag-and-drop handling in WebContentsView.
 // If we are dragging a virtual file out of the browser, we use a background
@@ -40,7 +39,7 @@ class CONTENT_EXPORT WebContentsDragWin
       public base::RefCountedThreadSafe<WebContentsDragWin> {
  public:
   WebContentsDragWin(gfx::NativeWindow source_window,
-                     content::WebContents* web_contents,
+                     WebContents* web_contents,
                      WebDragDest* drag_dest,
                      const base::Callback<void()>& drag_end_callback);
   virtual ~WebContentsDragWin();
@@ -49,7 +48,7 @@ class CONTENT_EXPORT WebContentsDragWin
   void StartDragging(const WebDropData& drop_data,
                      WebKit::WebDragOperationsMask ops,
                      const gfx::ImageSkia& image,
-                     const gfx::Point& image_offset);
+                     const gfx::Vector2d& image_offset);
   void CancelDrag();
 
   // DataObjectImpl::Observer implementation.
@@ -76,15 +75,15 @@ class CONTENT_EXPORT WebContentsDragWin
                   const GURL& page_url,
                   const std::string& page_encoding,
                   const gfx::ImageSkia& image,
-                  const gfx::Point& image_offset);
+                  const gfx::Vector2d& image_offset);
 
   // Called on drag-and-drop thread.
   void StartBackgroundDragging(const WebDropData& drop_data,
                                WebKit::WebDragOperationsMask ops,
                                const GURL& page_url,
                                const std::string& page_encoding,
-                               const SkBitmap& image,
-                               const gfx::Point& image_offset);
+                               const gfx::ImageSkia& image,
+                               const gfx::Vector2d& image_offset);
   // Called on UI thread.
   void EndDragging();
   void CloseThread();
@@ -95,7 +94,7 @@ class CONTENT_EXPORT WebContentsDragWin
   // All the member variables below are accessed on UI thread.
 
   gfx::NativeWindow source_window_;
-  content::WebContents* web_contents_;
+  WebContents* web_contents_;
   WebDragDest* drag_dest_;
 
   // |drag_source_| is our callback interface passed to the system when we
@@ -114,5 +113,7 @@ class CONTENT_EXPORT WebContentsDragWin
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsDragWin);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_DRAG_WIN_H_

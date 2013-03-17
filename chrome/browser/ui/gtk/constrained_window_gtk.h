@@ -10,20 +10,24 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/constrained_window.h"
+#include "chrome/browser/ui/native_web_contents_modal_dialog.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
-class TabContents;
 typedef struct _GdkColor GdkColor;
 class ChromeWebContentsViewDelegateGtk;
+
+namespace content {
+class WebContents;
+}
 
 class ConstrainedWindowGtkDelegate {
  public:
   // Returns the widget that will be put in the constrained window's container.
   virtual GtkWidget* GetWidgetRoot() = 0;
 
-  // Returns the widget that should get focus when ConstrainedWindow is focused.
+  // Returns the widget that should get focus when ConstrainedWindowGtk is
+  // focused.
   virtual GtkWidget* GetFocusWidget() = 0;
 
   // Tells the delegate to either delete itself or set up a task to delete
@@ -39,24 +43,28 @@ class ConstrainedWindowGtkDelegate {
   virtual ~ConstrainedWindowGtkDelegate();
 };
 
-// Constrained window implementation for the GTK port. Unlike the Win32 system,
-// ConstrainedWindowGtk doesn't draw draggable fake windows and instead just
-// centers the dialog. It is thus an order of magnitude simpler.
-class ConstrainedWindowGtk : public ConstrainedWindow {
+// Web contents modal dialog implementation for the GTK port. Unlike the Win32
+// system, ConstrainedWindowGtk doesn't draw draggable fake windows and instead
+// just centers the dialog. It is thus an order of magnitude simpler.
+class ConstrainedWindowGtk {
  public:
   typedef ChromeWebContentsViewDelegateGtk TabContentsViewType;
 
-  ConstrainedWindowGtk(TabContents* tab_contents,
+  ConstrainedWindowGtk(content::WebContents* web_contents,
                        ConstrainedWindowGtkDelegate* delegate);
   virtual ~ConstrainedWindowGtk();
 
-  // Overridden from ConstrainedWindow:
-  virtual void ShowConstrainedWindow() OVERRIDE;
-  virtual void CloseConstrainedWindow() OVERRIDE;
-  virtual void FocusConstrainedWindow() OVERRIDE;
+  void ShowWebContentsModalDialog();
+  void CloseWebContentsModalDialog();
+  void FocusWebContentsModalDialog();
+  void PulseWebContentsModalDialog();
+  NativeWebContentsModalDialog GetNativeDialog();
 
-  // Returns the TabContents that constrains this Constrained Window.
-  TabContents* owner() const { return tab_contents_; }
+  // Called when the result of GetBackgroundColor may have changed.
+  void BackgroundColorChanged();
+
+  // Returns the WebContents that constrains this Constrained Window.
+  content::WebContents* owner() const { return web_contents_; }
 
   // Returns the toplevel widget that displays this "window".
   GtkWidget* widget() { return border_.get(); }
@@ -65,16 +73,14 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   TabContentsViewType* ContainingView();
 
  private:
-  friend class ConstrainedWindow;
-
   // Signal callbacks.
   CHROMEGTK_CALLBACK_1(ConstrainedWindowGtk, gboolean, OnKeyPress,
                        GdkEventKey*);
   CHROMEGTK_CALLBACK_1(ConstrainedWindowGtk, void, OnHierarchyChanged,
                        GtkWidget*);
 
-  // The TabContents that owns and constrains this ConstrainedWindow.
-  TabContents* tab_contents_;
+  // The WebContents that owns and constrains this ConstrainedWindowGtk.
+  content::WebContents* web_contents_;
 
   // The top level widget container that exports to our WebContentsView.
   ui::OwnedWidgetGtk border_;
@@ -82,7 +88,7 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   // Delegate that provides the contents of this constrained window.
   ConstrainedWindowGtkDelegate* delegate_;
 
-  // Stores if |ShowConstrainedWindow()| has been called.
+  // Stores if |ShowWebContentsModalDialog()| has been called.
   bool visible_;
 
   base::WeakPtrFactory<ConstrainedWindowGtk> weak_factory_;

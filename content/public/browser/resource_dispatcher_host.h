@@ -14,13 +14,16 @@ class URLRequest;
 }
 
 namespace content {
+
+class DownloadItem;
 class ResourceContext;
 class ResourceDispatcherHostDelegate;
 struct DownloadSaveInfo;
 
 class CONTENT_EXPORT ResourceDispatcherHost {
  public:
-  typedef base::Callback<void(DownloadId, net::Error)> DownloadStartedCallback;
+  typedef base::Callback<void(DownloadItem*, net::Error)>
+    DownloadStartedCallback;
 
   // Returns the singleton instance of the ResourceDispatcherHost.
   static ResourceDispatcherHost* Get();
@@ -33,12 +36,16 @@ class CONTENT_EXPORT ResourceDispatcherHost {
   // dialog boxes.
   virtual void SetAllowCrossOriginAuthPrompt(bool value) = 0;
 
-  // Initiates a download by explicit request of the renderer, e.g. due to
-  // alt-clicking a link.  If the download is started, |started_callback| will
-  // be called on the UI thread with the DownloadId; otherwise an error code
-  // will be returned.  |is_content_initiated| is used to indicate that
-  // the request was generated from a web page, and hence may not be
-  // as trustworthy as a browser generated request.
+  // Initiates a download by explicit request of the renderer (e.g. due to
+  // alt-clicking a link) or some other chrome subsystem.
+  // |is_content_initiated| is used to indicate that the request was generated
+  // from a web page, and hence may not be as trustworthy as a browser
+  // generated request.  If |download_id| is invalid, a download id will be
+  // automatically assigned to the request, otherwise the specified download id
+  // will be used.  (Note that this will result in re-use of an existing
+  // download item if the download id was already assigned.)  If the download
+  // is started, |started_callback| will be called on the UI thread with the
+  // DownloadItem; otherwise an error code will be returned.
   virtual net::Error BeginDownload(
       scoped_ptr<net::URLRequest> request,
       bool is_content_initiated,
@@ -46,7 +53,8 @@ class CONTENT_EXPORT ResourceDispatcherHost {
       int child_id,
       int route_id,
       bool prefer_cache,
-      const DownloadSaveInfo& save_info,
+      scoped_ptr<DownloadSaveInfo> save_info,
+      content::DownloadId download_id,
       const DownloadStartedCallback& started_callback) = 0;
 
   // Clears the ResourceDispatcherHostLoginDelegate associated with the request.

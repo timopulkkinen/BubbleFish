@@ -5,12 +5,10 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_IMAGE_TRANSPORT_FACTORY_H_
 #define CONTENT_BROWSER_RENDERER_HOST_IMAGE_TRANSPORT_FACTORY_H_
 
+#include <string>
+
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/native_widget_types.h"
-
-namespace content {
-class GLHelper;
-}
 
 namespace gfx {
 class Size;
@@ -24,6 +22,9 @@ class Texture;
 namespace WebKit {
 class WebGraphicsContext3D;
 }
+
+namespace content {
+class GLHelper;
 
 // This class provides a way to get notified when surface handles get lost.
 class ImageTransportFactoryObserver {
@@ -69,12 +70,9 @@ class ImageTransportFactory {
   // Destroys a shared surface handle.
   virtual void DestroySharedSurfaceHandle(gfx::GLSurfaceHandle surface) = 0;
 
-  // Creates a transport texture of a given size and scale factor, and using the
-  // opaque handle sent by the GPU process.
+  // Creates a transport texture for a given scale factor.
   virtual scoped_refptr<ui::Texture> CreateTransportClient(
-      const gfx::Size& size,
-      float device_scale_factor,
-      uint64 transport_handle) = 0;
+      float device_scale_factor) = 0;
 
   // Variant of CreateTransportClient() that deletes the texture on the GPU when
   // the returned value is deleted.
@@ -86,13 +84,18 @@ class ImageTransportFactory {
   // Gets a GLHelper instance, associated with the shared context. This
   // GLHelper will get destroyed whenever the shared context is lost
   // (ImageTransportFactoryObserver::OnLostResources is called).
-  virtual content::GLHelper* GetGLHelper() = 0;
+  virtual GLHelper* GetGLHelper() = 0;
 
   // Inserts a SyncPoint into the shared context.
   virtual uint32 InsertSyncPoint() = 0;
 
+  // Blocks waiting for the sync point on the service side.
+  virtual void WaitSyncPoint(uint32 sync_point) = 0;
+
   virtual void AddObserver(ImageTransportFactoryObserver* observer) = 0;
   virtual void RemoveObserver(ImageTransportFactoryObserver* observer) = 0;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_IMAGE_TRANSPORT_FACTORY_H_

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -15,11 +16,17 @@ const std::string kAllUrlsTarget =
 
 typedef ExtensionApiTest AllUrlsApiTest;
 
-IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
+#if defined(OS_WIN) && !defined(NDEBUG)
+// http://crbug.com/174341
+#define MAYBE_WhitelistedExtension DISABLED_WhitelistedExtension
+#else
+#define MAYBE_WhitelistedExtension WhitelistedExtension
+#endif
+IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, MAYBE_WhitelistedExtension) {
   // First setup the two extensions.
-  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
   // Then add the two extensions to the whitelist.
@@ -29,7 +36,8 @@ IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
   extensions::Extension::SetScriptingWhitelist(whitelist);
 
   // Then load extensions.
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir1));
   ASSERT_TRUE(LoadExtension(extension_dir2));
@@ -84,13 +92,13 @@ IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
 // and run scripts on non-restricted all pages.
 IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, RegularExtensions) {
   // First load the two extensions.
-  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
-
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir1));
   ASSERT_TRUE(LoadExtension(extension_dir2));

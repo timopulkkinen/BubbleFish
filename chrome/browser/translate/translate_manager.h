@@ -14,8 +14,8 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/time.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/common/translate_errors.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -92,9 +92,6 @@ class TranslateManager : public content::NotificationObserver,
         base::TimeDelta::FromMilliseconds(delay_ms);
   }
 
-  // Convenience method to know if a tab is showing a translate infobar.
-  static bool IsShowingTranslateInfobar(content::WebContents* web_contents);
-
   // Returns true if the URL can be translated.
   static bool IsTranslatableURL(const GURL& url);
 
@@ -150,7 +147,7 @@ class TranslateManager : public content::NotificationObserver,
                                  int render_id,
                                  const std::string& page_lang);
 
-  // Sends a translation request to the RenderView of |tab_contents|.
+  // Sends a translation request to the RenderView of |web_contents|.
   void DoTranslatePage(content::WebContents* web_contents,
                        const std::string& translate_script,
                        const std::string& source_lang,
@@ -173,11 +170,6 @@ class TranslateManager : public content::NotificationObserver,
   // to translate it).
   void RequestTranslateScript();
 
-  // Shows the specified translate |infobar| in the given |tab|.  If a current
-  // translate infobar is showing, it just replaces it with the new one.
-  void ShowInfoBar(content::WebContents* web_contents,
-                   TranslateInfoBarDelegate* infobar);
-
   // Returns the language to translate to. The language returned is the
   // first language found in the following list that is supported by the
   // translation service:
@@ -185,10 +177,6 @@ class TranslateManager : public content::NotificationObserver,
   //     the accept-language list
   // If no language is found then an empty string is returned.
   static std::string GetTargetLanguage(PrefService* prefs);
-
-  // Returns the translate info bar showing in |tab| or NULL if none is showing.
-  static TranslateInfoBarDelegate* GetTranslateInfoBarDelegate(
-      content::WebContents* web_contents);
 
   content::NotificationRegistrar notification_registrar_;
 

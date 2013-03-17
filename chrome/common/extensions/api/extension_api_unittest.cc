@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,6 +16,8 @@
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/features/simple_feature.h"
+#include "chrome/common/extensions/manifest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -28,10 +30,10 @@ class TestFeatureProvider : public FeatureProvider {
   }
 
   virtual Feature* GetFeature(const std::string& name) OVERRIDE {
-    Feature* result = new Feature();
+    SimpleFeature* result = new SimpleFeature();
     result->set_name(name);
-    result->extension_types()->insert(Extension::TYPE_EXTENSION);
-    result->contexts()->insert(context_);
+    result->extension_types()->insert(Manifest::TYPE_EXTENSION);
+    result->GetContexts()->insert(context_);
     to_destroy_.push_back(make_linked_ptr(result));
     return result;
   }
@@ -96,11 +98,11 @@ TEST(ExtensionAPI, IsPrivileged) {
   scoped_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
-  EXPECT_FALSE(extension_api->IsPrivileged("extension.connect"));
-  EXPECT_FALSE(extension_api->IsPrivileged("extension.onConnect"));
+  EXPECT_FALSE(extension_api->IsPrivileged("runtime.connect"));
+  EXPECT_FALSE(extension_api->IsPrivileged("runtime.onConnect"));
 
   // Properties are not supported yet.
-  EXPECT_TRUE(extension_api->IsPrivileged("extension.lastError"));
+  EXPECT_TRUE(extension_api->IsPrivileged("runtime.lastError"));
 
   // Default unknown names to privileged for paranoia's sake.
   EXPECT_TRUE(extension_api->IsPrivileged(""));
@@ -143,7 +145,7 @@ TEST(ExtensionAPI, IsPrivilegedFeatures) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
-    FilePath manifest_path;
+    base::FilePath manifest_path;
     PathService::Get(chrome::DIR_TEST_DATA, &manifest_path);
     manifest_path = manifest_path.AppendASCII("extensions")
         .AppendASCII("extension_api_unittest")
@@ -191,22 +193,23 @@ TEST(ExtensionAPI, LazyGetSchema) {
 
 scoped_refptr<Extension> CreateExtensionWithPermissions(
     const std::set<std::string>& permissions) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString("name", "extension");
   manifest.SetString("version", "1.0");
   manifest.SetInteger("manifest_version", 2);
   {
-    scoped_ptr<ListValue> permissions_list(new ListValue());
+    scoped_ptr<base::ListValue> permissions_list(new base::ListValue());
     for (std::set<std::string>::const_iterator i = permissions.begin();
         i != permissions.end(); ++i) {
-      permissions_list->Append(Value::CreateStringValue(*i));
+      permissions_list->Append(new base::StringValue(*i));
     }
     manifest.Set("permissions", permissions_list.release());
   }
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      FilePath(), Extension::LOAD, manifest, Extension::NO_FLAGS, &error));
+      base::FilePath(), Manifest::UNPACKED,
+      manifest, Extension::NO_FLAGS, &error));
   CHECK(extension.get());
   CHECK(error.empty());
 
@@ -352,11 +355,13 @@ TEST(ExtensionAPI, GetAPINameFromFullName) {
 TEST(ExtensionAPI, DefaultConfigurationFeatures) {
   scoped_ptr<ExtensionAPI> api(ExtensionAPI::CreateWithDefaultConfiguration());
 
-  Feature* bookmarks = api->GetFeature("bookmarks");
-  Feature* bookmarks_create = api->GetFeature("bookmarks.create");
+  SimpleFeature* bookmarks =
+      static_cast<SimpleFeature*>(api->GetFeature("bookmarks"));
+  SimpleFeature* bookmarks_create =
+      static_cast<SimpleFeature*>(api->GetFeature("bookmarks.create"));
 
   struct {
-    Feature* feature;
+    SimpleFeature* feature;
     // TODO(aa): More stuff to test over time.
   } test_data[] = {
     { bookmarks },
@@ -364,14 +369,14 @@ TEST(ExtensionAPI, DefaultConfigurationFeatures) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
-    Feature* feature = test_data[i].feature;
+    SimpleFeature* feature = test_data[i].feature;
     ASSERT_TRUE(feature) << i;
 
     EXPECT_TRUE(feature->whitelist()->empty());
     EXPECT_TRUE(feature->extension_types()->empty());
 
-    EXPECT_EQ(1u, feature->contexts()->size());
-    EXPECT_TRUE(feature->contexts()->count(
+    EXPECT_EQ(1u, feature->GetContexts()->size());
+    EXPECT_TRUE(feature->GetContexts()->count(
         Feature::BLESSED_EXTENSION_CONTEXT));
 
     EXPECT_EQ(Feature::UNSPECIFIED_LOCATION, feature->location());
@@ -382,20 +387,20 @@ TEST(ExtensionAPI, DefaultConfigurationFeatures) {
 }
 
 TEST(ExtensionAPI, FeaturesRequireContexts) {
-  scoped_ptr<ListValue> schema1(new ListValue());
-  DictionaryValue* feature_definition = new DictionaryValue();
+  scoped_ptr<base::ListValue> schema1(new base::ListValue());
+  base::DictionaryValue* feature_definition = new base::DictionaryValue();
   schema1->Append(feature_definition);
   feature_definition->SetString("namespace", "test");
   feature_definition->SetBoolean("uses_feature_system", true);
 
-  scoped_ptr<ListValue> schema2(schema1->DeepCopy());
+  scoped_ptr<base::ListValue> schema2(schema1->DeepCopy());
 
-  ListValue* contexts = new ListValue();
-  contexts->Append(Value::CreateStringValue("content_script"));
+  base::ListValue* contexts = new base::ListValue();
+  contexts->Append(new base::StringValue("content_script"));
   feature_definition->Set("contexts", contexts);
 
   struct {
-    ListValue* schema;
+    base::ListValue* schema;
     bool expect_success;
   } test_data[] = {
     { schema1.get(), true },
@@ -415,17 +420,17 @@ TEST(ExtensionAPI, FeaturesRequireContexts) {
   }
 }
 
-static void GetDictionaryFromList(const DictionaryValue* schema,
+static void GetDictionaryFromList(const base::DictionaryValue* schema,
                                   const std::string& list_name,
                                   const int list_index,
-                                  const DictionaryValue** out) {
-  const ListValue* list;
+                                  const base::DictionaryValue** out) {
+  const base::ListValue* list;
   EXPECT_TRUE(schema->GetList(list_name, &list));
   EXPECT_TRUE(list->GetDictionary(list_index, out));
 }
 
 TEST(ExtensionAPI, TypesHaveNamespace) {
-  FilePath manifest_path;
+  base::FilePath manifest_path;
   PathService::Get(chrome::DIR_TEST_DATA, &manifest_path);
   manifest_path = manifest_path.AppendASCII("extensions")
       .AppendASCII("extension_api_unittest")
@@ -439,10 +444,10 @@ TEST(ExtensionAPI, TypesHaveNamespace) {
   api.RegisterSchema("test.foo", manifest_str);
   api.LoadAllSchemas();
 
-  const DictionaryValue* schema = api.GetSchema("test.foo");
+  const base::DictionaryValue* schema = api.GetSchema("test.foo");
 
-  const DictionaryValue* dict;
-  const DictionaryValue* sub_dict;
+  const base::DictionaryValue* dict;
+  const base::DictionaryValue* sub_dict;
   std::string type;
 
   GetDictionaryFromList(schema, "types", 0, &dict);
@@ -451,7 +456,7 @@ TEST(ExtensionAPI, TypesHaveNamespace) {
   EXPECT_TRUE(dict->GetString("customBindings", &type));
   EXPECT_EQ("test.foo.TestType", type);
   EXPECT_TRUE(dict->GetDictionary("properties", &sub_dict));
-  const DictionaryValue* property;
+  const base::DictionaryValue* property;
   EXPECT_TRUE(sub_dict->GetDictionary("foo", &property));
   EXPECT_TRUE(property->GetString("$ref", &type));
   EXPECT_EQ("test.foo.OtherType", type);

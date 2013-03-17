@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/network_profile_bubble_view.h"
 
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
@@ -87,7 +87,7 @@ void NetworkProfileBubbleView::Init() {
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   title->SetMultiLine(true);
   title->SizeToFit(kNotificationBubbleWidth);
-  title->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->AddView(title);
 
   views::ColumnSet* bottom_columns = layout->AddColumnSet(1);
@@ -123,7 +123,7 @@ void NetworkProfileBubbleView::LinkClicked(views::Link* source,
   NetworkProfileBubble::RecordUmaEvent(
       NetworkProfileBubble::METRIC_LEARN_MORE_CLICKED);
   WindowOpenDisposition disposition =
-      chrome::DispositionFromEventFlags(event_flags);
+      ui::DispositionFromEventFlags(event_flags);
   content::OpenURLParams params(
       GURL("https://sites.google.com/a/chromium.org/dev/administrators/"
             "common-problems-and-solutions#network_profile"),

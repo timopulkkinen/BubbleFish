@@ -5,11 +5,12 @@
 #ifndef CONTENT_BROWSER_FILEAPI_FILEAPI_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_FILEAPI_FILEAPI_MESSAGE_FILTER_H_
 
+#include <map>
 #include <set>
 #include <string>
 
 #include "base/callback.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/hash_tables.h"
 #include "base/id_map.h"
 #include "base/platform_file.h"
@@ -18,11 +19,10 @@
 #include "webkit/blob/blob_data.h"
 #include "webkit/fileapi/file_system_types.h"
 
-class ChromeBlobStorageContext;
-class FilePath;
 class GURL;
 
 namespace base {
+class FilePath;
 class Time;
 }
 
@@ -41,7 +41,10 @@ namespace webkit_blob {
 class ShareableFileReference;
 }
 
-class FileAPIMessageFilter : public content::BrowserMessageFilter {
+namespace content {
+class ChromeBlobStorageContext;
+
+class FileAPIMessageFilter : public BrowserMessageFilter {
  public:
   // Used by the renderer process host on the UI thread.
   FileAPIMessageFilter(
@@ -56,12 +59,12 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
       fileapi::FileSystemContext* file_system_context,
       ChromeBlobStorageContext* blob_storage_context);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+      BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
@@ -111,10 +114,14 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
   void OnWillUpdate(const GURL& path);
   void OnDidUpdate(const GURL& path, int64 delta);
   void OnSyncGetPlatformPath(const GURL& path,
-                             FilePath* platform_path);
+                             base::FilePath* platform_path);
   void OnCreateSnapshotFile(int request_id,
-                            const GURL& blob_url,
                             const GURL& path);
+  void OnDidReceiveSnapshotFile(int request_id);
+
+  void OnCreateSnapshotFile_Deprecated(int request_id,
+                                       const GURL& blob_url,
+                                       const GURL& path);
 
   void OnStartBuildingBlob(const GURL& url);
   void OnAppendBlobDataItem(const GURL& url,
@@ -131,7 +138,7 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
   void DidGetMetadata(int request_id,
                       base::PlatformFileError result,
                       const base::PlatformFileInfo& info,
-                      const FilePath& platform_path);
+                      const base::FilePath& platform_path);
   void DidReadDirectory(int request_id,
                         base::PlatformFileError result,
                         const std::vector<base::FileUtilProxy::Entry>& entries,
@@ -153,17 +160,24 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
                            base::PlatformFileError result);
   void DidCreateSnapshot(
       int request_id,
-      const base::Callback<void(const FilePath&)>& register_file_callback,
+      const fileapi::FileSystemURL& url,
       base::PlatformFileError result,
       const base::PlatformFileInfo& info,
-      const FilePath& platform_path,
+      const base::FilePath& platform_path,
       const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
 
+  void DidCreateSnapshot_Deprecated(
+      int request_id,
+      const base::Callback<void(const base::FilePath&)>& register_file_callback,
+      base::PlatformFileError result,
+      const base::PlatformFileInfo& info,
+      const base::FilePath& platform_path,
+      const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
   // Registers the given file pointed by |virtual_path| and backed by
-  // |platform_path| as the |blob_url|.  Called by DidCreateSnapshot.
+  // |platform_path| as the |blob_url|.  Called by DidCreateSnapshot_Deprecated.
   void RegisterFileAsBlob(const GURL& blob_url,
-                          const FilePath& virtual_path,
-                          const FilePath& platform_path);
+                          const fileapi::FileSystemURL& url,
+                          const base::FilePath& platform_path);
 
   // Checks renderer's access permissions for single file.
   bool HasPermissionsForFile(const fileapi::FileSystemURL& url,
@@ -194,11 +208,18 @@ class FileAPIMessageFilter : public content::BrowserMessageFilter {
   // all of them when the renderer process dies.
   base::hash_set<std::string> blob_urls_;
 
+  // Used to keep snapshot files alive while a DidCreateSnapshot
+  // is being sent to the renderer.
+  std::map<int, scoped_refptr<webkit_blob::ShareableFileReference> >
+      in_transit_snapshot_files_;
+
   // Keep track of file system file URLs opened by OpenFile() in this process.
   // Need to close all of them when the renderer process dies.
   std::multiset<GURL> open_filesystem_urls_;
 
   DISALLOW_COPY_AND_ASSIGN(FileAPIMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_FILEAPI_FILEAPI_MESSAGE_FILTER_H_

@@ -4,7 +4,7 @@
 
 /**
  * Combines classes from javac.custom.classpath property and ${out.dir}/classes
- * into a single jar file ${ant.project.name}-debug.jar and places the file in
+ * into a single jar file ${ant.project.name}.jar and places the file in
  * ${lib.java.dir}.
  */
 
@@ -14,7 +14,6 @@ importClass(org.apache.tools.ant.types.FileSet);
 importClass(org.apache.tools.ant.types.ZipFileSet);
 importClass(org.apache.tools.ant.taskdefs.Zip);
 
-var echo = project.createTask("echo");
 var jarTask = project.createTask("jar");
 
 // Do not allow duplicates in the jar, the default behavior of Jar task
@@ -26,7 +25,7 @@ var duplicate = Zip.Duplicate();
 duplicate.setValue("preserve");
 jarTask.setDuplicate(duplicate);
 
-var destFile = project.getProperty("ant.project.name") + "-debug.jar";
+var destFile = project.getProperty("ant.project.name") + ".jar";
 var destPath = File(project.getProperty("test.lib.java.dir") + "/" + destFile);
 jarTask.setDestFile(destPath);
 
@@ -64,7 +63,4 @@ for (var i in excludedClasses) {
 }
 
 jarTask.setExcludes(exclusionString);
-echo.setMessage("Creating test jar: " +
-                jarTask.getDestFile().getAbsolutePath());
-echo.perform();
 jarTask.perform();

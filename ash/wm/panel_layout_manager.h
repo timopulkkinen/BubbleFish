@@ -15,6 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
+#include "ui/aura/window_observer.h"
 
 namespace aura {
 class Window;
@@ -45,16 +46,21 @@ namespace internal {
 class ASH_EXPORT PanelLayoutManager
     : public aura::LayoutManager,
       public ash::LauncherIconObserver,
+      public aura::WindowObserver,
       public aura::client::ActivationChangeObserver {
  public:
   explicit PanelLayoutManager(aura::Window* panel_container);
   virtual ~PanelLayoutManager();
+
+  // Call Shutdown() before deleting children of panel_container.
+  void Shutdown();
 
   void StartDragging(aura::Window* panel);
   void FinishDragging();
 
   void ToggleMinimize(aura::Window* panel);
 
+  ash::Launcher* launcher() { return launcher_; }
   void SetLauncher(ash::Launcher* launcher);
 
   // Overridden from aura::LayoutManager:
@@ -70,14 +76,43 @@ class ASH_EXPORT PanelLayoutManager
   // Overridden from ash::LauncherIconObserver
   virtual void OnLauncherIconPositionsChanged() OVERRIDE;
 
+  // Overridden from aura::WindowObserver
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
+  virtual void OnWindowVisibilityChanged(aura::Window* window,
+                                         bool visible) OVERRIDE;
+
   // Overridden from aura::client::ActivationChangeObserver
-  virtual void OnWindowActivated(aura::Window* active,
-                                 aura::Window* old_active) OVERRIDE;
+  virtual void OnWindowActivated(aura::Window* gained_active,
+                                 aura::Window* lost_active) OVERRIDE;
 
  private:
   friend class PanelLayoutManagerTest;
+  friend class PanelWindowResizerTest;
 
-  typedef std::list<aura::Window*> PanelList;
+  views::Widget* CreateCalloutWidget();
+
+  struct PanelInfo{
+    PanelInfo() : window(NULL), callout_widget(NULL) {}
+
+    bool operator==(const aura::Window* other_window) const {
+      return window == other_window;
+    }
+
+    // A weak pointer to the panel window.
+    aura::Window* window;
+    // The callout widget for this panel. This pointer must be managed
+    // manually as this structure is used in a std::list. See
+    // http://www.chromium.org/developers/smart-pointer-guidelines
+    views::Widget* callout_widget;
+
+  };
+
+  typedef std::list<PanelInfo> PanelList;
+
+  void MinimizePanel(aura::Window* panel);
+  void RestorePanel(aura::Window* panel);
 
   // Called whenever the panel layout might change.
   void Relayout();
@@ -86,20 +121,8 @@ class ASH_EXPORT PanelLayoutManager
   // changes or a panel is moved).
   void UpdateStacking(aura::Window* active_panel);
 
-  // Trigger a delayed task to update the callout. We use this because
-  // otherwise, ShadowController::OnWindowPropertyChanged may be invoked after
-  // we've already updated the callout, causing the drop shadow to be stacked on
-  // top of the callout rather than the other way around.
-  // TODO(dcheng): Possibly a bug in the shadow controller. If a window is
-  // focused but not stacked at the top, I don't think its shadow should be
-  // drawn on top of "higher" windows.
-  void UpdateCallout(aura::Window* active_window);
-
-  // Don't call this directly. Only UpdateCallout() should call this method.
-  void ShowCalloutHelper(aura::Window* active_panel);
-
-  // For testing.
-  views::Widget* callout_widget() const { return callout_widget_.get(); }
+  // Update the callout arrows for all managed panels.
+  void UpdateCallouts();
 
   // Parent window associated with this layout manager.
   aura::Window* panel_container_;
@@ -114,8 +137,6 @@ class ASH_EXPORT PanelLayoutManager
   // The last active panel. Used to maintain stacking even if no panels are
   // currently focused.
   aura::Window* last_active_panel_;
-  // Manage the callout for the focused panel, if any.
-  scoped_ptr<views::Widget> callout_widget_;
   base::WeakPtrFactory<PanelLayoutManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManager);

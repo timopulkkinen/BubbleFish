@@ -1,10 +1,18 @@
 include_rules = [
+  "+apps",
   "+breakpad",
   "+chrome/app",
   "+chrome/installer",
   "+chrome/tools/profiles",  # For history unit tests.
   "+chromeos",
+  "+components/auto_login_parser",
+  "+components/navigation_interception",
+  "+components/visitedlink/browser",
+  "+components/web_contents_delegate_android",
   "+content/public/browser",
+  "+device/bluetooth",
+  "+device/media_transfer_protocol",
+  "+extensions/common",
   "+google/cacheinvalidation",  # Sync invalidation API protobuf files.
   "+google_apis",
   "+google_update",
@@ -27,6 +35,7 @@ include_rules = [
   "+sync/notifier",  # Sync invalidation API files.
   "+sync/protocol",  # Sync protobuf files.
   "+third_party/cros_system_api",
+  "+win8/util",
   "+xib_localizers", # For generated mac localization helpers
 
   # TODO(stuartmorgan): Remove these by refactoring necessary code out of
@@ -35,9 +44,8 @@ include_rules = [
   "+webkit/appcache",
   "+webkit/blob",
   "+webkit/database",
-  "+webkit/dom_storage",
+  "+webkit/dom_storage/dom_storage_types.h",
   "+webkit/fileapi",
-  "+webkit/forms",  # Defines some types that are marshalled over IPC.
   "+webkit/plugins",  # Defines some types that are marshalled over IPC.
   "+webkit/quota",
   "+webkit/user_agent",
@@ -57,24 +65,16 @@ include_rules = [
   "+webkit/glue/webkit_glue.h",
   "+webkit/glue/webmenuitem.h",
   "+webkit/glue/webpreferences.h",
-  "+webkit/glue/window_open_disposition.h",
-  # DO NOT ADD ANY MORE ITEMS TO THE ABOVE LIST!
-
-  # TODO(jam): Need to remove all these and use only content/public. BUG=98716
-  # DO NOT ADD ANY MORE ITEMS TO THE LIST BELOW!
-  "!content/browser/geolocation/wifi_data_provider_common.h",
   # DO NOT ADD ANY MORE ITEMS TO THE ABOVE LIST!
 
   "-chrome/browser/ui/views",
   # TODO(tfarina): Remove all these. crbug.com/125846.
   # DO NOT ADD ANY MORE ITEMS TO THE LIST BELOW!
   "!chrome/browser/ui/views/extensions/extension_view_views.h",
-  "!chrome/browser/ui/views/frame/browser_view.h",
   "!chrome/browser/ui/views/location_bar/location_bar_view.h",
   "!chrome/browser/ui/views/location_bar/location_icon_view.h",
   "!chrome/browser/ui/views/notifications/balloon_view.h",
   "!chrome/browser/ui/views/notifications/balloon_view_host.h",
-  "!chrome/browser/ui/views/page_info_bubble_view.h",
   "!chrome/browser/ui/views/reload_button.h",
   "!chrome/browser/ui/views/select_file_dialog_extension.h",
   "!chrome/browser/ui/views/unhandled_keyboard_event_handler.h",
@@ -96,8 +96,4 @@ include_rules = [
   "+third_party/re2",
   "+third_party/sqlite",
   "+third_party/undoview",
-
-  # FIXME: this is used by a browser_test. We need to find a better structure
-  # for this include.
-  "!chrome/renderer/visitedlink_slave.h",
 ]

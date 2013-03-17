@@ -14,8 +14,8 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugins/plugin_installer_observer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -54,22 +54,21 @@ void BeginDownload(
       render_process_host_id,
       render_view_host_routing_id,
       true,  // prefer_cache
-      content::DownloadSaveInfo(),
+      scoped_ptr<content::DownloadSaveInfo>(new content::DownloadSaveInfo()),
+      content::DownloadId::Invalid(),
       callback);
 
   if (error != net::OK) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(callback, content::DownloadId::Invalid(), error));
+        base::Bind(callback, static_cast<DownloadItem*>(NULL), error));
   }
 }
 
 }  // namespace
 
-PluginInstaller::PluginInstaller(PluginMetadata* plugin)
-    : plugin_(plugin),
-      state_(INSTALLER_STATE_IDLE) {
-  DCHECK(plugin_);
+PluginInstaller::PluginInstaller()
+    : state_(INSTALLER_STATE_IDLE) {
 }
 
 PluginInstaller::~PluginInstaller() {
@@ -131,21 +130,22 @@ void PluginInstaller::RemoveWeakObserver(
   weak_observers_.RemoveObserver(observer);
 }
 
-void PluginInstaller::StartInstalling(TabContents* tab_contents) {
+void PluginInstaller::StartInstalling(const GURL& plugin_url,
+                                      content::WebContents* web_contents) {
   DCHECK_EQ(INSTALLER_STATE_IDLE, state_);
-  DCHECK(!plugin_->url_for_display());
   state_ = INSTALLER_STATE_DOWNLOADING;
   FOR_EACH_OBSERVER(PluginInstallerObserver, observers_, DownloadStarted());
-  content::WebContents* web_contents = tab_contents->web_contents();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   DownloadManager* download_manager =
-      BrowserContext::GetDownloadManager(tab_contents->profile());
+      BrowserContext::GetDownloadManager(profile);
   download_util::RecordDownloadSource(
       download_util::INITIATED_BY_PLUGIN_INSTALLER);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&BeginDownload,
-                 plugin_->plugin_url(),
-                 tab_contents->profile()->GetResourceContext(),
+                 plugin_url,
+                 profile->GetResourceContext(),
                  web_contents->GetRenderProcessHost()->GetID(),
                  web_contents->GetRenderViewHost()->GetRoutingID(),
                  base::Bind(&PluginInstaller::DownloadStarted,
@@ -155,30 +155,25 @@ void PluginInstaller::StartInstalling(TabContents* tab_contents) {
 
 void PluginInstaller::DownloadStarted(
     scoped_refptr<content::DownloadManager> dlm,
-    content::DownloadId download_id,
+    content::DownloadItem* item,
     net::Error error) {
-  if (error != net::OK) {
+  if (!item) {
+    DCHECK_NE(net::OK, error);
     std::string msg =
         base::StringPrintf("Error %d: %s", error, net::ErrorToString(error));
     DownloadError(msg);
     return;
   }
-  DownloadItem* download_item = dlm->GetDownload(download_id.local());
-  // TODO(benjhayden): DCHECK(item && item->IsInProgress()) after figuring out
-  // why DownloadStarted may get net:OK but an invalid id.
-  if (!download_item) {
-    DownloadError("Download not found");
-    return;
-  }
-  download_item->SetOpenWhenComplete(true);
-  download_item->AddObserver(this);
+  DCHECK_EQ(net::OK, error);
+  item->SetOpenWhenComplete(true);
+  item->AddObserver(this);
 }
 
-void PluginInstaller::OpenDownloadURL(content::WebContents* web_contents) {
+void PluginInstaller::OpenDownloadURL(const GURL& plugin_url,
+                                      content::WebContents* web_contents) {
   DCHECK_EQ(INSTALLER_STATE_IDLE, state_);
-  DCHECK(plugin_->url_for_display());
   web_contents->OpenURL(content::OpenURLParams(
-      plugin_->plugin_url(),
+      plugin_url,
       content::Referrer(web_contents->GetURL(),
                         WebKit::WebReferrerPolicyDefault),
       NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED, false));

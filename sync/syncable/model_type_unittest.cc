@@ -70,5 +70,21 @@ TEST_F(ModelTypeTest, IsRealDataType) {
   EXPECT_TRUE(IsRealDataType(APPS));
 }
 
+// Make sure we can convert ModelTypes to and from specifics field
+// numbers.
+TEST_F(ModelTypeTest, ModelTypeToFromSpecificsFieldNumber) {
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
+    int field_number = GetSpecificsFieldNumberFromModelType(iter.Get());
+    EXPECT_EQ(iter.Get(),
+              GetModelTypeFromSpecificsFieldNumber(field_number));
+  }
+}
+
+TEST_F(ModelTypeTest, ModelTypeOfInvalidSpecificsFieldNumber) {
+  EXPECT_EQ(UNSPECIFIED, GetModelTypeFromSpecificsFieldNumber(0));
+}
+
 }  // namespace
 }  // namespace syncer

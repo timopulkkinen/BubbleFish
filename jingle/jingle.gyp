@@ -7,7 +7,7 @@
     'chromium_code': 1,
   },  # variables
   'conditions': [
-    ['OS != "ios"', {
+    ['enable_webrtc==1 or OS!="android"', {
       'targets': [
         # A library of various utils for integration with libjingle.
         {
@@ -95,6 +95,8 @@
             'notifier/listener/push_notifications_send_update_task.h',
             'notifier/listener/push_notifications_subscribe_task.cc',
             'notifier/listener/push_notifications_subscribe_task.h',
+            'notifier/listener/send_ping_task.cc',
+            'notifier/listener/send_ping_task.h',
             'notifier/listener/xml_element_util.cc',
             'notifier/listener/xml_element_util.h',
             'notifier/listener/xmpp_push_client.cc',
@@ -102,7 +104,6 @@
           ],
           'defines' : [
             '_CRT_SECURE_NO_WARNINGS',
-            '_USE_32BIT_TIME_T',
           ],
           'dependencies': [
             '../base/base.gyp:base',
@@ -110,6 +111,7 @@
             '../net/net.gyp:net',
             '../third_party/expat/expat.gyp:expat',
             '../third_party/libjingle/libjingle.gyp:libjingle',
+            'jingle_glue',
           ],
           'export_dependent_settings': [
             '../third_party/libjingle/libjingle.gyp:libjingle',
@@ -179,6 +181,7 @@
             'notifier/listener/push_client_unittest.cc',
             'notifier/listener/push_notifications_send_update_task_unittest.cc',
             'notifier/listener/push_notifications_subscribe_task_unittest.cc',
+            'notifier/listener/send_ping_task_unittest.cc',
             'notifier/listener/xml_element_util_unittest.cc',
             'notifier/listener/xmpp_push_client_unittest.cc',
             'run_all_unittests.cc',
@@ -211,11 +214,15 @@
           ],
         },
       ],
-    }, {  # OS == "ios"
+    }, {  # enable_webrtc!=1 and OS=="android"
       'targets': [
-        # Stub targets as iOS doesn't use libjingle.
+        # Stub targets as Android doesn't use libjingle when webrtc is disabled.
         {
           'target_name': 'jingle_glue',
+          'type': 'none',
+        },
+        {
+          'target_name': 'jingle_glue_test_util',
           'type': 'none',
         },
         {

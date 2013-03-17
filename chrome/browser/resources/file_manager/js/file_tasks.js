@@ -4,13 +4,12 @@
 
 /**
  * This object encapsulates everything related to tasks execution.
+ *
  * @param {FileManager} fileManager FileManager instance.
- * @param {Array.<string>} urls List of file urls.
- * @param {Array.<string>=} opt_mimeTypes List of MIME types for each
- *     of the files.
- * @param {object} opt_params File manager load parameters.
+ * @param {Object=} opt_params File manager load parameters.
+ * @constructor
  */
-function FileTasks(fileManager, urls, opt_mimeTypes, opt_params) {
+function FileTasks(fileManager, opt_params) {
   this.fileManager_ = fileManager;
   this.params_ = opt_params;
   this.tasks_ = null;
@@ -18,22 +17,26 @@ function FileTasks(fileManager, urls, opt_mimeTypes, opt_params) {
 
   /**
    * List of invocations to be called once tasks are available.
+   *
+   * @private
+   * @type {Array,<Object>}
    */
   this.pendingInvocations_ = [];
-
-  /* TODO(kaznacheev): Remove urls and opt_mimeTypes from parameters and
-     call init directly from the client code.
-   */
-  this.init(urls, opt_mimeTypes);
 }
 
 /**
 * Location of the Chrome Web Store.
+*
+* @const
+* @type {string}
 */
 FileTasks.CHROME_WEB_STORE_URL = 'https://chrome.google.com/webstore';
 
 /**
 * Location of the FAQ about the file actions.
+*
+* @const
+* @type {string}
 */
 FileTasks.NO_ACTION_FOR_FILE_URL = 'http://support.google.com/chromeos/bin/' +
     'answer.py?answer=1700055&topic=29026&ctx=topic';
@@ -54,7 +57,8 @@ FileTasks.prototype.init = function(urls, opt_mimeTypes) {
 
 /**
  * Returns amount of tasks.
- * @return {Number=} amount of tasks.
+ *
+ * @return {number} amount of tasks.
  */
 FileTasks.prototype.size = function() {
   return (this.tasks_ && this.tasks_.length) || 0;
@@ -62,6 +66,7 @@ FileTasks.prototype.size = function() {
 
 /**
  * Callback when tasks found.
+ *
  * @param {Array.<Object>} tasks The tasks.
  * @private
  */
@@ -77,15 +82,16 @@ FileTasks.prototype.onTasks_ = function(tasks) {
 
 /**
  * Processes internal tasks.
+ *
  * @param {Array.<Object>} tasks The tasks.
  * @private
  */
 FileTasks.prototype.processTasks_ = function(tasks) {
   this.tasks_ = [];
-  var id = util.getExtensionId();
+  var id = util.platform.getAppId();
   var is_on_drive = false;
   for (var index = 0; index < this.urls_.length; ++index) {
-    if (FileType.isOnGDrive(this.urls_[index])) {
+    if (FileType.isOnDrive(this.urls_[index])) {
       is_on_drive = true;
       break;
     }
@@ -164,6 +170,7 @@ FileTasks.prototype.processTasks_ = function(tasks) {
 
 /**
  * Executes default task.
+ *
  * @private
  */
 FileTasks.prototype.executeDefault_ = function() {
@@ -198,6 +205,7 @@ FileTasks.prototype.executeDefault_ = function() {
 
 /**
  * Executes a single task.
+ *
  * @param {string} taskId Task identifier.
  * @param {Array.<string>=} opt_urls Urls to execute on instead of |this.urls_|.
  * @private
@@ -205,37 +213,38 @@ FileTasks.prototype.executeDefault_ = function() {
 FileTasks.prototype.execute_ = function(taskId, opt_urls) {
   var urls = opt_urls || this.urls_;
   this.checkAvailability_(function() {
-    chrome.fileBrowserPrivate.executeTask(taskId, urls);
-
     var task_parts = taskId.split('|');
-    if (task_parts[0] == util.getExtensionId() && task_parts[1] == 'file') {
+    if (task_parts[0] == util.platform.getAppId() && task_parts[1] == 'file') {
       // For internal tasks we do not listen to the event to avoid
       // handling the same task instance from multiple tabs.
       // So, we manually execute the task.
       this.executeInternalTask_(task_parts[2], urls);
+    } else {
+      chrome.fileBrowserPrivate.executeTask(taskId, urls);
     }
   }.bind(this));
 };
 
 /**
  * Checks whether the remote files are available right now.
+ *
  * @param {function} callback The callback.
  * @private
  */
 FileTasks.prototype.checkAvailability_ = function(callback) {
-  function areAll(props, name) {
-    function isOne(e) {
+  var areAll = function(props, name) {
+    var isOne = function(e) {
       // If got no properties, we safely assume that item is unavailable.
       return e && e[name];
-    }
+    };
     return props.filter(isOne).length == props.length;
-  }
+  };
 
   var fm = this.fileManager_;
   var urls = this.urls_;
 
-  if (fm.isOnGData() && fm.isOffline()) {
-    fm.metadataCache_.get(urls, 'gdata', function(props) {
+  if (fm.isOnDrive() && fm.isDriveOffline()) {
+    fm.metadataCache_.get(urls, 'drive', function(props) {
       if (areAll(props, 'availableOffline')) {
         callback();
         return;
@@ -257,9 +266,9 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
     return;
   }
 
-  if (fm.isOnGData() && fm.isOnMeteredConnection()) {
-    fm.metadataCache_.get(urls, 'gdata', function(gdataProps) {
-      if (areAll(gdataProps, 'availableWhenMetered')) {
+  if (fm.isOnDrive() && fm.isDriveOnMeteredConnection()) {
+    fm.metadataCache_.get(urls, 'drive', function(driveProps) {
+      if (areAll(driveProps, 'availableWhenMetered')) {
         callback();
         return;
       }
@@ -267,7 +276,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       fm.metadataCache_.get(urls, 'filesystem', function(fileProps) {
         var sizeToDownload = 0;
         for (var i = 0; i != urls.length; i++) {
-          if (!gdataProps[i].availableWhenMetered)
+          if (!driveProps[i].availableWhenMetered)
             sizeToDownload += fileProps[i].size;
         }
         fm.confirm.show(
@@ -275,7 +284,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
                 urls.length == 1 ?
                     'CONFIRM_MOBILE_DATA_USE' :
                     'CONFIRM_MOBILE_DATA_USE_PLURAL',
-                util.bytesToSi(sizeToDownload)),
+                util.bytesToString(sizeToDownload)),
             callback);
       });
     });
@@ -287,6 +296,7 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
 
 /**
  * Executes an internal task.
+ *
  * @param {string} id The short task id.
  * @param {Array.<string>} urls The urls to execute on.
  * @private
@@ -303,8 +313,24 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
       urls = fm.getAllUrlsInCurrentDirectory().filter(FileType.isAudio);
       position = urls.indexOf(selectedUrl);
     }
-    chrome.mediaPlayerPrivate.play(urls, position);
+    if (util.platform.v2()) {
+      chrome.runtime.getBackgroundPage(function(background) {
+        background.launchAudioPlayer({ items: urls, position: position });
+      });
+    } else {
+      chrome.mediaPlayerPrivate.play(urls, position);
+    }
     return;
+  }
+
+  if (util.platform.v2()) {
+    if (id == 'watch') {
+      console.assert(urls.length == 1, 'Cannot open multiple videos');
+      chrome.runtime.getBackgroundPage(function(background) {
+        background.launchVideoPlayer(urls[0]);
+      });
+      return;
+    }
   }
 
   if (id == 'mount-archive') {
@@ -336,6 +362,7 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
 
 /**
  * Mounts archives.
+ *
  * @param {Array.<string>} urls Mount file urls list.
  * @private
  */
@@ -365,6 +392,7 @@ FileTasks.prototype.mountArchives_ = function(urls) {
 
 /**
  * Open the Gallery.
+ *
  * @param {Array.<string>} urls List of selected urls.
  */
 FileTasks.prototype.openGallery = function(urls) {
@@ -380,29 +408,43 @@ FileTasks.prototype.openGallery = function(urls) {
 
   if (this.params_ && this.params_.gallery) {
     // Remove the Gallery state from the location, we do not need it any more.
-    util.updateLocation(
+    util.updateAppState(
         true /* replace */, null /* keep path */, '' /* remove search. */);
   }
 
+  var savedAppState = window.appState;
+  var savedTitle = document.title;
+
   // Push a temporary state which will be replaced every time the selection
   // changes in the Gallery and popped when the Gallery is closed.
-  util.updateLocation(false /*push*/);
+  util.updateAppState(false /*push*/);
 
-  function onClose(selectedUrls) {
+  var onClose = function(selectedUrls) {
     fm.directoryModel_.selectUrls(selectedUrls);
-    history.back(1);  // This will restore document.title.
-  }
+    if (util.platform.v2()) {
+      fm.closeFilePopup_();  // Will call Gallery.unload.
+      window.appState = savedAppState;
+      util.saveAppState();
+      document.title = savedTitle;
+    } else {
+      window.history.back(1);  // This will restore document.title.
+    }
+  };
 
   galleryFrame.onload = function() {
     fm.show_();
     galleryFrame.contentWindow.ImageUtil.metrics = metrics;
+    window.galleryTestAPI = galleryFrame.contentWindow.galleryTestAPI;
 
+    // TODO(haruki): isOnReadonlyDirectory() only checks the permission for the
+    // root. We should check more granular permission to know whether the file
+    // is writable or not.
     var readonly = fm.isOnReadonlyDirectory();
     var currentDir = fm.directoryModel_.getCurrentDirEntry();
     var downloadsDir = fm.directoryModel_.getRootsList().item(0);
     var readonlyDirName = null;
     if (readonly) {
-      readonlyDirName = fm.isOnGData() ?
+      readonlyDirName = fm.isOnDrive() ?
           PathUtil.getRootLabel(PathUtil.getRootPath(currentDir.fullPath)) :
           fm.directoryModel_.getCurrentRootName();
     }
@@ -411,10 +453,14 @@ FileTasks.prototype.openGallery = function(urls) {
       // We show the root label in readonly warning (e.g. archive name).
       readonlyDirName: readonlyDirName,
       curDirEntry: currentDir,
-      saveDirEntry: readonly ? downloadsDir : currentDir,
+      saveDirEntry: readonly ? downloadsDir : null,
+      searchResults: fm.directoryModel_.isSearching(),
       metadataCache: fm.metadataCache_,
       pageState: this.params_,
       onClose: onClose,
+      onThumbnailError: function(imageURL) {
+        fm.metadataCache_.refreshFileMetadata(imageURL);
+      },
       displayStringFunction: strf
     };
     galleryFrame.contentWindow.Gallery.open(context, allUrls, urls);
@@ -426,6 +472,7 @@ FileTasks.prototype.openGallery = function(urls) {
 
 /**
  * Displays the list of tasks in a task picker combobutton.
+ *
  * @param {cr.ui.ComboButton} combobutton The task picker element.
  * @private
  */
@@ -459,6 +506,7 @@ FileTasks.prototype.display_ = function(combobutton) {
 
 /**
  * Creates sorted array of available task descriptions such as title and icon.
+ *
  * @return {Array} created array can be used to feed combobox, menus and so on.
  * @private
  */
@@ -485,6 +533,7 @@ FileTasks.prototype.createItems_ = function() {
  * Updates context menu with default item.
  * @private
  */
+
 FileTasks.prototype.updateMenuItem_ = function() {
   this.fileManager_.updateContextMenuActionItems(this.defaultTask_,
       this.tasks_.length > 1);
@@ -492,9 +541,10 @@ FileTasks.prototype.updateMenuItem_ = function() {
 
 /**
  * Creates combobutton item based on task.
+ *
  * @param {Object} task Task to convert.
  * @param {string=} opt_title Title.
- * @param {boolean} opt_bold Make a menu item bold.
+ * @param {boolean=} opt_bold Make a menu item bold.
  * @return {Object} Item appendable to combobutton drop-down list.
  * @private
  */
@@ -514,6 +564,7 @@ FileTasks.prototype.createCombobuttonItem_ = function(task, opt_title,
  * Decorates a FileTasks method, so it will be actually executed after the tasks
  * are available.
  * This decorator expects an implementation called |method + '_'|.
+ *
  * @param {string} method The method name.
  */
 FileTasks.decorate = function(method) {
@@ -532,8 +583,8 @@ FileTasks.decorate = function(method) {
  * Shows modal action picker dialog with currently available list of tasks.
  *
  * @param {DefaultActionDialog} actionDialog Action dialog to show and update.
- * @param {String} title Title to use.
- * @param {String} message Message to use.
+ * @param {string} title Title to use.
+ * @param {string} message Message to use.
  * @param {function(Object)} onSuccess Callback to pass selected task.
  */
 FileTasks.prototype.showTaskPicker = function(actionDialog, title, message,
@@ -557,4 +608,3 @@ FileTasks.decorate('display');
 FileTasks.decorate('updateMenuItem');
 FileTasks.decorate('execute');
 FileTasks.decorate('executeDefault');
-

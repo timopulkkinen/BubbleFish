@@ -9,7 +9,7 @@
   'targets': [
     {
       'target_name': 'dbus',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
         '../build/linux/system.gyp:dbus',
@@ -18,9 +18,15 @@
       'export_dependent_settings': [
         '../base/base.gyp:base',
       ],
+      'defines': [
+        'DBUS_IMPLEMENTATION',
+      ],
       'sources': [
         'bus.cc',
         'bus.h',
+        'dbus_export.h',
+        'dbus_statistics.cc',
+        'dbus_statistics.h',
         'exported_object.cc',
         'exported_object.h',
         'file_descriptor.cc',
@@ -87,11 +93,13 @@
       ],
       'sources': [
         'bus_unittest.cc',
+        'dbus_statistics_unittest.cc',
         'end_to_end_async_unittest.cc',
         'end_to_end_sync_unittest.cc',
         'message_unittest.cc',
         'mock_unittest.cc',
         'property_unittest.cc',
+        'signal_sender_verification_unittest.cc',
         'string_util_unittest.cc',
         'test_service.cc',
         'test_service.h',

@@ -14,16 +14,13 @@
 #include "content/common/sandbox_mac_unittest_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
+namespace content {
 
-using sandboxtest::MacSandboxTest;
-using sandbox::Sandbox;
-
-class FontLoadingTestCase : public sandboxtest::MacSandboxTestCase {
+class FontLoadingTestCase : public MacSandboxTestCase {
  public:
   FontLoadingTestCase() : font_data_length_(-1) {}
-  virtual bool BeforeSandboxInit();
-  virtual bool SandboxedTest();
+  virtual bool BeforeSandboxInit() OVERRIDE;
+  virtual bool SandboxedTest() OVERRIDE;
  private:
   scoped_ptr<base::SharedMemory> font_shmem_;
   size_t font_data_length_;
@@ -34,7 +31,8 @@ REGISTER_SANDBOX_TEST_CASE(FontLoadingTestCase);
 // Load raw font data into shared memory object.
 bool FontLoadingTestCase::BeforeSandboxInit() {
   std::string font_data;
-  if (!file_util::ReadFileToString(FilePath(test_data_.c_str()), &font_data)) {
+  if (!file_util::ReadFileToString(base::FilePath(test_data_.c_str()),
+                                   &font_data)) {
     LOG(ERROR) << "Failed to read font data from file (" << test_data_ << ")";
     return false;
   }
@@ -105,7 +103,7 @@ bool FontLoadingTestCase::SandboxedTest() {
 }
 
 TEST_F(MacSandboxTest, FontLoadingTest) {
-  FilePath temp_file_path;
+  base::FilePath temp_file_path;
   FILE* temp_file = file_util::CreateAndOpenTemporaryFile(&temp_file_path);
   ASSERT_TRUE(temp_file);
   file_util::ScopedFILE temp_file_closer(temp_file);
@@ -121,10 +119,10 @@ TEST_F(MacSandboxTest, FontLoadingTest) {
       static_cast<const char *>(result.font_data.memory()),
       result.font_data_size);
 
-  ASSERT_TRUE(RunTestInSandbox(content::SANDBOX_TYPE_RENDERER,
+  ASSERT_TRUE(RunTestInSandbox(SANDBOX_TYPE_RENDERER,
                   "FontLoadingTestCase", temp_file_path.value().c_str()));
   temp_file_closer.reset();
   ASSERT_TRUE(file_util::Delete(temp_file_path, false));
 }
 
-}  // namespace
+}  // namespace content

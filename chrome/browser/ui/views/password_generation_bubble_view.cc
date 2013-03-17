@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/autofill_messages.h"
+#include "chrome/common/password_generation_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_view_host.h"
@@ -35,7 +36,7 @@ const int kBubbleMargin = 9;
 const int kButtonHorizontalSpacing = 4;
 const int kButtonWidth = 65;
 const int kDefaultTextFieldChars = 18;
-const int kTitleLabelVerticalOffset = -3;
+const int kTitleLabelVerticalOffset = -1;
 const int kVerticalPadding = 8;
 
 // Constants for Text fieldWrapper.
@@ -118,7 +119,7 @@ gfx::Size TextfieldWrapper::GetImageSize() const {
 }  // namespace
 
 PasswordGenerationBubbleView::PasswordGenerationBubbleView(
-    const webkit::forms::PasswordForm& form,
+    const content::PasswordForm& form,
     const gfx::Rect& anchor_rect,
     views::View* anchor_view,
     content::RenderViewHost* render_view_host,
@@ -130,6 +131,8 @@ PasswordGenerationBubbleView::PasswordGenerationBubbleView(
       title_label_(NULL),
       accept_button_(NULL),
       textfield_(NULL),
+      regenerate_button_(NULL),
+      textfield_wrapper_(NULL),
       form_(form),
       anchor_rect_(anchor_rect),
       render_view_host_(render_view_host),
@@ -146,38 +149,35 @@ void PasswordGenerationBubbleView::Init() {
 
   // TODO(gcasto): Localize text after we have finalized the UI.
   // crbug.com/118062.
-  gfx::Font label_font =
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
-  label_font = label_font.DeriveFont(2);
-  title_label_ = new views::Label(ASCIIToUTF16("Password Suggestion"),
-                                  label_font);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title_label_ = new views::Label(
+      l10n_util::GetStringUTF16(IDS_PASSWORD_GENERATION_BUBBLE_TITLE),
+      rb.GetFont(ui::ResourceBundle::MediumFont));
   AddChildView(title_label_);
 
   regenerate_button_ = new views::ImageButton(this);
   regenerate_button_->SetImage(
-      views::CustomButton::BS_NORMAL,
+      views::CustomButton::STATE_NORMAL,
+      theme_provider_->GetImageSkiaNamed(IDR_RELOAD_DIMMED));
+  regenerate_button_->SetImage(
+      views::CustomButton::STATE_HOVERED,
       theme_provider_->GetImageSkiaNamed(IDR_RELOAD));
   regenerate_button_->SetImage(
-      views::CustomButton::BS_HOT,
-      theme_provider_->GetImageSkiaNamed(IDR_RELOAD));
-  regenerate_button_->SetImage(
-      views::CustomButton::BS_PUSHED,
+      views::CustomButton::STATE_PRESSED,
       theme_provider_->GetImageSkiaNamed(IDR_RELOAD));
 
   textfield_ = new views::Textfield();
-  gfx::Font textfield_font =
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
-  textfield_font = textfield_font.DeriveFont(2, gfx::Font::BOLD);
-  textfield_->SetFont(textfield_font);
   textfield_->set_default_width_in_chars(kDefaultTextFieldChars);
   textfield_->SetText(ASCIIToUTF16(password_generator_->Generate()));
+  textfield_->SetController(this);
 
   textfield_wrapper_ = new TextfieldWrapper(textfield_,
                                             regenerate_button_);
   AddChildView(textfield_wrapper_);
 
-  accept_button_ = new views::NativeTextButton(this,
-                                               ASCIIToUTF16("Try it"));
+  accept_button_ = new views::NativeTextButton(
+      this,
+      l10n_util::GetStringUTF16(IDS_PASSWORD_GENERATION_BUTTON_TEXT));
   AddChildView(accept_button_);
 }
 
@@ -220,14 +220,31 @@ void PasswordGenerationBubbleView::ButtonPressed(views::Button* sender,
     render_view_host_->Send(new AutofillMsg_GeneratedPasswordAccepted(
         render_view_host_->GetRoutingID(), textfield_->text()));
     password_manager_->SetFormHasGeneratedPassword(form_);
+    actions_.password_accepted = true;
     StartFade(false);
   }
   if (sender == regenerate_button_) {
     textfield_->SetText(
         ASCIIToUTF16(password_generator_->Generate()));
+    actions_.password_regenerated = true;
   }
+}
+
+void PasswordGenerationBubbleView::ContentsChanged(views::Textfield* sender,
+                                                   const string16& contents) {
+  actions_.password_edited = true;
+}
+
+bool PasswordGenerationBubbleView::HandleKeyEvent(
+    views::Textfield* sender,
+    const ui::KeyEvent& key_event) {
+  return false;
 }
 
 views::View* PasswordGenerationBubbleView::GetInitiallyFocusedView() {
   return textfield_;
+}
+
+void PasswordGenerationBubbleView::WindowClosing() {
+  password_generation::LogUserActions(actions_);
 }

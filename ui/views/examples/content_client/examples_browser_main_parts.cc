@@ -16,34 +16,17 @@
 #include "googleurl/src/gurl.h"
 #include "ui/views/examples/examples_window_with_content.h"
 #include "ui/views/focus/accelerator_handler.h"
-#include "ui/views/test/test_views_delegate.h"
+#include "ui/views/test/desktop_test_views_delegate.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/desktop/desktop_screen.h"
-#include "ui/aura/desktop/desktop_stacking_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/single_display_manager.h"
 #include "ui/gfx/screen.h"
-#include "ui/views/widget/desktop_native_widget_helper_aura.h"
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
 
 namespace views {
 namespace examples {
-
-namespace {
-
-class ExamplesViewsDelegate : public TestViewsDelegate {
- public:
-#if defined(USE_AURA)
-  virtual NativeWidgetHelperAura* CreateNativeWidgetHelper(
-      NativeWidgetAura* native_widget) OVERRIDE {
-    return new DesktopNativeWidgetHelperAura(native_widget);
-  }
-#endif
-};
-
-}  // namespace
 
 ExamplesBrowserMainParts::ExamplesBrowserMainParts(
     const content::MainFunctionParams& parameters) {
@@ -55,12 +38,11 @@ ExamplesBrowserMainParts::~ExamplesBrowserMainParts() {
 void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
   browser_context_.reset(new content::ShellBrowserContext(false));
 
-#if defined(USE_AURA)
-  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
-  stacking_client_.reset(new aura::DesktopStackingClient);
-  gfx::Screen::SetInstance(aura::CreateDesktopScreen());
+#if !defined(OS_CHROMEOS) && defined(USE_AURA)
+  gfx::Screen::SetScreenInstance(
+      gfx::SCREEN_TYPE_NATIVE, CreateDesktopScreen());
 #endif
-  views_delegate_.reset(new ExamplesViewsDelegate);
+  views_delegate_.reset(new DesktopTestViewsDelegate);
 
   ShowExamplesWindowWithContent(QUIT_ON_CLOSE, browser_context_.get());
 }
@@ -69,7 +51,6 @@ void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
   browser_context_.reset();
   views_delegate_.reset();
 #if defined(USE_AURA)
-  stacking_client_.reset();
   aura::Env::DeleteInstance();
 #endif
 }

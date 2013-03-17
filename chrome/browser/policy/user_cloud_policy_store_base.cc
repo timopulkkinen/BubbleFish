@@ -21,13 +21,15 @@ UserCloudPolicyStoreBase::~UserCloudPolicyStoreBase() {
 }
 
 scoped_ptr<UserCloudPolicyValidator> UserCloudPolicyStoreBase::CreateValidator(
-      scoped_ptr<enterprise_management::PolicyFetchResponse> policy,
-      const UserCloudPolicyValidator::CompletionCallback& callback) {
+    scoped_ptr<enterprise_management::PolicyFetchResponse> policy) {
   // Configure the validator.
   UserCloudPolicyValidator* validator =
-      UserCloudPolicyValidator::Create(policy.Pass(), callback);
+      UserCloudPolicyValidator::Create(policy.Pass());
   validator->ValidatePolicyType(dm_protocol::kChromeUserPolicyType);
-  validator->ValidateAgainstCurrentPolicy(policy_.get(), false);
+  validator->ValidateAgainstCurrentPolicy(
+      policy_.get(),
+      CloudPolicyValidatorBase::TIMESTAMP_REQUIRED,
+      CloudPolicyValidatorBase::DM_TOKEN_REQUIRED);
   validator->ValidatePayload();
   return scoped_ptr<UserCloudPolicyValidator>(validator);
 }

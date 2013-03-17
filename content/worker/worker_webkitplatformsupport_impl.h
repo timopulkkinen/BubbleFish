@@ -8,16 +8,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/common/webkitplatformsupport_impl.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMimeRegistry.h"
-
-class WebFileSystemImpl;
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 
 namespace WebKit {
 class WebFileUtilities;
 }
 
-class WorkerWebKitPlatformSupportImpl
-    : public content::WebKitPlatformSupportImpl,
-      public WebKit::WebMimeRegistry {
+namespace content {
+class WebFileSystemImpl;
+
+class WorkerWebKitPlatformSupportImpl : public WebKitPlatformSupportImpl,
+                                        public WebKit::WebMimeRegistry {
  public:
   WorkerWebKitPlatformSupportImpl();
   virtual ~WorkerWebKitPlatformSupportImpl();
@@ -47,9 +48,8 @@ class WorkerWebKitPlatformSupportImpl
       const WebKit::WebString& key, const WebKit::WebString& old_value,
       const WebKit::WebString& new_value, const WebKit::WebString& origin,
       const WebKit::WebURL& url, bool is_local_storage);
-  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
 
-  virtual WebKit::WebKitPlatformSupport::FileHandle databaseOpenFile(
+  virtual WebKit::Platform::FileHandle databaseOpenFile(
       const WebKit::WebString& vfs_file_name, int desired_flags);
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
@@ -62,7 +62,7 @@ class WorkerWebKitPlatformSupportImpl
 
   virtual WebKit::WebBlobRegistry* blobRegistry();
 
-  virtual WebKit::WebIDBFactory* idbFactory() OVERRIDE;
+  virtual WebKit::WebIDBFactory* idbFactory();
 
   // WebMimeRegistry methods:
   virtual WebKit::WebMimeRegistry::SupportsType supportsMIMEType(
@@ -97,5 +97,7 @@ class WorkerWebKitPlatformSupportImpl
   scoped_ptr<WebFileSystemImpl> web_file_system_;
   scoped_ptr<WebKit::WebIDBFactory> web_idb_factory_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_WORKER_WORKER_WEBKITPLATFORMSUPPORT_IMPL_H_

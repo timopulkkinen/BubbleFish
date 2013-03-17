@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/sync.pb.h"
 
@@ -53,7 +55,7 @@ static const int64 kInvalidId = 0;
 // transaction is necessary to create a BaseNode or any of its children.
 // Unlike syncable::Entry, a sync API BaseNode is identified primarily by its
 // int64 metahandle, which we call an ID here.
-class BaseNode {
+class SYNC_EXPORT BaseNode {
  public:
   // Enumerates the possible outcomes of trying to initialize a sync node.
   enum InitByLookupResult {
@@ -88,7 +90,7 @@ class BaseNode {
   virtual int64 GetId() const;
 
   // Returns the modification time of the object.
-  const base::Time& GetModificationTime() const;
+  base::Time GetModificationTime() const;
 
   // Nodes are hierarchically arranged into a single-rooted tree.
   // InitByRootLookup on ReadNode allows access to the root. GetParentId is
@@ -111,20 +113,6 @@ class BaseNode {
   // Getter specific to the BOOKMARK datatype.  Returns protobuf
   // data.  Can only be called if GetModelType() == BOOKMARK.
   const sync_pb::BookmarkSpecifics& GetBookmarkSpecifics() const;
-
-  // Legacy, bookmark-specific getter that wraps GetBookmarkSpecifics() above.
-  // Returns the URL of a bookmark object.
-  // TODO(ncarter): Remove this datatype-specific accessor.
-  GURL GetURL() const;
-
-  // Legacy, bookmark-specific getter that wraps GetBookmarkSpecifics() above.
-  // Fill in a vector with the byte data of this node's favicon.  Assumes
-  // that the node is a bookmark.
-  // Favicons are expected to be PNG images, and though no verification is
-  // done on the syncapi client of this, the server may reject favicon updates
-  // that are invalid for whatever reason.
-  // TODO(ncarter): Remove this datatype-specific accessor.
-  void GetFaviconBytes(std::vector<unsigned char>* output) const;
 
   // Getter specific to the APPS datatype.  Returns protobuf
   // data.  Can only be called if GetModelType() == APPS.
@@ -165,6 +153,19 @@ class BaseNode {
   // data.  Can only be called if GetModelType() == SESSIONS.
   const sync_pb::SessionSpecifics& GetSessionSpecifics() const;
 
+  // Getter specific to the DEVICE_INFO datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == DEVICE_INFO.
+  const sync_pb::DeviceInfoSpecifics& GetDeviceInfoSpecifics() const;
+
+  // Getter specific to the EXPERIMENTS datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == EXPERIMENTS.
+  const sync_pb::ExperimentsSpecifics& GetExperimentsSpecifics() const;
+
+  // Getter specific to the PRIORITY_PREFERENCE datatype. Returns protobuf
+  // data.  Can only be called if GetModelType() == PRIORITY_PREFERENCE.
+  const sync_pb::PriorityPreferenceSpecifics&
+      GetPriorityPreferenceSpecifics() const;
+
   const sync_pb::EntitySpecifics& GetEntitySpecifics() const;
 
   // Returns the local external ID associated with the node.
@@ -185,6 +186,10 @@ class BaseNode {
   // children, return 0.
   int64 GetFirstChildId() const;
 
+  // Returns the total number of nodes including and beneath this node.
+  // Recursively iterates through all children.
+  int GetTotalNodeCount() const;
+
   // These virtual accessors provide access to data members of derived classes.
   virtual const syncable::Entry* GetEntry() const = 0;
   virtual const BaseTransaction* GetTransaction() const = 0;
@@ -200,11 +205,6 @@ class BaseNode {
  protected:
   BaseNode();
   virtual ~BaseNode();
-  // The server has a size limit on client tags, so we generate a fixed length
-  // hash locally. This also ensures that ModelTypes have unique namespaces.
-  static std::string GenerateSyncableHash(
-      ModelType model_type,
-      const std::string& client_tag);
 
   // Determines whether part of the entry is encrypted, and if so attempts to
   // decrypt it. Unless decryption is necessary and fails, this will always
@@ -238,6 +238,7 @@ class BaseNode {
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitle);
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitleWithEncryption);
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetPreviouslyEncryptedSpecifics);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, IncrementTransactionVersion);
 
   void* operator new(size_t size);  // Node is meant for stack use only.
 

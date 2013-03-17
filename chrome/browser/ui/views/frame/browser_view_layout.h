@@ -34,6 +34,8 @@ class BrowserViewLayout : public views::LayoutManager {
   BrowserViewLayout();
   virtual ~BrowserViewLayout();
 
+  bool GetConstrainedWindowTopY(int* top_y);
+
   // Returns the minimum size of the browser view.
   virtual gfx::Size GetMinimumSize();
 
@@ -98,11 +100,8 @@ class BrowserViewLayout : public views::LayoutManager {
   }
 
   // Child views that the layout manager manages.
-  TabStrip* tabstrip_;
-  ToolbarView* toolbar_;
   views::SingleSplitView* contents_split_;
   ContentsContainer* contents_container_;
-  views::View* infobar_container_;
   DownloadShelfView* download_shelf_;
   BookmarkBarView* active_bookmark_bar_;
 
@@ -115,6 +114,10 @@ class BrowserViewLayout : public views::LayoutManager {
 
   // The distance the FindBar is from the top of the window, in pixels.
   int find_bar_y_;
+
+  // The distance the constrained window is from the top of the window,
+  // in pixels.
+  int constrained_window_top_y_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserViewLayout);
 };

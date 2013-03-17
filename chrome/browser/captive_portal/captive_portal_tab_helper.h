@@ -10,14 +10,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/captive_portal/captive_portal_service.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "webkit/glue/resource_type.h"
 
 class GURL;
 class Profile;
+
+namespace content {
+  class WebContents;
+}
 
 namespace net {
 class SSLInfo;
@@ -56,16 +60,18 @@ class CaptivePortalTabHelper
     : public content::WebContentsObserver,
       public content::NotificationObserver,
       public base::NonThreadSafe,
-      public WebContentsUserData<CaptivePortalTabHelper> {
+      public content::WebContentsUserData<CaptivePortalTabHelper> {
  public:
   virtual ~CaptivePortalTabHelper();
 
   // content::WebContentsObserver:
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) OVERRIDE;
 
   virtual void DidCommitProvisionalLoadForFrame(
@@ -103,7 +109,7 @@ class CaptivePortalTabHelper
   friend class CaptivePortalBrowserTest;
   friend class CaptivePortalTabHelperTest;
 
-  friend class WebContentsUserData<CaptivePortalTabHelper>;
+  friend class content::WebContentsUserData<CaptivePortalTabHelper>;
   explicit CaptivePortalTabHelper(content::WebContents* web_contents);
 
   // Called by Observe in response to the corresponding event.
@@ -137,6 +143,8 @@ class CaptivePortalTabHelper
   // Neither of these will ever be NULL.
   scoped_ptr<CaptivePortalTabReloader> tab_reloader_;
   scoped_ptr<CaptivePortalLoginDetector> login_detector_;
+
+  content::WebContents* web_contents_;
 
   // If a provisional load has failed, and the tab is loading an error page, the
   // error code associated with the error page we're loading.

@@ -3,13 +3,15 @@
 // found in the LICENSE file.
 
 /**
- * @constructor
  * @extends cr.EventTarget
  * @param {HTMLDivElement} div Div container for breadcrumbs.
+ * @constructor
  */
 function BreadcrumbsController(div) {
   this.bc_ = div;
   this.hideLast_ = false;
+  this.rootPath_ = null;
+  this.path_ = null;
   div.addEventListener('click', this.onClick_.bind(this));
 }
 
@@ -32,8 +34,12 @@ BreadcrumbsController.prototype.setHideLast = function(value) {
  * @param {string} path Path to directory.
  */
 BreadcrumbsController.prototype.update = function(rootPath, path) {
+  if (path == this.path_)
+    return;
+
   this.bc_.textContent = '';
   this.rootPath_ = rootPath;
+  this.path_ = path;
 
   var relativePath = path.substring(rootPath.length).replace(/\/$/, '');
   var pathNames = relativePath.split('/');
@@ -182,8 +188,8 @@ BreadcrumbsController.prototype.hide = function() {
 
 /**
  * Handle a click event on a breadcrumb element.
- * @private
  * @param {Event} event The click event.
+ * @private
  */
 BreadcrumbsController.prototype.onClick_ = function(event) {
   var path = this.getTargetPath(event);

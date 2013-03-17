@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -24,6 +24,7 @@ gfx::ImageSkia GetDefaultIcon() {
 }  // namespace
 
 ExtensionActionIconFactory::ExtensionActionIconFactory(
+    Profile* profile,
     const Extension* extension,
     const ExtensionAction* action,
     Observer* observer)
@@ -32,6 +33,7 @@ ExtensionActionIconFactory::ExtensionActionIconFactory(
       observer_(observer) {
   if (action_->default_icon()) {
     default_icon_.reset(new IconImage(
+        profile,
         extension_,
         *action_->default_icon(),
         ExtensionAction::GetIconSizeForType(action_->action_type()),
@@ -63,4 +65,3 @@ gfx::ImageSkia ExtensionActionIconFactory::GetBaseIconFromAction(int tab_id) {
 
   return GetDefaultIcon();
 }
-

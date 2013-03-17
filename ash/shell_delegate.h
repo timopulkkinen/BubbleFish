@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/magnifier/magnifier_constants.h"
 #include "ash/shell.h"
 #include "base/callback.h"
 #include "base/string16.h"
@@ -18,10 +19,15 @@ class AppListViewDelegate;
 }
 
 namespace aura {
+class RootWindow;
 class Window;
 namespace client {
 class UserActionClient;
 }
+}
+
+namespace ui {
+class MenuModel;
 }
 
 namespace views {
@@ -34,11 +40,13 @@ class CapsLockDelegate;
 class LauncherDelegate;
 class LauncherModel;
 struct LauncherItem;
-class SystemTray;
+class RootWindowHostFactory;
 class SystemTrayDelegate;
 class UserWallpaperDelegate;
 
 enum UserMetricsAction {
+  UMA_ACCEL_KEYBOARD_BRIGHTNESS_DOWN_F6,
+  UMA_ACCEL_KEYBOARD_BRIGHTNESS_UP_F7,
   UMA_ACCEL_MAXIMIZE_RESTORE_F4,
   UMA_ACCEL_NEWTAB_T,
   UMA_ACCEL_NEXTWINDOW_F5,
@@ -46,10 +54,23 @@ enum UserMetricsAction {
   UMA_ACCEL_PREVWINDOW_F5,
   UMA_ACCEL_PREVWINDOW_TAB,
   UMA_ACCEL_SEARCH_LWIN,
+  UMA_MAXIMIZE_BUTTON_MAXIMIZE,
+  UMA_MAXIMIZE_BUTTON_MAXIMIZE_LEFT,
+  UMA_MAXIMIZE_BUTTON_MAXIMIZE_RIGHT,
+  UMA_MAXIMIZE_BUTTON_MINIMIZE,
+  UMA_MAXIMIZE_BUTTON_RESTORE,
+  UMA_MAXIMIZE_BUTTON_SHOW_BUBBLE,
   UMA_LAUNCHER_CLICK_ON_APP,
   UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON,
   UMA_MOUSE_DOWN,
+  UMA_TOGGLE_MAXIMIZE_CAPTION_CLICK,
+  UMA_TOGGLE_MAXIMIZE_CAPTION_GESTURE,
   UMA_TOUCHSCREEN_TAP_DOWN,
+};
+
+enum AccessibilityNotificationVisibility {
+  A11Y_NOTIFICATION_NONE,
+  A11Y_NOTIFICATION_SHOW,
 };
 
 // Delegate of the Shell.
@@ -59,10 +80,19 @@ class ASH_EXPORT ShellDelegate {
   virtual ~ShellDelegate() {}
 
   // Returns true if user has logged in.
-  virtual bool IsUserLoggedIn() = 0;
+  virtual bool IsUserLoggedIn() const = 0;
 
   // Returns true if we're logged in and browser has been started
-  virtual bool IsSessionStarted() = 0;
+  virtual bool IsSessionStarted() const = 0;
+
+  // Returns true if this is the first time that the shell has been run after
+  // the system has booted.  false is returned after the shell has been
+  // restarted, typically due to logging in as a guest or logging out.
+  virtual bool IsFirstRunAfterBoot() const = 0;
+
+  // Returns true if a user is logged in whose session can be locked (i.e. the
+  // user has a password with which to unlock the session).
+  virtual bool CanLockScreen() const = 0;
 
   // Invoked when a user locks the screen.
   virtual void LockScreen() = 0;
@@ -85,7 +115,10 @@ class ASH_EXPORT ShellDelegate {
   // Invoked when the user uses Ctrl-N or Ctrl-Shift-N to open a new window.
   virtual void NewWindow(bool incognito) = 0;
 
-  // Invoked when the user uses Ctrl-M or Ctrl-O to open file manager.
+  // Invoked when the user uses F4 to toggle window maximized state.
+  virtual void ToggleMaximized() = 0;
+
+  // Invoked when an accelerator is used to open the file manager.
   virtual void OpenFileManager(bool as_dialog) = 0;
 
   // Invoked when the user opens Crosh.
@@ -110,12 +143,34 @@ class ASH_EXPORT ShellDelegate {
   // Get the current browser context. This will get us the current profile.
   virtual content::BrowserContext* GetCurrentBrowserContext() = 0;
 
-  // Invoked when the user presses a shortcut to toggle spoken feedback
-  // for accessibility.
-  virtual void ToggleSpokenFeedback() = 0;
+  // Invoked to toggle spoken feedback for accessibility
+  virtual void ToggleSpokenFeedback(
+      AccessibilityNotificationVisibility notify) = 0;
 
   // Returns true if spoken feedback is enabled.
   virtual bool IsSpokenFeedbackEnabled() const = 0;
+
+  // Invoked to toggle high contrast for accessibility.
+  virtual void ToggleHighContrast() = 0;
+
+  // Returns true if high contrast mode is enabled.
+  virtual bool IsHighContrastEnabled() const = 0;
+
+  // Invoked to enable the screen magnifier.
+  virtual void SetMagnifierEnabled(bool enabled) = 0;
+
+  // Invoked to change the type of the screen magnifier.
+  virtual void SetMagnifierType(MagnifierType type) = 0;
+
+  // Returns if the screen magnifier is enabled or not.
+  virtual bool IsMagnifierEnabled() const = 0;
+
+  // Returns the current screen magnifier mode.
+  virtual MagnifierType GetMagnifierType() const = 0;
+
+  // Returns true if the user want to show accesibility menu even when all the
+  // accessibility features are disabled.
+  virtual bool ShouldAlwaysShowAccessibilityMenu() const = 0;
 
   // Invoked to create an AppListViewDelegate. Shell takes the ownership of
   // the created delegate.
@@ -127,7 +182,7 @@ class ASH_EXPORT ShellDelegate {
       ash::LauncherModel* model) = 0;
 
   // Creates a system-tray delegate. Shell takes ownership of the delegate.
-  virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* tray) = 0;
+  virtual SystemTrayDelegate* CreateSystemTrayDelegate() = 0;
 
   // Creates a user wallpaper delegate. Shell takes ownership of the delegate.
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() = 0;
@@ -153,10 +208,13 @@ class ASH_EXPORT ShellDelegate {
   // Handles the Previous Track Media shortcut key.
   virtual void HandleMediaPrevTrack() = 0;
 
-  // Produces l10n-ed text of remaining time, e.g.: "13 mins left" or
+  // Produces l10n-ed text of remaining time, e.g.: "13 minutes left" or
   // "13 Minuten übrig".
   // Used, for example, to display the remaining battery life.
   virtual string16 GetTimeRemainingString(base::TimeDelta delta) = 0;
+
+  // Produces l10n-ed text for time duration, e.g.: "13 minutes" or "2 hours".
+  virtual string16 GetTimeDurationLongString(base::TimeDelta delta) = 0;
 
   // Saves the zoom scale of the full screen magnifier.
   virtual void SaveScreenMagnifierScale(double scale) = 0;
@@ -164,6 +222,16 @@ class ASH_EXPORT ShellDelegate {
   // Gets a saved value of the zoom scale of full screen magnifier. If a value
   // is not saved, return a negative value.
   virtual double GetSavedScreenMagnifierScale() = 0;
+
+  // Creates a menu model of the context for the |root_window|.
+  virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root_window) = 0;
+
+  // Creates a root window host factory. Shell takes ownership of the returned
+  // value.
+  virtual RootWindowHostFactory* CreateRootWindowHostFactory() = 0;
+
+  // Get the product name.
+  virtual string16 GetProductName() const = 0;
 };
 
 }  // namespace ash

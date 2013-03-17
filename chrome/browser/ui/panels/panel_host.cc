@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -50,9 +49,9 @@ void PanelHost::Init(const GURL& url) {
   if (url.is_empty())
     return;
 
-  web_contents_.reset(content::WebContents::Create(
-      profile_, content::SiteInstance::CreateForURL(profile_, url),
-      MSG_ROUTING_NONE, NULL));
+  content::WebContents::CreateParams create_params(
+      profile_, content::SiteInstance::CreateForURL(profile_, url));
+  web_contents_.reset(content::WebContents::Create(create_params));
   chrome::SetViewType(web_contents_.get(), chrome::VIEW_TYPE_PANEL);
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
@@ -64,15 +63,19 @@ void PanelHost::Init(const GURL& url) {
       panel_->session_id());
 
   FaviconTabHelper::CreateForWebContents(web_contents_.get());
-  prefs_tab_helper_.reset(new PrefsTabHelper(web_contents_.get()));
+  PrefsTabHelper::CreateForWebContents(web_contents_.get());
 
   web_contents_->GetController().LoadURL(
       url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
 void PanelHost::DestroyWebContents() {
-  prefs_tab_helper_.reset();
-  web_contents_.reset();
+  // Cannot do a web_contents_.reset() because web_contents_.get() will
+  // still return the pointer when we CHECK in WebContentsDestroyed (or if
+  // we get called back in the middle of web contents destruction, which
+  // WebView might do when it detects the web contents is destroyed).
+  content::WebContents* contents = web_contents_.release();
+  delete contents;
 }
 
 gfx::Image PanelHost::GetPageIcon() const {
@@ -81,6 +84,7 @@ gfx::Image PanelHost::GetPageIcon() const {
 
   FaviconTabHelper* favicon_tab_helper =
       FaviconTabHelper::FromWebContents(web_contents_.get());
+  CHECK(favicon_tab_helper);
   return favicon_tab_helper->GetFavicon();
 }
 
@@ -104,8 +108,7 @@ content::WebContents* PanelHost::OpenURLFromTab(
   navigate_params.disposition = params.disposition == NEW_BACKGROUND_TAB ?
       params.disposition : NEW_FOREGROUND_TAB;
   chrome::Navigate(&navigate_params);
-  return navigate_params.target_contents ?
-      navigate_params.target_contents->web_contents() : NULL;
+  return navigate_params.target_contents;
 }
 
 void PanelHost::NavigationStateChanged(const content::WebContents* source,
@@ -126,12 +129,7 @@ void PanelHost::AddNewContents(content::WebContents* source,
                                bool* was_blocked) {
   chrome::NavigateParams navigate_params(profile_, new_contents->GetURL(),
                                          content::PAGE_TRANSITION_LINK);
-  // Create a TabContents because the NavigateParams takes a TabContents,
-  // not a WebContents, for the target_contents.
-  TabContents* new_tab_contents = TabContents::FromWebContents(new_contents);
-  if (!new_tab_contents)
-    new_tab_contents = TabContents::Factory::CreateTabContents(new_contents);
-  navigate_params.target_contents = new_tab_contents;
+  navigate_params.target_contents = new_contents;
 
   // Force all links to open in a new tab, even if they were trying to open a
   // window.
@@ -174,10 +172,6 @@ void PanelHost::ContentsZoomChange(bool zoom_in) {
   Zoom(zoom_in ? content::PAGE_ZOOM_IN : content::PAGE_ZOOM_OUT);
 }
 
-bool PanelHost::HandleContextMenu(const content::ContextMenuParams& params) {
-  return true;  // Disallow context menu.
-}
-
 void PanelHost::HandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
@@ -204,6 +198,9 @@ void PanelHost::RenderViewGone(base::TerminationStatus status) {
 }
 
 void PanelHost::WebContentsDestroyed(content::WebContents* web_contents) {
+  // Web contents should only be destroyed by us.
+  CHECK(!web_contents_.get());
+
   // Close the panel after we return to the message loop (not immediately,
   // otherwise, it may destroy this object before the stack has a chance
   // to cleanly unwind.)

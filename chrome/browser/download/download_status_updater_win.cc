@@ -4,21 +4,26 @@
 
 #include "chrome/browser/download/download_status_updater.h"
 
-#include <string>
 #include <shobjidl.h>
+#include <string>
 
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/win/metro.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "win8/util/win8_util.h"
 
 // This code doesn't compile with Aura on. TODO(avi): hook it up so that
 // win_aura can do platform integration.
@@ -51,9 +56,8 @@ void UpdateTaskbarProgressBar(int download_count,
   }
 
   // Iterate through all the browser windows, and draw the progress bar.
-  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
-      browser_iterator != BrowserList::end(); browser_iterator++) {
-    Browser* browser = *browser_iterator;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* browser = *it;
     BrowserWindow* window = browser->window();
     if (!window)
       continue;
@@ -67,21 +71,30 @@ void UpdateTaskbarProgressBar(int download_count,
   }
 }
 
+void MetroDownloadNotificationClickedHandler(const wchar_t* download_path) {
+  // Metro chrome will invoke these handlers on the metro thread.
+  DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  // Ensure that we invoke the function to display the downloaded item on the
+  // UI thread.
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+                                   base::Bind(platform_util::ShowItemInFolder,
+                                              base::FilePath(download_path)));
+}
+
 }  // namespace
 
 void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
     content::DownloadItem* download) {
 
   // Always update overall progress.
-
   float progress = 0;
   int download_count = 0;
   bool progress_known = GetProgress(&progress, &download_count);
   UpdateTaskbarProgressBar(download_count, progress_known, progress);
 
   // Fire notifications when downloads complete.
-
-  if (!base::win::IsMetroProcess())
+  if (!win8::IsSingleWindowMetroMode())
     return;
 
   if (download->GetState() != content::DownloadItem::COMPLETE)
@@ -92,6 +105,21 @@ void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
       download->IsTemporary() ||
       download->GetAutoOpened())
     return;
+
+  // Don't display the Windows8 metro notifications for an incognito download.
+  if (download->GetBrowserContext() &&
+      download->GetBrowserContext()->IsOffTheRecord())
+    return;
+
+  // Don't display the Windows 8 metro notifications if we are in the
+  // foreground.
+  HWND foreground_window = ::GetForegroundWindow();
+  if (::IsWindow(foreground_window)) {
+    DWORD process_id = 0;
+    ::GetWindowThreadProcessId(foreground_window, &process_id);
+    if (process_id == ::GetCurrentProcessId())
+      return;
+  }
 
   // In Windows 8 metro mode display a metro style notification which
   // informs the user that the download is complete.
@@ -116,7 +144,9 @@ void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
                          title.c_str(),
                          body.c_str(),
                          L"",
-                         notification_id.c_str());
+                         notification_id.c_str(),
+                         MetroDownloadNotificationClickedHandler,
+                         download->GetTargetFilePath().value().c_str());
   }
 }
 

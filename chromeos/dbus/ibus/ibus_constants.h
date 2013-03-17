@@ -11,6 +11,15 @@ namespace ibus {
 
 const char kServiceName[] = "org.freedesktop.IBus";
 
+// Constants used to receive NameOwner signals from ibus-daemon. Note that
+// "org.freedesktop.DBus" is used instead of "org.freedesktop.IBus" for these
+// signals.
+const char kDBusServiceName[] = "org.freedesktop.DBus";
+const char kDBusObjectPath[] = "/org/freedesktop/DBus";
+const char kDBusInterface[] = "org.freedesktop.DBus";
+const char kGetNameOwnerMethod[] = "GetNameOwner";
+const char kNameOwnerChangedSignal[] = "NameOwnerChanged";
+
 namespace bus {
 const char kServicePath[] = "/org/freedesktop/IBus";
 const char kServiceInterface[] = "org.freedesktop.IBus";
@@ -33,7 +42,8 @@ const char kResetMethod[] = "Reset";
 const char kSetCapabilitiesMethod[] = "SetCapabilities";
 const char kSetCursorLocationMethod[] = "SetCursorLocation";
 const char kProcessKeyEventMethod[] = "ProcessKeyEvent";
-const char kSetSurroundingText[] = "SetSurroundingText";
+const char kSetSurroundingTextMethod[] = "SetSurroundingText";
+const char kPropertyActivateMethod[] = "PropertyActivate";
 }  // namespace input_context
 
 namespace engine_factory {
@@ -66,6 +76,67 @@ const char kForwardKeyEventSignal[] = "ForwardKeyEvent";
 const char kRequireSurroundingTextSignal[] = "RequireSurroundingText";
 const char kCommitTextSignal[] = "CommitText";
 }  // namespace engine
+
+namespace panel {
+const char kServiceName[] = "org.freedesktop.IBus.Panel";
+const char kServicePath[] = "/org/freedesktop/IBus/Panel";
+const char kServiceInterface[] = "org.freedesktop.IBus.Panel";
+const char kUpdateLookupTableMethod[] = "UpdateLookupTable";
+const char kHideLookupTableMethod[] = "HideLookupTable";
+const char kUpdateAuxiliaryTextMethod[] = "UpdateAuxiliaryText";
+const char kHideAuxiliaryTextMethod[] = "HideAuxiliaryText";
+const char kUpdatePreeditTextMethod[] = "UpdatePreeditText";
+const char kHidePreeditTextMethod[] = "HidePreeditText";
+const char kRegisterPropertiesMethod[] = "RegisterProperties";
+const char kUpdatePropertyMethod[] = "UpdateProperty";
+const char kCandidateClickedSignal[] = "CandidateClicked";
+const char kCursorUpSignal[] = "CursorUp";
+const char kCursorDownSignal[] = "CursorDown";
+const char kPageUpSignal[] = "PageUp";
+const char kPageDownSignal[] = "PageDown";
+
+// Methods to be just ignored. We do not use these methods in the UI.
+// See http://crbug.com/164525.
+const char kFocusInMethod[] = "FocusIn";
+const char kFocusOutMethod[] = "FocusOut";
+const char kStateChangedMethod[] = "StateChanged";
+}  // namespace panel
+
+// Following variables indicate state of IBusProperty.
+enum IBusPropertyState {
+  IBUS_PROPERTY_STATE_UNCHECKED = 0,
+  IBUS_PROPERTY_STATE_CHECKED = 1,
+  IBUS_PROPERTY_STATE_INCONSISTENT = 2,
+};
+
+// Following button indicator value is introduced from
+// http://developer.gnome.org/gdk/stable/gdk-Event-Structures.html#GdkEventButton
+enum IBusMouseButton {
+  IBUS_MOUSE_BUTTON_LEFT = 1U,
+  IBUS_MOUSE_BUTTON_MIDDLE = 2U,
+  IBUS_MOUSE_BUTTON_RIGHT = 3U,
+};
+
+namespace config {
+const char kServiceName[] = "org.freedesktop.IBus.Config";
+const char kServicePath[] = "/org/freedesktop/IBus/Config";
+const char kServiceInterface[] = "org.freedesktop.IBus.Config";
+const char kSetValueMethod[] = "SetValue";
+}  // namespace config
+
+// We can't use ui/gfx/rect.h in chromeos/, so we should use ibus::Rect instead.
+struct Rect {
+ Rect() : x(0), y(0), width(0), height(0) {}
+ Rect(int x, int y, int width, int height)
+     : x(x),
+       y(y),
+       width(width),
+       height(height) {}
+ int x;
+ int y;
+ int width;
+ int height;
+};
 
 }  // namespace ibus
 }  // namespace chromeos

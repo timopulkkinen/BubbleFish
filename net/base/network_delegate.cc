@@ -37,7 +37,7 @@ void NetworkDelegate::NotifySendHeaders(URLRequest* request,
 int NetworkDelegate::NotifyHeadersReceived(
     URLRequest* request,
     const CompletionCallback& callback,
-    HttpResponseHeaders* original_response_headers,
+    const HttpResponseHeaders* original_response_headers,
     scoped_refptr<HttpResponseHeaders>* override_response_headers) {
   DCHECK(CalledOnValidThread());
   DCHECK(original_response_headers);
@@ -108,7 +108,7 @@ bool NetworkDelegate::CanGetCookies(const URLRequest& request,
 }
 
 bool NetworkDelegate::CanAccessFile(const URLRequest& request,
-                                    const FilePath& path) const {
+                                    const base::FilePath& path) const {
   DCHECK(CalledOnValidThread());
   return OnCanAccessFile(request, path);
 }

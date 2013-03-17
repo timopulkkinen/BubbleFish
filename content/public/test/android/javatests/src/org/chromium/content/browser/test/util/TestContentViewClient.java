@@ -4,9 +4,11 @@
 
 package org.chromium.content.browser.test.util;
 
+import android.content.Context;
 
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnStartContentIntentHelper;
 
 /**
  * The default ContentViewClient used by ContentView tests.
@@ -17,24 +19,30 @@ import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEval
 public class TestContentViewClient extends ContentViewClient {
 
     private OnEvaluateJavaScriptResultHelper mOnEvaluateJavaScriptResultHelper;
+    private OnStartContentIntentHelper mOnStartContentIntentHelper;
 
     public TestContentViewClient() {
         mOnEvaluateJavaScriptResultHelper = new OnEvaluateJavaScriptResultHelper();
+        mOnStartContentIntentHelper = new OnStartContentIntentHelper();
     }
 
     public OnEvaluateJavaScriptResultHelper getOnEvaluateJavaScriptResultHelper() {
         return mOnEvaluateJavaScriptResultHelper;
     }
 
+    public OnStartContentIntentHelper getOnStartContentIntentHelper() {
+        return mOnStartContentIntentHelper;
+    }
+
     /**
-     * ATTENTION!: When overriding the following methods, be sure to call
-     * the corresponding methods in the super class. Otherwise
+     * ATTENTION!: When overriding the following method, be sure to call
+     * the corresponding method in the super class. Otherwise
      * {@link CallbackHelper#waitForCallback()} methods will
      * stop working!
      */
+
     @Override
-    public void onEvaluateJavaScriptResult(int id, String jsonResult) {
-        super.onEvaluateJavaScriptResult(id, jsonResult);
-        mOnEvaluateJavaScriptResultHelper.notifyCalled(id, jsonResult);
+    public void onStartContentIntent(Context context, String contentUrl) {
+        mOnStartContentIntentHelper.notifyCalled(contentUrl);
     }
 }

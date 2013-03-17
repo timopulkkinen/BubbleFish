@@ -26,7 +26,7 @@ namespace media {
 class AudioManager;
 }
 
-namespace media_stream {
+namespace content {
 
 class AudioInputDeviceManagerEventHandler;
 
@@ -43,7 +43,7 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   virtual void Register(MediaStreamProviderListener* listener,
                         base::MessageLoopProxy* device_thread_loop) OVERRIDE;
   virtual void Unregister() OVERRIDE;
-  virtual void EnumerateDevices() OVERRIDE;
+  virtual void EnumerateDevices(MediaStreamType stream_type) OVERRIDE;
   virtual int Open(const StreamDeviceInfo& device) OVERRIDE;
   virtual void Close(int session_id) OVERRIDE;
 
@@ -53,13 +53,16 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   // Stops the device referenced by the session id.
   void Stop(int session_id);
 
+  void UseFakeDevice();
+  bool ShouldUseFakeDevice() const;
+
  private:
   typedef std::map<int, AudioInputDeviceManagerEventHandler*> EventHandlerMap;
   typedef std::map<int, StreamDeviceInfo> StreamDeviceMap;
   virtual ~AudioInputDeviceManager();
 
   // Enumerates audio input devices on media stream device thread.
-  void EnumerateOnDeviceThread();
+  void EnumerateOnDeviceThread(MediaStreamType stream_type);
   // Opens the device on media stream device thread.
   void OpenOnDeviceThread(int session_id, const StreamDeviceInfo& device);
   // Closes the deivce on the media stream device thread.
@@ -67,13 +70,14 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
 
   // Callback used by EnumerateOnDeviceThread(), called with a list of
   // enumerated devices on IO thread.
-  void DevicesEnumeratedOnIOThread(StreamDeviceInfoArray* devices);
+  void DevicesEnumeratedOnIOThread(MediaStreamType stream_type,
+                                   scoped_ptr<StreamDeviceInfoArray> devices);
   // Callback used by OpenOnDeviceThread(), called with the session_id
   // referencing the opened device on IO thread.
-  void OpenedOnIOThread(content::MediaStreamDeviceType type, int session_id);
+  void OpenedOnIOThread(MediaStreamType type, int session_id);
   // Callback used by CloseOnDeviceThread(), called with the session_id
   // referencing the closed device on IO thread.
-  void ClosedOnIOThread(content::MediaStreamDeviceType type, int session_id);
+  void ClosedOnIOThread(MediaStreamType type, int session_id);
 
   // Verifies that the calling thread is media stream device thread.
   bool IsOnDeviceThread() const;
@@ -82,6 +86,7 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   MediaStreamProviderListener* listener_;
   int next_capture_session_id_;
   EventHandlerMap event_handlers_;
+  bool use_fake_device_;
 
   // Only accessed from media stream device thread.
   StreamDeviceMap devices_;
@@ -93,6 +98,6 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   DISALLOW_COPY_AND_ASSIGN(AudioInputDeviceManager);
 };
 
-}  // namespace media_stream
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_DEVICE_MANAGER_H_

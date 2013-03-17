@@ -13,6 +13,7 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/prefs/json_pref_store.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -59,7 +60,7 @@ class ServiceIOThread : public base::Thread {
   virtual ~ServiceIOThread();
 
  protected:
-  virtual void CleanUp();
+  virtual void CleanUp() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceIOThread);
@@ -152,19 +153,18 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
     Teardown();
     return false;
   }
+  blocking_pool_ = new base::SequencedWorkerPool(3, "ServiceBlocking");
 
   request_context_getter_ = new ServiceURLRequestContextGetter();
 
-  // See if we have been suppiled an LSID in the command line. This LSID will
-  // override the credentials we use for Cloud Print.
-  std::string lsid = command_line.GetSwitchValueASCII(
-          switches::kServiceAccountLsid);
-
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  FilePath pref_path = user_data_dir.Append(chrome::kServiceStateFileName);
+  base::FilePath pref_path =
+      user_data_dir.Append(chrome::kServiceStateFileName);
   service_prefs_.reset(
-      new ServiceProcessPrefs(pref_path, file_thread_->message_loop_proxy()));
+      new ServiceProcessPrefs(
+          pref_path,
+          JsonPrefStore::GetTaskRunnerForFile(pref_path, blocking_pool_)));
   service_prefs_->ReadPrefs();
 
   // Check if a locale override has been specified on the command-line.
@@ -188,13 +188,7 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   // Then check if the cloud print proxy was previously enabled.
   if (command_line.HasSwitch(switches::kEnableCloudPrintProxy) ||
       service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled, false)) {
-    GetCloudPrintProxy()->EnableForUser(lsid);
-  }
-  // Enable Virtual Printer Driver if needed.
-  if (service_prefs_->GetBoolean(prefs::kVirtualPrinterDriverEnabled, false)) {
-    // Register the fact that there is at least one
-    // service needing the process.
-    OnServiceEnabled();
+    GetCloudPrintProxy()->EnableForUser(std::string());
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
@@ -229,6 +223,17 @@ bool ServiceProcess::Teardown() {
   shutdown_event_.Signal();
   io_thread_.reset();
   file_thread_.reset();
+
+  if (blocking_pool_.get()) {
+    // The goal is to make it impossible for chrome to 'infinite loop' during
+    // shutdown, but to reasonably expect that all BLOCKING_SHUTDOWN tasks
+    // queued during shutdown get run. There's nothing particularly scientific
+    // about the number chosen.
+    const int kMaxNewShutdownBlockingTasks = 1000;
+    blocking_pool_->Shutdown(kMaxNewShutdownBlockingTasks);
+    blocking_pool_ = NULL;
+  }
+
   // The NetworkChangeNotifier must be destroyed after all other threads that
   // might use it have been shut down.
   network_change_notifier_.reset();
@@ -271,9 +276,9 @@ bool ServiceProcess::HandleClientDisconnect() {
   return true;
 }
 
-CloudPrintProxy* ServiceProcess::GetCloudPrintProxy() {
+cloud_print::CloudPrintProxy* ServiceProcess::GetCloudPrintProxy() {
   if (!cloud_print_proxy_.get()) {
-    cloud_print_proxy_.reset(new CloudPrintProxy());
+    cloud_print_proxy_.reset(new cloud_print::CloudPrintProxy());
     cloud_print_proxy_->Initialize(service_prefs_.get(), this);
   }
   return cloud_print_proxy_.get();
@@ -295,20 +300,6 @@ void ServiceProcess::OnCloudPrintProxyDisabled(bool persist_state) {
     service_prefs_->WritePrefs();
   }
   OnServiceDisabled();
-}
-
-void ServiceProcess::EnableVirtualPrintDriver() {
-  OnServiceEnabled();
-  // Save the preference that we have enabled the virtual driver.
-  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, true);
-  service_prefs_->WritePrefs();
-}
-
-void ServiceProcess::DisableVirtualPrintDriver() {
-  OnServiceDisabled();
-  // Save the preference that we have disabled the virtual driver.
-  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, false);
-  service_prefs_->WritePrefs();
 }
 
 ServiceURLRequestContextGetter*

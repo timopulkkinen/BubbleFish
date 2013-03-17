@@ -5,45 +5,50 @@
 #ifndef CHROME_BROWSER_INFOBARS_INFOBAR_TAB_HELPER_H_
 #define CHROME_BROWSER_INFOBARS_INFOBAR_TAB_HELPER_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "chrome/browser/api/infobars/infobar_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class InfoBarDelegate;
 
 // Per-tab info bar manager.
 class InfoBarTabHelper : public InfoBarService,
                          public content::WebContentsObserver,
-                         public content::NotificationObserver {
- public:
+                         public content::NotificationObserver,
+                         public content::WebContentsUserData<InfoBarTabHelper> {
+ private:
+  friend class content::WebContentsUserData<InfoBarTabHelper>;
+
+  typedef std::vector<InfoBarDelegate*> InfoBars;
+
   explicit InfoBarTabHelper(content::WebContents* web_contents);
   virtual ~InfoBarTabHelper();
 
-  // InfoBarService implementation.
-  virtual bool AddInfoBar(InfoBarDelegate* delegate) OVERRIDE;
+  // InfoBarService:
+  virtual void SetInfoBarsEnabled(bool enabled) OVERRIDE;
+  virtual InfoBarDelegate* AddInfoBar(
+      scoped_ptr<InfoBarDelegate> delegate) OVERRIDE;
   virtual void RemoveInfoBar(InfoBarDelegate* delegate) OVERRIDE;
-  virtual bool ReplaceInfoBar(InfoBarDelegate* old_delegate,
-                              InfoBarDelegate* new_delegate) OVERRIDE;
+  virtual InfoBarDelegate* ReplaceInfoBar(
+      InfoBarDelegate* old_delegate,
+      scoped_ptr<InfoBarDelegate> new_delegate) OVERRIDE;
   virtual size_t GetInfoBarCount() const OVERRIDE;
   virtual InfoBarDelegate* GetInfoBarDelegateAt(size_t index) OVERRIDE;
   virtual content::WebContents* GetWebContents() OVERRIDE;
 
-  // Enables or disables infobars for the given tab.
-  void set_infobars_enabled(bool value) { infobars_enabled_ = value; }
-
-  // content::WebContentsObserver overrides:
+  // content::WebContentsObserver:
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // content::NotificationObserver overrides:
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
- private:
-  typedef std::vector<InfoBarDelegate*> InfoBars;
 
   void RemoveInfoBarInternal(InfoBarDelegate* delegate, bool animate);
   void RemoveAllInfoBars(bool animate);

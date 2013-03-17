@@ -8,7 +8,6 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -27,6 +26,14 @@ class ContentSettingBlockedImageModel : public ContentSettingImageModel {
 class ContentSettingGeolocationImageModel : public ContentSettingImageModel {
  public:
   ContentSettingGeolocationImageModel();
+
+  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+};
+
+// Image model for displaying media icons in the location bar.
+class ContentSettingMediaImageModel : public ContentSettingImageModel {
+ public:
+  ContentSettingMediaImageModel();
 
   virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
 };
@@ -82,6 +89,7 @@ void ContentSettingBlockedImageModel::UpdateFromWebContents(
     {CONTENT_SETTINGS_TYPE_PLUGINS, IDR_BLOCKED_PLUGINS},
     {CONTENT_SETTINGS_TYPE_POPUPS, IDR_BLOCKED_POPUPS},
     {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT, IDR_BLOCKED_MIXED_CONTENT},
+    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDR_BLOCKED_PPAPI_BROKER},
   };
   static const ContentSettingsTypeIdEntry kBlockedTooltipIDs[] = {
     {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_TITLE},
@@ -91,6 +99,7 @@ void ContentSettingBlockedImageModel::UpdateFromWebContents(
     {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_TOOLTIP},
     {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
         IDS_BLOCKED_DISPLAYING_INSECURE_CONTENT},
+    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_BLOCKED_PPAPI_BROKER_TITLE},
   };
   static const ContentSettingsTypeIdEntry kBlockedExplanatoryTextIDs[] = {
     {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_EXPLANATORY_TEXT},
@@ -106,20 +115,31 @@ void ContentSettingBlockedImageModel::UpdateFromWebContents(
 
   // If a content type is blocked by default and was accessed, display the
   // accessed icon.
-  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
+  if (!content_settings)
+    return;
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   if (!content_settings->IsContentBlocked(get_content_settings_type())) {
-    if (!content_settings->IsContentAccessed(get_content_settings_type()) ||
-        (tab_contents->profile()->GetHostContentSettingsMap()->
-            GetDefaultContentSetting(get_content_settings_type(), NULL) !=
+    if (!content_settings->IsContentAllowed(get_content_settings_type()))
+      return;
+
+    // For cookies, only show the accessed bubble if cookies are blocked by
+    // default.
+    if (get_content_settings_type() == CONTENT_SETTINGS_TYPE_COOKIES &&
+        (profile->GetHostContentSettingsMap()->
+            GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES, NULL) !=
                 CONTENT_SETTING_BLOCK))
       return;
+
     static const ContentSettingsTypeIdEntry kAccessedIconIDs[] = {
       {CONTENT_SETTINGS_TYPE_COOKIES, IDR_ACCESSED_COOKIES},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDR_BLOCKED_PPAPI_BROKER},
     };
     static const ContentSettingsTypeIdEntry kAccessedTooltipIDs[] = {
       {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ACCESSED_COOKIES_TITLE},
+      {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_TITLE},
     };
     icon_id = GetIdForContentType(
         kAccessedIconIDs, arraysize(kAccessedIconIDs), type);
@@ -128,8 +148,10 @@ void ContentSettingBlockedImageModel::UpdateFromWebContents(
     explanation_id = 0;
   }
   set_visible(true);
+  DCHECK(icon_id);
   set_icon(icon_id);
   set_explanatory_string_id(explanation_id);
+  DCHECK(tooltip_id);
   set_tooltip(l10n_util::GetStringUTF8(tooltip_id));
 }
 
@@ -144,6 +166,8 @@ void ContentSettingGeolocationImageModel::UpdateFromWebContents(
     return;
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
+  if (!content_settings)
+    return;
   const GeolocationSettingsState& settings_state = content_settings->
       geolocation_settings_state();
   if (settings_state.state_map().empty())
@@ -162,6 +186,34 @@ void ContentSettingGeolocationImageModel::UpdateFromWebContents(
       IDS_GEOLOCATION_ALLOWED_TOOLTIP : IDS_GEOLOCATION_BLOCKED_TOOLTIP));
 }
 
+ContentSettingMediaImageModel::ContentSettingMediaImageModel()
+    : ContentSettingImageModel(CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
+}
+
+void ContentSettingMediaImageModel::UpdateFromWebContents(
+    WebContents* web_contents) {
+  set_visible(false);
+  if (!web_contents)
+    return;
+
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents);
+  if (!content_settings)
+    return;
+
+  bool blocked =
+      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM);
+  if (!blocked &&
+      !content_settings->IsContentAllowed(get_content_settings_type()))
+    return;
+
+  set_tooltip(
+      l10n_util::GetStringUTF8(blocked ?
+          IDS_MEDIASTREAM_BLOCKED_TOOLTIP : IDS_MEDIASTREAM_ALLOWED_TOOLTIP));
+  set_icon(blocked ? IDR_BLOCKED_MEDIA : IDR_ASK_MEDIA);
+  set_visible(true);
+}
+
 ContentSettingRPHImageModel::ContentSettingRPHImageModel()
     : ContentSettingImageModel(
         CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS) {
@@ -177,6 +229,8 @@ void ContentSettingRPHImageModel::UpdateFromWebContents(
 
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
+  if (!content_settings)
+    return;
   if (content_settings->pending_protocol_handler().IsEmpty())
     return;
 
@@ -212,6 +266,8 @@ ContentSettingImageModel*
       return new ContentSettingNotificationsImageModel();
     case CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS:
       return new ContentSettingRPHImageModel();
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
+      return new ContentSettingMediaImageModel();
     default:
       return new ContentSettingBlockedImageModel(content_settings_type);
   }

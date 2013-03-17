@@ -10,7 +10,6 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "content/public/browser/download_id.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/common/referrer.h"
 #include "googleurl/src/gurl.h"
@@ -18,6 +17,7 @@
 
 namespace content {
 
+class DownloadItem;
 class ResourceContext;
 class ResourceDispatcherHost;
 class WebContents;
@@ -38,23 +38,21 @@ class WebContents;
 
 class CONTENT_EXPORT DownloadUrlParameters {
  public:
-  // If there is an error, the DownloadId will be invalid.
-  typedef base::Callback<void(DownloadId, net::Error)> OnStartedCallback;
+  // If there is an error, then |item| will be NULL.
+  typedef base::Callback<void(DownloadItem*, net::Error)> OnStartedCallback;
 
   typedef std::pair<std::string, std::string> RequestHeadersNameValuePair;
   typedef std::vector<RequestHeadersNameValuePair> RequestHeadersType;
 
   static DownloadUrlParameters* FromWebContents(
       WebContents* web_contents,
-      const GURL& url,
-      const DownloadSaveInfo& save_info);
+      const GURL& url);
 
   DownloadUrlParameters(
       const GURL& url,
       int render_process_host_id,
       int render_view_host_routing_id,
-      content::ResourceContext* resource_context,
-      const DownloadSaveInfo& save_info);
+      content::ResourceContext* resource_context);
 
   ~DownloadUrlParameters();
 
@@ -69,6 +67,12 @@ class CONTENT_EXPORT DownloadUrlParameters {
     referrer_encoding_ = referrer_encoding;
   }
   void set_load_flags(int load_flags) { load_flags_ |= load_flags; }
+  void set_last_modified(const std::string& last_modified) {
+    last_modified_ = last_modified;
+  }
+  void set_etag(const std::string& etag) {
+    etag_ = etag;
+  }
   void set_method(const std::string& method) {
     method_ = method;
   }
@@ -82,10 +86,26 @@ class CONTENT_EXPORT DownloadUrlParameters {
   void set_callback(const OnStartedCallback& callback) {
     callback_ = callback;
   }
+  void set_file_path(const base::FilePath& file_path) {
+    save_info_.file_path = file_path;
+  }
+  void set_suggested_name(const string16& suggested_name) {
+    save_info_.suggested_name = suggested_name;
+  }
+  void set_offset(int64 offset) { save_info_.offset = offset; }
+  void set_hash_state(std::string hash_state) {
+    save_info_.hash_state = hash_state;
+  }
+  void set_prompt(bool prompt) { save_info_.prompt_for_save_location = prompt; }
+  void set_file_stream(scoped_ptr<net::FileStream> file_stream) {
+    save_info_.file_stream = file_stream.Pass();
+  }
 
   const OnStartedCallback& callback() const { return callback_; }
   bool content_initiated() const { return content_initiated_; }
   int load_flags() const { return load_flags_; }
+  const std::string& last_modified() { return last_modified_; }
+  const std::string& etag() { return etag_; }
   const std::string& method() const { return method_; }
   const std::string& post_body() const { return post_body_; }
   int64 post_id() const { return post_id_; }
@@ -108,14 +128,26 @@ class CONTENT_EXPORT DownloadUrlParameters {
   ResourceDispatcherHost* resource_dispatcher_host() const {
     return resource_dispatcher_host_;
   }
-  const DownloadSaveInfo& save_info() const { return save_info_; }
+  const base::FilePath& file_path() const { return save_info_.file_path; }
+  const string16& suggested_name() const { return save_info_.suggested_name; }
+  int64 offset() const { return save_info_.offset; }
+  const std::string& hash_state() const { return save_info_.hash_state; }
+  bool prompt() const { return save_info_.prompt_for_save_location; }
   const GURL& url() const { return url_; }
+
+  // Note that this is state changing--the DownloadUrlParameters object
+  // will not have a file_stream attached to it after this call.
+  scoped_ptr<net::FileStream> GetFileStream() {
+    return save_info_.file_stream.Pass();
+  }
 
  private:
   OnStartedCallback callback_;
   bool content_initiated_;
   RequestHeadersType request_headers_;
   int load_flags_;
+  std::string last_modified_;
+  std::string etag_;
   std::string method_;
   std::string post_body_;
   int64 post_id_;

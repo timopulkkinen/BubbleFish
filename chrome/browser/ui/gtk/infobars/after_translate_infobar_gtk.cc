@@ -15,7 +15,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 AfterTranslateInfoBar::AfterTranslateInfoBar(
-    InfoBarTabHelper* owner,
+    InfoBarService* owner,
     TranslateInfoBarDelegate* delegate)
     : TranslateInfoBarBase(owner, delegate),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
@@ -36,14 +36,20 @@ void AfterTranslateInfoBar::Init() {
   GtkWidget* hbox = gtk_hbox_new(FALSE, ui::kControlSpacing);
   gtk_util::CenterWidgetInHBox(hbox_, hbox, false, 0);
 
-  GtkWidget* original_lang_combo =
-      CreateLanguageCombobox(GetDelegate()->original_language_index(),
-                             GetDelegate()->target_language_index());
+  size_t original_language_index = GetDelegate()->original_language_index();
+  size_t target_language_index = GetDelegate()->target_language_index();
+  bool exclude_the_other = original_language_index != target_language_index;
+
+  GtkWidget* original_lang_combo = CreateLanguageCombobox(
+      original_language_index,
+      exclude_the_other ? target_language_index :
+                          TranslateInfoBarDelegate::kNoIndex);
   Signals()->Connect(original_lang_combo, "changed",
                      G_CALLBACK(&OnOriginalLanguageModifiedThunk), this);
-  GtkWidget* target_lang_combo =
-      CreateLanguageCombobox(GetDelegate()->target_language_index(),
-                             GetDelegate()->original_language_index());
+  GtkWidget* target_lang_combo = CreateLanguageCombobox(
+      target_language_index,
+      exclude_the_other ? original_language_index :
+                          TranslateInfoBarDelegate::kNoIndex);
   Signals()->Connect(target_lang_combo, "changed",
                      G_CALLBACK(&OnTargetLanguageModifiedThunk), this);
 

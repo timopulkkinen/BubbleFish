@@ -8,149 +8,122 @@
 
 #include <map>
 
-#include "base/lazy_instance.h"
-#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/common/extensions/api/media_galleries_private.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace extensions {
 
 namespace {
 
-// Events
-const char kOnAttachEventName[] = "mediaGalleriesPrivate.onDeviceAttached";
-const char kOnDetachEventName[] = "mediaGalleriesPrivate.onDeviceDetached";
-
-// Used to keep track of transient IDs for removable devices, so persistent
-// device IDs are not exposed to renderers.
-class TransientDeviceIds {
- public:
-  static TransientDeviceIds* GetInstance();
-
-  // Returns the transient for a given |unique_id|.
-  // Returns an empty string on error.
-  std::string GetTransientIdForUniqueId(const std::string& unique_id) const {
-    UniqueIdToTransientIdMap::const_iterator it = id_map_.find(unique_id);
-    return (it == id_map_.end()) ? std::string() :
-                                   base::Uint64ToString(it->second);
-  }
-
-  bool DeviceAttached(const std::string& unique_id) {
-    bool inserted =
-        id_map_.insert(std::make_pair(unique_id, transient_id_)).second;
-    if (!inserted) {
-      NOTREACHED();
-      return false;
-    }
-    ++transient_id_;
-    return true;
-  }
-
-  bool DeviceDetached(const std::string& unique_id) {
-    if (id_map_.erase(unique_id) == 0) {
-      NOTREACHED();
-      return false;
-    }
-    return true;
-  }
-
- private:
-  friend struct base::DefaultLazyInstanceTraits<TransientDeviceIds>;
-
-  typedef std::map<std::string, uint64_t> UniqueIdToTransientIdMap;
-
-  // Use GetInstance().
-  TransientDeviceIds() : transient_id_(0) {}
-  ~TransientDeviceIds() {}
-
-  UniqueIdToTransientIdMap id_map_;
-  uint64_t transient_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(TransientDeviceIds);
-};
-
-static base::LazyInstance<TransientDeviceIds> g_transient_device_ids =
-    LAZY_INSTANCE_INITIALIZER;
-
-// static
-TransientDeviceIds* TransientDeviceIds::GetInstance() {
-  return g_transient_device_ids.Pointer();
+std::string GetTransientIdForDeviceId(const std::string& device_id) {
+  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
+  return monitor->GetTransientIdForDeviceId(device_id);
 }
 
 }  // namespace
 
 using extensions::api::media_galleries_private::DeviceAttachmentDetails;
 using extensions::api::media_galleries_private::DeviceDetachmentDetails;
+using extensions::api::media_galleries_private::GalleryChangeDetails;
 
 MediaGalleriesPrivateEventRouter::MediaGalleriesPrivateEventRouter(
     Profile* profile)
     : profile_(profile) {
-  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
-  if (system_monitor)
-    system_monitor->AddDevicesChangedObserver(this);
+  DCHECK(profile_);
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
+  if (monitor)
+    monitor->AddObserver(this);
 }
 
 MediaGalleriesPrivateEventRouter::~MediaGalleriesPrivateEventRouter() {
-  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
-  if (system_monitor)
-    system_monitor->RemoveDevicesChangedObserver(this);
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
+  if (monitor)
+    monitor->RemoveObserver(this);
+}
+
+void MediaGalleriesPrivateEventRouter::OnGalleryChanged(
+    chrome::MediaGalleryPrefId gallery_id,
+    const std::set<std::string>& extension_ids) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  EventRouter* router =
+      extensions::ExtensionSystem::Get(profile_)->event_router();
+  if (!router->HasEventListener(event_names::kOnGalleryChangedEventName))
+    return;
+
+  for (std::set<std::string>::const_iterator it = extension_ids.begin();
+       it != extension_ids.end(); ++it) {
+    GalleryChangeDetails details;
+    details.gallery_id = gallery_id;
+    scoped_ptr<ListValue> args(new ListValue());
+    args->Append(details.ToValue().release());
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        event_names::kOnGalleryChangedEventName,
+        args.Pass()));
+    // Use DispatchEventToExtension() instead of BroadcastEvent().
+    // BroadcastEvent() sends the gallery changed events to all the extensions
+    // who have added a listener to the onGalleryChanged event. There is a
+    // chance that an extension might have added an onGalleryChanged() listener
+    // without calling addGalleryWatch(). Therefore, use
+    // DispatchEventToExtension() to dispatch the gallery changed event only to
+    // the watching extensions.
+    router->DispatchEventToExtension(*it, event.Pass());
+  }
 }
 
 void MediaGalleriesPrivateEventRouter::OnRemovableStorageAttached(
-    const std::string& id,
-    const string16& name,
-    const FilePath::StringType& location) {
-  EventRouter* router = profile_->GetExtensionEventRouter();
-  if (!router->HasEventListener(kOnAttachEventName))
+    const chrome::StorageMonitor::StorageInfo& info) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  EventRouter* router =
+      extensions::ExtensionSystem::Get(profile_)->event_router();
+  if (!router->HasEventListener(event_names::kOnAttachEventName))
     return;
-
-  TransientDeviceIds* device_ids = TransientDeviceIds::GetInstance();
-  if (!device_ids->DeviceAttached(id))
-    return;
-  std::string transient_id = device_ids->GetTransientIdForUniqueId(id);
-  CHECK(!transient_id.empty());
 
   DeviceAttachmentDetails details;
-  details.device_name = UTF16ToUTF8(name);
-  details.device_id = transient_id;
+  details.device_name = UTF16ToUTF8(info.name);
+  details.device_id = GetTransientIdForDeviceId(info.device_id);
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(details.ToValue().release());
-  DispatchEvent(kOnAttachEventName, args.Pass());
+  DispatchEvent(event_names::kOnAttachEventName, args.Pass());
 }
 
 void MediaGalleriesPrivateEventRouter::OnRemovableStorageDetached(
-    const std::string& id) {
-  EventRouter* router = profile_->GetExtensionEventRouter();
-  if (!router->HasEventListener(kOnDetachEventName))
+    const chrome::StorageMonitor::StorageInfo& info) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  EventRouter* router =
+      extensions::ExtensionSystem::Get(profile_)->event_router();
+  if (!router->HasEventListener(event_names::kOnDetachEventName))
     return;
-
-  TransientDeviceIds* device_ids = TransientDeviceIds::GetInstance();
-  std::string transient_id = device_ids->GetTransientIdForUniqueId(id);
-  if (transient_id.empty()) {
-    NOTREACHED();
-    return;
-  }
-  CHECK(device_ids->DeviceDetached(id));
 
   DeviceDetachmentDetails details;
-  details.device_id = transient_id;
+  details.device_id = GetTransientIdForDeviceId(info.device_id);
 
   scoped_ptr<base::ListValue> args(new ListValue());
   args->Append(details.ToValue().release());
-  DispatchEvent(kOnDetachEventName, args.Pass());
+  DispatchEvent(event_names::kOnDetachEventName, args.Pass());
 }
 
 void MediaGalleriesPrivateEventRouter::DispatchEvent(
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
-  EventRouter* router = profile_ ? profile_->GetExtensionEventRouter() : NULL;
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  EventRouter* router =
+      extensions::ExtensionSystem::Get(profile_)->event_router();
   if (!router)
     return;
-  router->DispatchEventToRenderers(event_name, event_args.Pass(), profile_,
-                                   GURL());
+  scoped_ptr<extensions::Event> event(new extensions::Event(
+      event_name, event_args.Pass()));
+  event->restrict_to_profile = profile_;
+  router->BroadcastEvent(event.Pass());
 }
 
 }  // namespace extensions

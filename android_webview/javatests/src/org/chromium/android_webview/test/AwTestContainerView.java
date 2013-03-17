@@ -24,29 +24,27 @@ import org.chromium.content.browser.ContentViewCore;
  * This class takes the place android.webkit.WebView would have in the production configuration.
  */
 class AwTestContainerView extends FrameLayout {
-    private ContentViewCore mContentViewCore;
     private AwContents mAwContents;
-    private ContentViewCore.InternalAccessDelegate mInternalAccessDelegate;
+    private AwContents.InternalAccessDelegate mInternalAccessDelegate;
 
     public AwTestContainerView(Context context) {
         super(context);
         mInternalAccessDelegate = new InternalAccessAdapter();
     }
 
-    public void initialize(ContentViewCore contentViewCore, AwContents awContents) {
-        mContentViewCore = contentViewCore;
+    public void initialize(AwContents awContents) {
         mAwContents = awContents;
     }
 
     public ContentViewCore getContentViewCore() {
-        return mContentViewCore;
+        return mAwContents.getContentViewCore();
     }
 
     public AwContents getAwContents() {
         return mAwContents;
     }
 
-    public ContentViewCore.InternalAccessDelegate getInternalAccessDelegate() {
+    public AwContents.InternalAccessDelegate getInternalAccessDelegate() {
         return mInternalAccessDelegate;
     }
 
@@ -54,42 +52,59 @@ class AwTestContainerView extends FrameLayout {
         mAwContents.destroy();
     }
 
-    // TODO: Required ContentViewCore changes are not upstreamed yet.
-    /*
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
-        mContentViewCore.onConfigurationChanged(newConfig);
+        mAwContents.onConfigurationChanged(newConfig);
     }
 
     @Override
     public void onAttachedToWindow() {
-        mContentViewCore.onAttachedToWindow();
+        mAwContents.onAttachedToWindow();
     }
 
     @Override
     public void onDetachedFromWindow() {
-        mContentViewCore.onDetachedFromWindow();
+        mAwContents.onDetachedFromWindow();
     }
 
     @Override
     public void onFocusChanged(boolean focused, int direction, Rect previouslyFocusedRect) {
-        mContentViewCore.onFocusChanged(focused, direction, previouslyFocusedRect);
+        mAwContents.onFocusChanged(focused, direction, previouslyFocusedRect);
+    }
+
+    @Override
+    public void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        mAwContents.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
     @Override
     public void onSizeChanged(int w, int h, int ow, int oh) {
-        mContentViewCore.onSizeChanged(w, h, ow, oh);
+        mAwContents.onSizeChanged(w, h, ow, oh);
     }
-    */
+
+    @Override
+    public void onVisibilityChanged(View changedView, int visibility) {
+        mAwContents.onVisibilityChanged(changedView, visibility);
+    }
+
+    @Override
+    public void onWindowVisibilityChanged(int visibility) {
+        mAwContents.onWindowVisibilityChanged(visibility);
+    }
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        return mContentViewCore.onTouchEvent(ev);
+        return mAwContents.onTouchEvent(ev);
     }
 
-    // TODO: ContentViewCore could define a generic class that holds an implementation similar to
+    @Override
+    public void onDraw(Canvas canvas) {
+        mAwContents.onDraw(canvas);
+    }
+
+    // TODO: AwContents could define a generic class that holds an implementation similar to
     // the one below.
-    private class InternalAccessAdapter implements ContentViewCore.InternalAccessDelegate {
+    private class InternalAccessAdapter implements AwContents.InternalAccessDelegate {
 
         @Override
         public boolean drawChild(Canvas canvas, View child, long drawingTime) {
@@ -136,11 +151,9 @@ class AwTestContainerView extends FrameLayout {
             return AwTestContainerView.super.awakenScrollBars(startDelay, invalidate);
         }
 
-        // TODO: Required ContentViewCore changes are not upstreamed yet.
-        /*
         @Override
-        public void onSurfaceTextureUpdated() {
+        public void setMeasuredDimension(int measuredWidth, int measuredHeight) {
+            AwTestContainerView.super.setMeasuredDimension(measuredWidth, measuredHeight);
         }
-        */
     }
 }

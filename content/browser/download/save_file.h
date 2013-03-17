@@ -6,11 +6,12 @@
 #define CONTENT_BROWSER_DOWNLOAD_SAVE_FILE_H_
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/download/base_file.h"
 #include "content/browser/download/save_types.h"
 
+namespace content {
 // SaveFile ----------------------------------------------------------------
 
 // These objects live exclusively on the file thread and handle the writing
@@ -24,14 +25,14 @@ class SaveFile {
   virtual ~SaveFile();
 
   // BaseFile delegated functions.
-  net::Error Initialize();
-  net::Error AppendDataToFile(const char* data, size_t data_len);
-  net::Error Rename(const FilePath& full_path);
+  DownloadInterruptReason Initialize();
+  DownloadInterruptReason AppendDataToFile(const char* data, size_t data_len);
+  DownloadInterruptReason Rename(const base::FilePath& full_path);
   void Detach();
   void Cancel();
   void Finish();
   void AnnotateWithSourceInformation();
-  FilePath FullPath() const;
+  base::FilePath FullPath() const;
   bool InProgress() const;
   int64 BytesSoFar() const;
   bool GetHash(std::string* hash);
@@ -52,5 +53,7 @@ class SaveFile {
 
   DISALLOW_COPY_AND_ASSIGN(SaveFile);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_SAVE_FILE_H_

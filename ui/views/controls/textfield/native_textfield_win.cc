@@ -18,12 +18,13 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/events/event.h"
+#include "ui/base/ime/win/tsf_bridge.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/base/native_theme/native_theme_win.h"
 #include "ui/base/range/range.h"
 #include "ui/base/win/mouse_wheel_util.h"
+#include "ui/native_theme/native_theme_win.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
@@ -95,7 +96,10 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
       ime_composition_start_(0),
       ime_composition_length_(0),
       container_view_(new NativeViewHost),
-      bg_color_(0) {
+      bg_color_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          tsf_event_router_(base::win::IsTSFAwareRequired() ?
+              new ui::TSFEventRouter(this) : NULL)) {
   if (!loaded_libarary_module_) {
     // msftedit.dll is RichEdit ver 4.1.
     // This version is available from WinXP SP1 and has TSF support.
@@ -120,18 +124,16 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
     SetEditStyle(SES_LOWERCASE, SES_LOWERCASE);
   }
 
+  // Disable auto font changing. Otherwise, characters can be rendered with
+  // multiple fonts. See http://crbug.com/168480 for details.
+  const LRESULT lang_option = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
+  SendMessage(EM_SETLANGOPTIONS, 0, lang_option & ~IMF_AUTOFONT);
+
   // Set up the text_object_model_.
   base::win::ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
   ole_interface.Attach(GetOleInterface());
   if (ole_interface)
     text_object_model_.QueryFrom(ole_interface);
-
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      !base::win::IsMetroProcess()) {
-    keyboard_.CreateInstance(__uuidof(TextInputPanel), NULL, CLSCTX_INPROC);
-    if (keyboard_ != NULL)
-      keyboard_->put_AttachedEditWindow(m_hWnd);
-  }
 
   InitializeAccessibilityInfo();
 }
@@ -213,6 +215,16 @@ void NativeTextfieldWin::AppendText(const string16& text) {
                 reinterpret_cast<LPARAM>(text.c_str()));
 }
 
+void NativeTextfieldWin::ReplaceSelection(const string16& text) {
+  // Currently not needed.
+  NOTIMPLEMENTED();
+}
+
+base::i18n::TextDirection NativeTextfieldWin::GetTextDirection() const {
+  NOTIMPLEMENTED();
+  return base::i18n::UNKNOWN_DIRECTION;
+}
+
 string16 NativeTextfieldWin::GetSelectedText() const {
   CHARRANGE sel;
   GetSel(sel);
@@ -239,28 +251,20 @@ void NativeTextfieldWin::UpdateBorder() {
                SWP_NOOWNERZORDER | SWP_NOSIZE);
 }
 
+void NativeTextfieldWin::UpdateBorderColor() {
+  // TODO(estade): implement.
+}
+
 void NativeTextfieldWin::UpdateTextColor() {
   CHARFORMAT cf = {0};
   cf.dwMask = CFM_COLOR;
-  cf.crTextColor = textfield_->use_default_text_color() ?
-      GetSysColor(textfield_->read_only() ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT) :
-      skia::SkColorToCOLORREF(textfield_->text_color());
+  cf.crTextColor = skia::SkColorToCOLORREF(textfield_->GetTextColor());
   CRichEditCtrl::SetDefaultCharFormat(cf);
 }
 
 void NativeTextfieldWin::UpdateBackgroundColor() {
-  if (!textfield_->use_default_background_color()) {
-    bg_color_ = skia::SkColorToCOLORREF(textfield_->background_color());
-  } else {
-    bg_color_ = GetSysColor(textfield_->read_only() ? COLOR_3DFACE
-                                                    : COLOR_WINDOW);
-  }
-  CRichEditCtrl::SetBackgroundColor(bg_color_);
-}
-
-void NativeTextfieldWin::UpdateCursorColor() {
-  if (!textfield_->use_default_cursor_color())
-    NOTIMPLEMENTED();
+  CRichEditCtrl::SetBackgroundColor(
+      skia::SkColorToCOLORREF(textfield_->GetBackgroundColor()));
 }
 
 void NativeTextfieldWin::UpdateReadOnly() {
@@ -339,6 +343,9 @@ bool NativeTextfieldWin::IsIMEComposing() const {
   // Retrieve the length of the composition string to check if an IME is
   // composing text. (If this length is > 0 then an IME is being used to compose
   // text.)
+  if (base::win::IsTSFAwareRequired())
+    return tsf_event_router_->IsImeComposing();
+
   HIMC imm_context = ImmGetContext(m_hWnd);
   if (!imm_context)
     return false;
@@ -349,11 +356,10 @@ bool NativeTextfieldWin::IsIMEComposing() const {
   return composition_size > 0;
 }
 
-void NativeTextfieldWin::GetSelectedRange(ui::Range* range) const {
+ui::Range NativeTextfieldWin::GetSelectedRange() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
-  range->set_start(0);
-  range->set_end(0);
+  return ui::Range();
 }
 
 void NativeTextfieldWin::SelectRange(const ui::Range& range) {
@@ -361,9 +367,10 @@ void NativeTextfieldWin::SelectRange(const ui::Range& range) {
   NOTIMPLEMENTED();
 }
 
-void NativeTextfieldWin::GetSelectionModel(gfx::SelectionModel* sel) const {
+gfx::SelectionModel NativeTextfieldWin::GetSelectionModel() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
+  return gfx::SelectionModel();
 }
 
 void NativeTextfieldWin::SelectSelectionModel(const gfx::SelectionModel& sel) {
@@ -375,6 +382,17 @@ size_t NativeTextfieldWin::GetCursorPosition() const {
   // TODO(tommi): Implement.
   NOTIMPLEMENTED();
   return 0U;
+}
+
+bool NativeTextfieldWin::GetCursorEnabled() const {
+  // TODO(msw): Implement.
+  NOTIMPLEMENTED();
+  return true;
+}
+
+void NativeTextfieldWin::SetCursorEnabled(bool enabled) {
+  // TODO(msw): Implement.
+  NOTIMPLEMENTED();
 }
 
 bool NativeTextfieldWin::HandleKeyPressed(const ui::KeyEvent& event) {
@@ -395,11 +413,21 @@ ui::TextInputClient* NativeTextfieldWin::GetTextInputClient() {
   return NULL;
 }
 
-void NativeTextfieldWin::ApplyStyleRange(const gfx::StyleRange& style) {
+void NativeTextfieldWin::SetColor(SkColor value) {
   NOTREACHED();
 }
 
-void NativeTextfieldWin::ApplyDefaultStyle() {
+void NativeTextfieldWin::ApplyColor(SkColor value, const ui::Range& range) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::SetStyle(gfx::TextStyle style, bool value) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::ApplyStyle(gfx::TextStyle style,
+                                    bool value,
+                                    const ui::Range& range) {
   NOTREACHED();
 }
 
@@ -409,6 +437,14 @@ void NativeTextfieldWin::ClearEditHistory() {
 
 int NativeTextfieldWin::GetFontHeight() {
   return textfield_->font().GetHeight();
+}
+
+int NativeTextfieldWin::GetTextfieldBaseline() const {
+  return textfield_->font().GetBaseline();
+}
+
+void NativeTextfieldWin::ExecuteTextCommand(int command_id) {
+  ExecuteCommand(command_id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -461,6 +497,46 @@ void NativeTextfieldWin::ExecuteCommand(int command_id) {
     default:                 NOTREACHED();     break;
   }
   OnAfterPossibleChange(true);
+}
+
+void NativeTextfieldWin::OnTextUpdated(const ui::Range& composition_range) {
+  if (ime_discard_composition_) {
+    ime_composition_start_ = composition_range.start();
+    ime_composition_length_ = composition_range.length();
+  } else {
+    ime_composition_start_ = 0;
+    ime_composition_length_ = 0;
+  }
+  OnAfterPossibleChange(false);
+  text_before_change_.clear();
+}
+
+void NativeTextfieldWin::OnImeStartCompositionInternal() {
+  // Users may press alt+shift or control+shift keys to change their keyboard
+  // layouts. So, we retrieve the input locale identifier everytime we start
+  // an IME composition.
+  int language_id = PRIMARYLANGID(GetKeyboardLayout(0));
+  ime_discard_composition_ =
+      language_id == LANG_JAPANESE || language_id == LANG_CHINESE;
+  ime_composition_start_ = 0;
+  ime_composition_length_ = 0;
+}
+
+void NativeTextfieldWin::OnImeEndCompositionInternal() {
+  // Bug 11863: Korean IMEs send a WM_IME_ENDCOMPOSITION message without
+  // sending any WM_IME_COMPOSITION messages when a user deletes all
+  // composition characters, i.e. a composition string becomes empty. To handle
+  // this case, we need to update the find results when a composition is
+  // finished or canceled.
+  textfield_->SyncText();
+}
+
+void NativeTextfieldWin::OnTSFStartComposition() {
+  OnImeStartCompositionInternal();
+}
+
+void NativeTextfieldWin::OnTSFEndComposition() {
+  OnImeEndCompositionInternal();
 }
 
 void NativeTextfieldWin::InitializeAccessibilityInfo() {
@@ -568,9 +644,16 @@ void NativeTextfieldWin::OnCopy() {
 }
 
 LRESULT NativeTextfieldWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
-  if (base::win::IsTsfAwareRequired()) {
+  if (base::win::IsTSFAwareRequired()) {
     // Enable TSF support of RichEdit.
     SetEditStyle(SES_USECTF, SES_USECTF);
+
+    // When TSF is enabled, OnTextUpdated() may be called without any previous
+    // call that would have indicated the start of an editing session.  In order
+    // to guarantee we've always called OnBeforePossibleChange() before
+    // OnAfterPossibleChange(), we therefore call that here.  Note that multiple
+    // (i.e. unmatched) calls to this function in a row are safe.
+    OnBeforePossibleChange();
   }
   SetMsgHandled(FALSE);
   return 0;
@@ -612,15 +695,7 @@ LRESULT NativeTextfieldWin::OnImeChar(UINT message,
 LRESULT NativeTextfieldWin::OnImeStartComposition(UINT message,
                                                   WPARAM wparam,
                                                   LPARAM lparam) {
-  // Users may press alt+shift or control+shift keys to change their keyboard
-  // layouts. So, we retrieve the input locale identifier everytime we start
-  // an IME composition.
-  int language_id = PRIMARYLANGID(GetKeyboardLayout(0));
-  ime_discard_composition_ =
-      language_id == LANG_JAPANESE || language_id == LANG_CHINESE;
-  ime_composition_start_ = 0;
-  ime_composition_length_ = 0;
-
+  OnImeStartCompositionInternal();
   return DefWindowProc(message, wparam, lparam);
 }
 
@@ -667,27 +742,13 @@ LRESULT NativeTextfieldWin::OnImeComposition(UINT message,
 LRESULT NativeTextfieldWin::OnImeEndComposition(UINT message,
                                                 WPARAM wparam,
                                                 LPARAM lparam) {
-  // Bug 11863: Korean IMEs send a WM_IME_ENDCOMPOSITION message without
-  // sending any WM_IME_COMPOSITION messages when a user deletes all
-  // composition characters, i.e. a composition string becomes empty. To handle
-  // this case, we need to update the find results when a composition is
-  // finished or canceled.
-  textfield_->SyncText();
+  OnImeEndCompositionInternal();
   return DefWindowProc(message, wparam, lparam);
 }
 
 LRESULT NativeTextfieldWin::OnPointerDown(UINT message, WPARAM wparam,
                                           LPARAM lparam) {
   SetFocus();
-  SetMsgHandled(FALSE);
-  return 0;
-}
-
-LRESULT NativeTextfieldWin::OnPointerUp(UINT message, WPARAM wparam,
-                                        LPARAM lparam) {
-  // ITextInputPanel is not supported on all platforms.  NULL is fine.
-  if (keyboard_ != NULL)
-    keyboard_->SetInPlaceVisibility(TRUE);
   SetMsgHandled(FALSE);
   return 0;
 }
@@ -782,6 +843,9 @@ void NativeTextfieldWin::OnLButtonDblClk(UINT keys, const CPoint& point) {
   double_click_point_ = point;
   double_click_time_ = GetCurrentMessage()->time;
 
+  if (!ShouldProcessMouseEvent())
+    return;
+
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   DefWindowProc(WM_LBUTTONDBLCLK, keys,
@@ -797,6 +861,9 @@ void NativeTextfieldWin::OnLButtonDown(UINT keys, const CPoint& point) {
       IsDoubleClick(double_click_point_, point,
                     GetCurrentMessage()->time - double_click_time_);
   tracking_double_click_ = false;
+
+  if (!ShouldProcessMouseEvent())
+    return;
 
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
@@ -970,6 +1037,10 @@ void NativeTextfieldWin::OnNonLButtonDown(UINT keys, const CPoint& point) {
   // x-buttons (which usually means "thumb buttons") are pressed, so we only
   // call this for M and R down.
   tracking_double_click_ = false;
+
+  if (!ShouldProcessMouseEvent())
+    return;
+
   SetMsgHandled(false);
 }
 
@@ -1006,6 +1077,24 @@ void NativeTextfieldWin::OnSetFocus(HWND hwnd) {
     return;
   }
   focus_manager->SetFocusedView(textfield_);
+
+  if (!base::win::IsTSFAwareRequired()) {
+    return;
+  }
+
+  DefWindowProc();
+
+  // Document manager created by RichEdit can be obtained only after
+  // WM_SET_FOCUS event is handled.
+  tsf_event_router_->SetManager(
+      ui::TSFBridge::GetInstance()->GetThreadManager());
+  SetMsgHandled(TRUE);
+}
+
+void NativeTextfieldWin::OnKillFocus(HWND hwnd) {
+  if(tsf_event_router_)
+    tsf_event_router_->SetManager(NULL);
+  SetMsgHandled(FALSE);
 }
 
 void NativeTextfieldWin::OnSysChar(TCHAR ch, UINT repeat_count, UINT flags) {
@@ -1018,6 +1107,10 @@ void NativeTextfieldWin::OnSysChar(TCHAR ch, UINT repeat_count, UINT flags) {
   //     it through.
   if (ch == VK_SPACE)
     SetMsgHandled(false);
+}
+
+void NativeTextfieldWin::OnFinalMessage(HWND hwnd) {
+  delete this;
 }
 
 void NativeTextfieldWin::HandleKeystroke() {
@@ -1215,6 +1308,18 @@ void NativeTextfieldWin::BuildContextMenu() {
   context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
   context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                               IDS_APP_SELECT_ALL);
+}
+
+bool NativeTextfieldWin::ShouldProcessMouseEvent() {
+  TextfieldController* controller = textfield_->GetController();
+  if (!controller)
+    return true;
+  MSG msg(*GetCurrentMessage());
+  // ATL doesn't set the |time| field.
+  if (!msg.time)
+    msg.time = GetMessageTime();
+  ui::MouseEvent mouse_event(msg);
+  return !controller->HandleMouseEvent(textfield_, mouse_event);
 }
 
 }  // namespace views

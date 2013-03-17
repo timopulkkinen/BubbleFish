@@ -4,6 +4,7 @@
 
 package org.chromium.android_webview.test;
 
+import android.test.FlakyTest;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
@@ -14,20 +15,20 @@ import org.chromium.base.test.util.Feature;
 public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllFinds() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllDouble() throws Throwable {
         findAllSyncOnUiThread("wood");
         assertEquals(4, findAllSyncOnUiThread("chuck"));
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllDoubleNext() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
         assertEquals(4, findAllSyncOnUiThread("wood"));
@@ -35,25 +36,25 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllDoesNotFind() throws Throwable {
         assertEquals(0, findAllSyncOnUiThread("foo"));
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllEmptyPage() throws Throwable {
         assertEquals(0, findAllSyncOnUiThread("foo"));
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllEmptyString() throws Throwable {
         assertEquals(0, findAllSyncOnUiThread(""));
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindNextForward() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
 
@@ -64,7 +65,7 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindNextBackward() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
 
@@ -75,7 +76,7 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindNextBig() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
 
@@ -89,7 +90,7 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindAllEmptyNext() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
         assertEquals(1, findNextOnUiThread(true));
@@ -101,14 +102,14 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testClearMatches() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
         clearMatchesOnUiThread();
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testClearFindNext() throws Throwable {
         assertEquals(4, findAllSyncOnUiThread("wood"));
         clearMatchesOnUiThread();
@@ -117,7 +118,7 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindEmptyNext() throws Throwable {
         assertEquals(0, findAllSyncOnUiThread(""));
         assertEquals(0, findNextOnUiThread(true));
@@ -125,7 +126,7 @@ public class WebViewSynchronousFindApisTest extends WebViewFindApisTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "FindInPage"})
+    @Feature({"AndroidWebView", "FindInPage"})
     public void testFindNextFirst() throws Throwable {
         runTestOnUiThread(new Runnable() {
             @Override

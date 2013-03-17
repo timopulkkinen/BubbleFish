@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/api/socket/socket.h"
 
 #include "base/bind.h"
-#include "chrome/browser/extensions/api/api_resource_event_notifier.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -16,11 +15,8 @@ namespace extensions {
 
 const char kSocketTypeNotSupported[] = "Socket type does not support this API";
 
-Socket::Socket(const std::string& owner_extension_id,
-               ApiResourceEventNotifier* event_notifier)
-    : ApiResource(owner_extension_id, event_notifier),
-      port_(0),
-      is_connected_(false) {
+Socket::Socket(const std::string& owner_extension_id)
+    : ApiResource(owner_extension_id), is_connected_(false) {
 }
 
 Socket::~Socket() {
@@ -43,7 +39,7 @@ void Socket::WriteData() {
 
   WriteRequest& request = write_queue_.front();
 
-  DCHECK(request.byte_count > request.bytes_written);
+  DCHECK(request.byte_count >= request.bytes_written);
   io_buffer_write_ = new net::WrappedIOBuffer(
       request.io_buffer->data() + request.bytes_written);
   int result = WriteImpl(

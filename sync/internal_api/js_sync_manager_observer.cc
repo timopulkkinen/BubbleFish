@@ -17,7 +17,6 @@
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_event_handler.h"
-#include "sync/sessions/session_state.h"
 
 namespace syncer {
 
@@ -72,6 +71,7 @@ void JsSyncManagerObserver::OnActionableError(
 
 void JsSyncManagerObserver::OnInitializationComplete(
     const WeakHandle<JsBackend>& js_backend,
+    const WeakHandle<DataTypeDebugInfoListener>& debug_info_listener,
     bool success, syncer::ModelTypeSet restored_types) {
   if (!event_handler_.IsInitialized()) {
     return;

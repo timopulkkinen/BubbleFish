@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/time.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 
 namespace sync_pb {
@@ -49,11 +51,11 @@ enum BootstrapTokenType {
 // and keeps the nigori node up to date.
 // Implementations of this class must be assumed to be non-thread-safe. All
 // methods must be invoked on the sync thread.
-class SyncEncryptionHandler {
+class SYNC_EXPORT SyncEncryptionHandler {
  public:
   // All Observer methods are done synchronously from within a transaction and
   // on the sync thread.
-  class Observer {
+  class SYNC_EXPORT Observer {
    public:
     Observer();
 
@@ -111,8 +113,12 @@ class SyncEncryptionHandler {
     // Used primarily for debugging.
     virtual void OnCryptographerStateChanged(Cryptographer* cryptographer) = 0;
 
-    // The passprhase state has changed.
-    virtual void OnPassphraseTypeChanged(PassphraseType type) = 0;
+    // The passphrase type has changed. |type| is the new type,
+    // |passphrase_time| is the time the passphrase was set (unset if |type|
+    // is KEYSTORE_PASSPHRASE or the passphrase was set before we started
+    // recording the time).
+    virtual void OnPassphraseTypeChanged(PassphraseType type,
+                                         base::Time passphrase_time) = 0;
 
    protected:
     virtual ~Observer();

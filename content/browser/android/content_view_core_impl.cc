@@ -8,28 +8,36 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
+#include "cc/layer.h"
+#include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/load_url_params.h"
 #include "content/browser/android/touch_point.h"
 #include "content/browser/renderer_host/java/java_bound_object.h"
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
+#include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
+#include "content/browser/ssl/ssl_host_state.h"
+#include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
+#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/favicon_status.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/page_transition_types.h"
 #include "jni/ContentViewCore_jni.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
@@ -37,6 +45,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/android/WebInputEventFactory.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/android/window_android.h"
+#include "ui/gfx/screen.h"
+#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/size_f.h"
 #include "webkit/glue/webmenuitem.h"
 #include "webkit/user_agent/user_agent_util.h"
 
@@ -47,9 +58,11 @@ using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::GetClass;
 using base::android::HasField;
+using base::android::MethodID;
 using base::android::JavaByteArrayToByteVector;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
+using WebKit::WebGestureEvent;
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 
@@ -61,15 +74,81 @@ enum PopupItemType {
   POPUP_ITEM_TYPE_ENABLED
 };
 
-namespace {
-jfieldID g_native_content_view;
-}  // namespace
-
 namespace content {
 
-struct ContentViewCoreImpl::JavaObject {
+namespace {
+jfieldID g_native_content_view;
 
+const void* kContentViewUserDataKey = &kContentViewUserDataKey;
+
+int GetRenderProcessIdFromRenderViewHost(RenderViewHost* host) {
+  DCHECK(host);
+  RenderProcessHost* render_process = host->GetProcess();
+  DCHECK(render_process);
+  if (render_process->HasConnection())
+    return render_process->GetHandle();
+  else
+    return 0;
+}
+
+}  // namespace
+
+// Enables a callback when the underlying WebContents is destroyed, to enable
+// nulling the back-pointer.
+class ContentViewCoreImpl::ContentViewUserData
+    : public base::SupportsUserData::Data {
+ public:
+  explicit ContentViewUserData(ContentViewCoreImpl* content_view_core)
+      : content_view_core_(content_view_core) {
+  }
+
+  virtual ~ContentViewUserData() {
+    // TODO(joth): When chrome has finished removing the TabContents class (see
+    // crbug.com/107201) consider inverting relationship, so ContentViewCore
+    // would own WebContents. That effectively implies making the WebContents
+    // destructor private on Android.
+    delete content_view_core_;
+  }
+
+  ContentViewCoreImpl* get() const { return content_view_core_; }
+
+ private:
+  // Not using scoped_ptr as ContentViewCoreImpl destructor is private.
+  ContentViewCoreImpl* content_view_core_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(ContentViewUserData);
 };
+
+struct ContentViewCoreImpl::JavaObject {
+  ScopedJavaGlobalRef<jclass> rect_clazz;
+  jmethodID rect_constructor;
+  ScopedJavaLocalRef<jobject> CreateJavaRect(
+      JNIEnv* env,
+      const gfx::Rect& rect) {
+    return ScopedJavaLocalRef<jobject>(
+        env, env->NewObject(rect_clazz.obj(),
+                            rect_constructor,
+                            static_cast<int>(rect.x()),
+                            static_cast<int>(rect.y()),
+                            static_cast<int>(rect.right()),
+                            static_cast<int>(rect.bottom())));
+  }
+};
+
+// static
+ContentViewCoreImpl* ContentViewCoreImpl::FromWebContents(
+    content::WebContents* web_contents) {
+  ContentViewCoreImpl::ContentViewUserData* data =
+      reinterpret_cast<ContentViewCoreImpl::ContentViewUserData*>(
+          web_contents->GetUserData(kContentViewUserDataKey));
+  return data ? data->get() : NULL;
+}
+
+// static
+ContentViewCore* ContentViewCore::FromWebContents(
+    content::WebContents* web_contents) {
+  return ContentViewCoreImpl::FromWebContents(web_contents);
+}
 
 ContentViewCore* ContentViewCore::GetNativeContentViewCore(JNIEnv* env,
                                                            jobject obj) {
@@ -77,25 +156,35 @@ ContentViewCore* ContentViewCore::GetNativeContentViewCore(JNIEnv* env,
       env->GetIntField(obj, g_native_content_view));
 }
 
-
 ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
                                          bool hardware_accelerated,
+                                         bool input_events_delivered_at_vsync,
                                          WebContents* web_contents,
                                          ui::WindowAndroid* window_android)
     : java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
+      root_layer_(cc::Layer::create()),
       tab_crashed_(false),
+      input_events_delivered_at_vsync_(input_events_delivered_at_vsync),
+      renderer_frame_pending_(false),
       window_android_(window_android) {
-  DCHECK(web_contents) <<
+  CHECK(web_contents) <<
       "A ContentViewCoreImpl should be created with a valid WebContents.";
+
+  // When a tab is restored (from a saved state), it does not have a renderer
+  // process.  We treat it like the tab is crashed. If the content is loaded
+  // when the tab is shown, tab_crashed_ will be reset.  Since
+  // RenderWidgetHostView is associated with the lifetime of the renderer
+  // process, we use it to test whether there is a renderer process.
+  tab_crashed_ = !(web_contents->GetRenderWidgetHostView());
 
   // TODO(leandrogracia): make use of the hardware_accelerated argument.
 
   InitJNI(env, obj);
 
-  notification_registrar_.Add(this,
-                              NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
-                              NotificationService::AllSources());
+  const gfx::Display& display =
+      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+  dpi_scale_ = display.device_scale_factor();
 
   // Currently, the only use case we have for overriding a user agent involves
   // spoofing a desktop Linux user agent for "Request desktop site".
@@ -107,53 +196,98 @@ ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
       webkit_glue::BuildUserAgentFromOSAndProduct(kLinuxInfoStr, product);
   web_contents->SetUserAgentOverride(spoofed_ua);
 
-  InitWebContents(web_contents);
+  InitWebContents();
 }
 
 ContentViewCoreImpl::~ContentViewCoreImpl() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  java_ref_.reset();
+  if (!j_obj.is_null()) {
+    Java_ContentViewCore_onNativeContentViewCoreDestroyed(
+        env, j_obj.obj(), reinterpret_cast<jint>(this));
+  }
   // Make sure nobody calls back into this object while we are tearing things
   // down.
   notification_registrar_.RemoveAll();
 
   delete java_object_;
   java_object_ = NULL;
+}
+
+void ContentViewCoreImpl::OnJavaContentViewCoreDestroyed(JNIEnv* env,
+                                                         jobject obj) {
+  DCHECK(env->IsSameObject(java_ref_.get(env).obj(), obj));
   java_ref_.reset();
 }
 
-void ContentViewCoreImpl::Destroy(JNIEnv* env, jobject obj) {
-  delete this;
-}
-
-void ContentViewCoreImpl::InitWebContents(WebContents* web_contents) {
-  web_contents_ = static_cast<WebContentsImpl*>(web_contents);
-  notification_registrar_.Add(this,
-      NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
+void ContentViewCoreImpl::InitWebContents() {
+  DCHECK(web_contents_);
+  notification_registrar_.Add(
+      this, NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
       Source<NavigationController>(&web_contents_->GetController()));
+  notification_registrar_.Add(
+      this, NOTIFICATION_RENDERER_PROCESS_CREATED,
+      content::NotificationService::AllBrowserContextsAndSources());
+  notification_registrar_.Add(
+      this, NOTIFICATION_WEB_CONTENTS_CONNECTED,
+      Source<WebContents>(web_contents_));
 
   static_cast<WebContentsViewAndroid*>(web_contents_->GetView())->
       SetContentViewCore(this);
+  DCHECK(!web_contents_->GetUserData(kContentViewUserDataKey));
+  web_contents_->SetUserData(kContentViewUserDataKey,
+                             new ContentViewUserData(this));
 }
 
 void ContentViewCoreImpl::Observe(int type,
                                   const NotificationSource& source,
                                   const NotificationDetails& details) {
   switch (type) {
-    case NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT: {
-      if (!web_contents_ || Source<RenderViewHost>(source).ptr() !=
-          web_contents_->GetRenderViewHost()) {
-        return;
+    case NOTIFICATION_RENDER_VIEW_HOST_CHANGED: {
+      std::pair<RenderViewHost*, RenderViewHost*>* switched_details =
+          Details<std::pair<RenderViewHost*, RenderViewHost*> >(details).ptr();
+      int old_pid = 0;
+      if (switched_details->first) {
+        old_pid = GetRenderProcessIdFromRenderViewHost(
+            switched_details->first);
       }
+      int new_pid = GetRenderProcessIdFromRenderViewHost(
+          web_contents_->GetRenderViewHost());
+      if (new_pid != old_pid) {
+        // Notify the Java side of the change of the current renderer process.
+        JNIEnv* env = AttachCurrentThread();
+        ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+        if (!obj.is_null()) {
+          Java_ContentViewCore_onRenderProcessSwap(
+              env, obj.obj(), old_pid, new_pid);
+        }
+      }
+      break;
+    }
+    case NOTIFICATION_RENDERER_PROCESS_CREATED: {
+      // Notify the Java side of the current renderer process.
+      RenderProcessHost* source_process_host =
+          Source<RenderProcessHost>(source).ptr();
+      RenderProcessHost* current_process_host =
+          web_contents_->GetRenderViewHost()->GetProcess();
 
-      JNIEnv* env = base::android::AttachCurrentThread();
-      std::pair<int, Value*>* result_pair =
-          Details<std::pair<int, Value*> >(details).ptr();
-      std::string json;
-      base::JSONWriter::Write(result_pair->second, &json);
-      ScopedJavaLocalRef<jstring> j_json = ConvertUTF8ToJavaString(env, json);
-      ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
-      if (!j_obj.is_null()) {
-        Java_ContentViewCore_onEvaluateJavaScriptResult(env, j_obj.obj(),
-            static_cast<jint>(result_pair->first), j_json.obj());
+      if (source_process_host == current_process_host) {
+        int pid = GetRenderProcessIdFromRenderViewHost(
+            web_contents_->GetRenderViewHost());
+        JNIEnv* env = AttachCurrentThread();
+        ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+        if (!obj.is_null()) {
+          Java_ContentViewCore_onRenderProcessSwap(env, obj.obj(), 0, pid);
+        }
+      }
+      break;
+    }
+    case NOTIFICATION_WEB_CONTENTS_CONNECTED: {
+      JNIEnv* env = AttachCurrentThread();
+      ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+      if (!obj.is_null()) {
+        Java_ContentViewCore_onWebContentsConnected(env, obj.obj());
       }
       break;
     }
@@ -162,19 +296,36 @@ void ContentViewCoreImpl::Observe(int type,
 
 void ContentViewCoreImpl::InitJNI(JNIEnv* env, jobject obj) {
   java_object_ = new JavaObject;
+  java_object_->rect_clazz.Reset(GetClass(env, "android/graphics/Rect"));
+  java_object_->rect_constructor = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, java_object_->rect_clazz.obj(), "<init>", "(IIII)V");
 }
 
 RenderWidgetHostViewAndroid*
     ContentViewCoreImpl::GetRenderWidgetHostViewAndroid() {
   RenderWidgetHostView* rwhv = NULL;
-  if (web_contents_)
+  if (web_contents_) {
     rwhv = web_contents_->GetRenderWidgetHostView();
+    if (web_contents_->ShowingInterstitialPage()) {
+      rwhv = static_cast<InterstitialPageImpl*>(
+          web_contents_->GetInterstitialPage())->
+              GetRenderViewHost()->GetView();
+    }
+  }
   return static_cast<RenderWidgetHostViewAndroid*>(rwhv);
 }
 
 ScopedJavaLocalRef<jobject> ContentViewCoreImpl::GetJavaObject() {
   JNIEnv* env = AttachCurrentThread();
   return java_ref_.get(env);
+}
+
+ScopedJavaLocalRef<jobject> ContentViewCoreImpl::GetContainerViewDelegate() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return ScopedJavaLocalRef<jobject>();
+  return Java_ContentViewCore_getContainerViewDelegate(env, obj.obj());
 }
 
 void ContentViewCoreImpl::OnWebPreferencesUpdated() {
@@ -197,7 +348,7 @@ void ContentViewCoreImpl::SetBackgroundColor(JNIEnv* env,
   RenderWidgetHostViewAndroid* rwhva = GetRenderWidgetHostViewAndroid();
   if (!rwhva)
     return;
-  rwhva->SetCachedBackgroundColor(color);
+  rwhva->OnDidChangeBodyBackgroundColor(color);
 }
 
 void ContentViewCoreImpl::OnHide(JNIEnv* env, jobject obj) {
@@ -216,32 +367,61 @@ void ContentViewCoreImpl::Hide() {
   GetWebContents()->WasHidden();
 }
 
-void ContentViewCoreImpl::UpdateContentSize(int width, int height) {
+void ContentViewCoreImpl::OnTabCrashed() {
+  // if tab_crashed_ is already true, just return. e.g. if two tabs share the
+  // render process, this will be called for each tab when the render process
+  // crashed. If user reload one tab, a new render process is created. It can be
+  // shared by the other tab. But if user closes the tab before reload the other
+  // tab, the new render process will be shut down. This will trigger the other
+  // tab's OnTabCrashed() called again as two tabs share the same
+  // BrowserRenderProcessHost.
+  if (tab_crashed_)
+    return;
+  tab_crashed_ = true;
+  // This can happen as WebContents is destroyed after java_object_ is set to 0
+  if (!java_object_)
+    return;
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_ContentViewCore_updateContentSize(env, obj.obj(), width, height);
+  Java_ContentViewCore_onTabCrash(env, obj.obj());
 }
 
-void ContentViewCoreImpl::UpdateScrollOffsetAndPageScaleFactor(int x, int y,
-                                                               float scale) {
+// All positions and sizes are in CSS pixels.
+// Note that viewport_width/height is a best effort based.
+// ContentViewCore has the actual information about the physical viewport size.
+void ContentViewCoreImpl::UpdateFrameInfo(
+    float scroll_offset_x, float scroll_offset_y,
+    float page_scale_factor,
+    float min_page_scale_factor, float max_page_scale_factor,
+    float content_width, float content_height,
+    float viewport_width, float viewport_height) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_ContentViewCore_updateScrollOffsetAndPageScaleFactor(env, obj.obj(), x,
-                                                            y, scale);
+  Java_ContentViewCore_updateFrameInfo(
+      env, obj.obj(),
+      scroll_offset_x,
+      scroll_offset_y,
+      page_scale_factor,
+      min_page_scale_factor, max_page_scale_factor,
+      content_width,
+      content_height,
+      viewport_width,
+      viewport_height);
 }
 
-void ContentViewCoreImpl::UpdatePageScaleLimits(float minimum_scale,
-                                                float maximum_scale) {
+void ContentViewCoreImpl::UpdateOffsetsForFullscreen(float controls_offset_y,
+                                                     float content_offset_y) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_ContentViewCore_updatePageScaleLimits(env, obj.obj(), minimum_scale,
-                                             maximum_scale);
+  Java_ContentViewCore_updateOffsetsForFullscreen(env, obj.obj(),
+                                                  controls_offset_y,
+                                                  content_offset_y);
 }
 
 void ContentViewCoreImpl::SetTitle(const string16& title) {
@@ -252,6 +432,14 @@ void ContentViewCoreImpl::SetTitle(const string16& title) {
   ScopedJavaLocalRef<jstring> jtitle =
       ConvertUTF8ToJavaString(env, UTF16ToUTF8(title));
   Java_ContentViewCore_setTitle(env, obj.obj(), jtitle.obj());
+}
+
+void ContentViewCoreImpl::OnBackgroundColorChanged(SkColor color) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_ContentViewCore_onBackgroundColorChanged(env, obj.obj(), color);
 }
 
 void ContentViewCoreImpl::ShowSelectPopupMenu(
@@ -301,20 +489,21 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
                                        multiple, selected_array.obj());
 }
 
-void ContentViewCoreImpl::ConfirmTouchEvent(bool handled) {
+void ContentViewCoreImpl::ConfirmTouchEvent(InputEventAckState ack_result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
     return;
-  Java_ContentViewCore_confirmTouchEvent(env, j_obj.obj(), handled);
+  Java_ContentViewCore_confirmTouchEvent(env, j_obj.obj(),
+                                         static_cast<jint>(ack_result));
 }
 
-void ContentViewCoreImpl::DidSetNeedTouchEvents(bool need_touch_events) {
+void ContentViewCoreImpl::HasTouchEventHandlers(bool need_touch_events) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
     return;
-  Java_ContentViewCore_didSetNeedTouchEvents(env,
+  Java_ContentViewCore_hasTouchEventHandlers(env,
                                              j_obj.obj(),
                                              need_touch_events);
 }
@@ -328,7 +517,50 @@ bool ContentViewCoreImpl::HasFocus() {
 }
 
 void ContentViewCoreImpl::OnSelectionChanged(const std::string& text) {
-  NOTIMPLEMENTED() << "not upstreamed yet";
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  ScopedJavaLocalRef<jstring> jtext = ConvertUTF8ToJavaString(env, text);
+  Java_ContentViewCore_onSelectionChanged(env, obj.obj(), jtext.obj());
+}
+
+void ContentViewCoreImpl::OnSelectionBoundsChanged(
+    const ViewHostMsg_SelectionBounds_Params& params) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  ScopedJavaLocalRef<jobject> anchor_rect_dip(
+      java_object_->CreateJavaRect(env, params.anchor_rect));
+  ScopedJavaLocalRef<jobject> focus_rect_dip(
+      java_object_->CreateJavaRect(env, params.focus_rect));
+  Java_ContentViewCore_onSelectionBoundsChanged(env, obj.obj(),
+                                                anchor_rect_dip.obj(),
+                                                params.anchor_dir,
+                                                focus_rect_dip.obj(),
+                                                params.focus_dir,
+                                                params.is_anchor_first);
+}
+
+void ContentViewCoreImpl::ShowPastePopup(int x_dip, int y_dip) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_ContentViewCore_showPastePopup(env, obj.obj(),
+                                      static_cast<jint>(x_dip),
+                                      static_cast<jint>(y_dip));
+}
+
+unsigned int ContentViewCoreImpl::GetScaledContentTexture(
+    float scale,
+    gfx::Size* out_size) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  if (!view)
+    return 0;
+
+  return view->GetScaledContentTexture(scale, out_size);
 }
 
 void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
@@ -343,14 +575,82 @@ void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
                                           jcontent_url.obj());
 }
 
+void ContentViewCoreImpl::ShowDisambiguationPopup(
+    const gfx::Rect& target_rect,
+    const SkBitmap& zoomed_bitmap) {
+  JNIEnv* env = AttachCurrentThread();
+
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  ScopedJavaLocalRef<jobject> rect_object(env,
+      env->NewObject(java_object_->rect_clazz.obj(),
+                     java_object_->rect_constructor,
+                     target_rect.x(),
+                     target_rect.y(),
+                     target_rect.right(),
+                     target_rect.bottom()));
+  DCHECK(!rect_object.is_null());
+
+  ScopedJavaLocalRef<jobject> java_bitmap =
+      gfx::ConvertToJavaBitmap(&zoomed_bitmap);
+  DCHECK(!java_bitmap.is_null());
+
+  Java_ContentViewCore_showDisambiguationPopup(env,
+                                               obj.obj(),
+                                               rect_object.obj(),
+                                               java_bitmap.obj());
+}
+
+gfx::Size ContentViewCoreImpl::GetPhysicalBackingSize() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return gfx::Size();
+  return gfx::Size(
+      Java_ContentViewCore_getPhysicalBackingWidthPix(env, j_obj.obj()),
+      Java_ContentViewCore_getPhysicalBackingHeightPix(env, j_obj.obj()));
+}
+
+gfx::Size ContentViewCoreImpl::GetViewportSizePix() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return gfx::Size();
+  return gfx::Size(Java_ContentViewCore_getViewportWidthPix(env, j_obj.obj()),
+                   Java_ContentViewCore_getViewportHeightPix(env, j_obj.obj()));
+}
+
+gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
+  return gfx::ToCeiledSize(
+      gfx::ScaleSize(GetViewportSizePix(), 1.0f / GetDpiScale()));
+}
+
+void ContentViewCoreImpl::AttachLayer(scoped_refptr<cc::Layer> layer) {
+  root_layer_->addChild(layer);
+}
+
+void ContentViewCoreImpl::RemoveLayer(scoped_refptr<cc::Layer> layer) {
+  layer->removeFromParent();
+}
+
+void ContentViewCoreImpl::DidProduceRendererFrame() {
+  renderer_frame_pending_ = true;
+}
+
 void ContentViewCoreImpl::LoadUrl(
     NavigationController::LoadURLParams& params) {
   GetWebContents()->GetController().LoadURLWithParams(params);
   tab_crashed_ = false;
 }
 
-ui::WindowAndroid* ContentViewCoreImpl::GetWindowAndroid() {
+ui::WindowAndroid* ContentViewCoreImpl::GetWindowAndroid() const {
   return window_android_;
+}
+
+scoped_refptr<cc::Layer> ContentViewCoreImpl::GetLayer() const {
+  return root_layer_.get();
 }
 
 // ----------------------------------------------------------------------------
@@ -385,7 +685,8 @@ void ContentViewCoreImpl::LoadUrl(
     jstring extra_headers,
     jbyteArray post_data,
     jstring base_url_for_data_url,
-    jstring virtual_url_for_data_url) {
+    jstring virtual_url_for_data_url,
+    jboolean can_load_local_resources) {
   DCHECK(url);
   NavigationController::LoadURLParams params(
       GURL(ConvertJavaStringToUTF8(env, url)));
@@ -417,18 +718,27 @@ void ContentViewCoreImpl::LoadUrl(
         GURL(ConvertJavaStringToUTF8(env, virtual_url_for_data_url));
   }
 
+  params.can_load_local_resources = can_load_local_resources;
+
   LoadUrl(params);
 }
 
 jint ContentViewCoreImpl::GetCurrentRenderProcessId(JNIEnv* env, jobject obj) {
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
-  DCHECK(host);
-  RenderProcessHost* render_process = host->GetProcess();
-  DCHECK(render_process);
-  if (render_process->HasConnection())
-    return render_process->GetHandle();
-  else
-    return 0;
+  return GetRenderProcessIdFromRenderViewHost(
+      web_contents_->GetRenderViewHost());
+}
+
+void ContentViewCoreImpl::SetAllUserAgentOverridesInHistory(
+    JNIEnv* env,
+    jobject,
+    jstring user_agent_override) {
+  std::string override =
+      base::android::ConvertJavaStringToUTF8(env, user_agent_override);
+  web_contents_->SetUserAgentOverride(override);
+  bool override_used = !override.empty();
+  const NavigationController& controller = web_contents_->GetController();
+  for (int i = 0; i < controller.GetEntryCount(); ++i)
+    controller.GetEntryAtIndex(i)->SetIsOverridingUserAgent(override_used);
 }
 
 ScopedJavaLocalRef<jstring> ContentViewCoreImpl::GetURL(
@@ -459,6 +769,18 @@ void ContentViewCoreImpl::SetFocus(JNIEnv* env, jobject obj, jboolean focused) {
     GetRenderWidgetHostViewAndroid()->Blur();
 }
 
+void ContentViewCoreImpl::SendOrientationChangeEvent(JNIEnv* env,
+                                                     jobject obj,
+                                                     jint orientation) {
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
+  if (rwhv)
+    rwhv->UpdateScreenInfo(rwhv->GetNativeView());
+
+  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
+      web_contents_->GetRenderViewHost());
+  rvhi->SendOrientationChangeEvent(orientation);
+}
+
 jboolean ContentViewCoreImpl::SendTouchEvent(JNIEnv* env,
                                              jobject obj,
                                              jlong time_ms,
@@ -468,24 +790,28 @@ jboolean ContentViewCoreImpl::SendTouchEvent(JNIEnv* env,
   if (rwhv) {
     using WebKit::WebTouchEvent;
     WebKit::WebTouchEvent event;
-    TouchPoint::BuildWebTouchEvent(env, type, time_ms, pts, event);
+    TouchPoint::BuildWebTouchEvent(env, type, time_ms, GetDpiScale(), pts,
+        event);
+    UpdateVSyncFlagOnInputEvent(&event);
     rwhv->SendTouchEvent(event);
     return true;
   }
   return false;
 }
 
-int ContentViewCoreImpl::GetTouchPadding()
-{
-  // TODO(trchen): derive a proper padding value from device dpi
-  return 48;
+float ContentViewCoreImpl::GetTouchPaddingDip() {
+  return 48.0f / GetDpiScale();
+}
+
+float ContentViewCoreImpl::GetDpiScale() const {
+  return dpi_scale_;
 }
 
 jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
                                                  jobject obj,
                                                  jlong time_ms,
-                                                 jint x,
-                                                 jint y) {
+                                                 jfloat x,
+                                                 jfloat y) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
     return false;
@@ -493,7 +819,7 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
   WebKit::WebMouseEvent event = WebInputEventFactory::mouseEvent(
       WebInputEventFactory::MouseEventTypeMove,
       WebKit::WebMouseEvent::ButtonNone,
-      time_ms / 1000.0, x, y, 0, 1);
+      time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale(), 0, 1);
 
   rwhv->SendMouseEvent(event);
   return true;
@@ -502,8 +828,8 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
 jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
                                                   jobject obj,
                                                   jlong time_ms,
-                                                  jint x,
-                                                  jint y,
+                                                  jfloat x,
+                                                  jfloat y,
                                                   jfloat vertical_axis) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
@@ -518,133 +844,192 @@ jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
     return false;
   }
   WebKit::WebMouseWheelEvent event = WebInputEventFactory::mouseWheelEvent(
-      type, time_ms / 1000.0, x, y);
+      type, time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale());
 
   rwhv->SendMouseWheelEvent(event);
   return true;
 }
 
-void ContentViewCoreImpl::SendGestureEvent(WebInputEvent::Type type,
-                                           long time_ms, int x, int y) {
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      type, time_ms / 1000.0, x, y, 0, 0, 0);
+WebGestureEvent ContentViewCoreImpl::MakeGestureEvent(
+    WebInputEvent::Type type, long time_ms, float x, float y) const {
+  WebGestureEvent event;
+  event.type = type;
+  event.x = x / GetDpiScale();
+  event.y = y / GetDpiScale();
+  event.timeStampSeconds = time_ms / 1000.0;
+  event.sourceDevice = WebGestureEvent::Touchscreen;
+  UpdateVSyncFlagOnInputEvent(&event);
+  return event;
+}
 
-  if (type == WebInputEvent::GestureFlingStart)
-    event.data.flingStart.sourceDevice = WebKit::WebGestureEvent::Touchscreen;
+void ContentViewCoreImpl::UpdateVSyncFlagOnInputEvent(
+    WebKit::WebInputEvent* event) const {
+  if (!input_events_delivered_at_vsync_)
+    return;
+  if (event->type == WebInputEvent::GestureScrollUpdate ||
+      event->type == WebInputEvent::GesturePinchUpdate ||
+      event->type == WebInputEvent::TouchMove)
+    event->modifiers |= WebInputEvent::IsLastInputEventForCurrentVSync;
+}
 
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+void ContentViewCoreImpl::SendGestureEvent(
+    const WebKit::WebGestureEvent& event) {
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
+  if (rwhv)
+    rwhv->SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::ScrollBegin(JNIEnv* env, jobject obj, jlong time_ms,
-                                      jint x, jint y) {
-  SendGestureEvent(
+                                      jfloat x, jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureScrollBegin, time_ms, x, y);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::ScrollEnd(JNIEnv* env, jobject obj, jlong time_ms) {
-  SendGestureEvent(WebInputEvent::GestureScrollEnd, time_ms, 0, 0);
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureScrollEnd, time_ms, 0, 0);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::ScrollBy(JNIEnv* env, jobject obj, jlong time_ms,
-                                   jint x, jint y, jint dx, jint dy) {
-  // TODO(rbyers): Stop setting generic deltaX/deltaY, crbug.com/143237
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      WebInputEvent::GestureScrollUpdate, time_ms / 1000.0, x, y, -dx, -dy, 0);
+                                   jfloat x, jfloat y, jfloat dx, jfloat dy) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureScrollUpdate, time_ms, x, y);
+  event.data.scrollUpdate.deltaX = -dx / GetDpiScale();
+  event.data.scrollUpdate.deltaY = -dy / GetDpiScale();
 
-  event.data.scrollUpdate.deltaX = -dx;
-  event.data.scrollUpdate.deltaY = -dy;
-
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::FlingStart(JNIEnv* env, jobject obj, jlong time_ms,
-                                     jint x, jint y, jint vx, jint vy) {
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      WebInputEvent::GestureFlingStart, time_ms / 1000.0, x, y, vx, vy, 0);
+                                     jfloat x, jfloat y, jfloat vx, jfloat vy) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureFlingStart, time_ms, x, y);
+
+  // Velocity should not be scaled by DIP since that interacts poorly with the
+  // deceleration constants.  The DIP scaling is done on the renderer.
   event.data.flingStart.velocityX = vx;
   event.data.flingStart.velocityY = vy;
 
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::FlingCancel(JNIEnv* env, jobject obj, jlong time_ms) {
-  SendGestureEvent(WebInputEvent::GestureFlingCancel, time_ms, 0, 0);
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureFlingCancel, time_ms, 0, 0);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y,
+                                    jfloat x, jfloat y,
                                     jboolean disambiguation_popup_tap) {
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      WebInputEvent::GestureTap, time_ms / 1000.0, x, y, 0, 0, 0);
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureTap, time_ms, x, y);
 
   event.data.tap.tapCount = 1;
   if (!disambiguation_popup_tap) {
-    int touchPadding = GetTouchPadding();
-    event.data.tap.width = touchPadding;
-    event.data.tap.height = touchPadding;
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.tap.width = touch_padding_dip;
+    event.data.tap.height = touch_padding_dip;
   }
 
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::ShowPressState(JNIEnv* env, jobject obj,
                                          jlong time_ms,
-                                         jint x, jint y) {
-  SendGestureEvent(WebInputEvent::GestureTapDown, time_ms, x, y);
+                                         jfloat x, jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureTapDown, time_ms, x, y);
+  SendGestureEvent(event);
+}
+
+void ContentViewCoreImpl::ShowPressCancel(JNIEnv* env,
+                                          jobject obj,
+                                          jlong time_ms,
+                                          jfloat x,
+                                          jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureTapCancel, time_ms, x, y);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::DoubleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y) {
-  SendGestureEvent(WebInputEvent::GestureDoubleTap, time_ms, x, y);
+                                    jfloat x, jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureDoubleTap, time_ms, x, y);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::LongPress(JNIEnv* env, jobject obj, jlong time_ms,
-                                    jint x, jint y,
+                                    jfloat x, jfloat y,
                                     jboolean disambiguation_popup_tap) {
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      WebInputEvent::GestureLongPress, time_ms / 1000.0, x, y, 0, 0, 0);
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureLongPress, time_ms, x, y);
 
   if (!disambiguation_popup_tap) {
-    int touchPadding = GetTouchPadding();
-    event.data.longPress.width = touchPadding;
-    event.data.longPress.height = touchPadding;
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.longPress.width = touch_padding_dip;
+    event.data.longPress.height = touch_padding_dip;
   }
 
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+  SendGestureEvent(event);
+}
+
+void ContentViewCoreImpl::LongTap(JNIEnv* env, jobject obj, jlong time_ms,
+                                  jfloat x, jfloat y,
+                                  jboolean disambiguation_popup_tap) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureLongTap, time_ms, x, y);
+
+  if (!disambiguation_popup_tap) {
+    const float touch_padding_dip = GetTouchPaddingDip();
+    event.data.longPress.width = touch_padding_dip;
+    event.data.longPress.height = touch_padding_dip;
+  }
+
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::PinchBegin(JNIEnv* env, jobject obj, jlong time_ms,
-                                     jint x, jint y) {
-  SendGestureEvent(
+                                     jfloat x, jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GesturePinchBegin, time_ms, x, y);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::PinchEnd(JNIEnv* env, jobject obj, jlong time_ms) {
-  SendGestureEvent(WebInputEvent::GesturePinchEnd, time_ms, 0, 0);
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GesturePinchEnd, time_ms, 0, 0);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::PinchBy(JNIEnv* env, jobject obj, jlong time_ms,
-                                  jint anchor_x, jint anchor_y, jfloat delta) {
-  WebKit::WebGestureEvent event = WebInputEventFactory::gestureEvent(
-      WebInputEvent::GesturePinchUpdate, time_ms / 1000.0, anchor_x, anchor_y,
-      delta, delta, 0);
+                                  jfloat anchor_x, jfloat anchor_y,
+                                  jfloat delta) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GesturePinchUpdate, time_ms, anchor_x, anchor_y);
   event.data.pinchUpdate.scale = delta;
 
-  if (GetRenderWidgetHostViewAndroid())
-    GetRenderWidgetHostViewAndroid()->SendGestureEvent(event);
+  SendGestureEvent(event);
 }
 
 void ContentViewCoreImpl::SelectBetweenCoordinates(JNIEnv* env, jobject obj,
-                                                   jint x1, jint y1,
-                                                   jint x2, jint y2) {
+                                                   jfloat x1, jfloat y1,
+                                                   jfloat x2, jfloat y2) {
   if (GetRenderWidgetHostViewAndroid()) {
-    GetRenderWidgetHostViewAndroid()->SelectRange(gfx::Point(x1, y1),
-                                                  gfx::Point(x2, y2));
+    GetRenderWidgetHostViewAndroid()->SelectRange(
+        gfx::Point(x1 / GetDpiScale(), y1 / GetDpiScale()),
+        gfx::Point(x2 / GetDpiScale(), y2 / GetDpiScale()));
+  }
+}
+
+void ContentViewCoreImpl::MoveCaret(JNIEnv* env, jobject obj,
+                                    jfloat x, jfloat y) {
+  if (GetRenderWidgetHostViewAndroid()) {
+    GetRenderWidgetHostViewAndroid()->MoveCaret(
+        gfx::Point(x / GetDpiScale(), y / GetDpiScale()));
   }
 }
 
@@ -675,6 +1060,12 @@ void ContentViewCoreImpl::GoToOffset(JNIEnv* env, jobject obj, jint offset) {
   web_contents_->GetController().GoToOffset(offset);
 }
 
+void ContentViewCoreImpl::GoToNavigationIndex(JNIEnv* env,
+                                              jobject obj,
+                                              jint index) {
+  web_contents_->GetController().GoToIndex(index);
+}
+
 void ContentViewCoreImpl::StopLoading(JNIEnv* env, jobject obj) {
   web_contents_->Stop();
 }
@@ -682,8 +1073,19 @@ void ContentViewCoreImpl::StopLoading(JNIEnv* env, jobject obj) {
 void ContentViewCoreImpl::Reload(JNIEnv* env, jobject obj) {
   // Set check_for_repost parameter to false as we have no repost confirmation
   // dialog ("confirm form resubmission" screen will still appear, however).
-  web_contents_->GetController().Reload(false);
+  if (web_contents_->GetController().NeedsReload())
+    web_contents_->GetController().LoadIfNecessary();
+  else
+    web_contents_->GetController().Reload(true);
   tab_crashed_ = false;
+}
+
+void ContentViewCoreImpl::CancelPendingReload(JNIEnv* env, jobject obj) {
+  web_contents_->GetController().CancelPendingReload();
+}
+
+void ContentViewCoreImpl::ContinuePendingReload(JNIEnv* env, jobject obj) {
+  web_contents_->GetController().ContinuePendingReload();
 }
 
 void ContentViewCoreImpl::ClearHistory(JNIEnv* env, jobject obj) {
@@ -695,14 +1097,21 @@ void ContentViewCoreImpl::AddJavascriptInterface(
     jobject /* obj */,
     jobject object,
     jstring name,
-    jboolean require_annotation) {
+    jclass safe_annotation_clazz,
+    jobject retained_object_set) {
   ScopedJavaLocalRef<jobject> scoped_object(env, object);
+  ScopedJavaLocalRef<jclass> scoped_clazz(env, safe_annotation_clazz);
+  JavaObjectWeakGlobalRef weak_retained_object_set(env, retained_object_set);
+
   // JavaBoundObject creates the NPObject with a ref count of 1, and
   // JavaBridgeDispatcherHostManager takes its own ref.
-  NPObject* bound_object = JavaBoundObject::Create(scoped_object,
-                                                   require_annotation);
-  web_contents_->java_bridge_dispatcher_host_manager()->AddNamedObject(
-      ConvertJavaStringToUTF16(env, name), bound_object);
+  JavaBridgeDispatcherHostManager* java_bridge =
+      web_contents_->java_bridge_dispatcher_host_manager();
+  java_bridge->SetRetainedObjectSet(weak_retained_object_set);
+  NPObject* bound_object = JavaBoundObject::Create(scoped_object, scoped_clazz,
+                                                   java_bridge->AsWeakPtr());
+  java_bridge->AddNamedObject(ConvertJavaStringToUTF16(env, name),
+                              bound_object);
   WebKit::WebBindings::releaseObject(bound_object);
 }
 
@@ -713,6 +1122,117 @@ void ContentViewCoreImpl::RemoveJavascriptInterface(JNIEnv* env,
       ConvertJavaStringToUTF16(env, name));
 }
 
+void ContentViewCoreImpl::UpdateVSyncParameters(JNIEnv* env, jobject /* obj */,
+                                                jlong timebase_micros,
+                                                jlong interval_micros) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  if (!view)
+    return;
+
+  RenderWidgetHostImpl* host = RenderWidgetHostImpl::From(
+      view->GetRenderWidgetHost());
+
+  host->UpdateVSyncParameters(
+      base::TimeTicks::FromInternalValue(timebase_micros),
+      base::TimeDelta::FromMicroseconds(interval_micros));
+}
+
+jboolean ContentViewCoreImpl::PopulateBitmapFromCompositor(JNIEnv* env,
+                                                           jobject obj,
+                                                           jobject jbitmap) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  if (!view)
+    return false;
+
+  return view->PopulateBitmapWithContents(jbitmap);
+}
+
+void ContentViewCoreImpl::WasResized(JNIEnv* env, jobject obj) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  if (view)
+    view->WasResized();
+}
+
+void ContentViewCoreImpl::ShowInterstitialPage(
+    JNIEnv* env, jobject obj, jstring jurl, jint delegate_ptr) {
+  GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
+  InterstitialPageDelegateAndroid* delegate =
+      reinterpret_cast<InterstitialPageDelegateAndroid*>(delegate_ptr);
+  InterstitialPage* interstitial = InterstitialPage::Create(
+      web_contents_, false, url, delegate);
+  delegate->set_interstitial_page(interstitial);
+  interstitial->Show();
+}
+
+jboolean ContentViewCoreImpl::IsShowingInterstitialPage(JNIEnv* env,
+                                                        jobject obj) {
+  return web_contents_->ShowingInterstitialPage();
+}
+
+jboolean ContentViewCoreImpl::ConsumePendingRendererFrame(JNIEnv* env,
+                                                          jobject obj) {
+  bool had_pending_frame = renderer_frame_pending_;
+  renderer_frame_pending_ = false;
+  return had_pending_frame;
+}
+
+jboolean ContentViewCoreImpl::IsRenderWidgetHostViewReady(JNIEnv* env,
+                                                          jobject obj) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  return view && view->HasValidFrame();
+}
+
+void ContentViewCoreImpl::ExitFullscreen(JNIEnv* env, jobject obj) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->ExitFullscreen();
+}
+
+void ContentViewCoreImpl::EnableHidingTopControls(JNIEnv* env, jobject obj,
+                                                  bool enable) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new ViewMsg_EnableHidingTopControls(host->GetRoutingID(), enable));
+}
+
+void ContentViewCoreImpl::ShowImeIfNeeded(JNIEnv* env, jobject obj) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new ViewMsg_ShowImeIfNeeded(host->GetRoutingID()));
+}
+
+void ContentViewCoreImpl::ScrollFocusedEditableNodeIntoView(JNIEnv* env,
+                                                            jobject obj) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new ViewMsg_ScrollFocusedEditableNodeIntoRect(host->GetRoutingID(),
+                                                           gfx::Rect()));
+}
+
+namespace {
+
+static void AddNavigationEntryToHistory(JNIEnv* env, jobject obj,
+                                        jobject history,
+                                        NavigationEntry* entry,
+                                        int index) {
+  // Get the details of the current entry
+  ScopedJavaLocalRef<jstring> j_url(
+      ConvertUTF8ToJavaString(env, entry->GetURL().spec()));
+  ScopedJavaLocalRef<jstring> j_virtual_url(
+      ConvertUTF8ToJavaString(env, entry->GetVirtualURL().spec()));
+  ScopedJavaLocalRef<jstring> j_original_url(
+      ConvertUTF8ToJavaString(env, entry->GetOriginalRequestURL().spec()));
+  ScopedJavaLocalRef<jstring> j_title(
+      ConvertUTF16ToJavaString(env, entry->GetTitle()));
+  ScopedJavaLocalRef<jobject> j_bitmap;
+  const FaviconStatus& status = entry->GetFavicon();
+  if (status.valid && status.image.ToSkBitmap()->getSize() > 0)
+    j_bitmap = gfx::ConvertToJavaBitmap(status.image.ToSkBitmap());
+
+  // Add the item to the list
+  Java_ContentViewCore_addToNavigationHistory(
+      env, obj, history, index, j_url.obj(), j_virtual_url.obj(),
+      j_original_url.obj(), j_title.obj(), j_bitmap.obj());
+}
+
+}  // namespace
+
 int ContentViewCoreImpl::GetNavigationHistory(JNIEnv* env,
                                               jobject obj,
                                               jobject context) {
@@ -720,30 +1240,33 @@ int ContentViewCoreImpl::GetNavigationHistory(JNIEnv* env,
   const NavigationController& controller = web_contents_->GetController();
   int count = controller.GetEntryCount();
   for (int i = 0; i < count; ++i) {
-    NavigationEntry* entry = controller.GetEntryAtIndex(i);
-
-    // Get the details of the current entry
-    ScopedJavaLocalRef<jstring> j_url = ConvertUTF8ToJavaString(env,
-        entry->GetURL().spec());
-    ScopedJavaLocalRef<jstring> j_virtual_url = ConvertUTF8ToJavaString(env,
-        entry->GetVirtualURL().spec());
-    ScopedJavaLocalRef<jstring> j_original_url = ConvertUTF8ToJavaString(env,
-        entry->GetOriginalRequestURL().spec());
-    ScopedJavaLocalRef<jstring> j_title = ConvertUTF16ToJavaString(env,
-        entry->GetTitle());
-    ScopedJavaLocalRef<jobject> j_bitmap;
-    const FaviconStatus& status = entry->GetFavicon();
-    if (status.valid && status.image.ToSkBitmap()->getSize() > 0) {
-      j_bitmap = gfx::ConvertToJavaBitmap(status.image.ToSkBitmap());
-    }
-
-    // Add the item to the list
-    Java_ContentViewCore_addToNavigationHistory(env, obj, context, j_url.obj(),
-        j_virtual_url.obj(), j_original_url.obj(), j_title.obj(),
-        j_bitmap.obj());
+    AddNavigationEntryToHistory(
+        env, obj, context, controller.GetEntryAtIndex(i), i);
   }
 
   return controller.GetCurrentEntryIndex();
+}
+
+void ContentViewCoreImpl::GetDirectedNavigationHistory(JNIEnv* env,
+                                                       jobject obj,
+                                                       jobject context,
+                                                       jboolean is_forward,
+                                                       jint max_entries) {
+  // Iterate through navigation entries to populate the list
+  const NavigationController& controller = web_contents_->GetController();
+  int count = controller.GetEntryCount();
+  int num_added = 0;
+  int increment_value = is_forward ? 1 : -1;
+  for (int i = controller.GetCurrentEntryIndex() + increment_value;
+       i >= 0 && i < count;
+       i += increment_value) {
+    if (num_added >= max_entries)
+      break;
+
+    AddNavigationEntryToHistory(
+        env, obj, context, controller.GetEntryAtIndex(i), i);
+    num_added++;
+  }
 }
 
 int ContentViewCoreImpl::GetNativeImeAdapter(JNIEnv* env, jobject obj) {
@@ -757,15 +1280,52 @@ jboolean ContentViewCoreImpl::NeedsReload(JNIEnv* env, jobject obj) {
   return web_contents_->GetController().NeedsReload();
 }
 
-jint ContentViewCoreImpl::EvaluateJavaScript(JNIEnv* env,
+void ContentViewCoreImpl::UndoScrollFocusedEditableNodeIntoView(
+    JNIEnv* env,
+    jobject obj) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(
+      new ViewMsg_UndoScrollFocusedEditableNodeIntoView(host->GetRoutingID()));
+}
+
+namespace {
+void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
+                              const base::Value* result) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::string json;
+  base::JSONWriter::Write(result, &json);
+  ScopedJavaLocalRef<jstring> j_json = ConvertUTF8ToJavaString(env, json);
+  Java_ContentViewCore_onEvaluateJavaScriptResult(env,
+                                                  j_json.obj(),
+                                                  callback.obj());
+}
+}  // namespace
+
+void ContentViewCoreImpl::EvaluateJavaScript(JNIEnv* env,
                                              jobject obj,
-                                             jstring script) {
+                                             jstring script,
+                                             jobject callback) {
   RenderViewHost* host = web_contents_->GetRenderViewHost();
   DCHECK(host);
 
-  string16 script_utf16 = ConvertJavaStringToUTF16(env, script);
-  return host->ExecuteJavascriptInWebFrameNotifyResult(string16(),
-                                                       script_utf16);
+  if (!callback) {
+    // No callback requested.
+    host->ExecuteJavascriptInWebFrame(string16(),  // frame_xpath
+                                      ConvertJavaStringToUTF16(env, script));
+    return;
+  }
+
+  // Secure the Java callback in a scoped object and give ownership of it to the
+  // base::Callback.
+  ScopedJavaGlobalRef<jobject> j_callback;
+  j_callback.Reset(env, callback);
+  content::RenderViewHost::JavascriptResultCallback c_callback =
+      base::Bind(&JavaScriptResultCallback, j_callback);
+
+  host->ExecuteJavascriptInWebFrameCallbackResult(
+      string16(),  // frame_xpath
+      ConvertJavaStringToUTF16(env, script),
+      c_callback);
 }
 
 bool ContentViewCoreImpl::GetUseDesktopUserAgent(
@@ -774,7 +1334,7 @@ bool ContentViewCoreImpl::GetUseDesktopUserAgent(
   return entry && entry->GetIsOverridingUserAgent();
 }
 
-void ContentViewCoreImpl::ImeUpdateAdapter(int native_ime_adapter,
+void ContentViewCoreImpl::UpdateImeAdapter(int native_ime_adapter,
                                            int text_input_type,
                                            const std::string& text,
                                            int selection_start,
@@ -788,12 +1348,26 @@ void ContentViewCoreImpl::ImeUpdateAdapter(int native_ime_adapter,
     return;
 
   ScopedJavaLocalRef<jstring> jstring_text = ConvertUTF8ToJavaString(env, text);
-  Java_ContentViewCore_imeUpdateAdapter(env, obj.obj(),
+  Java_ContentViewCore_updateImeAdapter(env, obj.obj(),
                                         native_ime_adapter, text_input_type,
                                         jstring_text.obj(),
                                         selection_start, selection_end,
                                         composition_start, composition_end,
                                         show_ime_if_needed);
+}
+
+void ContentViewCoreImpl::ProcessImeBatchStateAck(bool is_begin) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_ContentViewCore_processImeBatchStateAck(env, obj.obj(), is_begin);
+}
+
+void ContentViewCoreImpl::ClearSslPreferences(JNIEnv* env, jobject obj) {
+  SSLHostState* state = SSLHostState::GetFor(
+      web_contents_->GetController().GetBrowserContext());
+  state->Clear();
 }
 
 void ContentViewCoreImpl::SetUseDesktopUserAgent(
@@ -824,22 +1398,15 @@ void ContentViewCoreImpl::SetUseDesktopUserAgent(
 
 // This is called for each ContentView.
 jint Init(JNIEnv* env, jobject obj,
+          jboolean input_events_delivered_at_vsync,
           jboolean hardware_accelerated,
           jint native_web_contents,
           jint native_window) {
   ContentViewCoreImpl* view = new ContentViewCoreImpl(
-      env, obj, hardware_accelerated,
+      env, obj, input_events_delivered_at_vsync, hardware_accelerated,
       reinterpret_cast<WebContents*>(native_web_contents),
       reinterpret_cast<ui::WindowAndroid*>(native_window));
   return reinterpret_cast<jint>(view);
-}
-
-jint EvaluateJavaScript(JNIEnv* env, jobject obj, jstring script) {
-  ContentViewCoreImpl* view = static_cast<ContentViewCoreImpl*>(
-      ContentViewCore::GetNativeContentViewCore(env, obj));
-  DCHECK(view);
-
-  return view->EvaluateJavaScript(env, obj, script);
 }
 
 bool RegisterContentViewCore(JNIEnv* env) {

@@ -7,12 +7,14 @@
 #include "base/logging.h"
 #include "content/renderer/dom_storage/webstoragearea_impl.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "webkit/dom_storage/dom_storage_types.h"
 
 using WebKit::WebStorageArea;
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
+
+namespace content {
 
 WebStorageNamespaceImpl::WebStorageNamespaceImpl()
     : namespace_id_(dom_storage::kLocalStorageNamespaceId) {
@@ -46,3 +48,5 @@ bool WebStorageNamespaceImpl::isSameNamespace(
       static_cast<const WebStorageNamespaceImpl*>(&other);
   return namespace_id_ == other_impl->namespace_id_;
 }
+
+}  // namespace content

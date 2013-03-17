@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -33,8 +33,7 @@ class InfobarTest(pyauto.PyUITest):
   def setUp(self):
     pyauto.PyUITest.setUp(self)
     self._flash_plugin_type = 'Plug-in'
-    if ((self.IsLinux() or self.IsWin()) and
-        self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome'):
+    if self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome':
       self._flash_plugin_type = 'Pepper Plugin'
     # Forcibly trigger all plugins to get registered.  crbug.com/94123
     # Sometimes flash files loaded too quickly after firing browser
@@ -311,22 +310,6 @@ class OneClickInfobarTest(pyauto.PyUITest):
     self._DisplayOneClickInfobar()
     self._OpenSecondProfile()
     self._DisplayOneClickInfobar(windex=1)
-
-  def testNoSameIDSigninForTwoProfiles(self):
-    """Verify two profiles cannot be signed in with same ID.
-
-    Make sure that the one-click sign in infobar does not appear for two
-    profiles trying to sign in with the same ID. This test creates a profile
-    and connects it to a Google account. Another new profile is created and
-    tries to login with the connected account from the first profile.
-
-    This test verifies the following bug: crbug.com/122975
-    """
-    test_utils.SignInToSyncAndVerifyState(self, 'test_google_account')
-    self._OpenSecondProfile()
-    self._LogIntoGoogleAccount(tab_index=0, windex=1)
-    self.assertTrue(lambda: test_utils.GetInfobarIndexByType(
-        self, self.OC_INFOBAR_TYPE, tab_index=0, windex=1) is None)
 
   def testNoOneClickInfobarWhenCookiesBlocked(self):
     """Verify one-click infobar does not show when cookies are blocked.

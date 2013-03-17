@@ -20,12 +20,13 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/public/common/url_constants.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class CommandUpdater;
 class GURL;
 class OmniboxEditController;
+class OmniboxViewMacTest;
 class Profile;
 class ToolbarModel;
 
@@ -58,6 +59,9 @@ class OmniboxView {
 
   CommandUpdater* command_updater() { return command_updater_; }
   const CommandUpdater* command_updater() const { return command_updater_; }
+
+  ToolbarModel* toolbar_model() { return toolbar_model_; }
+  const ToolbarModel* toolbar_model() const { return toolbar_model_; }
 
   // For use when switching tabs, this saves the current state onto the tab so
   // that it can be restored during a later call to Update().
@@ -102,7 +106,8 @@ class OmniboxView {
                            const string16& display_text,
                            bool update_popup);
 
-  // Sets the window text and the caret position.
+  // Sets the window text and the caret position. |notify_text_changed| is true
+  // if the model should be notified of the change.
   virtual void SetWindowTextAndCaretPos(const string16& text,
                                         size_t caret_pos,
                                         bool update_popup,
@@ -149,12 +154,18 @@ class OmniboxView {
   // Sets the focus to the autocomplete view.
   virtual void SetFocus() = 0;
 
+  // Shows or hides the caret based on whether the model's is_caret_visible() is
+  // true.
+  virtual void ApplyCaretVisibility() = 0;
+
   // Called when the temporary text in the model may have changed.
   // |display_text| is the new text to show; |save_original_selection| is true
   // when there wasn't previously a temporary text and thus we need to save off
-  // the user's existing selection.
+  // the user's existing selection. |notify_text_changed| is true if the model
+  // should be notified of the change.
   virtual void OnTemporaryTextMaybeChanged(const string16& display_text,
-                                           bool save_original_selection) = 0;
+                                           bool save_original_selection,
+                                           bool notify_text_changed) = 0;
 
   // Called when the inline autocomplete text in the model may have changed.
   // |display_text| is the new text to show; |user_text_length| is the length of
@@ -184,10 +195,8 @@ class OmniboxView {
   // the top-most window is the relative window.
   virtual gfx::NativeView GetRelativeWindowForPopup() const = 0;
 
-  // Shows the instant suggestion text. If |animate_to_complete| is true the
-  // view should start an animation that when done commits the text.
-  virtual void SetInstantSuggestion(const string16& input,
-                                    bool animate_to_complete) = 0;
+  // Shows the instant suggestion text.
+  virtual void SetInstantSuggestion(const string16& input) = 0;
 
   // Returns the current instant suggestion text.
   virtual string16 GetInstantSuggestion() const = 0;
@@ -244,10 +253,10 @@ class OmniboxView {
   virtual void EmphasizeURLComponents() = 0;
 
   OmniboxEditController* controller() { return controller_; }
-  ToolbarModel* toolbar_model() { return toolbar_model_; }
-  const ToolbarModel* toolbar_model() const { return toolbar_model_; }
 
  private:
+  friend class OmniboxViewMacTest;
+
   // |model_| can be NULL in tests.
   scoped_ptr<OmniboxEditModel> model_;
   OmniboxEditController* controller_;

@@ -4,11 +4,13 @@
 
 #include "content/test/layout_browsertest.h"
 
+namespace content {
+
 class AppCacheLayoutTest : public InProcessBrowserLayoutTest {
  public:
   AppCacheLayoutTest() : InProcessBrowserLayoutTest(
-      FilePath().AppendASCII("http").AppendASCII("tests"),
-      FilePath().AppendASCII("appcache"),
+      base::FilePath().AppendASCII("http").AppendASCII("tests"),
+      base::FilePath().AppendASCII("appcache"),
       -1) {
   }
 
@@ -95,3 +97,5 @@ IN_PROC_BROWSER_TEST_F(AppCacheLayoutTest, DISABLED_PHP) {
   for (size_t i = 0; i < arraysize(kPHPTests); ++i)
     RunHttpLayoutTest(kPHPTests[i]);
 }
+
+}  // namespace content

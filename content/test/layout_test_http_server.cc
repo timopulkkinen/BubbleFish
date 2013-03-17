@@ -16,17 +16,18 @@
 #include "base/win/windows_version.h"
 #endif
 
+namespace content {
 namespace {
 
 bool PrepareCommandLine(CommandLine* cmd_line) {
-  FilePath src_path;
+  base::FilePath src_path;
   if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_path))
     return false;
 
   if (!GetPythonCommand(cmd_line))
     return false;
 
-  FilePath script_path(src_path);
+  base::FilePath script_path(src_path);
   script_path = script_path.AppendASCII("third_party");
   script_path = script_path.AppendASCII("WebKit");
   script_path = script_path.AppendASCII("Tools");
@@ -39,7 +40,7 @@ bool PrepareCommandLine(CommandLine* cmd_line) {
 
 }  // namespace
 
-LayoutTestHttpServer::LayoutTestHttpServer(const FilePath& root_directory,
+LayoutTestHttpServer::LayoutTestHttpServer(const base::FilePath& root_directory,
                                            int port)
     : root_directory_(root_directory),
       port_(port),
@@ -66,8 +67,8 @@ bool LayoutTestHttpServer::Start() {
                            root_directory_.value());
   cmd_line.AppendArg("--port=" + base::IntToString(port_));
 
-  FilePath layout_tests_dir;
-  if (!PathService::Get(content::DIR_LAYOUT_TESTS, &layout_tests_dir))
+  base::FilePath layout_tests_dir;
+  if (!PathService::Get(DIR_LAYOUT_TESTS, &layout_tests_dir))
     return false;
   cmd_line.AppendArgNative(FILE_PATH_LITERAL("--layout_tests_dir=") +
                            layout_tests_dir.value());
@@ -130,3 +131,5 @@ bool LayoutTestHttpServer::Stop() {
 
   return stopped;
 }
+
+}  // namespace content

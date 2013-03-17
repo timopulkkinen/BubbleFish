@@ -18,7 +18,6 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/field_types.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -38,30 +37,33 @@ class BrowserContext;
 // Handles loading and saving Autofill profile information to the web database.
 // This class also stores the profiles loaded from the database for use during
 // Autofill.
-class PersonalDataManager
-    : public WebDataServiceConsumer,
-      public ProfileSyncServiceObserver,
-      public ProfileKeyedService,
-      public content::NotificationObserver {
+class PersonalDataManager : public WebDataServiceConsumer,
+                            public ProfileSyncServiceObserver,
+                            public content::NotificationObserver {
  public:
+  // A pair of GUID and variant index. Represents a single FormGroup and a
+  // specific data variant.
+  typedef std::pair<std::string, size_t> GUIDPair;
+
+  PersonalDataManager();
+  virtual ~PersonalDataManager();
+
+  // Kicks off asynchronous loading of profiles and credit cards.
+  void Init(content::BrowserContext* context);
+
   // WebDataServiceConsumer:
   virtual void OnWebDataServiceRequestDone(
       WebDataServiceBase::Handle h,
       const WDTypedResult* result) OVERRIDE;
 
-  // Sets the listener to be notified of PersonalDataManager events.
-  virtual void SetObserver(PersonalDataManagerObserver* observer);
+  // Adds a listener to be notified of PersonalDataManager events.
+  virtual void AddObserver(PersonalDataManagerObserver* observer);
 
-  // Removes |observer| as the observer of this PersonalDataManager.
+  // Removes |observer| as an observer of this PersonalDataManager.
   virtual void RemoveObserver(PersonalDataManagerObserver* observer);
 
   // ProfileSyncServiceObserver:
   virtual void OnStateChanged() OVERRIDE;
-
-  // ProfileKeyedService:
-  // Cancels any pending requests to WebDataServiceBase and stops
-  // listening for Sync notifications.
-  virtual void Shutdown() OVERRIDE;
 
   // content::NotificationObserver:
   // Observes "batch" changes made by Sync and refreshes data from the
@@ -78,6 +80,9 @@ class PersonalDataManager
   bool ImportFormData(const FormStructure& form,
                       const CreditCard** credit_card);
 
+  // Saves |imported_profile| to the WebDB if it exists.
+  virtual void SaveImportedProfile(const AutofillProfile& imported_profile);
+
   // Saves a credit card value detected in |ImportedFormData|.
   virtual void SaveImportedCreditCard(const CreditCard& imported_credit_card);
 
@@ -87,11 +92,12 @@ class PersonalDataManager
   // Updates |profile| which already exists in the web database.
   void UpdateProfile(const AutofillProfile& profile);
 
-  // Removes the profile represented by |guid|.
-  virtual void RemoveProfile(const std::string& guid);
+  // Removes the profile or credit card represented by |guid|.
+  virtual void RemoveByGUID(const std::string& guid);
 
   // Returns the profile with the specified |guid|, or NULL if there is no
-  // profile with the specified |guid|.
+  // profile with the specified |guid|. Both web and auxiliary profiles may
+  // be returned.
   AutofillProfile* GetProfileByGUID(const std::string& guid);
 
   // Adds |credit_card| to the web database.
@@ -100,15 +106,12 @@ class PersonalDataManager
   // Updates |credit_card| which already exists in the web database.
   void UpdateCreditCard(const CreditCard& credit_card);
 
-  // Removes the credit card represented by |guid|.
-  virtual void RemoveCreditCard(const std::string& guid);
-
   // Returns the credit card with the specified |guid|, or NULL if there is
   // no credit card with the specified |guid|.
   CreditCard* GetCreditCardByGUID(const std::string& guid);
 
   // Gets the field types availabe in the stored address and credit card data.
-  void GetNonEmptyTypes(FieldTypeSet* non_empty_types) const;
+  void GetNonEmptyTypes(FieldTypeSet* non_empty_types);
 
   // Returns true if the credit card information is stored with a password.
   bool HasPassword();
@@ -120,9 +123,34 @@ class PersonalDataManager
   // lifetime is until the web database is updated with new profile and credit
   // card information, respectively.  |profiles()| returns both web and
   // auxiliary profiles.  |web_profiles()| returns only web profiles.
-  const std::vector<AutofillProfile*>& profiles() const;
+  const std::vector<AutofillProfile*>& GetProfiles();
   virtual const std::vector<AutofillProfile*>& web_profiles() const;
   virtual const std::vector<CreditCard*>& credit_cards() const;
+
+  // Loads profiles that can suggest data for |type|. |field_contents| is the
+  // part the user has already typed. |field_is_autofilled| is true if the field
+  // has already been autofilled. |other_field_types| represents the rest of
+  // form. Identifying info is loaded into the last four outparams.
+  void GetProfileSuggestions(
+      AutofillFieldType type,
+      const string16& field_contents,
+      bool field_is_autofilled,
+      std::vector<AutofillFieldType> other_field_types,
+      std::vector<string16>* values,
+      std::vector<string16>* labels,
+      std::vector<string16>* icons,
+      std::vector<GUIDPair>* guid_pairs);
+
+  // Gets credit cards that can suggest data for |type|. See
+  // GetProfileSuggestions for argument descriptions. The variant in each
+  // GUID pair should be ignored.
+  void GetCreditCardSuggestions(
+      AutofillFieldType type,
+      const string16& field_contents,
+      std::vector<string16>* values,
+      std::vector<string16>* labels,
+      std::vector<string16>* icons,
+      std::vector<GUIDPair>* guid_pairs);
 
   // Re-loads profiles and credit cards from the WebDatabase asynchronously.
   // In the general case, this is a no-op and will re-create the same
@@ -155,15 +183,12 @@ class PersonalDataManager
   friend class AutofillTest;
   friend class PersonalDataManagerFactory;
   friend class PersonalDataManagerTest;
-  friend class scoped_ptr<PersonalDataManager>;
   friend class ProfileSyncServiceAutofillTest;
   friend class RemoveAutofillTester;
   friend class TestingAutomationProvider;
+  friend struct base::DefaultDeleter<PersonalDataManager>;
   friend void autofill_helper::SetProfiles(int, std::vector<AutofillProfile>*);
   friend void autofill_helper::SetCreditCards(int, std::vector<CreditCard>*);
-
-  PersonalDataManager();
-  virtual ~PersonalDataManager();
 
   // Sets |web_profiles_| to the contents of |profiles| and updates the web
   // database by adding, updating and removing profiles.
@@ -185,7 +210,7 @@ class PersonalDataManager
   virtual void LoadProfiles();
 
   // Loads the auxiliary profiles.  Currently Mac only.
-  void LoadAuxiliaryProfiles() const;
+  virtual void LoadAuxiliaryProfiles();
 
   // Loads the saved credit cards from the web database.
   virtual void LoadCreditCards();
@@ -204,9 +229,6 @@ class PersonalDataManager
   // query handle.
   void CancelPendingQuery(WebDataServiceBase::Handle* handle);
 
-  // Saves |imported_profile| to the WebDB if it exists.
-  virtual void SaveImportedProfile(const AutofillProfile& imported_profile);
-
   // Notifies Sync about data migration if necessary.
   void EmptyMigrationTrash();
 
@@ -220,6 +242,7 @@ class PersonalDataManager
   // For tests.
   const AutofillMetrics* metric_logger() const;
   void set_metric_logger(const AutofillMetrics* metric_logger);
+  void set_browser_context(content::BrowserContext* context);
 
   // The browser context this PersonalDataManager is in.
   content::BrowserContext* browser_context_;
@@ -251,8 +274,6 @@ class PersonalDataManager
   ObserverList<PersonalDataManagerObserver> observers_;
 
  private:
-  // Kicks off asynchronous loading of profiles and credit cards.
-  void Init(content::BrowserContext* context);
 
   // For logging UMA metrics. Overridden by metrics tests.
   scoped_ptr<const AutofillMetrics> metric_logger_;

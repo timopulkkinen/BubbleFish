@@ -8,6 +8,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
@@ -20,7 +21,7 @@ namespace gpu {
 class GLCopyTextureCHROMIUMTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    gl_.Initialize(gfx::Size(4, 4));
+    gl_.Initialize(GLManager::Options());
 
     glGenTextures(2, textures_);
     glBindTexture(GL_TEXTURE_2D, textures_[1]);
@@ -406,7 +407,10 @@ TEST_F(GLCopyTextureCHROMIUMTest, ProgramStatePreservation) {
   glBindTexture(GL_TEXTURE_2D, 0);
 
   GLManager gl2;
-  gl2.InitializeShared(gfx::Size(16, 16), &gl_);
+  GLManager::Options options;
+  options.size = gfx::Size(16, 16);
+  options.share_group_manager = &gl_;
+  gl2.Initialize(options);
   gl_.MakeCurrent();
 
   static const char* v_shader_str =

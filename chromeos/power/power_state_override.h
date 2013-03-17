@@ -9,27 +9,43 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/dbus/dbus_thread_manager_observer.h"
 
 namespace chromeos {
 
+class DBusThreadManager;
+
 // This class overrides the current power state on the machine, disabling
 // a set of power management features.
-class CHROMEOS_EXPORT PowerStateOverride {
+class CHROMEOS_EXPORT PowerStateOverride
+    : public base::RefCountedThreadSafe<PowerStateOverride>,
+      public DBusThreadManagerObserver {
  public:
   enum Mode {
     // Blocks the screen from being dimmed or blanked due to user inactivity.
     // Also implies BLOCK_SYSTEM_SUSPEND.
     BLOCK_DISPLAY_SLEEP,
 
-    // Blocks the system from being suspended due to user inactivity or (in the
-    // case of a laptop) the lid being closed.
+    // Blocks the system from being suspended due to user inactivity.
     BLOCK_SYSTEM_SUSPEND,
   };
 
   explicit PowerStateOverride(Mode mode);
-  ~PowerStateOverride();
+
+  // DBusThreadManagerObserver implementation:
+  virtual void OnDBusThreadManagerDestroying(DBusThreadManager* manager)
+      OVERRIDE;
 
  private:
+  friend class base::RefCountedThreadSafe<PowerStateOverride>;
+
+  // This destructor cancels the current power state override. There might be
+  // a very slight delay between the the last reference to an instance being
+  // released and the power state override being canceled. This is only in
+  // the case that the current instance has JUST been created and ChromeOS
+  // hasn't had a chance to service the initial power override request yet.
+  virtual ~PowerStateOverride();
+
   // Callback from RequestPowerStateOverride which receives our request_id.
   void SetRequestId(uint32 request_id);
 
@@ -37,6 +53,10 @@ class CHROMEOS_EXPORT PowerStateOverride {
   // delayed task since we cannot call back into power manager from Heartbeat
   // since the last request has just been completed at that point.
   void CallRequestPowerStateOverrides();
+
+  // Asks the power manager to cancel |request_id_| and sets it to zero.
+  // Does nothing if it's already zero.
+  void CancelRequest();
 
   // Bitmap containing requested override types from
   // PowerManagerClient::PowerStateOverrideType.
@@ -49,7 +69,7 @@ class CHROMEOS_EXPORT PowerStateOverride {
   // override.
   base::RepeatingTimer<PowerStateOverride> heartbeat_;
 
-  base::WeakPtrFactory<PowerStateOverride> weak_ptr_factory_;
+  DBusThreadManager* dbus_thread_manager_;  // not owned
 
   DISALLOW_COPY_AND_ASSIGN(PowerStateOverride);
 };

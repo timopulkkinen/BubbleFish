@@ -83,6 +83,16 @@ class NavigationController {
     // static constants.
   };
 
+  enum RestoreType {
+    // Indicates the restore is from the current session. For example, restoring
+    // a closed tab.
+    RESTORE_CURRENT_SESSION,
+
+    // Restore from the previous session.
+    RESTORE_LAST_SESSION_EXITED_CLEANLY,
+    RESTORE_LAST_SESSION_CRASHED,
+  };
+
   // Creates a navigation entry and translates the virtual url to a real one.
   // This is a general call; prefer LoadURL[FromRenderer]/TransferURL below.
   // Extra headers are separated by \n.
@@ -138,6 +148,17 @@ class NavigationController {
     // after LoadURLWithParams call.
     scoped_refptr<base::RefCountedMemory> browser_initiated_post_data;
 
+    // True if this URL should be able to access local resources.
+    bool can_load_local_resources;
+
+    // Indicates whether this navigation involves a cross-process redirect,
+    // in which case it should replace the current navigation entry.
+    bool is_cross_site_redirect;
+
+    // Used to specify which frame to navigate. If empty, the main frame is
+    // navigated. This is currently only used in tests.
+    std::string frame_name;
+
     explicit LoadURLParams(const GURL& url);
     ~LoadURLParams();
 
@@ -161,14 +182,13 @@ class NavigationController {
   virtual void SetBrowserContext(BrowserContext* browser_context) = 0;
 
   // Initializes this NavigationController with the given saved navigations,
-  // using selected_navigation as the currently loaded entry. Before this call
-  // the controller should be unused (there should be no current entry). If
-  // from_last_session is true, navigations are from the previous session,
-  // otherwise they are from the current session (undo tab close). This takes
-  // ownership of the NavigationEntrys in |entries| and clears it out.
-  // This is used for session restore.
+  // using |selected_navigation| as the currently loaded entry. Before this call
+  // the controller should be unused (there should be no current entry). |type|
+  // indicates where the restor comes from. This takes ownership of the
+  // NavigationEntrys in |entries| and clears it out.  This is used for session
+  // restore.
   virtual void Restore(int selected_navigation,
-                       bool from_last_session,
+                       RestoreType type,
                        std::vector<NavigationEntry*>* entries) = 0;
 
   // Entries -------------------------------------------------------------------
@@ -249,6 +269,15 @@ class NavigationController {
   // by the navigation controller and may be deleted at any time.
   virtual NavigationEntry* GetTransientEntry() const = 0;
 
+  // Adds an entry that is returned by GetActiveEntry(). The entry is
+  // transient: any navigation causes it to be removed and discarded.  The
+  // NavigationController becomes the owner of |entry| and deletes it when
+  // it discards it. This is useful with interstitial pages that need to be
+  // represented as an entry, but should go away when the user navigates away
+  // from them.
+  // Note that adding a transient entry does not change the active contents.
+  virtual void SetTransientEntry(NavigationEntry* entry) = 0;
+
   // New navigations -----------------------------------------------------------
 
   // Loads the specified URL, specifying extra http headers to add to the
@@ -305,6 +334,9 @@ class NavigationController {
 
   // Random --------------------------------------------------------------------
 
+  // Session storage depends on dom_storage that depends on WebKit::WebString,
+  // which cannot be used on iOS.
+#if !defined(OS_IOS)
   // Returns all the SessionStorageNamespace objects that this
   // NavigationController knows about.
   virtual const SessionStorageNamespaceMap&
@@ -313,6 +345,7 @@ class NavigationController {
   // TODO(ajwong): Remove this once prerendering, instant, and session restore
   // are migrated.
   virtual SessionStorageNamespace* GetDefaultSessionStorageNamespace() = 0;
+#endif
 
   // Sets the max restored page ID this NavigationController has seen, if it
   // was restored from a previous session.
@@ -357,6 +390,10 @@ class NavigationController {
   // Removes all the entries except the active entry. If there is a new pending
   // navigation it is preserved.
   virtual void PruneAllButActive() = 0;
+
+  // Clears all screenshots associated with navigation entries in this
+  // controller. Useful to reduce memory consumption in low-memory situations.
+  virtual void ClearAllScreenshots() = 0;
 };
 
 }  // namespace content

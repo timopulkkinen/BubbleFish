@@ -69,13 +69,21 @@ class ShillClientUnittestBase : public testing::Test {
     base::Closure GetCallback();
   };
 
+  class MockListValueCallback {
+   public:
+    MockListValueCallback();
+    ~MockListValueCallback();
+    MOCK_METHOD1(Run, void(const base::ListValue& list));
+    ShillClientHelper::ListValueCallback GetCallback();
+  };
+
   // A mock ErrorCallback.
   class MockErrorCallback {
    public:
     MockErrorCallback();
     ~MockErrorCallback();
     MOCK_METHOD2(Run, void(const std::string& error_name,
-                           const std::string& error_mesage));
+                           const std::string& error_message));
     ShillClientHelper::ErrorCallback GetCallback();
   };
 
@@ -122,6 +130,10 @@ class ShillClientUnittestBase : public testing::Test {
   static void ExpectStringArgument(const std::string& expected_string,
                                    dbus::MessageReader* reader);
 
+  static void ExpectArrayOfStringsArgument(
+      const std::vector<std::string>& expected_strings,
+      dbus::MessageReader* reader);
+
   // Expects the reader to have a Value.
   static void ExpectValueArgument(const base::Value* expected_value,
                                   dbus::MessageReader* reader);
@@ -139,10 +151,17 @@ class ShillClientUnittestBase : public testing::Test {
                                      DBusMethodCallStatus call_status,
                                      const dbus::ObjectPath& result);
 
-  // Checks the result and expects the call status to be SUCCESS.
   static void ExpectObjectPathResultWithoutStatus(
       const dbus::ObjectPath& expected_result,
       const dbus::ObjectPath& result);
+
+  static void ExpectBoolResultWithoutStatus(
+      bool expected_result,
+      bool result);
+
+  static void ExpectStringResultWithoutStatus(
+      const std::string& expected_result,
+      const std::string& result);
 
   // Checks the result and expects the call status to be SUCCESS.
   static void ExpectDictionaryValueResult(

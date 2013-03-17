@@ -12,6 +12,8 @@
 #include "base/time.h"
 #include "content/common/gpu/gpu_watchdog.h"
 
+namespace content {
+
 // A thread that intermitently sends tasks to a group of watched message loops
 // and deliberately crashes if one of them does not respond after a timeout.
 class GpuWatchdogThread : public base::Thread,
@@ -42,8 +44,9 @@ class GpuWatchdogThread : public base::Thread,
     virtual ~GpuWatchdogTaskObserver();
 
     // Implements MessageLoop::TaskObserver.
-    virtual void WillProcessTask(base::TimeTicks time_posted) OVERRIDE;
-    virtual void DidProcessTask(base::TimeTicks time_posted) OVERRIDE;
+    virtual void WillProcessTask(
+        const base::PendingTask& pending_task) OVERRIDE;
+    virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE;
 
    private:
     GpuWatchdogThread* watchdog_;
@@ -52,7 +55,7 @@ class GpuWatchdogThread : public base::Thread,
   virtual ~GpuWatchdogThread();
 
   void OnAcknowledge();
-  void OnCheck();
+  void OnCheck(bool after_suspend);
   void DeliberatelyTerminateToRecoverFromHang();
 
 #if defined(OS_WIN)
@@ -69,11 +72,15 @@ class GpuWatchdogThread : public base::Thread,
   base::TimeDelta arm_cpu_time_;
 #endif
 
-  base::Time arm_absolute_time_;
+  // Time after which it's assumed that the computer has been suspended since
+  // the task was posted.
+  base::Time suspension_timeout_;
 
   base::WeakPtrFactory<GpuWatchdogThread> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuWatchdogThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_GPU_GPU_WATCHDOG_THREAD_H_

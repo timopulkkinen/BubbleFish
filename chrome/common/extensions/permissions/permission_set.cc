@@ -9,13 +9,16 @@
 #include <string>
 
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/extensions/url_pattern.h"
-#include "chrome/common/extensions/url_pattern_set.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/common/url_pattern.h"
+#include "extensions/common/url_pattern_set.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using extensions::URLPatternSet;
 
 namespace {
 
@@ -44,6 +47,7 @@ const char* kNonPermissionModuleNames[] = {
   "omnibox",
   "pageAction",
   "pageActions",
+  "pageLauncher",
   "permissions",
   "runtime",
   "scriptBadge",
@@ -66,6 +70,7 @@ const char* kNonPermissionFunctionNames[] = {
   "app.installState",
   "app.runningState",
   "management.getPermissionWarningsByManifest",
+  "management.uninstallSelf",
 };
 const size_t kNumNonPermissionFunctionNames =
     arraysize(kNonPermissionFunctionNames);
@@ -195,6 +200,23 @@ PermissionSet* PermissionSet::CreateUnion(
   return new PermissionSet(apis, explicit_hosts, scriptable_hosts);
 }
 
+// static
+PermissionSet* PermissionSet::ExcludeNotInManifestPermissions(
+    const PermissionSet* set) {
+  if (!set)
+    return new PermissionSet();
+
+  APIPermissionSet apis;
+  for (APIPermissionSet::const_iterator i = set->apis().begin();
+       i != set->apis().end(); ++i) {
+    if (!i->ManifestEntryForbidden())
+      apis.insert(i->Clone());
+  }
+
+  return new PermissionSet(
+      apis, set->explicit_hosts(), set->scriptable_hosts());
+}
+
 bool PermissionSet::operator==(
     const PermissionSet& rhs) const {
   return apis_ == rhs.apis_ &&
@@ -203,20 +225,9 @@ bool PermissionSet::operator==(
 }
 
 bool PermissionSet::Contains(const PermissionSet& set) const {
-  // Every set includes the empty set.
-  if (set.IsEmpty())
-    return true;
-
-  if (!apis_.Contains(set.apis()))
-      return false;
-
-  if (!explicit_hosts().Contains(set.explicit_hosts()))
-    return false;
-
-  if (!scriptable_hosts().Contains(set.scriptable_hosts()))
-    return false;
-
-  return true;
+  return apis_.Contains(set.apis()) &&
+         explicit_hosts().Contains(set.explicit_hosts()) &&
+         scriptable_hosts().Contains(set.scriptable_hosts());
 }
 
 std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
@@ -230,7 +241,7 @@ std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
 
 bool PermissionSet::HasAnyAccessToAPI(
     const std::string& api_name) const {
-  if (HasAccessToFunction(api_name))
+  if (HasAccessToFunction(api_name, true))
     return true;
 
   for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
@@ -247,7 +258,7 @@ std::set<std::string>
 }
 
 PermissionMessages PermissionSet::GetPermissionMessages(
-    Extension::Type extension_type) const {
+    Manifest::Type extension_type) const {
   PermissionMessages messages;
 
   if (HasEffectiveFullAccess()) {
@@ -259,7 +270,7 @@ PermissionMessages PermissionSet::GetPermissionMessages(
 
   // Since platform apps always use isolated storage, they can't (silently)
   // access user data on other domains, so there's no need to prompt.
-  if (extension_type != Extension::TYPE_PLATFORM_APP) {
+  if (extension_type != Manifest::TYPE_PLATFORM_APP) {
     if (HasEffectiveAccessToAllHosts()) {
       messages.push_back(PermissionMessage(
           PermissionMessage::kHostsAll,
@@ -279,7 +290,7 @@ PermissionMessages PermissionSet::GetPermissionMessages(
 }
 
 std::vector<string16> PermissionSet::GetWarningMessages(
-    Extension::Type extension_type) const {
+    Manifest::Type extension_type) const {
   std::vector<string16> messages;
   PermissionMessages permissions = GetPermissionMessages(extension_type);
 
@@ -340,14 +351,16 @@ bool PermissionSet::CheckAPIPermissionWithParam(
 }
 
 bool PermissionSet::HasAccessToFunction(
-    const std::string& function_name) const {
+    const std::string& function_name, bool allow_implicit) const {
   // TODO(jstritar): Embed this information in each permission and add a method
   // like GrantsAccess(function_name) to APIPermission. A "default"
   // permission can then handle the modules and functions that everyone can
   // access.
-  for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
-    if (function_name == kNonPermissionFunctionNames[i])
-      return true;
+  if (allow_implicit) {
+    for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
+      if (function_name == kNonPermissionFunctionNames[i])
+        return true;
+    }
   }
 
   // Search for increasingly smaller substrings of |function_name| to see if we
@@ -361,9 +374,11 @@ bool PermissionSet::HasAccessToFunction(
     if (permission && apis_.count(permission->id()))
       return true;
 
-    for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
-      if (name == kNonPermissionModuleNames[i]) {
-        return true;
+    if (allow_implicit) {
+      for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
+        if (name == kNonPermissionModuleNames[i]) {
+          return true;
+        }
       }
     }
     lastdot = name.find_last_of("./");
@@ -496,6 +511,10 @@ std::set<std::string> PermissionSet::GetDistinctHosts(
 }
 
 void PermissionSet::InitImplicitPermissions() {
+  // The downloads permission implies the internal version as well.
+  if (apis_.find(APIPermission::kDownloads) != apis_.end())
+    apis_.insert(APIPermission::kDownloadsInternal);
+
   // The webRequest permission implies the internal version as well.
   if (apis_.find(APIPermission::kWebRequest) != apis_.end())
     apis_.insert(APIPermission::kWebRequestInternal);
@@ -510,8 +529,7 @@ void PermissionSet::InitImplicitExtensionPermissions(
   // Add the implied permissions.
   if (!extension->plugins().empty())
     apis_.insert(APIPermission::kPlugin);
-
-  if (!extension->devtools_url().is_empty())
+  if (!ManifestURL::GetDevToolsPage(extension).is_empty())
     apis_.insert(APIPermission::kDevtools);
 
   // Add the scriptable hosts.

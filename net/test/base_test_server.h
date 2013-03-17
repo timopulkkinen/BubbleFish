@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/host_port_pair.h"
 
@@ -30,15 +30,15 @@ class BaseTestServer {
  public:
   typedef std::pair<std::string, std::string> StringPair;
 
+  // Following types represent protocol schemes. See also
+  // http://www.iana.org/assignments/uri-schemes.html
   enum Type {
     TYPE_BASIC_AUTH_PROXY,
     TYPE_FTP,
-    TYPE_GDATA,
     TYPE_HTTP,
     TYPE_HTTPS,
     TYPE_WS,
     TYPE_WSS,
-    TYPE_SYNC,
     TYPE_TCP_ECHO,
     TYPE_UDP_ECHO,
   };
@@ -107,7 +107,7 @@ class BaseTestServer {
 
     // Returns the relative filename of the file that contains the
     // |server_certificate|.
-    FilePath GetCertificateFile() const;
+    base::FilePath GetCertificateFile() const;
 
     // GetOCSPArgument returns the value of any OCSP argument to testserver or
     // the empty string if there is none.
@@ -128,7 +128,7 @@ class BaseTestServer {
     // each containing a single, PEM-encoded X.509 certificates. The subject
     // from each certificate will be added to the certificate_authorities
     // field of the CertificateRequest.
-    std::vector<FilePath> client_authorities;
+    std::vector<base::FilePath> client_authorities;
 
     // A bitwise-OR of BulkCipher that should be used by the
     // HTTPS server, or BULK_CIPHER_ANY to indicate that all implemented
@@ -148,9 +148,6 @@ class BaseTestServer {
   // Pass as the 'host' parameter during construction to server on 127.0.0.1
   static const char kLocalhost[];
 
-  // The auth token to be used for TYPE_GDATA server.
-  static const char kGDataAuthToken[];
-
   // Initialize a TestServer listening on a specific host (IP or hostname).
   BaseTestServer(Type type,  const std::string& host);
 
@@ -161,7 +158,7 @@ class BaseTestServer {
   // if the server is started.
   const HostPortPair& host_port_pair() const;
 
-  const FilePath& document_root() const { return document_root_; }
+  const base::FilePath& document_root() const { return document_root_; }
   const base::DictionaryValue& server_data() const;
   std::string GetScheme() const;
   bool GetAddressList(AddressList* address_list) const WARN_UNUSED_RESULT;
@@ -179,6 +176,11 @@ class BaseTestServer {
       const std::string& original_path,
       const std::vector<StringPair>& text_to_replace,
       std::string* replacement_path);
+
+  static bool UsingSSL(Type type) {
+    return type == BaseTestServer::TYPE_HTTPS ||
+           type == BaseTestServer::TYPE_WSS;
+  }
 
  protected:
   virtual ~BaseTestServer();
@@ -198,8 +200,8 @@ class BaseTestServer {
   void CleanUpWhenStoppingServer();
 
   // Set path of test resources.
-  void SetResourcePath(const FilePath& document_root,
-                       const FilePath& certificates_dir);
+  void SetResourcePath(const base::FilePath& document_root,
+                       const base::FilePath& certificates_dir);
 
   // Parses the server data read from the test server.  Returns true
   // on success.
@@ -207,7 +209,13 @@ class BaseTestServer {
 
   // Generates a DictionaryValue with the arguments for launching the external
   // Python test server.
-  bool GenerateArguments(base::DictionaryValue* arguments) const;
+  bool GenerateArguments(base::DictionaryValue* arguments) const
+    WARN_UNUSED_RESULT;
+
+  // Subclasses can override this to add arguments that are specific to their
+  // own test servers.
+  virtual bool GenerateAdditionalArguments(
+      base::DictionaryValue* arguments) const WARN_UNUSED_RESULT;
 
  private:
   void Init(const std::string& host);
@@ -217,10 +225,10 @@ class BaseTestServer {
   bool LoadTestRootCert() const WARN_UNUSED_RESULT;
 
   // Document root of the test server.
-  FilePath document_root_;
+  base::FilePath document_root_;
 
   // Directory that contains the SSL certificates.
-  FilePath certificates_dir_;
+  base::FilePath certificates_dir_;
 
   // Address the test server listens on.
   HostPortPair host_port_pair_;

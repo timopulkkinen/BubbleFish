@@ -5,8 +5,13 @@
 #include "ui/aura/test/aura_test_base.h"
 
 #include "ui/aura/test/aura_test_helper.h"
+#include "ui/aura/window.h"
 #include "ui/base/gestures/gesture_configuration.h"
 #include "ui/base/ime/text_input_test_support.h"
+
+#if defined(OS_LINUX)
+#include "ui/base/x/x11_util.h"
+#endif
 
 namespace aura {
 namespace test {
@@ -19,7 +24,7 @@ AuraTestBase::~AuraTestBase() {
 
 void AuraTestBase::SetUp() {
   testing::Test::SetUp();
-  ui::TextInputTestSupport::Initilaize();
+  ui::TextInputTestSupport::Initialize();
 
   // Changing the parameters for gesture recognition shouldn't cause
   // tests to fail, so we use a separate set of parameters for unit
@@ -45,8 +50,16 @@ void AuraTestBase::SetUp() {
   ui::GestureConfiguration::set_rail_break_proportion(15);
   ui::GestureConfiguration::set_rail_start_proportion(2);
   ui::GestureConfiguration::set_default_radius(0);
-  ui::GestureConfiguration::set_touchscreen_fling_acceleration_adjustment(
-      1.f / 900.f);
+  ui::GestureConfiguration::set_fling_acceleration_curve_coefficients(
+      0, 0.0166667f);
+  ui::GestureConfiguration::set_fling_acceleration_curve_coefficients(
+      1, -0.0238095f);
+  ui::GestureConfiguration::set_fling_acceleration_curve_coefficients(
+      2, 0.0452381f);
+  ui::GestureConfiguration::set_fling_acceleration_curve_coefficients(
+      3, 0.8f);
+  ui::GestureConfiguration::set_fling_velocity_cap(15000.0f);
+
   helper_.reset(new AuraTestHelper(&message_loop_));
   helper_->SetUp();
 }
@@ -59,6 +72,24 @@ void AuraTestBase::TearDown() {
   helper_->TearDown();
   ui::TextInputTestSupport::Shutdown();
   testing::Test::TearDown();
+
+#if defined(OS_LINUX)
+  ui::ResetXCursorCache();
+#endif
+}
+
+Window* AuraTestBase::CreateTransientChild(int id, Window* parent) {
+  Window* window = new Window(NULL);
+  window->set_id(id);
+  window->SetType(aura::client::WINDOW_TYPE_NORMAL);
+  window->Init(ui::LAYER_TEXTURED);
+  window->SetDefaultParentByRootWindow(root_window(), gfx::Rect());
+  parent->AddTransientChild(window);
+  return window;
+}
+
+void AuraTestBase::SetDefaultParentByPrimaryRootWindow(aura::Window* window) {
+  window->SetDefaultParentByRootWindow(root_window(), gfx::Rect());
 }
 
 void AuraTestBase::RunAllPendingInMessageLoop() {

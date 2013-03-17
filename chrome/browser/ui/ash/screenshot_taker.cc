@@ -11,8 +11,8 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stringprintf.h"
@@ -28,7 +28,7 @@
 #include "ui/aura/window.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
@@ -45,7 +45,7 @@ const int64 kVisualFeedbackLayerDisplayTimeMs = 100;
 const int kScreenshotMinimumIntervalInMS = 1000;
 
 
-void SaveScreenshotInternal(const FilePath& screenshot_path,
+void SaveScreenshotInternal(const base::FilePath& screenshot_path,
                             scoped_refptr<base::RefCountedBytes> png_data) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(!screenshot_path.empty());
@@ -57,7 +57,7 @@ void SaveScreenshotInternal(const FilePath& screenshot_path,
   }
 }
 
-void SaveScreenshot(const FilePath& screenshot_path,
+void SaveScreenshot(const base::FilePath& screenshot_path,
                     scoped_refptr<base::RefCountedBytes> png_data) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(!screenshot_path.empty());
@@ -73,9 +73,9 @@ void SaveScreenshot(const FilePath& screenshot_path,
 // TODO(kinaba): crbug.com/140425, remove this ungly #ifdef dispatch.
 #ifdef OS_CHROMEOS
 void SaveScreenshotToDrive(scoped_refptr<base::RefCountedBytes> png_data,
-                           gdata::DriveFileError error,
-                           const FilePath& local_path) {
-  if (error != gdata::DRIVE_FILE_OK) {
+                           drive::DriveFileError error,
+                           const base::FilePath& local_path) {
+  if (error != drive::DRIVE_FILE_OK) {
     LOG(ERROR) << "Failed to write screenshot image to Google Drive: " << error;
     return;
   }
@@ -84,14 +84,14 @@ void SaveScreenshotToDrive(scoped_refptr<base::RefCountedBytes> png_data,
 
 void EnsureDirectoryExistsCallback(
     Profile* profile,
-    const FilePath& screenshot_path,
+    const base::FilePath& screenshot_path,
     scoped_refptr<base::RefCountedBytes> png_data,
-    gdata::DriveFileError error) {
+    drive::DriveFileError error) {
   // It is okay to fail with DRIVE_FILE_ERROR_EXISTS since anyway the directory
   // of the target file exists.
-  if (error == gdata::DRIVE_FILE_OK ||
-      error == gdata::DRIVE_FILE_ERROR_EXISTS) {
-    gdata::util::PrepareWritableFileAndRun(
+  if (error == drive::DRIVE_FILE_OK ||
+      error == drive::DRIVE_FILE_ERROR_EXISTS) {
+    drive::util::PrepareWritableFileAndRun(
         profile,
         screenshot_path,
         base::Bind(&SaveScreenshotToDrive, png_data));
@@ -101,12 +101,12 @@ void EnsureDirectoryExistsCallback(
   }
 }
 
-void PostSaveScreenshotTask(const FilePath& screenshot_path,
+void PostSaveScreenshotTask(const base::FilePath& screenshot_path,
                             scoped_refptr<base::RefCountedBytes> png_data) {
-  if (gdata::util::IsUnderDriveMountPoint(screenshot_path)) {
+  if (drive::util::IsUnderDriveMountPoint(screenshot_path)) {
     Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
     if (profile) {
-      gdata::util::EnsureDirectoryExists(
+      drive::util::EnsureDirectoryExists(
           profile,
           screenshot_path.DirName(),
           base::Bind(&EnsureDirectoryExistsCallback,
@@ -120,7 +120,7 @@ void PostSaveScreenshotTask(const FilePath& screenshot_path,
   }
 }
 #else
-void PostSaveScreenshotTask(const FilePath& screenshot_path,
+void PostSaveScreenshotTask(const base::FilePath& screenshot_path,
                             scoped_refptr<base::RefCountedBytes> png_data) {
   content::BrowserThread::GetBlockingPool()->PostTask(
       FROM_HERE, base::Bind(&SaveScreenshot, screenshot_path, png_data));
@@ -155,13 +155,20 @@ ScreenshotTaker::~ScreenshotTaker() {
 }
 
 void ScreenshotTaker::HandleTakeScreenshotForAllRootWindows() {
-  FilePath screenshot_directory;
+  base::FilePath screenshot_directory;
   if (!ScreenshotSource::GetScreenshotDirectory(&screenshot_directory))
     return;
 
   std::string screenshot_basename =
       ScreenshotSource::GetScreenshotBaseFilename();
   ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
+  // Reorder root_windows to take the primary root window's snapshot at first.
+  aura::RootWindow* primary_root = ash::Shell::GetPrimaryRootWindow();
+  if (*(root_windows.begin()) != primary_root) {
+    root_windows.erase(std::find(
+        root_windows.begin(), root_windows.end(), primary_root));
+    root_windows.insert(root_windows.begin(), primary_root);
+  }
   for (size_t i = 0; i < root_windows.size(); ++i) {
     aura::RootWindow* root_window = root_windows[i];
     scoped_refptr<base::RefCountedBytes> png_data(new base::RefCountedBytes);
@@ -184,7 +191,7 @@ void ScreenshotTaker::HandleTakePartialScreenshot(
     aura::Window* window, const gfx::Rect& rect) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  FilePath screenshot_directory;
+  base::FilePath screenshot_directory;
   if (!ScreenshotSource::GetScreenshotDirectory(&screenshot_directory))
     return;
 

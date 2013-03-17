@@ -16,11 +16,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
-// TODO(nona): Remove ibus namespace after complete libibus removal.
-namespace ibus {
 
 TEST(IBusTextTest, WriteReadTest) {
   const char kSampleText[] = "Sample Text";
+  const char kAnnotation[] = "Annotation";
+  const char kDescriptionTitle[] = "Description Title";
+  const char kDescriptionBody[] = "Description Body";
   const IBusText::UnderlineAttribute kSampleUnderlineAttribute1 = {
     IBusText::IBUS_TEXT_UNDERLINE_SINGLE, 10, 20};
 
@@ -35,6 +36,9 @@ TEST(IBusTextTest, WriteReadTest) {
   // Make IBusText
   IBusText text;
   text.set_text(kSampleText);
+  text.set_annotation(kAnnotation);
+  text.set_description_title(kDescriptionTitle);
+  text.set_description_body(kDescriptionBody);
   std::vector<IBusText::UnderlineAttribute>* underline_attributes =
       text.mutable_underline_attributes();
   underline_attributes->push_back(kSampleUnderlineAttribute1);
@@ -53,7 +57,10 @@ TEST(IBusTextTest, WriteReadTest) {
   dbus::MessageReader reader(response.get());
   IBusText expected_text;
   ASSERT_TRUE(PopIBusText(&reader, &expected_text));
-  EXPECT_EQ(expected_text.text(), kSampleText);
+  EXPECT_EQ(kSampleText, expected_text.text());
+  EXPECT_EQ(kAnnotation, expected_text.annotation());
+  EXPECT_EQ(kDescriptionTitle, expected_text.description_title());
+  EXPECT_EQ(kDescriptionBody, expected_text.description_body());
   EXPECT_EQ(3U, expected_text.underline_attributes().size());
   EXPECT_EQ(1U, expected_text.selection_attributes().size());
 }
@@ -90,5 +97,4 @@ TEST(IBusTextTest, PopStringFromIBusTextTest) {
   EXPECT_EQ(kSampleText, result);
 }
 
-}  // namespace ibus
 }  // namespace chromeos

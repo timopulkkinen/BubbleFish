@@ -8,20 +8,16 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "build/build_config.h"
-#include "third_party/angle/include/EGL/egl.h"
-#include "third_party/angle/include/EGL/eglext.h"
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_context.h"
-
-// This header must come after the above third-party include, as
-// it brings in #defines that cause conflicts.
-#include "ui/gl/gl_bindings.h"
 
 #if defined(USE_X11)
 extern "C" {
 #include <X11/Xlib.h>
 }
 #endif
+
+using ui::GetLastEGLErrorString;
 
 namespace gfx {
 
@@ -36,8 +32,45 @@ EGLNativeDisplayType g_software_native_display;
 
 const char* g_egl_extensions = NULL;
 bool g_egl_create_context_robustness_supported = false;
+bool g_egl_sync_control_supported = false;
 
-}
+class EGLSyncControlVSyncProvider
+    : public gfx::SyncControlVSyncProvider {
+ public:
+  explicit EGLSyncControlVSyncProvider(EGLSurface surface)
+      : SyncControlVSyncProvider(),
+        surface_(surface) {
+  }
+
+  virtual ~EGLSyncControlVSyncProvider() { }
+
+ protected:
+  virtual bool GetSyncValues(int64* system_time,
+                             int64* media_stream_counter,
+                             int64* swap_buffer_counter) OVERRIDE {
+    uint64 u_system_time, u_media_stream_counter, u_swap_buffer_counter;
+    bool result = eglGetSyncValuesCHROMIUM(
+        g_display, surface_, &u_system_time,
+        &u_media_stream_counter, &u_swap_buffer_counter) == EGL_TRUE;
+    if (result) {
+      *system_time = static_cast<int64>(u_system_time);
+      *media_stream_counter = static_cast<int64>(u_media_stream_counter);
+      *swap_buffer_counter = static_cast<int64>(u_swap_buffer_counter);
+    }
+    return result;
+  }
+
+  virtual bool GetMscRate(int32* numerator, int32* denominator) OVERRIDE {
+    return false;
+  }
+
+ private:
+  EGLSurface surface_;
+
+  DISALLOW_COPY_AND_ASSIGN(EGLSyncControlVSyncProvider);
+};
+
+}  // namespace
 
 GLSurfaceEGL::GLSurfaceEGL() : software_(false) {}
 
@@ -104,6 +137,8 @@ bool GLSurfaceEGL::InitializeOneOff() {
   g_egl_extensions = eglQueryString(g_display, EGL_EXTENSIONS);
   g_egl_create_context_robustness_supported =
       HasEGLExtension("EGL_EXT_create_context_robustness");
+  g_egl_sync_control_supported =
+      HasEGLExtension("EGL_CHROMIUM_sync_control");
 
   initialized = true;
 
@@ -189,6 +224,11 @@ NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(bool software,
 bool NativeViewGLSurfaceEGL::Initialize() {
   DCHECK(!surface_);
 
+  if (window_ == kNullAcceleratedWidget) {
+    LOG(ERROR) << "Trying to create surface without window.";
+    return false;
+  }
+
   if (!GetDisplay()) {
     LOG(ERROR) << "Trying to create surface with invalid display.";
     return false;
@@ -200,12 +240,13 @@ bool NativeViewGLSurfaceEGL::Initialize() {
   };
 
   // Create a surface for the native window.
-  surface_ = eglCreateWindowSurface(GetDisplay(),
-                                    GetConfig(),
-                                    window_,
-                                    gfx::g_EGL_NV_post_sub_buffer ?
-                                        egl_window_attributes_sub_buffer :
-                                        NULL);
+  surface_ = eglCreateWindowSurface(
+      GetDisplay(),
+      GetConfig(),
+      window_,
+      gfx::g_driver_egl.ext.b_EGL_NV_post_sub_buffer ?
+          egl_window_attributes_sub_buffer :
+          NULL);
 
   if (!surface_) {
     LOG(ERROR) << "eglCreateWindowSurface failed with error "
@@ -220,6 +261,9 @@ bool NativeViewGLSurfaceEGL::Initialize() {
                                       EGL_POST_SUB_BUFFER_SUPPORTED_NV,
                                       &surfaceVal);
   supports_post_sub_buffer_ = (surfaceVal && retVal) == EGL_TRUE;
+
+  if (g_egl_sync_control_supported)
+    vsync_provider_.reset(new EGLSyncControlVSyncProvider(surface_));
 
   return true;
 }
@@ -383,6 +427,10 @@ bool NativeViewGLSurfaceEGL::PostSubBuffer(
   return true;
 }
 
+VSyncProvider* NativeViewGLSurfaceEGL::GetVSyncProvider() {
+  return vsync_provider_.get();
+}
+
 NativeViewGLSurfaceEGL::~NativeViewGLSurfaceEGL() {
   Destroy();
 }
@@ -398,9 +446,10 @@ PbufferGLSurfaceEGL::PbufferGLSurfaceEGL(bool software, const gfx::Size& size)
 }
 
 bool PbufferGLSurfaceEGL::Initialize() {
-  DCHECK(!surface_);
+  EGLSurface old_surface = surface_;
 
-  if (!GetDisplay()) {
+  EGLDisplay display = GetDisplay();
+  if (!display) {
     LOG(ERROR) << "Trying to create surface with invalid display.";
     return false;
   }
@@ -411,22 +460,29 @@ bool PbufferGLSurfaceEGL::Initialize() {
     return false;
   }
 
+  // Allocate the new pbuffer surface before freeing the old one to ensure
+  // they have different addresses. If they have the same address then a
+  // future call to MakeCurrent might early out because it appears the current
+  // context and surface have not changed.
   const EGLint pbuffer_attribs[] = {
     EGL_WIDTH, size_.width(),
     EGL_HEIGHT, size_.height(),
     EGL_NONE
   };
 
-  surface_ = eglCreatePbufferSurface(GetDisplay(),
-                                     GetConfig(),
-                                     pbuffer_attribs);
-  if (!surface_) {
+  EGLSurface new_surface = eglCreatePbufferSurface(display,
+                                                   GetConfig(),
+                                                   pbuffer_attribs);
+  if (!new_surface) {
     LOG(ERROR) << "eglCreatePbufferSurface failed with error "
                << GetLastEGLErrorString();
-    Destroy();
     return false;
   }
 
+  if (old_surface)
+    eglDestroySurface(display, old_surface);
+
+  surface_ = new_surface;
   return true;
 }
 
@@ -463,10 +519,6 @@ bool PbufferGLSurfaceEGL::Resize(const gfx::Size& size) {
 
   GLContext* current_context = GLContext::GetCurrent();
   bool was_current = current_context && current_context->IsCurrent(this);
-  if (was_current)
-    current_context->ReleaseCurrent(this);
-
-  Destroy();
 
   size_ = size;
 
@@ -490,10 +542,10 @@ void* PbufferGLSurfaceEGL::GetShareHandle() {
   NOTREACHED();
   return NULL;
 #else
-  if (!g_EGL_ANGLE_query_surface_pointer)
+  if (!gfx::g_driver_egl.ext.b_EGL_ANGLE_query_surface_pointer)
     return NULL;
 
-  if (!g_EGL_ANGLE_surface_d3d_texture_2d_share_handle)
+  if (!gfx::g_driver_egl.ext.b_EGL_ANGLE_surface_d3d_texture_2d_share_handle)
     return NULL;
 
   void* handle;

@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/performance_monitor/database.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -21,7 +21,7 @@ namespace performance_monitor {
 namespace {
 // Needed because Database::AddMetric is overloaded, so base::Bind doesn't work.
 void AddMetricToDatabaseOnBackgroundThread(Database* database,
-                                           Metric metric) {
+                                           const Metric& metric) {
   database->AddMetric(metric);
 }
 

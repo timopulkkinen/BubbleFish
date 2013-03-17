@@ -9,6 +9,8 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_browser_thread.h"
 
@@ -16,7 +18,7 @@ using content::BrowserThread;
 
 CocoaProfileTest::CocoaProfileTest()
     : ui_thread_(BrowserThread::UI, &message_loop_),
-      profile_manager_(static_cast<TestingBrowserProcess*>(g_browser_process)),
+      profile_manager_(TestingBrowserProcess::GetGlobal()),
       profile_(NULL),
       file_user_blocking_thread_(new content::TestBrowserThread(
           BrowserThread::FILE_USER_BLOCKING, &message_loop_)),
@@ -31,23 +33,23 @@ CocoaProfileTest::~CocoaProfileTest() {
   // browser, since it may trigger accesses to the profile upon destruction.
   browser_.reset();
 
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   // Some services created on the TestingProfile require deletion on the UI
   // thread. If the scoper in TestingBrowserProcess, owned by ChromeTestSuite,
   // were to delete the ProfileManager, the UI thread would at that point no
   // longer exist.
-  static_cast<TestingBrowserProcess*>(g_browser_process)->SetProfileManager(
+  TestingBrowserProcess::GetGlobal()->SetProfileManager(
       NULL);
 
   // Make sure any pending tasks run before we destroy other threads.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Drop any new tasks for the IO and FILE threads.
   io_thread_.reset();
   file_user_blocking_thread_.reset();
   file_thread_.reset();
 
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 void CocoaProfileTest::SetUp() {
@@ -85,12 +87,13 @@ void CocoaProfileTest::TearDown() {
 void CocoaProfileTest::CloseBrowserWindow() {
   // Check to make sure a window was actually created.
   DCHECK(browser_->window());
-  chrome::CloseAllTabs(browser_.get());
+  browser_->tab_strip_model()->CloseAllTabs();
   chrome::CloseWindow(browser_.get());
   // |browser_| will be deleted by its BrowserWindowController.
   ignore_result(browser_.release());
 }
 
 Browser* CocoaProfileTest::CreateBrowser() {
-  return new Browser(Browser::CreateParams(profile()));
+  return new Browser(Browser::CreateParams(profile(),
+                                           chrome::HOST_DESKTOP_TYPE_NATIVE));
 }

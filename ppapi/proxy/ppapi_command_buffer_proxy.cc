@@ -45,42 +45,6 @@ bool PpapiCommandBufferProxy::Echo(const base::Closure& callback) {
   return false;
 }
 
-bool PpapiCommandBufferProxy::SetSurfaceVisible(bool visible) {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-bool PpapiCommandBufferProxy::DiscardBackbuffer() {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-bool PpapiCommandBufferProxy::EnsureBackbuffer() {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-uint32 PpapiCommandBufferProxy::InsertSyncPoint() {
-  NOTIMPLEMENTED();
-  return 0;
-}
-
-void PpapiCommandBufferProxy::WaitSyncPoint(uint32 sync_point) {
-  NOTIMPLEMENTED();
-}
-
-bool PpapiCommandBufferProxy::SignalSyncPoint(uint32 sync_point,
-                                              const base::Closure& callback) {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-void PpapiCommandBufferProxy::SetMemoryAllocationChangedCallback(
-      const base::Callback<void(const GpuMemoryAllocationForRenderer&)>&
-          callback) {
-  NOTIMPLEMENTED();
-}
-
 bool PpapiCommandBufferProxy::SetParent(
     CommandBufferProxy* parent_command_buffer,
     uint32 parent_texture_id) {
@@ -93,16 +57,6 @@ bool PpapiCommandBufferProxy::SetParent(
 void PpapiCommandBufferProxy::SetChannelErrorCallback(
     const base::Closure& callback) {
   channel_error_callback_ = callback;
-}
-
-void PpapiCommandBufferProxy::SetNotifyRepaintTask(
-    const base::Closure& callback) {
-  NOTIMPLEMENTED();
-}
-
-void PpapiCommandBufferProxy::SetOnConsoleMessageCallback(
-    const GpuConsoleMessageCallback& callback) {
-  NOTIMPLEMENTED();
 }
 
 bool PpapiCommandBufferProxy::Initialize() {
@@ -125,7 +79,15 @@ gpu::CommandBuffer::State PpapiCommandBufferProxy::GetState() {
 }
 
 gpu::CommandBuffer::State PpapiCommandBufferProxy::GetLastState() {
+  // Note: The locking command buffer wrapper does not take a global lock before
+  // calling this function.
   return last_state_;
+}
+
+int32 PpapiCommandBufferProxy::GetLastToken() {
+  // Note: The locking command buffer wrapper does not take a global lock before
+  // calling this function.
+  return last_state_.token;
 }
 
 void PpapiCommandBufferProxy::Flush(int32 put_offset) {
@@ -173,26 +135,22 @@ void PpapiCommandBufferProxy::SetGetOffset(int32 get_offset) {
   NOTREACHED();
 }
 
-int32 PpapiCommandBufferProxy::CreateTransferBuffer(
-    size_t size,
-    int32 id_request) {
-  if (last_state_.error == gpu::error::kNoError) {
-    int32 id;
-    if (Send(new PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer(
-             ppapi::API_ID_PPB_GRAPHICS_3D, resource_, size, &id))) {
-      return id;
-    }
-  }
-  return -1;
-}
+gpu::Buffer PpapiCommandBufferProxy::CreateTransferBuffer(size_t size,
+                                                          int32* id) {
+  *id = -1;
 
-int32 PpapiCommandBufferProxy::RegisterTransferBuffer(
-    base::SharedMemory* shared_memory,
-    size_t size,
-    int32 id_request) {
-  // Not implemented in proxy.
-  NOTREACHED();
-  return -1;
+  if (last_state_.error != gpu::error::kNoError)
+    return gpu::Buffer();
+
+  if (!Send(new PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer(
+            ppapi::API_ID_PPB_GRAPHICS_3D, resource_, size, id))) {
+    return gpu::Buffer();
+  }
+
+  if ((*id) <= 0)
+    return gpu::Buffer();
+
+  return GetTransferBuffer(*id);
 }
 
 void PpapiCommandBufferProxy::DestroyTransferBuffer(int32 id) {
@@ -201,12 +159,13 @@ void PpapiCommandBufferProxy::DestroyTransferBuffer(int32 id) {
 
   // Remove the transfer buffer from the client side4 cache.
   TransferBufferMap::iterator it = transfer_buffers_.find(id);
-  DCHECK(it != transfer_buffers_.end());
 
-  // Delete the shared memory object, closing the handle in this process.
-  delete it->second.shared_memory;
+  if (it != transfer_buffers_.end()) {
+    // Delete the shared memory object, closing the handle in this process.
+    delete it->second.shared_memory;
 
-  transfer_buffers_.erase(it);
+    transfer_buffers_.erase(it);
+  }
 
   Send(new PpapiHostMsg_PPBGraphics3D_DestroyTransferBuffer(
       ppapi::API_ID_PPB_GRAPHICS_3D, resource_, id));

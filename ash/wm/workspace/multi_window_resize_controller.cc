@@ -7,14 +7,13 @@
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/workspace/workspace_event_handler.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/client/screen_position_client.h"
-#include "ui/aura/event_filter.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/shared/compound_event_filter.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
@@ -22,6 +21,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/corewm/compound_event_filter.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -34,7 +34,7 @@ namespace internal {
 namespace {
 
 // Delay before showing.
-const int kShowDelayMS = 100;
+const int kShowDelayMS = 400;
 
 // Delay before hiding.
 const int kHideDelayMS = 500;
@@ -100,7 +100,7 @@ class MultiWindowResizeController::ResizeView : public views::View {
   virtual gfx::NativeCursor GetCursor(
       const ui::MouseEvent& event) OVERRIDE {
     int component = (direction_ == LEFT_RIGHT) ? HTRIGHT : HTBOTTOM;
-    return aura::shared::CompoundEventFilter::CursorForWindowComponent(
+    return views::corewm::CompoundEventFilter::CursorForWindowComponent(
         component);
   }
 
@@ -183,9 +183,9 @@ void MultiWindowResizeController::Show(Window* window,
       window, window->parent(), &show_location_in_parent_);
   if (show_timer_.IsRunning())
     return;
-  show_timer_.Start(FROM_HERE,
-                    base::TimeDelta::FromMilliseconds(kShowDelayMS),
-                    this, &MultiWindowResizeController::ShowNow);
+  show_timer_.Start(
+      FROM_HERE, base::TimeDelta::FromMilliseconds(kShowDelayMS),
+      this, &MultiWindowResizeController::ShowIfValidMouseLocation);
 }
 
 void MultiWindowResizeController::Hide() {
@@ -193,11 +193,20 @@ void MultiWindowResizeController::Hide() {
   if (window_resizer_.get())
     return;  // Ignore hides while actively resizing.
 
+  if (windows_.window1) {
+    windows_.window1->RemoveObserver(this);
+    windows_.window1 = NULL;
+  }
+  if (windows_.window2) {
+    windows_.window2->RemoveObserver(this);
+    windows_.window2 = NULL;
+  }
+
   show_timer_.Stop();
+
   if (!resize_widget_.get())
     return;
-  windows_.window1->RemoveObserver(this);
-  windows_.window2->RemoveObserver(this);
+
   for (size_t i = 0; i < windows_.other_windows.size(); ++i)
     windows_.other_windows[i]->RemoveObserver(this);
   mouse_watcher_.reset();
@@ -214,6 +223,17 @@ void MultiWindowResizeController::OnWindowDestroying(
   // Have to explicitly reset the WindowResizer, otherwise Hide() does nothing.
   window_resizer_.reset();
   Hide();
+}
+
+MultiWindowResizeController::ResizeWindows
+MultiWindowResizeController::DetermineWindowsFromScreenPoint(
+    aura::Window* window) const {
+  gfx::Point mouse_location(
+      gfx::Screen::GetScreenFor(window)->GetCursorScreenPoint());
+  wm::ConvertPointFromScreen(window, &mouse_location);
+  const int component =
+      window->delegate()->GetNonClientComponent(mouse_location);
+  return DetermineWindows(window, component, mouse_location);
 }
 
 MultiWindowResizeController::ResizeWindows
@@ -349,6 +369,15 @@ void MultiWindowResizeController::DelayedHide() {
                     this, &MultiWindowResizeController::Hide);
 }
 
+void MultiWindowResizeController::ShowIfValidMouseLocation() {
+  if (DetermineWindowsFromScreenPoint(windows_.window1).Equals(windows_) ||
+      DetermineWindowsFromScreenPoint(windows_.window2).Equals(windows_)) {
+    ShowNow();
+  } else {
+    Hide();
+  }
+}
+
 void MultiWindowResizeController::ShowNow() {
   DCHECK(!resize_widget_.get());
   DCHECK(windows_.is_valid());
@@ -364,9 +393,9 @@ void MultiWindowResizeController::ShowNow() {
   ResizeView* view = new ResizeView(this, windows_.direction);
   resize_widget_->set_focus_on_creation(false);
   resize_widget_->Init(params);
-  SetWindowVisibilityAnimationType(
+  views::corewm::SetWindowVisibilityAnimationType(
       resize_widget_->GetNativeWindow(),
-      WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
+      views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
   resize_widget_->GetNativeWindow()->SetName("MultiWindowResizeController");
   resize_widget_->SetContentsView(view);
   show_bounds_in_screen_ = ScreenAsh::ConvertRectToScreen(
@@ -430,7 +459,7 @@ void MultiWindowResizeController::CompleteResize(int event_flags) {
   window_resizer_.reset();
 
   // Mouse may still be over resizer, if not hide.
-  gfx::Point screen_loc = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point screen_loc = Shell::GetScreen()->GetCursorScreenPoint();
   if (!resize_widget_->GetWindowBoundsInScreen().Contains(screen_loc)) {
     Hide();
   } else {

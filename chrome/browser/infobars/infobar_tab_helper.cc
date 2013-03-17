@@ -7,7 +7,6 @@
 #include "chrome/browser/api/infobars/infobar_delegate.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/insecure_content_infobar_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/navigation_controller.h"
@@ -17,14 +16,34 @@
 using content::NavigationController;
 using content::WebContents;
 
-InfoBarService* InfoBarService::FromTabContents(TabContents* tab) {
-  return tab->infobar_tab_helper();
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(InfoBarTabHelper);
+
+void InfoBarService::CreateForWebContents(content::WebContents* web_contents) {
+  return content::WebContentsUserData<InfoBarTabHelper>::CreateForWebContents(
+      web_contents);
+}
+
+InfoBarService* InfoBarService::FromWebContents(WebContents* web_contents) {
+  return content::WebContentsUserData<InfoBarTabHelper>::FromWebContents(
+      web_contents);
+}
+
+const InfoBarService* InfoBarService::FromWebContents(
+    const WebContents* web_contents) {
+  return content::WebContentsUserData<InfoBarTabHelper>::FromWebContents(
+      web_contents);
+}
+
+InfoBarService::~InfoBarService() {
 }
 
 InfoBarTabHelper::InfoBarTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       infobars_enabled_(false) {
   DCHECK(web_contents);
+  registrar_.Add(this,
+                 content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(web_contents));
 }
 
 InfoBarTabHelper::~InfoBarTabHelper() {
@@ -37,24 +56,27 @@ InfoBarTabHelper::~InfoBarTabHelper() {
   RemoveAllInfoBars(false);
 }
 
-bool InfoBarTabHelper::AddInfoBar(InfoBarDelegate* delegate) {
-  if (!infobars_enabled_) {
-    delegate->InfoBarClosed();
-    return false;
-  }
+void InfoBarTabHelper::SetInfoBarsEnabled(bool enabled) {
+  infobars_enabled_ = enabled;
+}
+
+InfoBarDelegate* InfoBarTabHelper::AddInfoBar(
+    scoped_ptr<InfoBarDelegate> delegate) {
+  if (!infobars_enabled_)
+    return NULL;
 
   for (InfoBars::const_iterator i(infobars_.begin()); i != infobars_.end();
        ++i) {
-    if ((*i)->EqualsDelegate(delegate)) {
-      DCHECK_NE(*i, delegate);
-      delegate->InfoBarClosed();
-      return false;
+    if ((*i)->EqualsDelegate(delegate.get())) {
+      DCHECK_NE(*i, delegate.get());
+      return NULL;
     }
   }
 
   // TODO(pkasting): Consider removing InfoBarTabHelper arg from delegate
   // constructors and instead using a setter from here.
-  infobars_.push_back(delegate);
+  InfoBarDelegate* delegate_ptr = delegate.release();
+  infobars_.push_back(delegate_ptr);
   // Add ourselves as an observer for navigations the first time a delegate is
   // added. We use this notification to expire InfoBars that need to expire on
   // page transitions.
@@ -67,36 +89,38 @@ bool InfoBarTabHelper::AddInfoBar(InfoBarDelegate* delegate) {
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
-      content::Source<InfoBarTabHelper>(this),
-      content::Details<InfoBarAddedDetails>(delegate));
-  return true;
+      content::Source<InfoBarService>(this),
+      content::Details<InfoBarAddedDetails>(delegate_ptr));
+  return delegate_ptr;
 }
 
 void InfoBarTabHelper::RemoveInfoBar(InfoBarDelegate* delegate) {
   RemoveInfoBarInternal(delegate, true);
 }
 
-bool InfoBarTabHelper::ReplaceInfoBar(InfoBarDelegate* old_delegate,
-                                      InfoBarDelegate* new_delegate) {
+InfoBarDelegate* InfoBarTabHelper::ReplaceInfoBar(
+    InfoBarDelegate* old_delegate,
+    scoped_ptr<InfoBarDelegate> new_delegate) {
   if (!infobars_enabled_)
-    return AddInfoBar(new_delegate);  // Deletes the delegate.
+    return AddInfoBar(new_delegate.Pass());  // Deletes the delegate.
 
   InfoBars::iterator i(std::find(infobars_.begin(), infobars_.end(),
                                  old_delegate));
   DCHECK(i != infobars_.end());
 
-  i = infobars_.insert(i, new_delegate) + 1;
+  InfoBarDelegate* new_delegate_ptr = new_delegate.release();
+  i = infobars_.insert(i, new_delegate_ptr);
+  InfoBarReplacedDetails replaced_details(old_delegate, new_delegate_ptr);
   // Remove the old delegate before notifying, so that if any observers call
   // back to AddInfoBar() or similar, we don't dupe-check against this delegate.
-  infobars_.erase(i);
+  infobars_.erase(++i);
 
   old_delegate->clear_owner();
-  InfoBarReplacedDetails replaced_details(old_delegate, new_delegate);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REPLACED,
-      content::Source<InfoBarTabHelper>(this),
+      content::Source<InfoBarService>(this),
       content::Details<InfoBarReplacedDetails>(&replaced_details));
-  return true;
+  return new_delegate_ptr;
 }
 
 size_t InfoBarTabHelper::GetInfoBarCount() const {
@@ -136,7 +160,7 @@ void InfoBarTabHelper::RemoveInfoBarInternal(InfoBarDelegate* delegate,
   InfoBarRemovedDetails removed_details(delegate, animate);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
-      content::Source<InfoBarTabHelper>(this),
+      content::Source<InfoBarService>(this),
       content::Details<InfoBarRemovedDetails>(&removed_details));
 }
 
@@ -146,30 +170,13 @@ void InfoBarTabHelper::RemoveAllInfoBars(bool animate) {
 }
 
 void InfoBarTabHelper::OnDidBlockDisplayingInsecureContent() {
-  // At most one infobar and do not supersede the stronger running content bar.
-  for (size_t i = 0; i < infobars_.size(); ++i) {
-    if (GetInfoBarDelegateAt(i)->AsInsecureContentInfoBarDelegate())
-      return;
-  }
-  AddInfoBar(new InsecureContentInfoBarDelegate(this,
-      InsecureContentInfoBarDelegate::DISPLAY));
+  InsecureContentInfoBarDelegate::Create(
+      this, InsecureContentInfoBarDelegate::DISPLAY);
 }
 
 void InfoBarTabHelper::OnDidBlockRunningInsecureContent() {
-  // At most one infobar superseding any weaker displaying content bar.
-  for (size_t i = 0; i < infobars_.size(); ++i) {
-    InsecureContentInfoBarDelegate* delegate =
-        GetInfoBarDelegateAt(i)->AsInsecureContentInfoBarDelegate();
-    if (delegate) {
-      if (delegate->type() != InsecureContentInfoBarDelegate::RUN) {
-        ReplaceInfoBar(delegate, new InsecureContentInfoBarDelegate(
-            this, InsecureContentInfoBarDelegate::RUN));
-      }
-      return;
-    }
-  }
-  AddInfoBar(new InsecureContentInfoBarDelegate(this,
-      InsecureContentInfoBarDelegate::RUN));
+  InsecureContentInfoBarDelegate::Create(this,
+                                         InsecureContentInfoBarDelegate::RUN);
 }
 
 void InfoBarTabHelper::RenderViewGone(base::TerminationStatus status) {
@@ -191,26 +198,32 @@ bool InfoBarTabHelper::OnMessageReceived(const IPC::Message& message) {
 void InfoBarTabHelper::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_NAV_ENTRY_COMMITTED: {
-      DCHECK(&web_contents()->GetController() ==
-             content::Source<NavigationController>(source).ptr());
+  if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
+    DCHECK(&web_contents()->GetController() ==
+           content::Source<NavigationController>(source).ptr());
 
-      content::LoadCommittedDetails& committed_details =
-          *(content::Details<content::LoadCommittedDetails>(details).ptr());
+    content::LoadCommittedDetails& committed_details =
+        *(content::Details<content::LoadCommittedDetails>(details).ptr());
 
-      // NOTE: It is not safe to change the following code to count upwards or
-      // use iterators, as the RemoveInfoBar() call synchronously modifies our
-      // delegate list.
-      for (size_t i = infobars_.size(); i > 0; --i) {
-        InfoBarDelegate* delegate = GetInfoBarDelegateAt(i - 1);
-        if (delegate->ShouldExpire(committed_details))
-          RemoveInfoBar(delegate);
-      }
-
-      break;
+    // NOTE: It is not safe to change the following code to count upwards or
+    // use iterators, as the RemoveInfoBar() call synchronously modifies our
+    // delegate list.
+    for (size_t i = infobars_.size(); i > 0; --i) {
+      InfoBarDelegate* delegate = GetInfoBarDelegateAt(i - 1);
+      if (delegate->ShouldExpire(committed_details))
+        RemoveInfoBar(delegate);
     }
-    default:
-      NOTREACHED();
+
+    return;
   }
+
+  DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
+  // The WebContents is going away; be aggressively paranoid and delete
+  // ourselves lest other parts of the system attempt to add infobars or use
+  // us otherwise during the destruction.
+  DCHECK_EQ(web_contents(), content::Source<WebContents>(source).ptr());
+  web_contents()->RemoveUserData(UserDataKey());
+  // That was the equivalent of "delete this". This object is now destroyed;
+  // returning from this function is the only safe thing to do.
+  return;
 }

@@ -11,9 +11,9 @@
 
 #include "base/atomicops.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
-#include "base/path_service.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/path_service.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/env_vars.h"
@@ -34,7 +34,10 @@ using installer::MasterPreferences;
 
 namespace {
 
-	const wchar_t kCommandExecuteImplUuid[] =
+const wchar_t kChromiumActiveSetupGuid[] =
+    L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AD}";
+
+const wchar_t kCommandExecuteImplUuid[] =
     L"{A2DF06F9-A21A-44A8-8A99-8B9C84F29161}";
 const wchar_t kInfomonitorGuid[] = L"{FDA71E6F-AC4C-4a00-8B70-9958A68906FF}";
 
@@ -47,9 +50,9 @@ BrowserDistribution* g_infomonitor_distribution = NULL;
 
 // Returns true if currently running in npchrome_frame.dll
 bool IsChromeFrameModule() {
-  FilePath module_path;
+  base::FilePath module_path;
   PathService::Get(base::FILE_MODULE, &module_path);
-  return FilePath::CompareEqualIgnoreCase(module_path.BaseName().value(),
+  return base::FilePath::CompareEqualIgnoreCase(module_path.BaseName().value(),
                                           installer::kChromeFrameDll);
 }
 
@@ -138,8 +141,12 @@ BrowserDistribution* BrowserDistribution::GetSpecificDistribution(
 }
 
 void BrowserDistribution::DoPostUninstallOperations(
-    const Version& version, const FilePath& local_data_path,
+    const Version& version, const base::FilePath& local_data_path,
     const string16& distribution_data) {
+}
+
+string16 BrowserDistribution::GetActiveSetupGuid() {
+  return kChromiumActiveSetupGuid;
 }
 
 string16 BrowserDistribution::GetAppGuid() {
@@ -226,7 +233,13 @@ bool BrowserDistribution::CanCreateDesktopShortcuts() {
   return true;
 }
 
+string16 BrowserDistribution::GetIconFilename() {
+  return string16();
+}
+
 int BrowserDistribution::GetIconIndex() {
+  // Assuming that main icon appears first alphabetically in the resource file
+  // for GetIconFilename().
   return 0;
 }
 
@@ -241,6 +254,10 @@ bool BrowserDistribution::GetCommandExecuteImplClsid(
   return true;
 }
 
+bool BrowserDistribution::AppHostIsSupported() {
+  return false;
+}
+
 void BrowserDistribution::UpdateInstallStatus(bool system_install,
     installer::ArchiveType archive_type,
     installer::InstallStatus install_status) {
@@ -252,14 +269,17 @@ bool BrowserDistribution::GetExperimentDetails(
 }
 
 void BrowserDistribution::LaunchUserExperiment(
-    const FilePath& setup_path, installer::InstallStatus status,
+    const base::FilePath& setup_path, installer::InstallStatus status,
     const Version& version, const installer::Product& product,
     bool system_level) {
 }
 
+bool BrowserDistribution::ShouldSetExperimentLabels() {
+  return false;
+}
 
 void BrowserDistribution::InactiveUserToastExperiment(int flavor,
     const string16& experiment_group,
     const installer::Product& installation,
-    const FilePath& application_path) {
+    const base::FilePath& application_path) {
 }

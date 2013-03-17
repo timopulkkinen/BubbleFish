@@ -7,7 +7,6 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/intents_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_ui_controller_factory.h"
@@ -17,16 +16,14 @@
 #include "content/renderer/render_view_impl.h"
 #include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_content_client.h"
-#include "content/shell/shell_main_delegate.h"
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPBody.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentServiceInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -56,9 +53,11 @@ using WebKit::WebMouseEvent;
 using WebKit::WebString;
 using WebKit::WebTextDirection;
 using WebKit::WebURLError;
-using content::NativeWebKeyboardEvent;
+
+namespace content  {
 
 namespace {
+
 #if defined(USE_AURA) && defined(USE_X11)
 // Converts MockKeyboard::Modifiers to ui::EventFlags.
 int ConvertMockKeyboardModifier(MockKeyboard::Modifiers modifiers) {
@@ -83,68 +82,33 @@ int ConvertMockKeyboardModifier(MockKeyboard::Modifiers modifiers) {
 }
 #endif
 
-class WebUITestWebUIControllerFactory : public content::WebUIControllerFactory {
+class WebUITestWebUIControllerFactory : public WebUIControllerFactory {
  public:
-  virtual content::WebUIController* CreateWebUIControllerForURL(
-      content::WebUI* web_ui, const GURL& url) const OVERRIDE {
+  virtual WebUIController* CreateWebUIControllerForURL(
+      WebUI* web_ui, const GURL& url) const OVERRIDE {
     return NULL;
   }
-  virtual content::WebUI::TypeID GetWebUIType(
-      content::BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE {
-    return content::WebUI::kNoWebUI;
+  virtual WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
+                                     const GURL& url) const OVERRIDE {
+    return WebUI::kNoWebUI;
   }
-  virtual bool UseWebUIForURL(content::BrowserContext* browser_context,
+  virtual bool UseWebUIForURL(BrowserContext* browser_context,
                               const GURL& url) const OVERRIDE {
-    return content::GetContentClient()->HasWebUIScheme(url);
+    return HasWebUIScheme(url);
   }
-  virtual bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
+  virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
                                       const GURL& url) const OVERRIDE {
-    return content::GetContentClient()->HasWebUIScheme(url);
-  }
-  virtual bool IsURLAcceptableForWebUI(
-      content::BrowserContext* browser_context,
-      const GURL& url,
-      bool data_urls_allowed) const OVERRIDE {
-    return false;
+    return HasWebUIScheme(url);
   }
 };
 
-class WebUITestClient : public content::ShellContentClient {
- public:
-  WebUITestClient() {
-  }
+}  // namespace
 
-  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
-    return url.SchemeIs(chrome::kChromeUIScheme);
-  }
-};
-
-class WebUITestBrowserClient : public content::ShellContentBrowserClient {
- public:
-  WebUITestBrowserClient() {}
-
-  virtual content::WebUIControllerFactory*
-      GetWebUIControllerFactory() OVERRIDE {
-    return &factory_;
-  }
-
- private:
-  WebUITestWebUIControllerFactory factory_;
-};
-
-}
-
-class RenderViewImplTest : public content::RenderViewTest {
+class RenderViewImplTest : public RenderViewTest {
  public:
   RenderViewImplTest() {
     // Attach a pseudo keyboard device to this object.
     mock_keyboard_.reset(new MockKeyboard());
-  }
-
-  virtual void SetUp() OVERRIDE {
-    content::RenderViewTest::SetUp();
-    content::ShellMainDelegate::InitializeResourceBundle();
   }
 
   RenderViewImpl* view() {
@@ -160,7 +124,8 @@ class RenderViewImplTest : public content::RenderViewTest {
     // Retrieve the Unicode character for the given tuple (keyboard-layout,
     // key-code, and modifiers).
     // Exit when a keyboard-layout driver cannot assign a Unicode character to
-    // the tuple to prevent sending an invalid key code to the RenderView object.
+    // the tuple to prevent sending an invalid key code to the RenderView
+    // object.
     CHECK(mock_keyboard_.get());
     CHECK(output);
     int length = mock_keyboard_->GetCharacters(layout, key_code, modifiers,
@@ -283,7 +248,7 @@ class RenderViewImplTest : public content::RenderViewTest {
 };
 
 // Test that we get form state change notifications when input fields change.
-TEST_F(RenderViewImplTest, OnNavStateChanged) {
+TEST_F(RenderViewImplTest, DISABLED_OnNavStateChanged) {
   // Don't want any delay for form state sync changes. This will still post a
   // message so updates will get coalesced, but as soon as we spin the message
   // loop, it will generate an update.
@@ -310,7 +275,7 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
   // An http url will trigger a resource load so cannot be used here.
   nav_params.url = GURL("data:text/html,<div>Page</div>");
   nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  nav_params.transition = content::PAGE_TRANSITION_TYPED;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
   nav_params.page_id = -1;
   nav_params.is_post = true;
 
@@ -347,15 +312,8 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
 }
 
 TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
-  WebUITestClient client;
-  WebUITestBrowserClient browser_client;
-  content::ContentClient* old_client = content::GetContentClient();
-  content::ContentBrowserClient* old_browser_client =
-      content::GetContentClient()->browser();
-
-  content::SetContentClient(&client);
-  content::GetContentClient()->set_browser_for_testing(&browser_client);
-  client.set_renderer_for_testing(old_client->renderer());
+  WebUITestWebUIControllerFactory factory;
+  WebUIControllerFactory::RegisterFactory(&factory);
 
   // Navigations to normal HTTP URLs can be handled locally.
   WebKit::WebURLRequest request(GURL("http://foo.com"));
@@ -390,14 +348,11 @@ TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
       WebKit::WebNavigationPolicyNewForegroundTab,
       false);
   EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
-
-  content::GetContentClient()->set_browser_for_testing(old_browser_client);
-  content::SetContentClient(old_client);
 }
 
 TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
   // Enable bindings to simulate a WebUI view.
-  view()->OnAllowBindings(content::BINDINGS_POLICY_WEB_UI);
+  view()->OnAllowBindings(BINDINGS_POLICY_WEB_UI);
 
   // Navigations to normal HTTP URLs will be sent to browser process.
   WebKit::WebURLRequest request(GURL("http://foo.com"));
@@ -497,7 +452,7 @@ TEST_F(RenderViewImplTest, SendSwapOutACK) {
   ViewMsg_Navigate_Params nav_params;
   nav_params.url = GURL("data:text/html,<div>Page B</div>");
   nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  nav_params.transition = content::PAGE_TRANSITION_TYPED;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
   nav_params.current_history_list_length = 1;
   nav_params.current_history_list_offset = 0;
   nav_params.pending_history_list_offset = 1;
@@ -509,9 +464,9 @@ TEST_F(RenderViewImplTest, SendSwapOutACK) {
   EXPECT_FALSE(msg3);
 }
 
-// Test that we get the correct UpdateState message when we go back twice
-// quickly without committing.  Regression test for http://crbug.com/58082.
-TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
+// Ensure the RenderViewImpl reloads the previous page if a reload request
+// arrives while it is showing swappedout://.  http://crbug.com/143155.
+TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
   // Load page A.
   LoadHTML("<div>Page A</div>");
 
@@ -519,6 +474,83 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   LoadHTML("<div>Page B</div>");
 
   // Check for a valid UpdateState message for page A.
+  ProcessPendingMessages();
+  const IPC::Message* msg_A = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  ASSERT_TRUE(msg_A);
+  int page_id_A;
+  std::string state_A;
+  ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
+  EXPECT_EQ(1, page_id_A);
+  render_thread_->sink().ClearMessages();
+
+  // Back to page A (page_id 1) and commit.
+  ViewMsg_Navigate_Params params_A;
+  params_A.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  params_A.transition = PAGE_TRANSITION_FORWARD_BACK;
+  params_A.current_history_list_length = 2;
+  params_A.current_history_list_offset = 1;
+  params_A.pending_history_list_offset = 0;
+  params_A.page_id = 1;
+  params_A.state = state_A;
+  view()->OnNavigate(params_A);
+  ProcessPendingMessages();
+
+  // Respond to a swap out request.
+  ViewMsg_SwapOut_Params params;
+  params.closing_process_id = 10;
+  params.closing_route_id = 11;
+  params.new_render_process_host_id = 12;
+  params.new_request_id = 13;
+  view()->OnSwapOut(params);
+
+  // Check for a OnSwapOutACK.
+  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_SwapOut_ACK::ID);
+  ASSERT_TRUE(msg);
+  render_thread_->sink().ClearMessages();
+
+  // It is possible to get a reload request at this point, containing the
+  // params.state of the initial page (e.g., if the new page fails the
+  // provisional load in the renderer process, after we unload the old page).
+  // Ensure the old page gets reloaded, not swappedout://.
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("data:text/html,<div>Page A</div>");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::RELOAD;
+  nav_params.transition = PAGE_TRANSITION_RELOAD;
+  nav_params.current_history_list_length = 2;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 0;
+  nav_params.page_id = 1;
+  nav_params.state = state_A;
+  view()->OnNavigate(nav_params);
+  ProcessPendingMessages();
+
+  // Verify page A committed, not swappedout://.
+  const IPC::Message* frame_navigate_msg =
+      render_thread_->sink().GetUniqueMessageMatching(
+          ViewHostMsg_FrameNavigate::ID);
+  EXPECT_TRUE(frame_navigate_msg);
+
+  // Read URL out of the parent trait of the params object.
+  ViewHostMsg_FrameNavigate::Param commit_params;
+  ViewHostMsg_FrameNavigate::Read(frame_navigate_msg, &commit_params);
+  EXPECT_NE(GURL("swappedout://"), commit_params.a.url);
+}
+
+
+// Test that we get the correct UpdateState message when we go back twice
+// quickly without committing.  Regression test for http://crbug.com/58082.
+// Disabled: http://crbug.com/157357 .
+TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
+  // Load page A.
+  LoadHTML("<div>Page A</div>");
+
+  // Load page B, which will trigger an UpdateState message for page A.
+  LoadHTML("<div>Page B</div>");
+
+  // Check for a valid UpdateState message for page A.
+  ProcessPendingMessages();
   const IPC::Message* msg_A = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
@@ -532,6 +564,7 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   LoadHTML("<div>Page C</div>");
 
   // Check for a valid UpdateState for page B.
+  ProcessPendingMessages();
   const IPC::Message* msg_B = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_B);
@@ -546,6 +579,7 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   LoadHTML("<div>Page D</div>");
 
   // Check for a valid UpdateState for page C.
+  ProcessPendingMessages();
   const IPC::Message* msg_C = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_C);
@@ -559,7 +593,7 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   // Go back to C and commit, preparing for our real test.
   ViewMsg_Navigate_Params params_C;
   params_C.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params_C.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params_C.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_C.current_history_list_length = 4;
   params_C.current_history_list_offset = 3;
   params_C.pending_history_list_offset = 2;
@@ -576,7 +610,7 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   // Back to page B (page_id 2), without committing.
   ViewMsg_Navigate_Params params_B;
   params_B.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params_B.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params_B.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_B.current_history_list_length = 4;
   params_B.current_history_list_offset = 2;
   params_B.pending_history_list_offset = 1;
@@ -587,7 +621,7 @@ TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
   // Back to page A (page_id 1) and commit.
   ViewMsg_Navigate_Params params;
   params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_B.current_history_list_length = 4;
   params_B.current_history_list_offset = 2;
   params_B.pending_history_list_offset = 0;
@@ -627,6 +661,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
   EXPECT_EQ(2, view()->history_page_ids_[1]);
 
   // Check for a valid UpdateState message for page A.
+  ProcessPendingMessages();
   const IPC::Message* msg_A = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
@@ -639,7 +674,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
   // Back to page A (page_id 1) and commit.
   ViewMsg_Navigate_Params params_A;
   params_A.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params_A.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params_A.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_A.current_history_list_length = 2;
   params_A.current_history_list_offset = 1;
   params_A.pending_history_list_offset = 0;
@@ -657,7 +692,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
   // The browser then sends a stale navigation to B, which should be ignored.
   ViewMsg_Navigate_Params params_B;
   params_B.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params_B.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params_B.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_B.current_history_list_length = 2;
   params_B.current_history_list_offset = 0;
   params_B.pending_history_list_offset = 1;
@@ -691,6 +726,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
   EXPECT_EQ(2, view()->history_page_ids_[1]);
 
   // Check for a valid UpdateState message for page A.
+  ProcessPendingMessages();
   const IPC::Message* msg_A = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
@@ -707,6 +743,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
   EXPECT_EQ(3, view()->history_page_ids_[2]);
 
   // Check for a valid UpdateState message for page B.
+  ProcessPendingMessages();
   const IPC::Message* msg_B = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_B);
@@ -721,7 +758,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
   // Ensure that going back to page B (page_id 2) at offset 0 is successful.
   ViewMsg_Navigate_Params params_B;
   params_B.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  params_B.transition = content::PAGE_TRANSITION_FORWARD_BACK;
+  params_B.transition = PAGE_TRANSITION_FORWARD_BACK;
   params_B.current_history_list_length = 2;
   params_B.current_history_list_offset = 1;
   params_B.pending_history_list_offset = 0;
@@ -1544,30 +1581,6 @@ TEST_F(RenderViewImplTest, SetHistoryLengthAndPrune) {
   EXPECT_EQ(expected_page_id_2, view()->history_page_ids_[3]);
 }
 
-TEST_F(RenderViewImplTest, FindTitleForIntentsPage) {
-  view()->set_send_content_state_immediately(true);
-  LoadHTML("<html><head><title>title</title>"
-           "<intent action=\"a\" type=\"t\"></intent></head></html>");
-  WebKit::WebIntentServiceInfo service;
-  service.setAction(ASCIIToUTF16("a"));
-  service.setType(ASCIIToUTF16("t"));
-  view()->registerIntentService(GetMainFrame(), service);
-  ProcessPendingMessages();
-
-  EXPECT_TRUE(render_thread_->sink().GetUniqueMessageMatching(
-      IntentsHostMsg_RegisterIntentService::ID));
-  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
-      IntentsHostMsg_RegisterIntentService::ID);
-  ASSERT_TRUE(msg);
-  webkit_glue::WebIntentServiceData service_data;
-  bool user_gesture = true;
-  IntentsHostMsg_RegisterIntentService::Read(msg, &service_data, &user_gesture);
-  EXPECT_EQ(ASCIIToUTF16("a"), service_data.action);
-  EXPECT_EQ(ASCIIToUTF16("t"), service_data.type);
-  EXPECT_EQ(ASCIIToUTF16("title"), service_data.title);
-  EXPECT_FALSE(user_gesture);
-}
-
 TEST_F(RenderViewImplTest, ContextMenu) {
   LoadHTML("<div>Page A</div>");
 
@@ -1706,9 +1719,9 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
 
 TEST_F(RenderViewImplTest, ZoomLimit) {
   const double kMinZoomLevel =
-      WebKit::WebView::zoomFactorToZoomLevel(content::kMinimumZoomFactor);
+      WebKit::WebView::zoomFactorToZoomLevel(kMinimumZoomFactor);
   const double kMaxZoomLevel =
-      WebKit::WebView::zoomFactorToZoomLevel(content::kMaximumZoomFactor);
+      WebKit::WebView::zoomFactorToZoomLevel(kMaximumZoomFactor);
 
   ViewMsg_Navigate_Params params;
   params.page_id = -1;
@@ -1746,7 +1759,7 @@ TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
   ExecuteJavaScript("document.getElementById('test1').focus();");
   view()->OnSetEditableSelectionOffsets(4, 8);
   const std::vector<WebKit::WebCompositionUnderline> empty_underline;
-  view()->OnSetCompositionFromExistingText(7,10, empty_underline);
+  view()->OnSetCompositionFromExistingText(7, 10, empty_underline);
   WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
@@ -1758,20 +1771,6 @@ TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
   EXPECT_EQ(0, info.selectionEnd);
 }
 
-TEST_F(RenderViewImplTest, OnReplaceAll) {
-  // Load an HTML page consisting of an input field.
-  LoadHTML("<html>"
-           "<head>"
-           "</head>"
-           "<body>"
-           "<input id=\"test1\" value=\"some test text hello\"></input>"
-           "</body>"
-           "</html>");
-  ExecuteJavaScript("document.getElementById('test1').focus();");
-  view()->OnReplaceAll(UTF8ToUTF16("replacement words"));
-  WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
-  EXPECT_EQ("replacement words", info.value);
-}
 
 TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
   // Load an HTML page consisting of an input field.
@@ -1796,3 +1795,31 @@ TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
   EXPECT_EQ(2, info.selectionStart);
   EXPECT_EQ(2, info.selectionEnd);
 }
+
+// Test that the navigating specific frames works correctly.
+TEST_F(RenderViewImplTest, NavigateFrame) {
+  // Load page A.
+  LoadHTML("hello <iframe srcdoc='fail' name='frame'></iframe>");
+
+  // Navigate the frame only.
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("data:text/html,world");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
+  nav_params.current_history_list_length = 1;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 1;
+  nav_params.page_id = -1;
+  nav_params.frame_to_navigate = "frame";
+  view()->OnNavigate(nav_params);
+  ProcessPendingMessages();
+
+  // Copy the document content to std::wstring and compare with the
+  // expected result.
+  const int kMaxOutputCharacters = 256;
+  std::wstring output = UTF16ToWideHack(
+      GetMainFrame()->contentAsText(kMaxOutputCharacters));
+  EXPECT_EQ(output, L"hello \n\nworld");
+}
+
+}  // namespace content

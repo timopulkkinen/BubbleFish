@@ -8,8 +8,9 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/testing_pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -72,24 +73,24 @@ class URLBlacklistManagerTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    pref_service_.RegisterListPref(prefs::kUrlBlacklist);
-    pref_service_.RegisterListPref(prefs::kUrlWhitelist);
+    pref_service_.registry()->RegisterListPref(prefs::kUrlBlacklist);
+    pref_service_.registry()->RegisterListPref(prefs::kUrlWhitelist);
     blacklist_manager_.reset(
         new TestingURLBlacklistManager(&pref_service_));
-    loop_.RunAllPending();
+    loop_.RunUntilIdle();
   }
 
   virtual void TearDown() OVERRIDE {
     if (blacklist_manager_.get())
       blacklist_manager_->ShutdownOnUIThread();
-    loop_.RunAllPending();
+    loop_.RunUntilIdle();
     // Delete |blacklist_manager_| while |io_thread_| is mapping IO to
     // |loop_|.
     blacklist_manager_.reset();
   }
 
   MessageLoop loop_;
-  TestingPrefService pref_service_;
+  TestingPrefServiceSimple pref_service_;
   scoped_ptr<TestingURLBlacklistManager> blacklist_manager_;
 
  private:
@@ -181,7 +182,7 @@ TEST_F(URLBlacklistManagerTest, SingleUpdateForTwoPrefChanges) {
   whitelist->Append(new StringValue("mail.google.com"));
   pref_service_.SetManagedPref(prefs::kUrlBlacklist, blacklist);
   pref_service_.SetManagedPref(prefs::kUrlBlacklist, whitelist);
-  loop_.RunAllPending();
+  loop_.RunUntilIdle();
 
   EXPECT_EQ(1, blacklist_manager_->update_called());
 }
@@ -193,7 +194,7 @@ TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask0) {
   blacklist_manager_->ShutdownOnUIThread();
   blacklist_manager_.reset();
   // Run the task after shutdown and deletion.
-  loop_.RunAllPending();
+  loop_.RunUntilIdle();
 }
 
 TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask1) {
@@ -202,11 +203,11 @@ TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask1) {
   // Shutdown comes before the task is executed.
   blacklist_manager_->ShutdownOnUIThread();
   // Run the task after shutdown, but before deletion.
-  loop_.RunAllPending();
+  loop_.RunUntilIdle();
 
   EXPECT_EQ(0, blacklist_manager_->update_called());
   blacklist_manager_.reset();
-  loop_.RunAllPending();
+  loop_.RunUntilIdle();
 }
 
 TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask2) {
@@ -217,7 +218,7 @@ TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask2) {
 
   EXPECT_FALSE(blacklist_manager_->set_blacklist_called());
   blacklist_manager_.reset();
-  loop_.RunAllPending();
+  loop_.RunUntilIdle();
 }
 
 TEST_F(URLBlacklistManagerTest, HasStandardScheme) {

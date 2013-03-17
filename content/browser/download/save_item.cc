@@ -11,9 +11,11 @@
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_package.h"
 
+namespace content {
+
 // Constructor for SaveItem when creating each saving job.
 SaveItem::SaveItem(const GURL& url,
-                   const content::Referrer& referrer,
+                   const Referrer& referrer,
                    SavePackage* package,
                    SaveFileCreateInfo::SaveFileSource save_source)
   : save_id_(-1),
@@ -112,7 +114,7 @@ int SaveItem::PercentComplete() const {
 }
 
 // Rename the save item with new path.
-void SaveItem::Rename(const FilePath& full_path) {
+void SaveItem::Rename(const base::FilePath& full_path) {
   DCHECK(!full_path.empty() && !has_final_name());
   full_path_ = full_path;
   file_name_ = full_path_.BaseName();
@@ -128,3 +130,5 @@ void SaveItem::SetTotalBytes(int64 total_bytes) {
   DCHECK(total_bytes_ == 0);
   total_bytes_ = total_bytes;
 }
+
+}  // namespace content

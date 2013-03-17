@@ -6,9 +6,10 @@
 
 #include <algorithm>
 
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
@@ -82,9 +83,10 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   explicit DevtoolsNotificationBridge(ExtensionPopupController* controller)
     : controller_(controller) {}
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
         if (content::Details<extensions::ExtensionHost>(
@@ -230,7 +232,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
     return nil;
 
   ExtensionProcessManager* manager =
-      browser->profile()->GetExtensionProcessManager();
+      extensions::ExtensionSystem::Get(browser->profile())->process_manager();
   DCHECK(manager);
   if (!manager)
     return nil;

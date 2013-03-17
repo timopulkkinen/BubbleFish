@@ -4,20 +4,24 @@
 
 #include "chrome/common/spellcheck_common.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 namespace chrome {
 namespace spellcheck_common {
 
-static const struct {
-  // The language.
-  const char* language;
+struct LanguageRegion {
+  const char* language;  // The language.
+  const char* language_region;  // language & region, used by dictionaries.
+};
 
-  // The corresponding language and region, used by the dictionaries.
-  const char* language_region;
-} g_supported_spellchecker_languages[] = {
+struct LanguageVersion {
+  const char* language;  // The language input.
+  const char* version;   // The corresponding version.
+};
+
+static const LanguageRegion g_supported_spellchecker_languages[] = {
   // Several languages are not to be included in the spellchecker list:
-  // th-TH, uk-UA
+  // th-TH, vi-VI.
   {"af", "af-ZA"},
   {"bg", "bg-BG"},
   {"ca", "ca-ES"},
@@ -39,6 +43,7 @@ static const struct {
   {"hu", "hu-HU"},
   {"id", "id-ID"},
   {"it", "it-IT"},
+  {"ko", "ko"},
   {"lt", "lt-LT"},
   {"lv", "lv-LV"},
   {"nb", "nb-NO"},
@@ -48,20 +53,31 @@ static const struct {
   {"pt-PT", "pt-PT"},
   {"ro", "ro-RO"},
   {"ru", "ru-RU"},
+  {"sh", "sh"},
   {"sk", "sk-SK"},
   {"sl", "sl-SI"},
-  {"sh", "sh"},
+  {"sq", "sq"},
   {"sr", "sr"},
   {"sv", "sv-SE"},
+  {"ta", "ta-IN"},
   {"tr", "tr-TR"},
   {"uk", "uk-UA"},
   {"vi", "vi-VN"},
 };
 
+bool IsValidRegion(const std::string& region) {
+  for (size_t i = 0; i < arraysize(g_supported_spellchecker_languages);
+       ++i) {
+    if (g_supported_spellchecker_languages[i].language_region == region)
+      return true;
+  }
+  return false;
+}
+
 // This function returns the language-region version of language name.
 // e.g. returns hi-IN for hi.
 std::string GetSpellCheckLanguageRegion(const std::string& input_language) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(g_supported_spellchecker_languages);
+  for (size_t i = 0; i < arraysize(g_supported_spellchecker_languages);
        ++i) {
     if (g_supported_spellchecker_languages[i].language == input_language) {
       return std::string(
@@ -72,47 +88,19 @@ std::string GetSpellCheckLanguageRegion(const std::string& input_language) {
   return input_language;
 }
 
-FilePath GetVersionedFileName(const std::string& input_language,
-                              const FilePath& dict_dir) {
-  // The default dictionary version is 1-2. These versions have been augmented
-  // with additional words found by the translation team.
-  static const char kDefaultVersionString[] = "-1-2";
+base::FilePath GetVersionedFileName(const std::string& input_language,
+                                    const base::FilePath& dict_dir) {
+  // The default dictionary version is 3-0. This version indicates that the bdic
+  // file contains a checksum.
+  static const char kDefaultVersionString[] = "-3-0";
 
-  static const struct {
-    // The language input.
-    const char* language;
-
-    // The corresponding version.
-    const char* version;
-  } special_version_string[] = {
-    {"es-ES", "-1-1"},  // 1-1: Have not been augmented with addtional words.
-    {"nl-NL", "-1-1"},
-    {"sv-SE", "-1-1"},
-    {"he-IL", "-1-1"},
-    {"el-GR", "-1-1"},
-    {"hi-IN", "-1-1"},
-    {"tr-TR", "-1-1"},
-    {"et-EE", "-1-1"},
-    {"lt-LT", "-1-3"},  // 1-3 (Feb 2009): new words, as well as an upgraded
-                        // dictionary.
-    {"pl-PL", "-1-3"},
-    {"fr-FR", "-2-0"},  // 2-0 (2010): upgraded dictionaries.
-    {"hu-HU", "-2-0"},
-    {"ro-RO", "-2-0"},
-    {"ru-RU", "-2-0"},
-    {"bg-BG", "-2-0"},
-    {"sr",    "-2-0"},
-    {"uk-UA", "-2-0"},
-    {"pt-BR", "-2-2"},  // 2-2 (Mar 2011): upgraded a dictionary.
-    {"sh",    "-2-2"},  // 2-2 (Mar 2011): added a dictionary.
-    {"en-US", "-2-3"},  // 2-3 (May 2012): fixed affixes + more words.
-    {"en-CA", "-2-3"},
-    {"en-GB", "-2-3"},
-    {"en-AU", "-2-3"},
-    {"ca-ES", "-2-3"},  // 2-3 (May 2012): upgraded a dictionary.
-    {"sv-SE", "-2-3"},  // 2-3 (May 2012): upgraded a dictionary.
-    {"af-ZA", "-2-3"},  // 2-3 (May 2012): added a dictionary.
-    {"fo-FO", "-2-3"},  // 2-3 (May 2012): added a dictionary.
+  // Add non-default version strings here. Use the same version for all the
+  // dictionaries that you add at the same time. Increment the major version
+  // number if you're updating either dic or aff files. Increment the minor
+  // version number if you're updating only dic_delta files.
+  static LanguageVersion special_version_string[] = {
+    {"tr-TR", "-4-0"},  // Jan 9, 2013: Add "FLAG num" to aff to avoid heapcheck
+                        // crash.
   };
 
   // Generate the bdict file name using default version string or special
@@ -120,7 +108,7 @@ FilePath GetVersionedFileName(const std::string& input_language,
   std::string language = GetSpellCheckLanguageRegion(input_language);
   std::string versioned_bdict_file_name(language + kDefaultVersionString +
                                         ".bdic");
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(special_version_string); ++i) {
+  for (size_t i = 0; i < arraysize(special_version_string); ++i) {
     if (language == special_version_string[i].language) {
       versioned_bdict_file_name =
           language + special_version_string[i].version + ".bdic";
@@ -133,7 +121,7 @@ FilePath GetVersionedFileName(const std::string& input_language,
 
 std::string GetCorrespondingSpellCheckLanguage(const std::string& language) {
   // Look for exact match in the Spell Check language list.
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(g_supported_spellchecker_languages);
+  for (size_t i = 0; i < arraysize(g_supported_spellchecker_languages);
        ++i) {
     // First look for exact match in the language region of the list.
     std::string spellcheck_language(
@@ -148,31 +136,12 @@ std::string GetCorrespondingSpellCheckLanguage(const std::string& language) {
       return g_supported_spellchecker_languages[i].language;
   }
 
-  // Look for a match by comparing only language parts. All the 'en-RR'
-  // except for 'en-GB' exactly matched in the above loop, will match
-  // 'en-US'. This is not ideal because 'en-ZA', 'en-NZ' had
-  // better be matched with 'en-GB'. This does not handle cases like
-  // 'az-Latn-AZ' vs 'az-Arab-AZ', either, but we don't use 3-part
-  // locale ids with a script code in the middle, yet.
-  // TODO(jungshik): Add a better fallback.
-  std::string language_part(language, 0, language.find('-'));
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(g_supported_spellchecker_languages);
-       ++i) {
-    std::string spellcheck_language(
-        g_supported_spellchecker_languages[i].language_region);
-    if (spellcheck_language.substr(0, spellcheck_language.find('-')) ==
-        language_part) {
-      return spellcheck_language;
-    }
-  }
-
   // No match found - return blank.
   return std::string();
 }
 
-
 void SpellCheckLanguages(std::vector<std::string>* languages) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(g_supported_spellchecker_languages);
+  for (size_t i = 0; i < arraysize(g_supported_spellchecker_languages);
        ++i) {
     languages->push_back(g_supported_spellchecker_languages[i].language);
   }

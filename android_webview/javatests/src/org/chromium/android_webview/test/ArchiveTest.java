@@ -10,6 +10,7 @@ import android.webkit.ValueCallback;
 import org.chromium.android_webview.AwContents;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.UrlUtils;
 
 import java.io.File;
 import java.util.concurrent.Semaphore;
@@ -20,14 +21,15 @@ public class ArchiveTest extends AndroidWebViewTestBase {
 
     private static final long TEST_TIMEOUT = 20000L;
 
-    private static final String TEST_PAGE =
-            "data:text/html;utf-8,<html><head></head><body>test</body></html>";
+    private static final String TEST_PAGE = UrlUtils.encodeHtmlDataUri(
+            "<html><head></head><body>test</body></html>");
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
     private AwTestContainerView mTestContainerView;
 
     @Override
     protected void setUp() throws Exception {
+        super.setUp();
         mTestContainerView = createAwTestContainerViewOnMainSync(mContentsClient);
     }
 
@@ -73,25 +75,25 @@ public class ArchiveTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testExplicitGoodPath() throws Throwable {
         final String path = new File(getActivity().getFilesDir(), "test.mht").getAbsolutePath();
         File file = new File(path);
         file.delete();
         assertFalse(file.exists());
 
-        loadUrlSync(mTestContainerView.getContentViewCore(),
+        loadUrlSync(mTestContainerView.getAwContents(),
                 mContentsClient.getOnPageFinishedHelper(), TEST_PAGE);
 
         doArchiveTest(mTestContainerView.getAwContents(), path, false, path);
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testAutoGoodPath() throws Throwable {
         final String path = getActivity().getFilesDir().getAbsolutePath() + "/";
 
-        loadUrlSync(mTestContainerView.getContentViewCore(),
+        loadUrlSync(mTestContainerView.getAwContents(),
                 mContentsClient.getOnPageFinishedHelper(), TEST_PAGE);
 
         // Create the first archive
@@ -108,28 +110,28 @@ public class ArchiveTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testExplicitBadPath() throws Throwable {
         final String path = new File("/foo/bar/baz.mht").getAbsolutePath();
         File file = new File(path);
         file.delete();
         assertFalse(file.exists());
 
-        loadUrlSync(mTestContainerView.getContentViewCore(),
+        loadUrlSync(mTestContainerView.getAwContents(),
                 mContentsClient.getOnPageFinishedHelper(), TEST_PAGE);
 
         doArchiveTest(mTestContainerView.getAwContents(), path, false, null);
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testAutoBadPath() throws Throwable {
         final String path = new File("/foo/bar/").getAbsolutePath();
         File file = new File(path);
         file.delete();
         assertFalse(file.exists());
 
-        loadUrlSync(mTestContainerView.getContentViewCore(),
+        loadUrlSync(mTestContainerView.getAwContents(),
                 mContentsClient.getOnPageFinishedHelper(), TEST_PAGE);
 
         doArchiveTest(mTestContainerView.getAwContents(), path, true, null);

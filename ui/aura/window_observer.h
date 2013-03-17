@@ -18,6 +18,34 @@ class Window;
 
 class AURA_EXPORT WindowObserver {
  public:
+  struct HierarchyChangeParams {
+    enum HierarchyChangePhase {
+      HIERARCHY_CHANGING,
+      HIERARCHY_CHANGED
+    };
+
+    Window* target;     // The window that was added or removed.
+    Window* new_parent;
+    Window* old_parent;
+    HierarchyChangePhase phase;
+    Window* receiver;   // The window receiving the notification.
+  };
+
+  WindowObserver();
+
+  // Called when a window is added or removed. Notifications are sent to the
+  // following hierarchies in this order:
+  // 1. |target|.
+  // 2. |target|'s child hierarchy.
+  // 3. |target|'s parent hierarchy in its |old_parent|
+  //        (only for Changing notifications).
+  // 3. |target|'s parent hierarchy in its |new_parent|.
+  //        (only for Changed notifications).
+  // This sequence is performed via the Changing and Changed notifications below
+  // before and after the change is committed.
+  virtual void OnWindowHierarchyChanging(const HierarchyChangeParams& params) {}
+  virtual void OnWindowHierarchyChanged(const HierarchyChangeParams& params) {}
+
   // Invoked when |new_window| has been added as a child of this window.
   virtual void OnWindowAdded(Window* new_window) {}
 
@@ -40,6 +68,7 @@ class AURA_EXPORT WindowObserver {
   // Invoked when SetVisible() is invoked on a window. |visible| is the
   // value supplied to SetVisible(). If |visible| is true, window->IsVisible()
   // may still return false. See description in Window::IsVisible() for details.
+  virtual void OnWindowVisibilityChanging(Window* window, bool visible) {}
   virtual void OnWindowVisibilityChanged(Window* window, bool visible) {}
 
   // Invoked when SetBounds() is invoked on |window|. |old_bounds| and
@@ -70,8 +99,27 @@ class AURA_EXPORT WindowObserver {
   // Called when a Window is about to be removed from a RootWindow.
   virtual void OnWindowRemovingFromRootWindow(Window* window) {}
 
+  // Called when a transient child is added to |window|.
+  virtual void OnAddTransientChild(Window* window, Window* transient) {}
+
+  // Called when a transient child is removed from |window|.
+  virtual void OnRemoveTransientChild(Window* window, Window* transient) {}
+
  protected:
-  virtual ~WindowObserver() {}
+  virtual ~WindowObserver();
+
+ private:
+  friend class Window;
+
+  // Called when this is added as an observer on |window|.
+  void OnObservingWindow(Window* window);
+
+  // Called when this is removed from the observers on |window|.
+  void OnUnobservingWindow(Window* window);
+
+  // Tracks the number of windows being observed to track down
+  // http://crbug.com/177012.
+  int observing_;
 };
 
 }  // namespace aura

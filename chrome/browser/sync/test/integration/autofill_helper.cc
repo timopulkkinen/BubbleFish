@@ -21,8 +21,8 @@
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/form_field_data.h"
 #include "chrome/test/base/thread_observer_helper.h"
-#include "webkit/forms/form_field.h"
 
 using base::WaitableEvent;
 using content::BrowserThread;
@@ -39,7 +39,7 @@ class AutofillDBThreadObserverHelper : public DBThreadObserverHelper {
  protected:
   virtual ~AutofillDBThreadObserverHelper() {}
 
-  virtual void RegisterObservers() {
+  virtual void RegisterObservers() OVERRIDE {
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    content::NotificationService::AllSources());
@@ -159,11 +159,11 @@ PersonalDataManager* GetPersonalDataManager(int index) {
 }
 
 void AddKeys(int profile, const std::set<AutofillKey>& keys) {
-  std::vector<webkit::forms::FormField> form_fields;
+  std::vector<FormFieldData> form_fields;
   for (std::set<AutofillKey>::const_iterator i = keys.begin();
        i != keys.end();
        ++i) {
-    webkit::forms::FormField field;
+    FormFieldData field;
     field.name = i->name();
     field.value = i->value();
     form_fields.push_back(field);
@@ -216,7 +216,7 @@ void SetProfiles(int profile, std::vector<AutofillProfile>* autofill_profiles) {
   EXPECT_CALL(observer, OnPersonalDataChanged()).
       WillOnce(QuitUIMessageLoop());
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
-  pdm->SetObserver(&observer);
+  pdm->AddObserver(&observer);
   pdm->SetProfiles(autofill_profiles);
   MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
@@ -227,7 +227,7 @@ void SetCreditCards(int profile, std::vector<CreditCard>* credit_cards) {
   EXPECT_CALL(observer, OnPersonalDataChanged()).
       WillOnce(QuitUIMessageLoop());
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
-  pdm->SetObserver(&observer);
+  pdm->AddObserver(&observer);
   pdm->SetCreditCards(credit_cards);
   MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
@@ -261,7 +261,7 @@ void UpdateProfile(int profile,
   for (size_t i = 0; i < all_profiles.size(); ++i) {
     profiles.push_back(*all_profiles[i]);
     if (all_profiles[i]->guid() == guid)
-      profiles.back().SetInfo(type.field_type(), value);
+      profiles.back().SetRawInfo(type.field_type(), value);
   }
   autofill_helper::SetProfiles(profile, &profiles);
 }
@@ -272,7 +272,7 @@ const std::vector<AutofillProfile*>& GetAllProfiles(
   EXPECT_CALL(observer, OnPersonalDataChanged()).
       WillOnce(QuitUIMessageLoop());
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
-  pdm->SetObserver(&observer);
+  pdm->AddObserver(&observer);
   pdm->Refresh();
   MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);

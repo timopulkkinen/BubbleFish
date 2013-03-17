@@ -8,47 +8,14 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/task_runner.h"
+#include "base/test/test_simple_task_runner.h"
 #include "net/base/io_buffer.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using ::testing::_;
-using ::testing::Return;
-using ::testing::SaveArg;
-using ::testing::StrictMock;
-
-namespace tracked_objects {
-class Location;
-}
-
+namespace content {
 namespace {
-
-class MockTaskRunner : public base::SequencedTaskRunner {
- public:
-  MockTaskRunner();
-
-  // TaskRunner functions.
-  MOCK_METHOD3(PostDelayedTask, bool(const tracked_objects::Location&,
-                                     const base::Closure&, base::TimeDelta));
-
-  MOCK_METHOD3(PostNonNestableDelayedTask, bool(
-      const tracked_objects::Location&,
-      const base::Closure&,
-      base::TimeDelta));
-
-  MOCK_CONST_METHOD0(RunsTasksOnCurrentThread, bool());
-
- protected:
-  ~MockTaskRunner();
-};
-
-MockTaskRunner::MockTaskRunner() { }
-
-MockTaskRunner::~MockTaskRunner() { }
 
 void CountCallbacks(int* counter) {
   ++*counter;
@@ -78,8 +45,7 @@ class ByteStreamTest : public testing::Test {
   // ByteStream, returning the result of the ByteStream::Write.
   // Separate function to avoid duplication of buffer_size in test
   // calls.
-  bool Write(content::ByteStreamWriter* byte_stream_input,
-             size_t buffer_size) {
+  bool Write(ByteStreamWriter* byte_stream_input, size_t buffer_size) {
     return byte_stream_input->Write(NewIOBuffer(buffer_size), buffer_size);
   }
 
@@ -135,9 +101,9 @@ ByteStreamTest::ByteStreamTest()
 // Confirm that filling and emptying the stream works properly, and that
 // we get full triggers when we expect.
 TEST_F(ByteStreamTest, ByteStream_PushBack) {
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       3 * 1024, &byte_stream_input, &byte_stream_output);
 
@@ -149,34 +115,34 @@ TEST_F(ByteStreamTest, ByteStream_PushBack) {
   EXPECT_FALSE(Write(byte_stream_input.get(), 1));
   EXPECT_FALSE(Write(byte_stream_input.get(), 1024));
   // Flush
-  byte_stream_input->Close(content::DOWNLOAD_INTERRUPT_REASON_NONE);
-  message_loop_.RunAllPending();
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NONE);
+  message_loop_.RunUntilIdle();
 
   // Pull the IO buffers out; do we get the same buffers and do they
   // have the same contents?
   scoped_refptr<net::IOBuffer> output_io_buffer;
   size_t output_length;
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_COMPLETE,
+  EXPECT_EQ(ByteStreamReader::STREAM_COMPLETE,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 }
 
@@ -184,140 +150,136 @@ TEST_F(ByteStreamTest, ByteStream_PushBack) {
 // that we're getting pushback even when data's split across the two
 // objects
 TEST_F(ByteStreamTest, ByteStream_PushBackSplit) {
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       9 * 1024, &byte_stream_input, &byte_stream_output);
 
   // Push a series of IO buffers on; test pushback happening and
   // that it's advisory.
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   EXPECT_FALSE(Write(byte_stream_input.get(), 6 * 1024));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Pull the IO buffers out; do we get the same buffers and do they
   // have the same contents?
   scoped_refptr<net::IOBuffer> output_io_buffer;
   size_t output_length;
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 }
 
 // Confirm that a Close() notification transmits in-order
 // with data on the stream.
 TEST_F(ByteStreamTest, ByteStream_CompleteTransmits) {
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
 
   scoped_refptr<net::IOBuffer> output_io_buffer;
   size_t output_length;
 
   // Empty stream, non-error case.
-  content::CreateByteStream(
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       3 * 1024, &byte_stream_input, &byte_stream_output);
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  byte_stream_input->Close(content::DOWNLOAD_INTERRUPT_REASON_NONE);
-  message_loop_.RunAllPending();
-  ASSERT_EQ(content::ByteStreamReader::STREAM_COMPLETE,
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NONE);
+  message_loop_.RunUntilIdle();
+  ASSERT_EQ(ByteStreamReader::STREAM_COMPLETE,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE,
+  EXPECT_EQ(DOWNLOAD_INTERRUPT_REASON_NONE,
             byte_stream_output->GetStatus());
 
   // Non-empty stream, non-error case.
-  content::CreateByteStream(
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       3 * 1024, &byte_stream_input, &byte_stream_output);
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  byte_stream_input->Close(content::DOWNLOAD_INTERRUPT_REASON_NONE);
-  message_loop_.RunAllPending();
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NONE);
+  message_loop_.RunUntilIdle();
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  ASSERT_EQ(content::ByteStreamReader::STREAM_COMPLETE,
+  ASSERT_EQ(ByteStreamReader::STREAM_COMPLETE,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE,
+  EXPECT_EQ(DOWNLOAD_INTERRUPT_REASON_NONE,
             byte_stream_output->GetStatus());
 
   // Empty stream, non-error case.
-  content::CreateByteStream(
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       3 * 1024, &byte_stream_input, &byte_stream_output);
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  byte_stream_input->Close(
-      content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED);
-  message_loop_.RunAllPending();
-  ASSERT_EQ(content::ByteStreamReader::STREAM_COMPLETE,
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED);
+  message_loop_.RunUntilIdle();
+  ASSERT_EQ(ByteStreamReader::STREAM_COMPLETE,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
+  EXPECT_EQ(DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
             byte_stream_output->GetStatus());
 
   // Non-empty stream, non-error case.
-  content::CreateByteStream(
+  CreateByteStream(
       message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
       3 * 1024, &byte_stream_input, &byte_stream_output);
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(Write(byte_stream_input.get(), 1024));
-  byte_stream_input->Close(
-      content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED);
-  message_loop_.RunAllPending();
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED);
+  message_loop_.RunUntilIdle();
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  ASSERT_EQ(content::ByteStreamReader::STREAM_COMPLETE,
+  ASSERT_EQ(ByteStreamReader::STREAM_COMPLETE,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
+  EXPECT_EQ(DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED,
             byte_stream_output->GetStatus());
 }
 
 // Confirm that callbacks on the sink side are triggered when they should be.
 TEST_F(ByteStreamTest, ByteStream_SinkCallback) {
-  scoped_refptr<MockTaskRunner> task_runner(new StrictMock<MockTaskRunner>());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner(
+      new base::TestSimpleTaskRunner());
 
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       message_loop_.message_loop_proxy(), task_runner,
       10000, &byte_stream_input, &byte_stream_output);
 
   scoped_refptr<net::IOBuffer> output_io_buffer;
   size_t output_length;
-  base::Closure intermediate_callback;
 
   // Note that the specifics of when the callbacks are called with regard
   // to how much data is pushed onto the stream is not (currently) part
@@ -330,55 +292,46 @@ TEST_F(ByteStreamTest, ByteStream_SinkCallback) {
   int num_callbacks = 0;
   byte_stream_output->RegisterCallback(
       base::Bind(CountCallbacks, &num_callbacks));
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
 
   EXPECT_TRUE(Write(byte_stream_input.get(), 4000));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
-  // Check callback results match expectations.
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_EQ(0, num_callbacks);
-  intermediate_callback.Run();
+  task_runner->RunUntilIdle();
   EXPECT_EQ(1, num_callbacks);
 
   // Check data and stream state.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 
   // Confirm callback *isn't* called at less than 33% (by lack of
   // unexpected call on task runner).
   EXPECT_TRUE(Write(byte_stream_input.get(), 3000));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // This reflects an implementation artifact that data goes with callbacks,
   // which should not be considered part of the interface guarantee.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 }
 
 // Confirm that callbacks on the source side are triggered when they should
 // be.
 TEST_F(ByteStreamTest, ByteStream_SourceCallback) {
-  scoped_refptr<MockTaskRunner> task_runner(new StrictMock<MockTaskRunner>());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner(
+      new base::TestSimpleTaskRunner());
 
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       task_runner, message_loop_.message_loop_proxy(),
       10000, &byte_stream_input, &byte_stream_output);
 
   scoped_refptr<net::IOBuffer> output_io_buffer;
   size_t output_length;
-  base::Closure intermediate_callback;
 
   // Note that the specifics of when the callbacks are called with regard
   // to how much data is pulled from the stream is not (currently) part
@@ -388,7 +341,7 @@ TEST_F(ByteStreamTest, ByteStream_SourceCallback) {
   // Confirm callback called when about 33% space available, and not
   // at other transitions.
 
-  // Setup expectations and add data.
+  // Add data.
   int num_callbacks = 0;
   byte_stream_input->RegisterCallback(
       base::Bind(CountCallbacks, &num_callbacks));
@@ -398,44 +351,30 @@ TEST_F(ByteStreamTest, ByteStream_SourceCallback) {
 
   // Allow bytes to transition (needed for message passing implementation),
   // and get and validate the data.
-  message_loop_.RunAllPending();
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  message_loop_.RunUntilIdle();
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
-  // Setup expectations.
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
-
   // Grab data, triggering callback.  Recorded on dispatch, but doesn't
   // happen because it's caught by the mock.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
   // Confirm that the callback passed to the mock does what we expect.
   EXPECT_EQ(0, num_callbacks);
-  intermediate_callback.Run();
+  task_runner->RunUntilIdle();
   EXPECT_EQ(1, num_callbacks);
 
   // Same drill with final buffer.
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_EQ(1, num_callbacks);
-  intermediate_callback.Run();
+  task_runner->RunUntilIdle();
   // Should have updated the internal structures but not called the
   // callback.
   EXPECT_EQ(1, num_callbacks);
@@ -444,13 +383,12 @@ TEST_F(ByteStreamTest, ByteStream_SourceCallback) {
 // Confirm that racing a change to a sink callback with a post results
 // in the new callback being called.
 TEST_F(ByteStreamTest, ByteStream_SinkInterrupt) {
-  scoped_refptr<MockTaskRunner> task_runner(new StrictMock<MockTaskRunner>());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner(
+      new base::TestSimpleTaskRunner());
 
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       message_loop_.message_loop_proxy(), task_runner,
       10000, &byte_stream_input, &byte_stream_output);
 
@@ -458,23 +396,17 @@ TEST_F(ByteStreamTest, ByteStream_SinkInterrupt) {
   size_t output_length;
   base::Closure intermediate_callback;
 
-  // Setup expectations and record initial state.
+  // Record initial state.
   int num_callbacks = 0;
   byte_stream_output->RegisterCallback(
       base::Bind(CountCallbacks, &num_callbacks));
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
 
   // Add data, and pass it across.
   EXPECT_TRUE(Write(byte_stream_input.get(), 4000));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // The task runner should have been hit, but the callback count
   // isn't changed until we actually run the callback.
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_EQ(0, num_callbacks);
 
   // If we change the callback now, the new one should be run
@@ -482,15 +414,15 @@ TEST_F(ByteStreamTest, ByteStream_SinkInterrupt) {
   int num_alt_callbacks = 0;
   byte_stream_output->RegisterCallback(
       base::Bind(CountCallbacks, &num_alt_callbacks));
-  intermediate_callback.Run();
+  task_runner->RunUntilIdle();
   EXPECT_EQ(0, num_callbacks);
   EXPECT_EQ(1, num_alt_callbacks);
 
   // Final cleanup.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 
 }
@@ -498,13 +430,12 @@ TEST_F(ByteStreamTest, ByteStream_SinkInterrupt) {
 // Confirm that racing a change to a source callback with a post results
 // in the new callback being called.
 TEST_F(ByteStreamTest, ByteStream_SourceInterrupt) {
-  scoped_refptr<MockTaskRunner> task_runner(new StrictMock<MockTaskRunner>());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner(
+      new base::TestSimpleTaskRunner());
 
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       task_runner, message_loop_.message_loop_proxy(),
       10000, &byte_stream_input, &byte_stream_output);
 
@@ -512,85 +443,65 @@ TEST_F(ByteStreamTest, ByteStream_SourceInterrupt) {
   size_t output_length;
   base::Closure intermediate_callback;
 
-  // Setup state for test and record initiali expectations
+  // Setup state for test.
   int num_callbacks = 0;
   byte_stream_input->RegisterCallback(
       base::Bind(CountCallbacks, &num_callbacks));
   EXPECT_TRUE(Write(byte_stream_input.get(), 2000));
   EXPECT_TRUE(Write(byte_stream_input.get(), 2001));
   EXPECT_FALSE(Write(byte_stream_input.get(), 6000));
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Initial get should not trigger callback.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  message_loop_.RunAllPending();
-
-  // Setup expectations.
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
+  message_loop_.RunUntilIdle();
 
   // Second get *should* trigger callback.
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
 
   // Which should do the right thing when it's run.
   int num_alt_callbacks = 0;
   byte_stream_input->RegisterCallback(
       base::Bind(CountCallbacks, &num_alt_callbacks));
-  intermediate_callback.Run();
+  task_runner->RunUntilIdle();
   EXPECT_EQ(0, num_callbacks);
   EXPECT_EQ(1, num_alt_callbacks);
 
   // Third get should also trigger callback.
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_HAS_DATA,
+  EXPECT_EQ(ByteStreamReader::STREAM_HAS_DATA,
             byte_stream_output->Read(&output_io_buffer, &output_length));
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
   EXPECT_TRUE(ValidateIOBuffer(output_io_buffer, output_length));
-  EXPECT_EQ(content::ByteStreamReader::STREAM_EMPTY,
+  EXPECT_EQ(ByteStreamReader::STREAM_EMPTY,
             byte_stream_output->Read(&output_io_buffer, &output_length));
 }
 
 // Confirm that callback is called on zero data transfer but source
 // complete.
 TEST_F(ByteStreamTest, ByteStream_ZeroCallback) {
-  scoped_refptr<MockTaskRunner> task_runner(new StrictMock<MockTaskRunner>());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner(
+      new base::TestSimpleTaskRunner());
 
-  scoped_ptr<content::ByteStreamWriter> byte_stream_input;
-  scoped_ptr<content::ByteStreamReader> byte_stream_output;
-  content::CreateByteStream(
+  scoped_ptr<ByteStreamWriter> byte_stream_input;
+  scoped_ptr<ByteStreamReader> byte_stream_output;
+  CreateByteStream(
       message_loop_.message_loop_proxy(), task_runner,
       10000, &byte_stream_input, &byte_stream_output);
 
   base::Closure intermediate_callback;
 
-  // Setup expectations and record initial state.
+  // Record initial state.
   int num_callbacks = 0;
   byte_stream_output->RegisterCallback(
       base::Bind(CountCallbacks, &num_callbacks));
-  EXPECT_CALL(*task_runner.get(), PostDelayedTask(_, _, base::TimeDelta()))
-      .WillOnce(DoAll(SaveArg<1>(&intermediate_callback),
-                      Return(true)));
 
   // Immediately close the stream.
-  byte_stream_input->Close(content::DOWNLOAD_INTERRUPT_REASON_NONE);
-  ::testing::Mock::VerifyAndClearExpectations(task_runner.get());
-  EXPECT_CALL(*task_runner.get(), RunsTasksOnCurrentThread())
-      .WillRepeatedly(Return(true));
-  intermediate_callback.Run();
+  byte_stream_input->Close(DOWNLOAD_INTERRUPT_REASON_NONE);
+  task_runner->RunUntilIdle();
   EXPECT_EQ(1, num_callbacks);
 }
 
+}  // namespace content

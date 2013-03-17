@@ -24,8 +24,10 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -34,10 +36,21 @@
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/icu/public/common/unicode/locid.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "unicode/locid.h"
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
+#endif
 
 using content::WebContents;
+
+const char kSyncDataKey[] = "about_sync_data";
+
+#if defined(OS_CHROMEOS)
+const char kHUDLogDataKey[] = "hud_log";
+#endif
 
 namespace {
 
@@ -68,18 +81,19 @@ const int kHttpPostFailServerError = 500;
 #if defined(OS_CHROMEOS)
 const char kBZip2MimeType[] = "application/x-bzip2";
 const char kLogsAttachmentName[] = "system_logs.bz2";
-// Maximum number of lines in system info log chunk to be still included
-// in product specific data.
-const size_t kMaxLineCount       = 40;
-// Maximum number of bytes in system info log chunk to be still included
-// in product specific data.
-const size_t kMaxSystemLogLength = 4 * 1024;
+const char kArbitraryMimeType[] = "application/octet-stream";
 #endif
 
 const int64 kInitialRetryDelay = 900000;  // 15 minutes
 const int64 kRetryDelayIncreaseFactor = 2;
 const int64 kRetryDelayLimit = 14400000;  // 4 hours
 
+void ReadFileToStringNoResult(const base::FilePath& path,
+                              std::string* contents) {
+  if (!file_util::ReadFileToString(path, contents))
+    if (contents)
+      contents->clear();
+}
 
 }  // namespace
 
@@ -87,12 +101,13 @@ const int64 kRetryDelayLimit = 14400000;  // 4 hours
 // Simple net::URLFetcherDelegate to clean up URLFetcher on completion.
 class FeedbackUtil::PostCleanup : public net::URLFetcherDelegate {
  public:
-  PostCleanup(Profile* profile, std::string* post_body,
+  PostCleanup(Profile* profile,
+              std::string* post_body,
               int64 previous_delay) : profile_(profile),
                                       post_body_(post_body),
                                       previous_delay_(previous_delay) { }
   // Overridden from net::URLFetcherDelegate.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source);
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
  protected:
   virtual ~PostCleanup() {}
@@ -170,8 +185,8 @@ void FeedbackUtil::SetOSVersion(std::string* os_version) {
 
 // static
 void FeedbackUtil::DispatchFeedback(Profile* profile,
-                                     std::string* post_body,
-                                     int64 delay) {
+                                    std::string* post_body,
+                                    int64 delay) {
   DCHECK(post_body);
 
   MessageLoop::current()->PostDelayedTask(
@@ -182,8 +197,8 @@ void FeedbackUtil::DispatchFeedback(Profile* profile,
 
 // static
 void FeedbackUtil::SendFeedback(Profile* profile,
-                                 std::string* post_body,
-                                 int64 previous_delay) {
+                                std::string* post_body,
+                                int64 previous_delay) {
   DCHECK(post_body);
 
   GURL post_url;
@@ -221,38 +236,53 @@ void FeedbackUtil::AddFeedbackData(
 
 #if defined(OS_CHROMEOS)
 bool FeedbackUtil::ValidFeedbackSize(const std::string& content) {
-  if (content.length() > kMaxSystemLogLength)
+  if (content.length() > chromeos::system::kFeedbackMaxLength)
     return false;
-  size_t line_count = 0;
-  const char* text = content.c_str();
-  for (size_t i = 0; i < content.length(); i++) {
-    if (*(text + i) == '\n') {
-      line_count++;
-      if (line_count > kMaxLineCount)
-        return false;
-    }
-  }
+  const size_t line_count = std::count(content.begin(), content.end(), '\n');
+  if (line_count > chromeos::system::kFeedbackMaxLineCount)
+    return false;
   return true;
 }
 #endif
 
 // static
-void FeedbackUtil::SendReport(
-    Profile* profile
-    , const std::string& category_tag
-    , const std::string& page_url_text
-    , const std::string& description
-    , const std::string& user_email_text
-    , ScreenshotDataPtr image_data_ptr
-    , int png_width
-    , int png_height
+void FeedbackUtil::SendReport(const FeedbackData& data) {
 #if defined(OS_CHROMEOS)
-    , const char* zipped_logs_data
-    , int zipped_logs_length
-    , const chromeos::system::LogDictionaryType* const sys_info
-    , const std::string& timestamp
+  if (data.attached_filename().size() &&
+      base::FilePath::IsSeparator(data.attached_filename()[0]) &&
+      !data.attached_filedata()) {
+    // Read the attached file and then send this report.
+    std::string* file_data = new std::string;
+
+    base::FilePath root =
+        ash::Shell::GetInstance()->delegate()->
+            GetCurrentBrowserContext()->GetPath();
+    base::FilePath filepath = root.Append(data.attached_filename().substr(1));
+    std::string stripped_filename = filepath.BaseName().value();
+
+    // Read the file into file_data, then call send report again with the
+    // stripped filename and file data (which will skip this code path).
+    content::BrowserThread::PostTaskAndReply(
+        content::BrowserThread::FILE, FROM_HERE,
+        base::Bind(&ReadFileToStringNoResult,
+                   filepath,
+                   file_data),
+        base::Bind(&FeedbackUtil::SendReport,
+                   FeedbackData(data.profile(),
+                                data.category_tag(),
+                                data.page_url(),
+                                data.description(),
+                                data.user_email(),
+                                data.image(),
+                                data.sys_info(),
+                                data.zip_content(),
+                                data.timestamp(),
+                                stripped_filename,
+                                file_data)));
+    return;
+  }
 #endif
-    ) {
+
   // Create google feedback protocol buffer objects
   userfeedback::ExtensionSubmit feedback_data;
   // type id set to 0, unused field but needs to be initialized to 0
@@ -261,6 +291,10 @@ void FeedbackUtil::SendReport(
   userfeedback::CommonData* common_data = feedback_data.mutable_common_data();
   userfeedback::WebData* web_data = feedback_data.mutable_web_data();
 
+  // Set our user agent.
+  userfeedback::Navigator* navigator = web_data->mutable_navigator();
+  navigator->set_user_agent(content::GetUserAgent(GURL()));
+
   // Set GAIA id to 0. We're not using gaia id's for recording
   // use feedback - we're using the e-mail field, allows users to
   // submit feedback from incognito mode and specify any mail id
@@ -268,17 +302,17 @@ void FeedbackUtil::SendReport(
   common_data->set_gaia_id(0);
 
   // Add the user e-mail to the feedback object
-  common_data->set_user_email(user_email_text);
+  common_data->set_user_email(data.user_email());
 
   // Add the description to the feedback object
-  common_data->set_description(description);
+  common_data->set_description(data.description());
 
   // Add the language
   std::string chrome_locale = g_browser_process->GetApplicationLocale();
   common_data->set_source_description_language(chrome_locale);
 
   // Set the url
-  web_data->set_url(page_url_text);
+  web_data->set_url(data.page_url());
 
   // Add the Chrome version
   chrome::VersionInfo version_info;
@@ -300,17 +334,18 @@ void FeedbackUtil::SendReport(
 #endif
 
   // Include the page image if we have one.
-  if (image_data_ptr.get() && image_data_ptr->size()) {
+  if (data.image().get() && data.image()->size()) {
     userfeedback::PostedScreenshot screenshot;
     screenshot.set_mime_type(kPngMimeType);
     // Set the dimensions of the screenshot
     userfeedback::Dimensions dimensions;
-    dimensions.set_width(static_cast<float>(png_width));
-    dimensions.set_height(static_cast<float>(png_height));
+    gfx::Rect& screen_size = GetScreenshotSize();
+    dimensions.set_width(static_cast<float>(screen_size.width()));
+    dimensions.set_height(static_cast<float>(screen_size.height()));
     *(screenshot.mutable_dimensions()) = dimensions;
 
-    int image_data_size = image_data_ptr->size();
-    char* image_data = reinterpret_cast<char*>(&(image_data_ptr->front()));
+    int image_data_size = data.image()->size();
+    char* image_data = reinterpret_cast<char*>(&(data.image()->front()));
     screenshot.set_binary_content(std::string(image_data, image_data_size));
 
     // Set the screenshot object in feedback
@@ -318,34 +353,47 @@ void FeedbackUtil::SendReport(
   }
 
 #if defined(OS_CHROMEOS)
-  if (sys_info) {
+  if (data.sys_info()) {
     // Add the product specific data
     for (chromeos::system::LogDictionaryType::const_iterator i =
-             sys_info->begin(); i != sys_info->end(); ++i) {
-      if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCompressSystemFeedback) || ValidFeedbackSize(i->second)) {
+        data.sys_info()->begin(); i != data.sys_info()->end(); ++i) {
+      if (i->first == kSyncDataKey ||
+          i->first == kHUDLogDataKey ||
+          ValidFeedbackSize(i->second)) {
         AddFeedbackData(&feedback_data, i->first, i->second);
       }
     }
 
     // If we have zipped logs, add them here
-    if (zipped_logs_data && CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kCompressSystemFeedback)) {
+    if (data.zip_content()) {
       userfeedback::ProductSpecificBinaryData attachment;
       attachment.set_mime_type(kBZip2MimeType);
       attachment.set_name(kLogsAttachmentName);
-      attachment.set_data(std::string(zipped_logs_data, zipped_logs_length));
+      attachment.set_data(*data.zip_content());
+      delete data.zip_content();
       *(feedback_data.add_product_specific_binary_data()) = attachment;
     }
   }
+  delete data.sys_info();
 
-  if (timestamp != "")
-    AddFeedbackData(&feedback_data, std::string(kTimestampTag), timestamp);
+  if (data.timestamp() != "")
+    AddFeedbackData(&feedback_data, std::string(kTimestampTag),
+                    data.timestamp());
+
+  if (data.attached_filename() != "" && data.attached_filedata() &&
+      data.attached_filedata()->size()) {
+    userfeedback::ProductSpecificBinaryData attached_file;
+    attached_file.set_mime_type(kArbitraryMimeType);
+    attached_file.set_name(data.attached_filename());
+    attached_file.set_data(*data.attached_filedata());
+    delete data.attached_filedata();
+    *(feedback_data.add_product_specific_binary_data()) = attached_file;
+  }
 #endif
 
   // Set our category tag if we have one
-  if (category_tag.size())
-    feedback_data.set_category_tag(category_tag);
+  if (data.category_tag().size())
+    feedback_data.set_category_tag(data.category_tag());
 
   // Set our Chrome specific data
   userfeedback::ChromeData chrome_data;
@@ -371,10 +419,10 @@ void FeedbackUtil::SendReport(
   feedback_data.SerializeToString(post_body);
 
   // We have the body of our POST, so send it off to the server with 0 delay
-  DispatchFeedback(profile, post_body, 0);
+  DispatchFeedback(data.profile(), post_body, 0);
 }
 
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
 // static
 void FeedbackUtil::ReportPhishing(WebContents* current_tab,
                                    const std::string& phishing_url) {

@@ -10,66 +10,85 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/threading/thread.h"
+#include "base/observer_list.h"
+#include "base/threading/non_thread_safe.h"
 #include "webkit/fileapi/file_system_url.h"
 
 namespace fileapi {
+class FileSystemURL;
+}
+
+namespace sync_file_system {
 
 // Represents local file sync status.
-// This class is thread-safe and fields of this class are protected by a lock.
-// Owned by FileSystemContext.
+// This class is supposed to run only on IO thread.
 //
 // This class manages two important synchronization flags: writing (counter)
 // and syncing (flag).  Writing counter keeps track of which URL is in
 // writing and syncing flag indicates which URL is in syncing.
 //
-// An invariant of this class is: no FileSystem objects should be both
-// in syncing_ and writing_ status, i.e. trying to increment writing
-// while the target url is in syncing must fail and vice versa.
-class FILEAPI_EXPORT LocalFileSyncStatus {
+// An entry can have multiple writers but sync is exclusive and cannot overwrap
+// with any writes or syncs.
+class WEBKIT_STORAGE_EXPORT LocalFileSyncStatus : public base::NonThreadSafe {
  public:
+  class WEBKIT_STORAGE_EXPORT Observer {
+   public:
+    Observer() {}
+    virtual ~Observer() {}
+    virtual void OnSyncEnabled(const fileapi::FileSystemURL& url) = 0;
+    virtual void OnWriteEnabled(const fileapi::FileSystemURL& url) = 0;
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Observer);
+  };
+
   LocalFileSyncStatus();
   ~LocalFileSyncStatus();
 
-  // Tries to increment writing counter for |url|.
-  // This fails if the target |url| is in syncing.
-  bool TryIncrementWriting(const FileSystemURL& url);
+  // Increment writing counter for |url|.
+  // This should not be called if the |url| is not writable.
+  void StartWriting(const fileapi::FileSystemURL& url);
 
   // Decrement writing counter for |url|.
-  void DecrementWriting(const FileSystemURL& url);
+  void EndWriting(const fileapi::FileSystemURL& url);
 
-  // Tries to mark syncing flag for |url| to enable writing.
-  // This fails if the target |url| is in writing.
-  bool TryDisableWriting(const FileSystemURL& url);
+  // Start syncing for |url| and disable writing.
+  // This should not be called if |url| is in syncing or in writing.
+  void StartSyncing(const fileapi::FileSystemURL& url);
 
-  // Clears the syncing flag for |url| to disable writing.
-  void EnableWriting(const FileSystemURL& url);
+  // Clears the syncing flag for |url| and enable writing.
+  void EndSyncing(const fileapi::FileSystemURL& url);
 
   // Returns true if the |url| or its parent or child is in writing.
-  bool IsWriting(const FileSystemURL& url) const;
+  bool IsWriting(const fileapi::FileSystemURL& url) const;
 
   // Returns true if the |url| is enabled for writing (i.e. not in syncing).
-  bool IsWritable(const FileSystemURL& url) const;
+  bool IsWritable(const fileapi::FileSystemURL& url) const;
+
+  // Returns true if the |url| is enabled for syncing (i.e. neither in
+  // syncing nor writing).
+  bool IsSyncable(const fileapi::FileSystemURL& url) const;
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
  private:
-  typedef std::map<FileSystemURL, int64, FileSystemURL::Comparator> URLCountMap;
-  typedef std::set<FileSystemURL, FileSystemURL::Comparator> URLSet;
+  typedef std::map<fileapi::FileSystemURL,int64,
+                   fileapi::FileSystemURL::Comparator> URLCountMap;
 
-  // These private methods must be called with the lock_ held.
-  bool IsChildOrParentWriting(const FileSystemURL& url) const;
-  bool IsChildOrParentSyncing(const FileSystemURL& url) const;
-
-  mutable base::Lock lock_;
+  bool IsChildOrParentWriting(const fileapi::FileSystemURL& url) const;
+  bool IsChildOrParentSyncing(const fileapi::FileSystemURL& url) const;
 
   // If this count is non-zero positive there're ongoing write operations.
   URLCountMap writing_;
 
   // If this flag is set sync process is running on the file.
-  URLSet syncing_;
+  fileapi::FileSystemURLSet syncing_;
+
+  ObserverList<Observer> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalFileSyncStatus);
 };
 
-}  // namespace fileapi
+}  // namespace sync_file_system
 
 #endif  // WEBKIT_FILEAPI_SYNCABLE_LOCAL_FILE_SYNC_STATUS_H_

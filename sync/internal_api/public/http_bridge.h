@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/http_post_provider_interface.h"
 
@@ -25,6 +26,7 @@ class HttpBridgeTest;
 
 namespace net {
 class HttpResponseHeaders;
+class HttpUserAgentSettings;
 class URLFetcher;
 }
 
@@ -36,10 +38,13 @@ namespace syncer {
 // This is a one-time use bridge. Create one for each request you want to make.
 // It is RefCountedThreadSafe because it can PostTask to the io loop, and thus
 // needs to stick around across context switches, etc.
-class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
-                   public HttpPostProviderInterface,
-                   public net::URLFetcherDelegate {
+class SYNC_EXPORT_PRIVATE HttpBridge
+    : public base::RefCountedThreadSafe<HttpBridge>,
+      public HttpPostProviderInterface,
+      public net::URLFetcherDelegate {
  public:
+  friend class SyncHttpBridgeTest;
+
   // A request context used for HTTP requests bridged from the sync backend.
   // A bridged RequestContext has a dedicated in-memory cookie store and does
   // not use a cache. Thus the same type can be used for incognito mode.
@@ -58,18 +63,17 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
     // The destructor MUST be called on the IO thread.
     virtual ~RequestContext();
 
-    virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
-
    private:
     net::URLRequestContext* const baseline_context_;
     const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-    const std::string user_agent_;
+    scoped_ptr<net::HttpUserAgentSettings> http_user_agent_settings_;
 
     DISALLOW_COPY_AND_ASSIGN(RequestContext);
   };
 
   // Lazy-getter for RequestContext objects.
-  class RequestContextGetter : public net::URLRequestContextGetter {
+  class SYNC_EXPORT_PRIVATE RequestContextGetter
+      : public net::URLRequestContextGetter {
    public:
     RequestContextGetter(
         net::URLRequestContextGetter* baseline_context_getter,
@@ -118,11 +122,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   // net::URLFetcherDelegate implementation.
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
-#if defined(UNIT_TEST)
-  net::URLRequestContextGetter* GetRequestContextGetter() const {
-    return context_getter_for_request_;
-  }
-#endif
+  net::URLRequestContextGetter* GetRequestContextGetterForTest() const;
 
  protected:
   friend class base::RefCountedThreadSafe<HttpBridge>;
@@ -204,7 +204,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   DISALLOW_COPY_AND_ASSIGN(HttpBridge);
 };
 
-class HttpBridgeFactory : public HttpPostProviderFactory {
+class SYNC_EXPORT HttpBridgeFactory : public HttpPostProviderFactory {
  public:
   HttpBridgeFactory(
       net::URLRequestContextGetter* baseline_context_getter,

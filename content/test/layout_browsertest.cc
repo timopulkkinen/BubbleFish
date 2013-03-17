@@ -7,21 +7,21 @@
 #include <sstream>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/scoped_temp_dir.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_switches.h"
-#include "content/shell/webkit_test_runner_host.h"
+#include "content/shell/webkit_test_controller.h"
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/layout_test_http_server.h"
 #include "net/base/net_util.h"
@@ -34,16 +34,19 @@ static const char kPlatformName[] = "chromium-mac";
 static const char kPlatformName[] = "chromium-linux";
 #elif defined(OS_OPENBSD)
 static const char kPlatformName[] = "chromium-openbsd";
+#elif defined(OS_ANDROID)
+static const char kPlatformName[] = "chromium-android";
 #else
 #error No known OS defined
 #endif
 
+namespace content {
 namespace {
 
-bool ReadExpectedResult(const FilePath& result_dir_path,
+bool ReadExpectedResult(const base::FilePath& result_dir_path,
                         const std::string test_case_file_name,
                         std::string* expected_result_value) {
-  FilePath expected_result_path(result_dir_path);
+  base::FilePath expected_result_path(result_dir_path);
   expected_result_path = expected_result_path.AppendASCII(test_case_file_name);
   expected_result_path = expected_result_path.InsertBeforeExtension(
       FILE_PATH_LITERAL("-expected"));
@@ -56,13 +59,15 @@ bool ReadExpectedResult(const FilePath& result_dir_path,
 }  // namespace
 
 InProcessBrowserLayoutTest::InProcessBrowserLayoutTest(
-    const FilePath& test_parent_dir, const FilePath& test_case_dir)
+    const base::FilePath& test_parent_dir, const base::FilePath& test_case_dir)
     : test_parent_dir_(test_parent_dir), test_case_dir_(test_case_dir),
       port_(-2) {
 }
 
 InProcessBrowserLayoutTest::InProcessBrowserLayoutTest(
-    const FilePath& test_parent_dir, const FilePath& test_case_dir, int port)
+    const base::FilePath& test_parent_dir,
+    const base::FilePath& test_case_dir,
+    int port)
     : test_parent_dir_(test_parent_dir), test_case_dir_(test_case_dir),
       port_(port) {
 }
@@ -73,9 +78,9 @@ InProcessBrowserLayoutTest::~InProcessBrowserLayoutTest() {
 }
 
 void InProcessBrowserLayoutTest::SetUpInProcessBrowserTestFixture() {
-  FilePath src_dir;
-  ASSERT_TRUE(PathService::Get(content::DIR_LAYOUT_TESTS, &src_dir));
-  FilePath absolute_parent_dir = src_dir.Append(test_parent_dir_);
+  base::FilePath src_dir;
+  ASSERT_TRUE(PathService::Get(DIR_LAYOUT_TESTS, &src_dir));
+  base::FilePath absolute_parent_dir = src_dir.Append(test_parent_dir_);
   ASSERT_TRUE(file_util::DirectoryExists(absolute_parent_dir));
   layout_test_dir_ = absolute_parent_dir.Append(test_case_dir_);
   ASSERT_TRUE(file_util::DirectoryExists(layout_test_dir_));
@@ -122,7 +127,7 @@ void InProcessBrowserLayoutTest::SetUpCommandLine(CommandLine* command_line) {
 }
 
 void InProcessBrowserLayoutTest::SetUpOnMainThread() {
-  test_controller_.reset(new content::WebKitTestController);
+  test_controller_.reset(new WebKitTestController);
 }
 
 void InProcessBrowserLayoutTest::RunLayoutTest(
@@ -144,13 +149,14 @@ void InProcessBrowserLayoutTest::RunHttpLayoutTest(
 void InProcessBrowserLayoutTest::RunLayoutTestInternal(
     const std::string& test_case_file_name, const GURL& url) {
   std::stringstream result;
-  scoped_ptr<content::WebKitTestResultPrinter> printer(
-      new content::WebKitTestResultPrinter(&result, NULL));
+  scoped_ptr<WebKitTestResultPrinter> printer(
+      new WebKitTestResultPrinter(&result, NULL));
   printer->set_capture_text_only(true);
   test_controller_->set_printer(printer.release());
 
   LOG(INFO) << "Navigating to URL " << url << " and blocking.";
-  ASSERT_TRUE(test_controller_->PrepareForLayoutTest(url, false, ""));
+  ASSERT_TRUE(
+      test_controller_->PrepareForLayoutTest(url, layout_test_dir_, false, ""));
   base::RunLoop run_loop;
   run_loop.Run();
   LOG(INFO) << "Navigation completed.";
@@ -188,10 +194,11 @@ void InProcessBrowserLayoutTest::RunLayoutTestInternal(
 
 std::string InProcessBrowserLayoutTest::SaveResults(const std::string& expected,
                                                     const std::string& actual) {
-  FilePath cwd;
+  base::FilePath cwd;
   EXPECT_TRUE(file_util::CreateNewTempDirectory(FILE_PATH_LITERAL(""), &cwd));
-  FilePath expected_filename = cwd.Append(FILE_PATH_LITERAL("expected.txt"));
-  FilePath actual_filename = cwd.Append(FILE_PATH_LITERAL("actual.txt"));
+  base::FilePath expected_filename = cwd.Append(
+      FILE_PATH_LITERAL("expected.txt"));
+  base::FilePath actual_filename = cwd.Append(FILE_PATH_LITERAL("actual.txt"));
   EXPECT_NE(-1, file_util::WriteFile(expected_filename,
                                      expected.c_str(),
                                      expected.size()));
@@ -202,3 +209,5 @@ std::string InProcessBrowserLayoutTest::SaveResults(const std::string& expected,
                       expected_filename.value().c_str(),
                       actual_filename.value().c_str());
 }
+
+}  // namespace content

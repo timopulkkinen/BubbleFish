@@ -22,7 +22,7 @@ class NetworkStatsTest : public PlatformTest {
  protected:
   virtual void TearDown() {
     // Flush the message loop to make application verifiers happy.
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
   MessageLoopForIO message_loop_;
 };
@@ -32,7 +32,7 @@ class NetworkStatsTestUDP : public NetworkStatsTest {
   NetworkStatsTestUDP()
       : test_server_(net::TestServer::TYPE_UDP_ECHO,
                      net::TestServer::kLocalhost,
-                     FilePath(FILE_PATH_LITERAL("net/data"))) {
+                     base::FilePath(FILE_PATH_LITERAL("net/data"))) {
   }
 
  protected:

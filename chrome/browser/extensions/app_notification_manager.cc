@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/perftimer.h"
@@ -77,7 +77,8 @@ AppNotificationManager::AppNotificationManager(Profile* profile)
 }
 
 void AppNotificationManager::Init() {
-  FilePath storage_path = profile_->GetPath().AppendASCII("App Notifications");
+  base::FilePath storage_path =
+      profile_->GetPath().AppendASCII("App Notifications");
   load_timer_.reset(new PerfTimer());
   BrowserThread::PostTask(
       BrowserThread::FILE,
@@ -215,7 +216,7 @@ syncer::SyncError AppNotificationManager::ProcessSyncChanges(
         "Models not yet associated.");
   }
 
-  AutoReset<bool> processing_changes(&processing_syncer_changes_, true);
+  base::AutoReset<bool> processing_changes(&processing_syncer_changes_, true);
 
   syncer::SyncError error;
   for (syncer::SyncChangeList::const_iterator iter = change_list.begin();
@@ -285,12 +286,13 @@ syncer::SyncError AppNotificationManager::ProcessSyncChanges(
   return error;
 }
 
-syncer::SyncError AppNotificationManager::MergeDataAndStartSyncing(
+syncer::SyncMergeResult AppNotificationManager::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
     scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
     scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  syncer::SyncMergeResult merge_result(type);
   // AppNotificationDataTypeController ensures that modei is fully should before
   // this method is called by waiting until the load notification is received
   // from AppNotificationManager.
@@ -304,7 +306,7 @@ syncer::SyncError AppNotificationManager::MergeDataAndStartSyncing(
 
   // We may add, or remove notifications here, so ensure we don't step on
   // our own toes.
-  AutoReset<bool> processing_changes(&processing_syncer_changes_, true);
+  base::AutoReset<bool> processing_changes(&processing_syncer_changes_, true);
 
   SyncDataMap local_data_map;
   PopulateGuidToSyncDataMap(GetAllSyncData(syncer::APP_NOTIFICATIONS),
@@ -324,10 +326,11 @@ syncer::SyncError AppNotificationManager::MergeDataAndStartSyncing(
       // Local notification should always match with sync notification as
       // notifications are immutable.
       if (local_notif->is_local() || !sync_notif->Equals(*local_notif)) {
-        return sync_error_factory_->CreateAndUploadError(
+        merge_result.set_error(sync_error_factory_->CreateAndUploadError(
              FROM_HERE,
             "MergeDataAndStartSyncing failed: local notification and sync "
-            "notification have same guid but different data.");
+            "notification have same guid but different data."));
+        return merge_result;
       }
     } else {
       // Sync model has a notification that local model does not, add it.
@@ -345,11 +348,12 @@ syncer::SyncError AppNotificationManager::MergeDataAndStartSyncing(
                            iter->second));
   }
 
-  syncer::SyncError error;
-  if (new_changes.size() > 0)
-    error = sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
-  models_associated_ = !error.IsSet();
-  return error;
+  if (new_changes.size() > 0) {
+    merge_result.set_error(
+        sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes));
+  }
+  models_associated_ = !merge_result.error().IsSet();
+  return merge_result;
 }
 
 void AppNotificationManager::StopSyncing(syncer::ModelType type) {
@@ -367,7 +371,8 @@ AppNotificationManager::~AppNotificationManager() {
                             storage_.release());
 }
 
-void AppNotificationManager::LoadOnFileThread(const FilePath& storage_path) {
+void AppNotificationManager::LoadOnFileThread(
+    const base::FilePath& storage_path) {
   PerfTimer timer;
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(!loaded());

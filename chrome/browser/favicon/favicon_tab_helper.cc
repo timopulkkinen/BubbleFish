@@ -7,12 +7,12 @@
 #include "chrome/browser/favicon/favicon_handler.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/favicon/favicon_util.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/icon_messages.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -33,11 +33,12 @@ using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(FaviconTabHelper)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(FaviconTabHelper);
 
 FaviconTabHelper::FaviconTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
+      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
+      should_fetch_icons_(true) {
   favicon_handler_.reset(new FaviconHandler(profile_, this,
                                             FaviconHandler::FAVICON));
   if (chrome::kEnableTouchIcon)
@@ -49,6 +50,9 @@ FaviconTabHelper::~FaviconTabHelper() {
 }
 
 void FaviconTabHelper::FetchFavicon(const GURL& url) {
+  if (!should_fetch_icons_)
+    return;
+
   favicon_handler_->FetchFavicon(url);
   if (touch_icon_handler_.get())
     touch_icon_handler_->FetchFavicon(url);
@@ -87,6 +91,10 @@ bool FaviconTabHelper::ShouldDisplayFavicon() {
   if (controller.GetLastCommittedEntry() && controller.GetPendingEntry())
     return true;
 
+  // No favicon on Instant New Tab Pages.
+  if (chrome::search::IsInstantNTP(web_contents()))
+    return false;
+
   content::WebUI* web_ui = web_contents()->GetWebUIForCurrentState();
   if (web_ui)
     return !web_ui->ShouldHideFavicon();
@@ -119,35 +127,14 @@ void FaviconTabHelper::SaveFavicon() {
                        favicon.image);
 }
 
-int FaviconTabHelper::DownloadImage(const GURL& image_url,
-                                    int image_size,
-                                    history::IconType icon_type,
-                                    const ImageDownloadCallback& callback) {
-  if (icon_type == history::FAVICON)
-    return favicon_handler_->DownloadImage(image_url, image_size, icon_type,
-                                           callback);
-  else if (touch_icon_handler_.get())
-    return touch_icon_handler_->DownloadImage(image_url, image_size, icon_type,
-                                              callback);
-  return 0;
-}
-
-void FaviconTabHelper::OnUpdateFaviconURL(
-    int32 page_id,
-    const std::vector<FaviconURL>& candidates) {
-  favicon_handler_->OnUpdateFaviconURL(page_id, candidates);
-  if (touch_icon_handler_.get())
-    touch_icon_handler_->OnUpdateFaviconURL(page_id, candidates);
-}
-
 NavigationEntry* FaviconTabHelper::GetActiveEntry() {
   return web_contents()->GetController().GetActiveEntry();
 }
 
 int FaviconTabHelper::StartDownload(const GURL& url, int image_size) {
-  content::RenderViewHost* host = web_contents()->GetRenderViewHost();
-  int id = FaviconUtil::DownloadFavicon(host, url, image_size);
-  return id;
+  return web_contents()->DownloadFavicon(url, image_size,
+      base::Bind(&FaviconTabHelper::DidDownloadFavicon,
+                 base::Unretained(this)));
 }
 
 void FaviconTabHelper::NotifyFaviconUpdated() {
@@ -177,26 +164,23 @@ void FaviconTabHelper::DidNavigateMainFrame(
   FetchFavicon(details.entry->GetURL());
 }
 
-bool FaviconTabHelper::OnMessageReceived(const IPC::Message& message) {
-  bool message_handled = false;   // Allow other handlers to receive these.
-  IPC_BEGIN_MESSAGE_MAP(FaviconTabHelper, message)
-    IPC_MESSAGE_HANDLER(IconHostMsg_DidDownloadFavicon, OnDidDownloadFavicon)
-    IPC_MESSAGE_HANDLER(IconHostMsg_UpdateFaviconURL, OnUpdateFaviconURL)
-    IPC_MESSAGE_UNHANDLED(message_handled = false)
-  IPC_END_MESSAGE_MAP()
-  return message_handled;
+void FaviconTabHelper::DidUpdateFaviconURL(
+    int32 page_id,
+    const std::vector<content::FaviconURL>& candidates) {
+  favicon_handler_->OnUpdateFaviconURL(page_id, candidates);
+  if (touch_icon_handler_.get())
+    touch_icon_handler_->OnUpdateFaviconURL(page_id, candidates);
 }
 
-void FaviconTabHelper::OnDidDownloadFavicon(
+void FaviconTabHelper::DidDownloadFavicon(
     int id,
     const GURL& image_url,
-    bool errored,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {
   favicon_handler_->OnDidDownloadFavicon(
-      id, image_url, errored, requested_size, bitmaps);
+      id, image_url, requested_size, bitmaps);
   if (touch_icon_handler_.get()) {
     touch_icon_handler_->OnDidDownloadFavicon(
-        id, image_url, errored, requested_size, bitmaps);
+        id, image_url, requested_size, bitmaps);
   }
 }

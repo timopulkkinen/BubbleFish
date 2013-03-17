@@ -50,6 +50,10 @@ bool TestBrowserWindow::IsMinimized() const {
   return false;
 }
 
+bool TestBrowserWindow::ShouldHideUIForFullscreen() const {
+  return false;
+}
+
 bool TestBrowserWindow::IsFullscreen() const {
   return false;
 }
@@ -111,7 +115,11 @@ int TestBrowserWindow::GetExtraRenderViewHeight() const {
 }
 
 #if defined(OS_MACOSX)
-bool TestBrowserWindow::InPresentationMode() {
+bool TestBrowserWindow::IsFullscreenWithChrome() {
+  return false;
+}
+
+bool TestBrowserWindow::IsFullscreenWithoutChrome() {
   return false;
 }
 #endif
@@ -125,12 +133,12 @@ WindowOpenDisposition TestBrowserWindow::GetDispositionForPopupBounds(
   return NEW_POPUP;
 }
 
-bool TestBrowserWindow::IsInstantTabShowing() {
-  return false;
-}
-
 FindBar* TestBrowserWindow::CreateFindBar() {
   return NULL;
+}
+
+bool TestBrowserWindow::GetConstrainedWindowTopY(int* top_y) {
+  return false;
 }
 
 namespace chrome {
@@ -161,11 +169,6 @@ class TestBrowserWindowOwner : public chrome::BrowserListObserver {
 };
 
 }  // namespace
-
-Browser* CreateBrowserWithTestWindowForProfile(Profile* profile) {
-  Browser::CreateParams params(profile);
-  return CreateBrowserWithTestWindowForParams(&params);
-}
 
 Browser* CreateBrowserWithTestWindowForParams(Browser::CreateParams* params) {
   TestBrowserWindow* window = new TestBrowserWindow;

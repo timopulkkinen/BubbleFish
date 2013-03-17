@@ -21,6 +21,7 @@
 #include "content/common/content_export.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "ui/base/range/range.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 
 namespace content {
@@ -44,13 +45,16 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
   virtual ~RenderWidgetHostViewBase();
 
   // RenderWidgetHostViewPort implementation.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void SelectionChanged(const string16& text,
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
   virtual const SkBitmap& GetBackground() OVERRIDE;
+  virtual gfx::Size GetPhysicalBackingSize() const OVERRIDE;
   virtual bool IsShowingContextMenu() const OVERRIDE;
   virtual void SetShowingContextMenu(bool showing_menu) OVERRIDE;
+  virtual string16 GetSelectedText() const OVERRIDE;
   virtual bool IsMouseLocked() OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
@@ -58,13 +62,22 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
   virtual WebKit::WebPopupType GetPopupType() OVERRIDE;
   virtual BrowserAccessibilityManager*
       GetBrowserAccessibilityManager() const OVERRIDE;
+  virtual void ProcessAckedTouchEvent(const WebKit::WebTouchEvent& touch,
+                                      InputEventAckState ack_result) OVERRIDE;
   virtual SmoothScrollGesture* CreateSmoothScrollGesture(
-      bool scroll_down, bool scroll_far) OVERRIDE;
+      bool scroll_down, int pixels_to_scroll, int mouse_event_x,
+      int mouse_event_y) OVERRIDE;
+  virtual bool CanSubscribeFrame() const OVERRIDE;
+  virtual void BeginFrameSubscription(
+      RenderWidgetHostViewFrameSubscriber* subscriber) OVERRIDE;
+  virtual void EndFrameSubscription() OVERRIDE;
+  virtual void OnSwapCompositorFrame(
+      const cc::CompositorFrame& frame) OVERRIDE {}
 
   void SetBrowserAccessibilityManager(BrowserAccessibilityManager* manager);
 
   // Notification that a resize or move session ended on the native widget.
-  void UpdateScreenInfo();
+  void UpdateScreenInfo(gfx::NativeView view);
 
 #if defined(OS_WIN)
   // The callback that DetachPluginsHelper calls for each child window. Call

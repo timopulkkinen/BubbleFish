@@ -7,12 +7,14 @@
 
 #include <string>
 
+namespace content {
+
 class RenderThreadImplUnittest : public testing::Test {
  public:
   RenderThreadImplUnittest()
       : kCustomizableHistogram_("Histogram1"),
         kNormalHistogram_("Histogram2") {}
-  ~RenderThreadImplUnittest() {}
+  virtual ~RenderThreadImplUnittest() {}
  protected:
   virtual void SetUp() OVERRIDE {
     histogram_customizer_.custom_histograms_.clear();
@@ -76,3 +78,5 @@ TEST_F(RenderThreadImplUnittest, CustomHistogramsForTwoRenderViews) {
             histogram_customizer_.ConvertToCustomHistogramName(
                 kCustomizableHistogram_));
 }
+
+}  // namespace content

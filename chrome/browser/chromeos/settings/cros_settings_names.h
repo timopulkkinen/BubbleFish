@@ -14,6 +14,7 @@ extern const char kAccountsPrefAllowNewUser[];
 extern const char kAccountsPrefShowUserNamesOnSignIn[];
 extern const char kAccountsPrefUsers[];
 extern const char kAccountsPrefEphemeralUsersEnabled[];
+extern const char kAccountsPrefDeviceLocalAccounts[];
 
 extern const char kSettingProxyEverywhere[];
 
@@ -45,6 +46,8 @@ extern const char kIdleLogoutWarningDuration[];
 extern const char kStartUpUrls[];
 
 extern const char kPolicyMissingMitigationMode[];
+
+extern const char kAllowRedeemChromeOsRegistrationOffers[];
 
 }  // namespace chromeos
 

@@ -8,8 +8,9 @@
 #include <map>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 
@@ -21,12 +22,12 @@ class SessionStorageDatabase;
 
 // Container for the set of per-origin Areas.
 // See class comments for DomStorageContext for a larger overview.
-class DomStorageNamespace
+class WEBKIT_STORAGE_EXPORT DomStorageNamespace
     : public base::RefCountedThreadSafe<DomStorageNamespace> {
  public:
   // Constructor for a LocalStorage namespace with id of 0
   // and an optional backing directory on disk.
-  DomStorageNamespace(const FilePath& directory,  // may be empty
+  DomStorageNamespace(const base::FilePath& directory,  // may be empty
                       DomStorageTaskRunner* task_runner);
 
   // Constructor for a SessionStorage namespace with a non-zero id and an
@@ -56,7 +57,8 @@ class DomStorageNamespace
   DomStorageNamespace* Clone(int64 clone_namespace_id,
                              const std::string& clone_persistent_namespace_id);
 
-  void DeleteOrigin(const GURL& origin);
+  void DeleteLocalStorageOrigin(const GURL& origin);
+  void DeleteSessionStorageOrigin(const GURL& origin);
   void PurgeMemory();
   void Shutdown();
 
@@ -81,7 +83,7 @@ class DomStorageNamespace
 
   int64 namespace_id_;
   std::string persistent_namespace_id_;
-  FilePath directory_;
+  base::FilePath directory_;
   AreaMap areas_;
   scoped_refptr<DomStorageTaskRunner> task_runner_;
   scoped_refptr<SessionStorageDatabase> session_storage_database_;

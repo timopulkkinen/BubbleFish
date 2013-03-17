@@ -29,7 +29,8 @@ static const SkColor kFileDragImageTextColor = SK_ColorBLACK;
 
 class FileDragImageSource : public gfx::CanvasImageSource {
  public:
-  FileDragImageSource(const FilePath& file_name, const gfx::ImageSkia& icon)
+  FileDragImageSource(const base::FilePath& file_name,
+                      const gfx::ImageSkia& icon)
       : CanvasImageSource(CalculateSize(icon), false),
         file_name_(file_name),
         icon_(icon) {
@@ -75,7 +76,7 @@ class FileDragImageSource : public gfx::CanvasImageSource {
     return gfx::Size(width, height);
   }
 
-  const FilePath file_name_;
+  const base::FilePath file_name_;
   const gfx::ImageSkia icon_;
 
   DISALLOW_COPY_AND_ASSIGN(FileDragImageSource);
@@ -83,7 +84,7 @@ class FileDragImageSource : public gfx::CanvasImageSource {
 
 }  // namespace
 
-void CreateDragImageForFile(const FilePath& file_name,
+void CreateDragImageForFile(const base::FilePath& file_name,
                             const gfx::ImageSkia* icon,
                             ui::OSExchangeData* data_object) {
   DCHECK(icon);
@@ -93,14 +94,13 @@ void CreateDragImageForFile(const FilePath& file_name,
   // ImageSkia takes ownership of |source|.
   gfx::ImageSkia image = gfx::ImageSkia(source, size);
 
-  SetDragImageOnDataObject(image, size,
-                           gfx::Point(size.width() / 2, kLinkDragImageVPadding),
-                           data_object);
+  gfx::Vector2d cursor_offset(size.width() / 2, kLinkDragImageVPadding);
+  SetDragImageOnDataObject(image, size, cursor_offset, data_object);
 }
 
 void SetDragImageOnDataObject(const gfx::Canvas& canvas,
                               const gfx::Size& size,
-                              const gfx::Point& cursor_offset,
+                              const gfx::Vector2d& cursor_offset,
                               ui::OSExchangeData* data_object) {
   gfx::ImageSkia image = gfx::ImageSkia(canvas.ExtractImageRep());
   SetDragImageOnDataObject(image, size, cursor_offset, data_object);

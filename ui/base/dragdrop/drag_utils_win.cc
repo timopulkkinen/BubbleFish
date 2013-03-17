@@ -21,7 +21,7 @@ namespace drag_utils {
 
 static void SetDragImageOnDataObject(HBITMAP hbitmap,
                                      const gfx::Size& size,
-                                     const gfx::Point& cursor_offset,
+                                     const gfx::Vector2d& cursor_offset,
                                      IDataObject* data_object) {
   base::win::ScopedComPtr<IDragSourceHelper> helper;
   HRESULT rv = CoCreateInstance(CLSID_DragDropHelper, 0, CLSCTX_INPROC_SERVER,
@@ -31,7 +31,7 @@ static void SetDragImageOnDataObject(HBITMAP hbitmap,
     sdi.sizeDragImage = size.ToSIZE();
     sdi.crColorKey = 0xFFFFFFFF;
     sdi.hbmpDragImage = hbitmap;
-    sdi.ptOffset = cursor_offset.ToPOINT();
+    sdi.ptOffset = gfx::PointAtOffsetFromOrigin(cursor_offset).ToPOINT();
     helper->InitializeFromBitmap(&sdi, data_object);
   }
 }
@@ -46,7 +46,7 @@ static HBITMAP CreateHBITMAPFromSkBitmap(const SkBitmap& sk_bitmap) {
   HBITMAP bitmap =
       CreateDIBSection(screen_dc, reinterpret_cast<BITMAPINFO*>(&header),
                        DIB_RGB_COLORS, &bits, NULL, 0);
-  DCHECK(sk_bitmap.rowBytes() == sk_bitmap.width() * 4);
+  DCHECK_EQ(sk_bitmap.rowBytes(), static_cast<size_t>(sk_bitmap.width() * 4));
   SkAutoLockPixels lock(sk_bitmap);
   memcpy(
       bits, sk_bitmap.getPixels(), sk_bitmap.height() * sk_bitmap.rowBytes());
@@ -56,7 +56,7 @@ static HBITMAP CreateHBITMAPFromSkBitmap(const SkBitmap& sk_bitmap) {
 
 void SetDragImageOnDataObject(const gfx::ImageSkia& image_skia,
                               const gfx::Size& size,
-                              const gfx::Point& cursor_offset,
+                              const gfx::Vector2d& cursor_offset,
                               ui::OSExchangeData* data_object) {
   DCHECK(data_object && !size.IsEmpty());
   // InitializeFromBitmap() doesn't expect an alpha channel and is confused
@@ -68,6 +68,14 @@ void SetDragImageOnDataObject(const gfx::ImageSkia& image_skia,
   // Attach 'bitmap' to the data_object.
   SetDragImageOnDataObject(bitmap, size, cursor_offset,
       ui::OSExchangeDataProviderWin::GetIDataObject(*data_object));
+
+#if defined(USE_AURA)
+  // TODO: the above code is used in non-Ash, while below is used in Ash. If we
+  // could figure this context out then we wouldn't do unnecessary work. However
+  // as it stands getting this information in ui/base would be a layering
+  // violation.
+  data_object->provider().SetDragImage(image_skia, cursor_offset);
+#endif
 }
 
 }  // namespace drag_utils

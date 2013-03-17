@@ -26,7 +26,6 @@
 
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
-struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
 
 namespace gfx {
@@ -37,12 +36,12 @@ namespace IPC {
 class Message;
 }
 
+namespace content {
 void RouteToGpuProcessHostUIShimTask(int host_id, const IPC::Message& msg);
 
-class GpuProcessHostUIShim
-    : public IPC::Listener,
-      public IPC::Sender,
-      public base::NonThreadSafe {
+class GpuProcessHostUIShim : public IPC::Listener,
+                             public IPC::Sender,
+                             public base::NonThreadSafe {
  public:
   // Create a GpuProcessHostUIShim with the given ID.  The object can be found
   // using FromID with the same id.
@@ -90,22 +89,25 @@ class GpuProcessHostUIShim
                     gfx::Size size);
 #endif
 
-  void OnGraphicsInfoCollected(const content::GPUInfo& gpu_info);
+  void OnGraphicsInfoCollected(const GPUInfo& gpu_info);
 
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
   void OnAcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params);
   void OnAcceleratedSurfaceSuspend(int32 surface_id);
-  void OnAcceleratedSurfaceNew(
-      const GpuHostMsg_AcceleratedSurfaceNew_Params& params);
   void OnAcceleratedSurfaceRelease(
       const GpuHostMsg_AcceleratedSurfaceRelease_Params& params);
   void OnVideoMemoryUsageStatsReceived(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats);
+      const GPUVideoMemoryUsageStats& video_memory_usage_stats);
+  void OnUpdateVSyncParameters(int surface_id,
+                               base::TimeTicks timebase,
+                               base::TimeDelta interval);
 
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_UI_SHIM_H_

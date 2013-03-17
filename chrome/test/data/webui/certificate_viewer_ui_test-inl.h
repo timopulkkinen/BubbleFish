@@ -4,18 +4,18 @@
 
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/certificate_viewer_webui.h"
-#include "chrome/browser/ui/webui/web_ui_browsertest.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/test_web_dialog_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/base/web_ui_browsertest.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "net/base/test_certificate_data.h"
 #include "net/base/x509_certificate.h"
+#include "ui/web_dialogs/test/test_web_dialog_observer.h"
 
 // Test framework for chrome/test/data/webui/certificate_viewer_dialog_test.js.
 class CertificateViewerUITest : public WebUIBrowserTest {
@@ -35,11 +35,11 @@ void CertificateViewerUITest::ShowCertificateViewer() {
   ASSERT_TRUE(browser());
   ASSERT_TRUE(browser()->window());
 
-  TestWebDialogObserver dialog_observer(this);
+  ui::test::TestWebDialogObserver dialog_observer(this);
   CertificateViewerDialog* dialog = new CertificateViewerDialog(
       google_cert);
   dialog->AddObserver(&dialog_observer);
-  dialog->Show(chrome::GetActiveWebContents(browser()),
+  dialog->Show(browser()->tab_strip_model()->GetActiveWebContents(),
                browser()->window()->GetNativeWindow());
   dialog->RemoveObserver(&dialog_observer);
   content::WebUI* webui = dialog_observer.GetWebUI();

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,29 +17,13 @@ var instantConfig = (function() {
   /** List of fields used to dynamically build form. **/
   var FIELDS = [
     {
-      key: 'instant.animation_scale_factor',
-      label: 'Slow down animations by a factor of ',
-      type: 'number',
-      units: 'no units, range 1 to 20',
-      size: 3,
-      default: 1,
-      min: 1,
-      max: 20
-    },
-    {
-      key: 'instant.experimental_zero_suggest_url_prefix',
-      label: 'Prefix URL for the (experimental) ZeroSuggest provider',
+      key: 'instant_ui.zero_suggest_url_prefix',
+      label: 'Prefix URL for the experimental Instant ZeroSuggest provider',
       type: 'string',
       size: 40,
       units: '',
       default: ''
     },
-    {
-      key: 'instant.show_search_provider_logo',
-      label: 'Show search provider logo',
-      type: 'checkbox',
-      default: false
-    }
   ];
 
   /**
@@ -80,8 +64,7 @@ var instantConfig = (function() {
       row.appendChild(input);
 
       var units = createElementWithClass('div', 'row-units');
-      if (field.units)
-        units.innerHTML = field.units;
+      if (field.units) units.innerHTML = field.units;
       row.appendChild(units);
 
       $('instant-form').appendChild(row);
@@ -134,9 +117,7 @@ var instantConfig = (function() {
       value = parseFloat($(prefName).value);
     else
       value = $(prefName).value;
-    chrome.send(
-        'setPreferenceValue',
-        [prefName, value]);
+    chrome.send('setPreferenceValue', [prefName, value]);
   }
 
   /**
@@ -166,6 +147,28 @@ var instantConfig = (function() {
     return false;
   }
 
+  /**
+   * Request debug info.
+   * The method is asynchronous, results being provided via getDebugInfoResult.
+   */
+  function getDebugInfo() {
+    chrome.send('getDebugInfo');
+  }
+
+  /**
+   * Handles callback from getDebugInfo.
+   * @param {Object} info The debug info.
+   */
+  function getDebugInfoResult(info) {
+    for (var i = 0; i < info.entries.length; ++i) {
+      var entry = info.entries[i];
+      var row = createElementWithClass('p', 'debug');
+      row.appendChild(createElementWithClass('span', 'timestamp')).textContent =
+          entry.time;
+      row.appendChild(document.createElement('span')).textContent = entry.text;
+      $('instant-debug-info').appendChild(row);
+    }
+  }
 
   function loadForm() {
     for (var i = 0; i < FIELDS.length; i++)
@@ -179,6 +182,7 @@ var instantConfig = (function() {
     buildForm();
     loadForm();
     initForm();
+    getDebugInfo();
 
     $('reset-button').onclick = onReset.bind(this);
     $('save-button').onclick = onSave.bind(this);
@@ -186,6 +190,7 @@ var instantConfig = (function() {
 
   return {
     initialize: initialize,
+    getDebugInfoResult: getDebugInfoResult,
     getPreferenceValueResult: getPreferenceValueResult
   };
 })();

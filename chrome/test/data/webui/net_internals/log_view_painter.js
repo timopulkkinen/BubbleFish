@@ -17,21 +17,21 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterStripInfo', function() {
   // before and after applying the filter.  If the second entry is null, the
   // element should be unmodified.
   var expectations = [
-    ['set-cookie: blah', 'set-cookie: [value was stripped]'],
-    ['set-cookie2: blah', 'set-cookie2: [value was stripped]'],
-    ['cookie: blah', 'cookie: [value was stripped]'],
-    ['authorization: NTLM blah', 'authorization: NTLM [value was stripped]'],
+    ['set-cookie: blah', 'set-cookie: [4 bytes were stripped]'],
+    ['set-cookie2: blah', 'set-cookie2: [4 bytes were stripped]'],
+    ['cookie: blah', 'cookie: [4 bytes were stripped]'],
+    ['authorization: NTLM blah', 'authorization: NTLM [4 bytes were stripped]'],
 
     ['proxy-authorization: Basic blah',
-     'proxy-authorization: Basic [value was stripped]'],
+     'proxy-authorization: Basic [4 bytes were stripped]'],
 
     ['WWW-Authenticate: Basic realm="Something, or another"', null],
 
     ['WWW-Authenticate: Negotiate blah-token-blah',
-     'WWW-Authenticate: Negotiate [value was stripped]'],
+     'WWW-Authenticate: Negotiate [15 bytes were stripped]'],
 
     ['WWW-Authenticate: NTLM asdllk2j3l423lk4j23l4kj',
-     'WWW-Authenticate: NTLM [value was stripped]'],
+     'WWW-Authenticate: NTLM [23 bytes were stripped]'],
 
     ['WWW-Authenticate: Kerberos , Negotiate asdfasdfasdfasfa', null],
     ['WWW-Authenticate: Kerberos, Negotiate asdfasdfasdfasfa', null],
@@ -43,10 +43,10 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterStripInfo', function() {
     ['Proxy-Authenticate: Basic realm="Something, or another"', null],
 
     ['Proxy-Authenticate: Negotiate blah-token-blah',
-     'Proxy-Authenticate: Negotiate [value was stripped]'],
+     'Proxy-Authenticate: Negotiate [15 bytes were stripped]'],
 
     ['Proxy-Authenticate: NTLM asdllk2j3l423lk4j23l4kj',
-     'Proxy-Authenticate: NTLM [value was stripped]'],
+     'Proxy-Authenticate: NTLM [23 bytes were stripped]'],
 
     ['Proxy-Authenticate: Kerberos , Negotiate asdfasdfa', null],
     ['Proxy-Authenticate: Kerberos, Negotiate asdfasdfa', null],
@@ -54,7 +54,15 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterStripInfo', function() {
     ['Proxy-Authenticate: Digest realm="Foo realm", Negotiate asdfasdfa', null],
     ['Proxy-Authenticate: Kerberos,Digest,Basic', null],
     ['Proxy-Authenticate: Digest realm="asdfasdf", nonce=5, qop="auth"', null],
-    ['Proxy-Authenticate: Basic realm=foo,foo=bar , Digest ', null]
+    ['Proxy-Authenticate: Basic realm=foo,foo=bar , Digest ', null],
+
+    ['cookie: Stuff [4 bytes were stripped]',
+     'cookie: [29 bytes were stripped]'],
+    ['cookie: [4 bytes were stripped] Stuff',
+     'cookie: [29 bytes were stripped]'],
+    ['set-cookie: [4 bytes were stripped]', null],
+    ['Proxy-Authenticate: NTLM [23 bytes were stripped]', null],
+    ['cookie: [value was stripped]', null],
   ];
 
   for (var i = 0; i < expectations.length; ++i) {
@@ -97,7 +105,7 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterStripInfo', function() {
         ':method': 'GET',
         ':path': '/cute/cat/pictures/',
         'cookie': 'blah'
-       },
+      },
       'line': 'GET / HTTP/1.1\r\n'
     },
     'phase': EventPhase.PHASE_BEGIN,
@@ -107,7 +115,7 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterStripInfo', function() {
   };
   var strippedSpdyRequestHeadersEntry =
       stripCookiesAndLoginInfo(spdyRequestHeadersEntry);
-  expectEquals('cookie: [value was stripped]',
+  expectEquals('cookie: [4 bytes were stripped]',
                strippedSpdyRequestHeadersEntry.params.headers[3]);
 
   testDone();
@@ -153,6 +161,7 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterPrintAsText', function() {
   runTestCase(painterTestExtraCustomParameter());
   runTestCase(painterTestMissingCustomParameter());
   runTestCase(painterTestSSLVersionFallback());
+  runTestCase(painterTestInProgressURLRequest());
 
   testDone();
 });
@@ -302,7 +311,7 @@ function painterTestURLRequest() {
       'params': {
         'source_dependency': {
           'id': 149,
-          'type': 11
+          'type': EventSourceType.HTTP_STREAM_JOB
         }
       },
       'phase': EventPhase.PHASE_NONE,
@@ -859,171 +868,171 @@ function painterTestNetError() {
   testCase.tickOffset = '1337911098446';
 
   testCase.logEntries = [
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675448',
-       'type': EventType.REQUEST_ALIVE
-     },
-     {
-       'params': {
-         'load_flags': 68223104,
-         'method': 'GET',
-         'priority': 4,
-         'url': 'http://www.doesnotexistdomain.com/'
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675455',
-       'type': EventType.URL_REQUEST_START_JOB
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675460',
-       'type': EventType.URL_REQUEST_START_JOB
-     },
-     {
-       'params': {
-         'load_flags': 68223104,
-         'method': 'GET',
-         'priority': 4,
-         'url': 'http://www.doesnotexistdomain.com/'
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675460',
-       'type': EventType.URL_REQUEST_START_JOB
-     },
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675469',
-       'type': EventType.HTTP_CACHE_GET_BACKEND
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675469',
-       'type': EventType.HTTP_CACHE_GET_BACKEND
-     },
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675469',
-       'type': EventType.HTTP_CACHE_OPEN_ENTRY
-     },
-     {
-       'params': {
-         'net_error': -2
-       },
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675470',
-       'type': EventType.HTTP_CACHE_OPEN_ENTRY
-     },
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675471',
-       'type': EventType.HTTP_CACHE_CREATE_ENTRY
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675473',
-       'type': EventType.HTTP_CACHE_CREATE_ENTRY
-     },
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675473',
-       'type': EventType.HTTP_CACHE_ADD_TO_ENTRY
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675474',
-       'type': EventType.HTTP_CACHE_ADD_TO_ENTRY
-     },
-     {
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675474',
-       'type': EventType.HTTP_STREAM_REQUEST
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675699',
-       'type': EventType.HTTP_STREAM_REQUEST
-     },
-     {
-       'params': {
-         'net_error': -105
-       },
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675705',
-       'type': EventType.URL_REQUEST_START_JOB
-     },
-     {
-       'params': {
-         'net_error': -105
-       },
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 318,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '953675923',
-       'type': EventType.REQUEST_ALIVE
-     }
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675448',
+      'type': EventType.REQUEST_ALIVE
+    },
+    {
+      'params': {
+        'load_flags': 68223104,
+        'method': 'GET',
+        'priority': 4,
+        'url': 'http://www.doesnotexistdomain.com/'
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675455',
+      'type': EventType.URL_REQUEST_START_JOB
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675460',
+      'type': EventType.URL_REQUEST_START_JOB
+    },
+    {
+      'params': {
+        'load_flags': 68223104,
+        'method': 'GET',
+        'priority': 4,
+        'url': 'http://www.doesnotexistdomain.com/'
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675460',
+      'type': EventType.URL_REQUEST_START_JOB
+    },
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675469',
+      'type': EventType.HTTP_CACHE_GET_BACKEND
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675469',
+      'type': EventType.HTTP_CACHE_GET_BACKEND
+    },
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675469',
+      'type': EventType.HTTP_CACHE_OPEN_ENTRY
+    },
+    {
+      'params': {
+        'net_error': -2
+      },
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675470',
+      'type': EventType.HTTP_CACHE_OPEN_ENTRY
+    },
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675471',
+      'type': EventType.HTTP_CACHE_CREATE_ENTRY
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675473',
+      'type': EventType.HTTP_CACHE_CREATE_ENTRY
+    },
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675473',
+      'type': EventType.HTTP_CACHE_ADD_TO_ENTRY
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675474',
+      'type': EventType.HTTP_CACHE_ADD_TO_ENTRY
+    },
+    {
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675474',
+      'type': EventType.HTTP_STREAM_REQUEST
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675699',
+      'type': EventType.HTTP_STREAM_REQUEST
+    },
+    {
+      'params': {
+        'net_error': -105
+      },
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675705',
+      'type': EventType.URL_REQUEST_START_JOB
+    },
+    {
+      'params': {
+        'net_error': -105
+      },
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675923',
+      'type': EventType.REQUEST_ALIVE
+    }
   ];
 
   testCase.expectedText =
@@ -1064,113 +1073,113 @@ function painterTestHexEncodedBytes() {
   testCase.tickOffset = '1337911098473';
 
   testCase.logEntries = [
-     {
-       'params': {
-         'source_dependency': {
-           'id': 634,
-           'type': 4
-         }
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918459',
-       'type': EventType.SOCKET_ALIVE
-     },
-     {
-       'params': {
-         'address_list': [
-           '184.30.253.15:80'
-         ]
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918460',
-       'type': EventType.TCP_CONNECT
-     },
-     {
-       'params': {
-         'address': '184.30.253.15:80'
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918461',
-       'type': EventType.TCP_CONNECT_ATTEMPT
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918464',
-       'type': EventType.TCP_CONNECT_ATTEMPT
-     },
-     {
-       'params': {
-         'source_address': '127.0.0.1:54041'
-       },
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918465',
-       'type': EventType.TCP_CONNECT
-     },
-     {
-       'params': {
-         'source_dependency': {
-           'id': 628,
-           'type': 11
-         }
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918472',
-       'type': EventType.SOCKET_IN_USE
-     },
-     {
-       'params': {
-         'byte_count': 780,
-         'hex_encoded_bytes': '474554202F66617669636F6E2E69636F20485454502' +
-                              'F312E310D0A486F73743A207777772E6170706C652E' +
-                              '636F6D0D0A436F6E6E656374696F6E3A20'
-       },
-       'phase': EventPhase.PHASE_NONE,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918484',
-       'type': EventType.SOCKET_BYTES_SENT
-     },
-     {
-       'params': {
-         'byte_count': 1024,
-         'hex_encoded_bytes': '485454502F312E3120323030204F4B0D0A4C6173742' +
-                              'D4D6F6469666965643A204D6F6E2C20313920446563' +
-                              '20323031312032323A34363A353920474D'
-       },
-       'phase': EventPhase.PHASE_NONE,
-       'source': {
-         'id': 637,
-         'type': EventSourceType.SOCKET
-       },
-       'time': '953918596',
-       'type': EventType.SOCKET_BYTES_RECEIVED
-     }
+    {
+      'params': {
+        'source_dependency': {
+          'id': 634,
+          'type': EventSourceType.CONNECT_JOB
+        }
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918459',
+      'type': EventType.SOCKET_ALIVE
+    },
+    {
+      'params': {
+        'address_list': [
+          '184.30.253.15:80'
+        ]
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918460',
+      'type': EventType.TCP_CONNECT
+    },
+    {
+      'params': {
+        'address': '184.30.253.15:80'
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918461',
+      'type': EventType.TCP_CONNECT_ATTEMPT
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918464',
+      'type': EventType.TCP_CONNECT_ATTEMPT
+    },
+    {
+      'params': {
+        'source_address': '127.0.0.1:54041'
+      },
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918465',
+      'type': EventType.TCP_CONNECT
+    },
+    {
+      'params': {
+        'source_dependency': {
+          'id': 628,
+          'type': EventSourceType.HTTP_STREAM_JOB
+        }
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918472',
+      'type': EventType.SOCKET_IN_USE
+    },
+    {
+      'params': {
+        'byte_count': 780,
+        'hex_encoded_bytes': '474554202F66617669636F6E2E69636F20485454502' +
+                             'F312E310D0A486F73743A207777772E6170706C652E' +
+                             '636F6D0D0A436F6E6E656374696F6E3A20'
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918484',
+      'type': EventType.SOCKET_BYTES_SENT
+    },
+    {
+      'params': {
+        'byte_count': 1024,
+        'hex_encoded_bytes': '485454502F312E3120323030204F4B0D0A4C6173742' +
+                             'D4D6F6469666965643A204D6F6E2C20313920446563' +
+                             '20323031312032323A34363A353920474D'
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 637,
+        'type': EventSourceType.SOCKET
+      },
+      'time': '953918596',
+      'type': EventType.SOCKET_BYTES_RECEIVED
+    }
   ];
 
   testCase.expectedText =
@@ -1214,30 +1223,30 @@ function painterTestCertVerifierJob() {
   testCase.tickOffset = '1337911098481';
 
   testCase.logEntries = [
-     {
-       'params': {
-         'certificates': [
-           '-----BEGIN CERTIFICATE-----\n1\n-----END CERTIFICATE-----\n',
-           '-----BEGIN CERTIFICATE-----\n2\n-----END CERTIFICATE-----\n',
-         ]
-       },
-       'phase': EventPhase.PHASE_BEGIN,
-       'source': {
-         'id': 752,
-         'type': EventSourceType.CERT_VERIFIER_JOB
-       },
-       'time': '954124663',
-       'type': EventType.CERT_VERIFIER_JOB
-     },
-     {
-       'phase': EventPhase.PHASE_END,
-       'source': {
-         'id': 752,
-         'type': EventSourceType.CERT_VERIFIER_JOB
-       },
-       'time': '954124697',
-       'type': EventType.CERT_VERIFIER_JOB
-     }
+    {
+      'params': {
+        'certificates': [
+          '-----BEGIN CERTIFICATE-----\n1\n-----END CERTIFICATE-----\n',
+          '-----BEGIN CERTIFICATE-----\n2\n-----END CERTIFICATE-----\n',
+        ]
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 752,
+        'type': EventSourceType.CERT_VERIFIER_JOB
+      },
+      'time': '954124663',
+      'type': EventType.CERT_VERIFIER_JOB
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 752,
+        'type': EventSourceType.CERT_VERIFIER_JOB
+      },
+      'time': '954124697',
+      'type': EventType.CERT_VERIFIER_JOB
+    }
   ];
 
   testCase.expectedText =
@@ -1262,31 +1271,31 @@ function painterTestProxyConfig() {
   testCase.tickOffset = '1337911098481';
 
   testCase.logEntries = [
-     {
-       'params': {
-         'new_config': {
-           'auto_detect': true,
-           'bypass_list': [
-             '*.local',
-             'foo',
-             '<local>'
-           ],
-           'pac_url': 'https://config/wpad.dat',
-           'single_proxy': 'cache-proxy:3128',
-           'source': 'SYSTEM'
-         },
-         'old_config': {
-           'auto_detect': true
-         }
-       },
-       'phase': EventPhase.PHASE_NONE,
-       'source': {
-         'id': 814,
-         'type': EventSourceType.NONE
-       },
-       'time': '954443578',
-       'type': EventType.PROXY_CONFIG_CHANGED
-     }
+    {
+      'params': {
+        'new_config': {
+          'auto_detect': true,
+          'bypass_list': [
+            '*.local',
+            'foo',
+            '<local>'
+          ],
+          'pac_url': 'https://config/wpad.dat',
+          'single_proxy': 'cache-proxy:3128',
+          'source': 'SYSTEM'
+        },
+        'old_config': {
+          'auto_detect': true
+        }
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 814,
+        'type': EventSourceType.NONE
+      },
+      'time': '954443578',
+      'type': EventType.PROXY_CONFIG_CHANGED
+    }
   ];
 
   testCase.expectedText =
@@ -1315,53 +1324,53 @@ function painterTestDontStripCookiesURLRequest() {
   testCase.tickOffset = '1337911098139';
 
   testCase.logEntries = [
-     {
-       'params': {
-         'headers': [
-           'HTTP/1.1 301 Moved Permanently',
-           'Cache-Control: private',
-           'Content-Length: 23',
-           'Content-Type: text/html',
-           'Location: http://msdn.microsoft.com',
-           'Server: Microsoft-IIS/7.5',
-           'Set-Cookie: MyMagicPony',
-           'P3P: CP=\"ALL\"',
-           'X-Powered-By: ASP.NET',
-           'X-UA-Compatible: IE=EmulateIE7',
-           'Date: Tue, 05 Jun 2012 21:06:45 GMT',
-           'Connection: close'
-         ]
-       },
-       'phase': EventPhase.PHASE_NONE,
-       'source': {
-         'id': 829,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '1019307339',
-       'type': EventType.HTTP_TRANSACTION_READ_RESPONSE_HEADERS
-     },
-     {
-       'params': {
-         'headers': [
-           'Host: msdn.microsoft.com',
-           'Connection: keep-alive',
-           'User-Agent: Mozilla/5.0',
-           'Accept: text/html',
-           'Accept-Encoding: gzip,deflate,sdch',
-           'Accept-Language: en-US,en;q=0.8',
-           'Accept-Charset: ISO-8859-1',
-           'Cookie: MyMagicPony'
-         ],
-         'line': 'GET / HTTP/1.1\r\n'
-       },
-       'phase': EventPhase.PHASE_NONE,
-       'source': {
-         'id': 829,
-         'type': EventSourceType.URL_REQUEST
-       },
-       'time': '1019307458',
-       'type': EventType.HTTP_TRANSACTION_SEND_REQUEST_HEADERS
-     }
+    {
+      'params': {
+        'headers': [
+          'HTTP/1.1 301 Moved Permanently',
+          'Cache-Control: private',
+          'Content-Length: 23',
+          'Content-Type: text/html',
+          'Location: http://msdn.microsoft.com',
+          'Server: Microsoft-IIS/7.5',
+          'Set-Cookie: MyMagicPony',
+          'P3P: CP=\"ALL\"',
+          'X-Powered-By: ASP.NET',
+          'X-UA-Compatible: IE=EmulateIE7',
+          'Date: Tue, 05 Jun 2012 21:06:45 GMT',
+          'Connection: close'
+        ]
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 829,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '1019307339',
+      'type': EventType.HTTP_TRANSACTION_READ_RESPONSE_HEADERS
+    },
+    {
+      'params': {
+        'headers': [
+          'Host: msdn.microsoft.com',
+          'Connection: keep-alive',
+          'User-Agent: Mozilla/5.0',
+          'Accept: text/html',
+          'Accept-Encoding: gzip,deflate,sdch',
+          'Accept-Language: en-US,en;q=0.8',
+          'Accept-Charset: ISO-8859-1',
+          'Cookie: MyMagicPony'
+        ],
+        'line': 'GET / HTTP/1.1\r\n'
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 829,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '1019307458',
+      'type': EventType.HTTP_TRANSACTION_SEND_REQUEST_HEADERS
+    }
   ];
 
   testCase.expectedText =
@@ -1399,7 +1408,7 @@ function painterTestStripCookiesURLRequest() {
   var testCase = painterTestDontStripCookiesURLRequest();
   testCase.privacyStripping = true;
   testCase.expectedText =
-      testCase.expectedText.replace(/MyMagicPony/g, '[value was stripped]');
+      testCase.expectedText.replace(/MyMagicPony/g, '[11 bytes were stripped]');
   return testCase;
 }
 
@@ -1426,7 +1435,7 @@ function painterTestDontStripCookiesSPDYSession() {
           'accept-charset: ISO-8859-1',
           'accept-encoding: gzip,deflate,sdch',
           'accept-language: en-US,en;q=0.8',
-          'cookie: MyLittlePony',
+          'cookie: MyMagicPony',
           'user-agent: Mozilla/5.0'
         ],
         'stream_id': 1
@@ -1447,7 +1456,7 @@ function painterTestDontStripCookiesSPDYSession() {
           ':version: HTTP/1.1',
           'date: Tue, 05 Jun 2012 19:21:30 GMT',
           'server: GSE',
-          'set-cookie: MyLittlePony',
+          'set-cookie: MyMagicPony',
           'x-random-header: sup'
         ],
         'stream_id': 5
@@ -1474,7 +1483,7 @@ function painterTestDontStripCookiesSPDYSession() {
     '                               accept-charset: ISO-8859-1\n' +
     '                               accept-encoding: gzip,deflate,sdch\n' +
     '                               accept-language: en-US,en;q=0.8\n' +
-    '                               cookie: MyLittlePony\n' +
+    '                               cookie: MyMagicPony\n' +
     '                               user-agent: Mozilla/5.0\n' +
     '                           --> stream_id = 1\n' +
     't=1338924090049 [st=7628]  SPDY_SESSION_SYN_REPLY\n' +
@@ -1483,7 +1492,7 @@ function painterTestDontStripCookiesSPDYSession() {
     '                               :version: HTTP/1.1\n' +
     '                               date: Tue, 05 Jun 2012 19:21:30 GMT\n' +
     '                               server: GSE\n' +
-    '                               set-cookie: MyLittlePony\n' +
+    '                               set-cookie: MyMagicPony\n' +
     '                               x-random-header: sup\n' +
     '                           --> stream_id = 5';
 
@@ -1497,7 +1506,7 @@ function painterTestStripCookiesSPDYSession() {
   var testCase = painterTestDontStripCookiesSPDYSession();
   testCase.privacyStripping = true;
   testCase.expectedText =
-      testCase.expectedText.replace(/MyLittlePony/g, '[value was stripped]');
+      testCase.expectedText.replace(/MyMagicPony/g, '[11 bytes were stripped]');
   return testCase;
 }
 
@@ -1547,7 +1556,7 @@ function painterTestSpdyURLRequestStripCookies() {
   var testCase = painterTestSpdyURLRequestDontStripCookies();
   testCase.privacyStripping = true;
   testCase.expectedText =
-      testCase.expectedText.replace(/MyMagicPony/g, '[value was stripped]');
+      testCase.expectedText.replace(/MyMagicPony/g, '[11 bytes were stripped]');
   return testCase;
 }
 
@@ -1691,6 +1700,75 @@ function painterTestSSLVersionFallback() {
 '                          --> net_error = -107 (ERR_SSL_PROTOCOL_ERROR)\n' +
 't=1339030161250 [st=171]  SSL_VERSION_FALLBACK\n' +
 '                          --> SSL 3.0 ==> SSL 0x123456';
+
+  return testCase;
+}
+
+/**
+ * Tests the formatting of a URL request that was just finishing up when
+ * net-internals was opened.
+ */
+function painterTestInProgressURLRequest() {
+  var testCase = {};
+  testCase.tickOffset = '1337911098446';
+
+  testCase.logEntries = [
+    {
+      'params': {
+        'load_flags': 68223104,
+        'load_state': LoadState.READING_RESPONSE,
+        'method': 'GET',
+        'url': 'http://www.MagicPonyShopper.com'
+      },
+      'phase': EventPhase.PHASE_BEGIN,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675548',
+      'type': EventType.REQUEST_ALIVE
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675699',
+      'type': EventType.HTTP_STREAM_REQUEST
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675705',
+      'type': EventType.URL_REQUEST_START_JOB
+    },
+    {
+      'phase': EventPhase.PHASE_END,
+      'source': {
+        'id': 318,
+        'type': EventSourceType.URL_REQUEST
+      },
+      'time': '953675923',
+      'type': EventType.REQUEST_ALIVE
+    }
+  ];
+
+  testCase.expectedText =
+'t=1338864773994 [st=  0] +REQUEST_ALIVE  [dt=375]\n' +
+'                          --> load_flags = 68223104 ' +
+    '(ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
+    '| VERIFY_EV_CERT)\n' +
+'                          --> load_state = ' + LoadState.READING_RESPONSE +
+    ' (READING_RESPONSE)\n' +
+'                          --> method = "GET"\n' +
+'                          --> url = "http://www.MagicPonyShopper.com"\n' +
+'t=1338864774145 [st=151]   -HTTP_STREAM_REQUEST\n' +
+'t=1338864774151 [st=157]   -URL_REQUEST_START_JOB\n' +
+'t=1338864774369 [st=375] -REQUEST_ALIVE';
 
   return testCase;
 }

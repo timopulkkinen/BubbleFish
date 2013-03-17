@@ -10,7 +10,9 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace fileapi {
 class FileSystemContext;
@@ -28,13 +30,11 @@ class TestShellRequestContext : public net::URLRequestContext {
 
   // Use an on-disk cache at the specified location.  Optionally, use the cache
   // in playback or record mode.
-  TestShellRequestContext(const FilePath& cache_path,
+  TestShellRequestContext(const base::FilePath& cache_path,
                           net::HttpCache::Mode cache_mode,
                           bool no_proxy);
 
   virtual ~TestShellRequestContext();
-
-  virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
 
   webkit_blob::BlobStorageController* blob_storage_controller() const {
     return blob_storage_controller_.get();
@@ -45,7 +45,7 @@ class TestShellRequestContext : public net::URLRequestContext {
   }
 
  private:
-  void Init(const FilePath& cache_path, net::HttpCache::Mode cache_mode,
+  void Init(const base::FilePath& cache_path, net::HttpCache::Mode cache_mode,
             bool no_proxy);
 
   net::URLRequestContextStorage storage_;

@@ -12,10 +12,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/proto/trials_seed.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/pref_names.h"
@@ -25,6 +26,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
@@ -40,6 +42,10 @@ const int kMaxRetrySeedFetch = 5;
 
 // Time between seed fetches, in hours.
 const int kSeedFetchPeriodHours = 5;
+
+// TODO(mad): To be removed when we stop updating the NetworkTimeTracker.
+// For the HTTP date headers, the resolution of the server time is 1 second.
+const int64 kServerTimeResolutionMs = 1000;
 
 // Maps Study_Channel enum values to corresponding chrome::VersionInfo::Channel
 // enum values.
@@ -58,6 +64,31 @@ chrome::VersionInfo::Channel ConvertStudyChannelToVersionChannel(
   // All enum values of |study_channel| were handled above.
   NOTREACHED();
   return chrome::VersionInfo::CHANNEL_UNKNOWN;
+}
+
+// Wrapper around channel checking, used to enable channel mocking for
+// testing. If the current browser channel is not UNKNOWN, this will return
+// that channel value. Otherwise, if the fake channel flag is provided, this
+// will return the fake channel. Failing that, this will return the UNKNOWN
+// channel.
+chrome::VersionInfo::Channel GetChannelForVariations() {
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel != chrome::VersionInfo::CHANNEL_UNKNOWN)
+    return channel;
+  std::string forced_channel =
+      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kFakeVariationsChannel);
+  if (forced_channel == "stable")
+    channel = chrome::VersionInfo::CHANNEL_STABLE;
+  else if (forced_channel == "beta")
+    channel = chrome::VersionInfo::CHANNEL_BETA;
+  else if (forced_channel == "dev")
+    channel = chrome::VersionInfo::CHANNEL_DEV;
+  else if (forced_channel == "canary")
+    channel = chrome::VersionInfo::CHANNEL_CANARY;
+  else
+    DVLOG(1) << "Invalid channel provided: " << forced_channel;
+  return channel;
 }
 
 Study_Platform GetCurrentPlatform() {
@@ -98,8 +129,9 @@ GURL GetVariationsServerURL() {
 
 }  // namespace
 
-VariationsService::VariationsService()
-    : variations_server_url_(GetVariationsServerURL()),
+VariationsService::VariationsService(PrefService* local_state)
+    : local_state_(local_state),
+      variations_server_url_(GetVariationsServerURL()),
       create_trials_from_seed_called_(false),
       resource_request_allowed_notifier_(
           new ResourceRequestAllowedNotifier) {
@@ -107,7 +139,8 @@ VariationsService::VariationsService()
 }
 
 VariationsService::VariationsService(ResourceRequestAllowedNotifier* notifier)
-    : variations_server_url_(GetVariationsServerURL()),
+    : local_state_(NULL),
+      variations_server_url_(GetVariationsServerURL()),
       create_trials_from_seed_called_(false),
       resource_request_allowed_notifier_(notifier) {
   resource_request_allowed_notifier_->Init(this);
@@ -116,14 +149,14 @@ VariationsService::VariationsService(ResourceRequestAllowedNotifier* notifier)
 VariationsService::~VariationsService() {
 }
 
-bool VariationsService::CreateTrialsFromSeed(PrefService* local_prefs) {
+bool VariationsService::CreateTrialsFromSeed() {
   create_trials_from_seed_called_ = true;
 
   TrialsSeed seed;
-  if (!LoadTrialsSeedFromPref(local_prefs, &seed))
+  if (!LoadTrialsSeedFromPref(local_state_, &seed))
     return false;
 
-  const int64 date_value = local_prefs->GetInt64(prefs::kVariationsSeedDate);
+  const int64 date_value = local_state_->GetInt64(prefs::kVariationsSeedDate);
   const base::Time seed_date = base::Time::FromInternalValue(date_value);
   const base::Time build_time = base::GetBuildTime();
   // Use the build time for date checks if either the seed date is invalid or
@@ -136,9 +169,25 @@ bool VariationsService::CreateTrialsFromSeed(PrefService* local_prefs) {
   if (!current_version_info.is_valid())
     return false;
 
+  chrome::VersionInfo::Channel channel = GetChannelForVariations();
   for (int i = 0; i < seed.study_size(); ++i) {
-    if (ShouldAddStudy(seed.study(i), current_version_info, reference_date))
+    if (ShouldAddStudy(seed.study(i), current_version_info, reference_date,
+                       channel)) {
       CreateTrialFromStudy(seed.study(i), reference_date);
+    }
+  }
+
+  // Log the "freshness" of the seed that was just used. The freshness is the
+  // time between the last successful seed download and now.
+  const int64 last_fetch_time_internal =
+      local_state_->GetInt64(prefs::kVariationsLastFetchTime);
+  if (last_fetch_time_internal) {
+    const base::Time now = base::Time::Now();
+    const base::TimeDelta delta =
+        now - base::Time::FromInternalValue(last_fetch_time_internal);
+    // Log the value in number of minutes.
+    UMA_HISTOGRAM_CUSTOM_COUNTS("Variations.SeedFreshness", delta.InMinutes(),
+        1, base::TimeDelta::FromDays(30).InMinutes(), 50);
   }
 
   return true;
@@ -159,30 +208,57 @@ void VariationsService::StartRepeatedVariationsSeedFetch() {
                this, &VariationsService::FetchVariationsSeed);
 }
 
-// static
-void VariationsService::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterStringPref(prefs::kVariationsSeed, std::string());
-  prefs->RegisterInt64Pref(prefs::kVariationsSeedDate,
-                           base::Time().ToInternalValue());
+bool VariationsService::GetNetworkTime(base::Time* network_time,
+                                       base::TimeDelta* uncertainty) const {
+  return network_time_tracker_.GetNetworkTime(network_time, uncertainty);
 }
+
+#if defined(OS_WIN)
+void VariationsService::StartGoogleUpdateRegistrySync() {
+  registry_syncer_.RequestRegistrySync();
+}
+#endif
 
 void VariationsService::SetCreateTrialsFromSeedCalledForTesting(bool called) {
   create_trials_from_seed_called_ = called;
 }
 
+// static
+void VariationsService::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kVariationsSeed, std::string());
+  registry->RegisterInt64Pref(prefs::kVariationsSeedDate,
+                              base::Time().ToInternalValue());
+  registry->RegisterInt64Pref(prefs::kVariationsLastFetchTime, 0);
+}
+
+// static
+VariationsService* VariationsService::Create(PrefService* local_state) {
+// This is temporarily disabled for Android. See http://crbug.com/168224
+#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_ANDROID)
+  // Unless the URL was provided, unsupported builds should return NULL to
+  // indicate that the service should not be used.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kVariationsServerURL))
+    return NULL;
+#endif
+  return new VariationsService(local_state);
+}
+
 void VariationsService::DoActualFetch() {
   pending_seed_request_.reset(net::URLFetcher::Create(
-      variations_server_url_, net::URLFetcher::GET, this));
+      0, variations_server_url_, net::URLFetcher::GET, this));
   pending_seed_request_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                                       net::LOAD_DO_NOT_SAVE_COOKIES);
   pending_seed_request_->SetRequestContext(
       g_browser_process->system_request_context());
-  pending_seed_request_->SetMaxRetries(kMaxRetrySeedFetch);
+  pending_seed_request_->SetMaxRetriesOn5xx(kMaxRetrySeedFetch);
   if (!variations_serial_number_.empty()) {
     pending_seed_request_->AddExtraRequestHeader("If-Match:" +
                                                  variations_serial_number_);
   }
   pending_seed_request_->Start();
+
+  last_request_started_time_ = base::TimeTicks::Now();
 }
 
 void VariationsService::FetchVariationsSeed() {
@@ -199,33 +275,53 @@ void VariationsService::FetchVariationsSeed() {
 void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK_EQ(pending_seed_request_.get(), source);
   // The fetcher will be deleted when the request is handled.
-  scoped_ptr<const net::URLFetcher> request(
-      pending_seed_request_.release());
+  scoped_ptr<const net::URLFetcher> request(pending_seed_request_.release());
   if (request->GetStatus().status() != net::URLRequestStatus::SUCCESS) {
     DVLOG(1) << "Variations server request failed.";
     return;
   }
 
   // Log the response code.
+  const int response_code = request->GetResponseCode();
   UMA_HISTOGRAM_CUSTOM_ENUMERATION("Variations.SeedFetchResponseCode",
-      net::HttpUtil::MapStatusCodeForHistogram(request->GetResponseCode()),
+      net::HttpUtil::MapStatusCodeForHistogram(response_code),
       net::HttpUtil::GetStatusCodesForHistogram());
 
-  if (request->GetResponseCode() != 200) {
-    DVLOG(1) << "Variations server request returned non-200 response code: "
-             << request->GetResponseCode();
+  const base::TimeDelta latency =
+      base::TimeTicks::Now() - last_request_started_time_;
+
+  base::Time response_date;
+  if (response_code == net::HTTP_OK ||
+      response_code == net::HTTP_NOT_MODIFIED) {
+    bool success = request->GetResponseHeaders()->GetDateValue(&response_date);
+    DCHECK(success || response_date.is_null());
+
+    if (!response_date.is_null()) {
+      network_time_tracker_.UpdateNetworkTime(
+          response_date,
+          base::TimeDelta::FromMilliseconds(kServerTimeResolutionMs),
+          latency);
+    }
+  }
+
+  if (response_code != net::HTTP_OK) {
+    DVLOG(1) << "Variations server request returned non-HTTP_OK response code: "
+             << response_code;
+    if (response_code == net::HTTP_NOT_MODIFIED) {
+      UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchNotModifiedLatency", latency);
+      RecordLastFetchTime();
+    } else {
+      UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchOtherLatency", latency);
+    }
     return;
   }
+  UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchSuccessLatency", latency);
 
   std::string seed_data;
   bool success = request->GetResponseAsString(&seed_data);
   DCHECK(success);
 
-  base::Time response_date;
-  success = request->GetResponseHeaders()->GetDateValue(&response_date);
-  DCHECK(success || response_date.is_null());
-
-  StoreSeedData(seed_data, response_date, g_browser_process->local_state());
+  StoreSeedData(seed_data, response_date, local_state_);
 }
 
 void VariationsService::OnResourceRequestsAllowed() {
@@ -244,6 +340,11 @@ void VariationsService::OnResourceRequestsAllowed() {
 bool VariationsService::StoreSeedData(const std::string& seed_data,
                                       const base::Time& seed_date,
                                       PrefService* local_prefs) {
+  if (seed_data.empty()) {
+    VLOG(1) << "Variations Seed data from server is empty, rejecting the seed.";
+    return false;
+  }
+
   // Only store the seed data if it parses correctly.
   TrialsSeed seed;
   if (!seed.ParseFromString(seed_data)) {
@@ -263,6 +364,9 @@ bool VariationsService::StoreSeedData(const std::string& seed_data,
   local_prefs->SetInt64(prefs::kVariationsSeedDate,
                         seed_date.ToInternalValue());
   variations_serial_number_ = seed.serial_number();
+
+  RecordLastFetchTime();
+
   return true;
 }
 
@@ -270,9 +374,10 @@ bool VariationsService::StoreSeedData(const std::string& seed_data,
 bool VariationsService::ShouldAddStudy(
     const Study& study,
     const chrome::VersionInfo& version_info,
-    const base::Time& reference_date) {
+    const base::Time& reference_date,
+    const chrome::VersionInfo::Channel channel) {
   if (study.has_filter()) {
-    if (!CheckStudyChannel(study.filter(), chrome::VersionInfo::GetChannel())) {
+    if (!CheckStudyChannel(study.filter(), channel)) {
       DVLOG(1) << "Filtered out study " << study.name() << " due to channel.";
       return false;
     }
@@ -453,10 +558,13 @@ bool VariationsService::ValidateStudyAndComputeTotalProbability(
 bool VariationsService::LoadTrialsSeedFromPref(PrefService* local_prefs,
                                                TrialsSeed* seed) {
   std::string base64_seed_data = local_prefs->GetString(prefs::kVariationsSeed);
-  std::string seed_data;
+  if (base64_seed_data.empty()) {
+    UMA_HISTOGRAM_BOOLEAN("Variations.SeedEmpty", true);
+    return false;
+  }
 
-  // If the decode process fails, assume the pref value is corrupt, and clear
-  // it.
+  // If the decode process fails, assume the pref value is corrupt and clear it.
+  std::string seed_data;
   if (!base::Base64Decode(base64_seed_data, &seed_data) ||
       !seed->ParseFromString(seed_data)) {
     VLOG(1) << "Variations Seed data in local pref is corrupt, clearing the "
@@ -480,7 +588,7 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrialList::FactoryGetFieldTrial(
           study.name(), total_probability, study.default_experiment_name(),
-          base::FieldTrialList::kExpirationYearInFuture, 1, 1, NULL));
+          base::FieldTrialList::kNoExpirationYear, 1, 1, NULL));
 
   if (study.has_consistency() &&
       study.consistency() == Study_Consistency_PERMANENT) {
@@ -492,10 +600,19 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
     if (experiment.name() != study.default_experiment_name())
       trial->AppendGroup(experiment.name(), experiment.probability_weight());
 
-    if (experiment.has_experiment_id()) {
+    if (experiment.has_google_web_experiment_id()) {
       const VariationID variation_id =
-          static_cast<VariationID>(experiment.experiment_id());
-      AssociateGoogleVariationIDForce(study.name(),
+          static_cast<VariationID>(experiment.google_web_experiment_id());
+      AssociateGoogleVariationIDForce(GOOGLE_WEB_PROPERTIES,
+                                      study.name(),
+                                      experiment.name(),
+                                      variation_id);
+    }
+    if (experiment.has_google_update_experiment_id()) {
+      const VariationID variation_id =
+          static_cast<VariationID>(experiment.google_update_experiment_id());
+      AssociateGoogleVariationIDForce(GOOGLE_UPDATE_SERVICE,
+                                      study.name(),
                                       experiment.name(),
                                       variation_id);
     }
@@ -504,6 +621,14 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
   trial->SetForced();
   if (IsStudyExpired(study, reference_date))
     trial->Disable();
+}
+
+void VariationsService::RecordLastFetchTime() {
+  // local_state_ is NULL in tests, so check it first.
+  if (local_state_) {
+    local_state_->SetInt64(prefs::kVariationsLastFetchTime,
+                           base::Time::Now().ToInternalValue());
+  }
 }
 
 }  // namespace chrome_variations

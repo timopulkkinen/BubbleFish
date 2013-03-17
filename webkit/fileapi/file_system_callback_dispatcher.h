@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/platform_file.h"
 #include "base/process.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 
@@ -20,7 +20,7 @@ namespace fileapi {
 // This class mirrors the callbacks in
 // third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h,
 // but uses chromium types.
-class FILEAPI_EXPORT FileSystemCallbackDispatcher {
+class WEBKIT_STORAGE_EXPORT FileSystemCallbackDispatcher {
  public:
   virtual ~FileSystemCallbackDispatcher();
 
@@ -30,7 +30,12 @@ class FILEAPI_EXPORT FileSystemCallbackDispatcher {
   // Callback to report information for a file.
   virtual void DidReadMetadata(
       const base::PlatformFileInfo& file_info,
-      const FilePath& platform_path) = 0;
+      const base::FilePath& platform_path) = 0;
+
+  // Callback to report information for a file and its actual file path.
+  virtual void DidCreateSnapshotFile(
+      const base::PlatformFileInfo& file_info,
+      const base::FilePath& platform_path) = 0;
 
   // Callback to report the contents of a directory. If the contents of
   // the given directory are reported in one batch, then |entries| will have

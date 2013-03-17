@@ -6,11 +6,13 @@
 #define CONTENT_TEST_LAYOUT_TEST_HTTP_SERVER_H_
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
 #endif
+
+namespace content {
 
 // This object bounds the lifetime of an external HTTP server
 // used for layout tests.
@@ -19,7 +21,7 @@
 // a more lightweight net/test/test_server HTTP server.
 class LayoutTestHttpServer {
  public:
-  LayoutTestHttpServer(const FilePath& root_directory, int port);
+  LayoutTestHttpServer(const base::FilePath& root_directory, int port);
   ~LayoutTestHttpServer();
 
   // Starts the server. Returns true on success.
@@ -36,7 +38,7 @@ class LayoutTestHttpServer {
   int port() const { return port_; }
 
  private:
-  FilePath root_directory_;  // Root directory of the server.
+  base::FilePath root_directory_;  // Root directory of the server.
 
   int port_;  // Port on which the server should listen.
 
@@ -49,5 +51,7 @@ class LayoutTestHttpServer {
 
   DISALLOW_COPY_AND_ASSIGN(LayoutTestHttpServer);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_TEST_LAYOUT_TEST_HTTP_SERVER_H_

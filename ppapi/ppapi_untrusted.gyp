@@ -20,6 +20,7 @@
         'nso_target': 'libppapi_cpp.so',
         'build_glibc': 1,
         'build_newlib': 1,
+        'build_pnacl_newlib': 1,
         'sources': [
           '<@(cpp_source_files)',
           'cpp/module_embedder.h',
@@ -38,6 +39,7 @@
         'nso_target': 'libppapi_gles2.so',
         'build_glibc': 1,
         'build_newlib': 1,
+        'build_pnacl_newlib': 1,
         'include_dirs': [
           'lib/gl/include',
         ],
@@ -77,14 +79,10 @@
         'link_flags': [
           '-lppapi_cpp',
           '-lppapi',
-          '-lpthread',
+          '-pthread',
         ],
         # TODO(bradchen): get rid of extra_deps64 and extra_deps32
         # once native_client/build/untrusted.gypi no longer needs them.
-        'extra_deps64': [
-          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi_cpp.a',
-          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi.a',
-        ],
         'extra_deps_newlib64': [
           '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi_cpp.a',
           '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi.a',
@@ -94,12 +92,12 @@
           '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libppapi.a',
         ],
         'extra_deps_glibc64': [
-          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libppapi_cpp.a',
-          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libppapi.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libppapi_cpp.so',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libppapi.so',
         ],
         'extra_deps_glibc32': [
-          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libppapi_cpp.a',
-          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libppapi.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libppapi_cpp.so',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libppapi.so',
         ],
         'extra_deps_arm': [
           '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libppapi_cpp.a',
@@ -109,13 +107,16 @@
           '<@(test_common_source_files)',
           '<@(test_nacl_source_files)',
         ],
+        'extra_args': [
+          '--strip-all',
+        ],
       },
       'conditions': [
         ['target_arch!="arm"', {
           'variables': {
             'compile_flags': [
               '-mno-tls-use-call',
-	    ],
+            ],
           },
         }],
         ['target_arch!="arm" and disable_glibc==0', {
@@ -147,8 +148,8 @@
               '--library-path=<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64',
               '--output=>(nmf_glibc)',
               '--stage-dependencies=<(PRODUCT_DIR)',
-              '--toolchain=glibc',
             ],
+            'msvs_cygwin_shell': 1,
           },
         ],
         }],

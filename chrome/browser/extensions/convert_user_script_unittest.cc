@@ -5,16 +5,18 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace extensions {
 
 namespace {
 
@@ -25,23 +27,25 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 }
 
-namespace extensions {
-
 TEST(ExtensionFromUserScript, Basic) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
+
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_basic.user.js");
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo"), &error));
+      test_file, GURL("http://www.google.com/foo"),
+      extensions_dir.path(), &error));
 
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(string16(), error);
 
   // Use a temp dir so that the extensions dir will clean itself up.
-  ScopedTempDir ext_dir;
+  base::ScopedTempDir ext_dir;
   EXPECT_TRUE(ext_dir.Set(extension->path()));
 
   // Validate generated extension metadata.
@@ -74,20 +78,24 @@ TEST(ExtensionFromUserScript, Basic) {
 }
 
 TEST(ExtensionFromUserScript, NoMetdata) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
+
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_no_metadata.user.js");
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo/bar.user.js?monkey"), &error));
+      test_file, GURL("http://www.google.com/foo/bar.user.js?monkey"),
+      extensions_dir.path(), &error));
 
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(string16(), error);
 
   // Use a temp dir so that the extensions dir will clean itself up.
-  ScopedTempDir ext_dir;
+  base::ScopedTempDir ext_dir;
   EXPECT_TRUE(ext_dir.Set(extension->path()));
 
   // Validate generated extension metadata.
@@ -116,35 +124,42 @@ TEST(ExtensionFromUserScript, NoMetdata) {
 }
 
 TEST(ExtensionFromUserScript, NotUTF8) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_not_utf8.user.js");
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo/bar.user.js?monkey"), &error));
+      test_file, GURL("http://www.google.com/foo/bar.user.js?monkey"),
+      extensions_dir.path(), &error));
 
   ASSERT_FALSE(extension.get());
   EXPECT_EQ(ASCIIToUTF16("User script must be UTF8 encoded."), error);
 }
 
 TEST(ExtensionFromUserScript, RunAtDocumentStart) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
+
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_run_at_start.user.js");
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo"), &error));
+      test_file, GURL("http://www.google.com/foo"),
+      extensions_dir.path(), &error));
 
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(string16(), error);
 
   // Use a temp dir so that the extensions dir will clean itself up.
-  ScopedTempDir ext_dir;
+  base::ScopedTempDir ext_dir;
   EXPECT_TRUE(ext_dir.Set(extension->path()));
 
   // Validate generated extension metadata.
@@ -160,20 +175,24 @@ TEST(ExtensionFromUserScript, RunAtDocumentStart) {
 }
 
 TEST(ExtensionFromUserScript, RunAtDocumentEnd) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
+
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_run_at_end.user.js");
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo"), &error));
+      test_file, GURL("http://www.google.com/foo"),
+      extensions_dir.path(), &error));
 
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(string16(), error);
 
   // Use a temp dir so that the extensions dir will clean itself up.
-  ScopedTempDir ext_dir;
+  base::ScopedTempDir ext_dir;
   EXPECT_TRUE(ext_dir.Set(extension->path()));
 
   // Validate generated extension metadata.
@@ -189,7 +208,10 @@ TEST(ExtensionFromUserScript, RunAtDocumentEnd) {
 }
 
 TEST(ExtensionFromUserScript, RunAtDocumentIdle) {
-  FilePath test_file;
+  base::ScopedTempDir extensions_dir;
+  ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
+
+  base::FilePath test_file;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_file));
   test_file = test_file.AppendASCII("extensions")
                        .AppendASCII("user_script_run_at_idle.user.js");
@@ -197,13 +219,14 @@ TEST(ExtensionFromUserScript, RunAtDocumentIdle) {
 
   string16 error;
   scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
-      test_file, GURL("http://www.google.com/foo"), &error));
+      test_file, GURL("http://www.google.com/foo"),
+      extensions_dir.path(), &error));
 
   ASSERT_TRUE(extension.get());
   EXPECT_EQ(string16(), error);
 
   // Use a temp dir so that the extensions dir will clean itself up.
-  ScopedTempDir ext_dir;
+  base::ScopedTempDir ext_dir;
   EXPECT_TRUE(ext_dir.Set(extension->path()));
 
   // Validate generated extension metadata.

@@ -9,7 +9,7 @@
 
 namespace content {
 class BrowserContext;
-class JavaScriptDialogCreator;
+class JavaScriptDialogManager;
 class WebContents;
 }
 
@@ -37,15 +37,10 @@ class AwBrowserDependencyFactory {
   static AwBrowserDependencyFactory* GetInstance();
 
   // Returns the current browser context based on the specified mode.
-  virtual content::BrowserContext* GetBrowserContext(bool incognito) = 0;
+  virtual content::BrowserContext* GetBrowserContext() = 0;
 
   // Constructs and returns ownership of a WebContents instance.
-  virtual content::WebContents* CreateWebContents(bool incognito) = 0;
-
-  // Creates and returns ownership of a new content container instance. That
-  // instance will take ownership of the passed |contents|.
-  virtual AwContentsContainer* CreateContentsContainer(
-      content::WebContents* contents) = 0;
+  virtual content::WebContents* CreateWebContents() = 0;
 
  protected:
   AwBrowserDependencyFactory();

@@ -7,36 +7,19 @@
 """Runs both the Python and Java tests."""
 
 import optparse
+import os
 import sys
 import time
 
-from pylib import apk_info
 from pylib import buildbot_report
-from pylib import test_options_parser
-from pylib import run_java_tests
-from pylib import run_python_tests
-from pylib import run_tests_helper
-from pylib.test_result import TestResults
-
-
-def SummarizeResults(java_results, python_results, annotation, build_type):
-  """Summarize the results from the various test types.
-
-  Args:
-    java_results: a TestResults object with java test case results.
-    python_results: a TestResults object with python test case results.
-    annotation: the annotation used for these results.
-    build_type: 'Release' or 'Debug'.
-
-  Returns:
-    A tuple (all_results, summary_string, num_failing)
-  """
-  all_results = TestResults.FromTestResults([java_results, python_results])
-  summary_string = all_results.LogFull('Instrumentation', annotation,
-                                       build_type)
-  num_failing = (len(all_results.failed) + len(all_results.crashed) +
-                 len(all_results.unknown))
-  return all_results, summary_string, num_failing
+from pylib import constants
+from pylib import ports
+from pylib.base import test_result
+from pylib.host_driven import run_python_tests
+from pylib.instrumentation import apk_info
+from pylib.instrumentation import dispatch
+from pylib.utils import run_tests_helper
+from pylib.utils import test_options_parser
 
 
 def DispatchInstrumentationTests(options):
@@ -51,22 +34,36 @@ def DispatchInstrumentationTests(options):
     options: command-line options for running the Java and Python tests.
 
   Returns:
-    An integer representing the number of failing tests.
+    An integer representing the number of broken tests.
   """
+  if not options.keep_test_server_ports:
+    # Reset the test port allocation. It's important to do it before starting
+    # to dispatch any tests.
+    if not ports.ResetTestServerPortAllocation():
+      raise Exception('Failed to reset test server port.')
+
   start_date = int(time.time() * 1000)
-  java_results = TestResults()
-  python_results = TestResults()
+  java_results = test_result.TestResults()
+  python_results = test_result.TestResults()
 
   if options.run_java_tests:
-    java_results = run_java_tests.DispatchJavaTests(
+    java_results = dispatch.Dispatch(
         options,
         [apk_info.ApkInfo(options.test_apk_path, options.test_apk_jar_path)])
   if options.run_python_tests:
     python_results = run_python_tests.DispatchPythonTests(options)
 
-  all_results, summary_string, num_failing = SummarizeResults(
-      java_results, python_results, options.annotation, options.build_type)
-  return num_failing
+  all_results = test_result.TestResults.FromTestResults([java_results,
+                                                         python_results])
+
+  all_results.LogFull(
+      test_type='Instrumentation',
+      test_package=options.test_apk,
+      annotation=options.annotation,
+      build_type=options.build_type,
+      flakiness_server=options.flakiness_dashboard_server)
+
+  return len(all_results.GetAllBroken())
 
 
 def main(argv):
@@ -77,10 +74,12 @@ def main(argv):
                                                      args)
 
   run_tests_helper.SetLogLevel(options.verbose_count)
-  buildbot_report.PrintNamedStep(
-      'Instrumentation tests: %s - %s' % (', '.join(options.annotation),
-                                          options.test_apk))
-  return DispatchInstrumentationTests(options)
+  ret = 1
+  try:
+    ret = DispatchInstrumentationTests(options)
+  finally:
+    buildbot_report.PrintStepResultIfNeeded(options, ret)
+  return ret
 
 
 if __name__ == '__main__':

@@ -125,6 +125,11 @@ DEFINE_bool(only_mmap_profile,
 DEFINE_bool(deep_heap_profile,
             EnvToBool("DEEP_HEAP_PROFILE", false),
             "If heap-profiling is on, profile deeper (only on Linux)");
+#if defined(TYPE_PROFILING)
+DEFINE_bool(heap_profile_type_statistics,
+            EnvToBool("HEAP_PROFILE_TYPE_STATISTICS", false),
+            "If heap-profiling is on, dump type statistics.");
+#endif  // defined(TYPE_PROFILING)
 
 
 //----------------------------------------------------------------------
@@ -267,7 +272,9 @@ static void NewHook(const void* ptr, size_t size);
 static void DeleteHook(const void* ptr);
 
 // Helper for HeapProfilerDump.
-static void DumpProfileLocked(const char* reason) {
+static void DumpProfileLocked(const char* reason,
+                              char* filename_buffer,
+                              size_t filename_buffer_length) {
   RAW_DCHECK(heap_lock.IsHeld(), "");
   RAW_DCHECK(is_on, "");
   RAW_DCHECK(!dumping, "");
@@ -277,18 +284,17 @@ static void DumpProfileLocked(const char* reason) {
   dumping = true;
 
   // Make file name
-  char file_name[1000];
   dump_count++;
-  snprintf(file_name, sizeof(file_name), "%s.%05d.%04d%s",
+  snprintf(filename_buffer, filename_buffer_length, "%s.%05d.%04d%s",
            filename_prefix, getpid(), dump_count, HeapProfileTable::kFileExt);
 
   // Dump the profile
-  RAW_VLOG(0, "Dumping heap profile to %s (%s)", file_name, reason);
+  RAW_VLOG(0, "Dumping heap profile to %s (%s)", filename_buffer, reason);
   // We must use file routines that don't access memory, since we hold
   // a memory lock now.
-  RawFD fd = RawOpenForWriting(file_name);
+  RawFD fd = RawOpenForWriting(filename_buffer);
   if (fd == kIllegalRawFD) {
-    RAW_LOG(ERROR, "Failed dumping heap profile to %s", file_name);
+    RAW_LOG(ERROR, "Failed dumping heap profile to %s", filename_buffer);
     dumping = false;
     return;
   }
@@ -304,6 +310,15 @@ static void DumpProfileLocked(const char* reason) {
                                          kProfileBufferSize);
   RawWrite(fd, profile, strlen(profile));
   RawClose(fd);
+
+#if defined(TYPE_PROFILING)
+  if (FLAGS_heap_profile_type_statistics) {
+    snprintf(filename_buffer, filename_buffer_length, "%s.%05d.%04d.type",
+             filename_prefix, getpid(), dump_count);
+    RAW_VLOG(0, "Dumping type statistics to %s", filename_buffer);
+    heap_profile->DumpTypeStatistics(filename_buffer);
+  }
+#endif  // defined(TYPE_PROFILING)
 
   dumping = false;
 }
@@ -350,7 +365,8 @@ static void MaybeDumpProfileLocked() {
       last_dump_time = current_time;
     }
     if (need_to_dump) {
-      DumpProfileLocked(buf);
+      char filename_buffer[1000];
+      DumpProfileLocked(buf, filename_buffer, sizeof(filename_buffer));
 
       last_dump_alloc = total.alloc_size;
       last_dump_free = total.free_size;
@@ -452,7 +468,7 @@ static void MunmapHook(const void* ptr, size_t size) {
   }
 }
 
-static void SbrkHook(const void* result, std::ptrdiff_t increment) {
+static void SbrkHook(const void* result, ptrdiff_t increment) {
   if (FLAGS_mmap_log) {  // log it
     RAW_LOG(INFO, "sbrk(inc=%"PRIdS") = 0x%"PRIxPTR"",
                   increment, (uintptr_t) result);
@@ -538,6 +554,14 @@ extern "C" void HeapProfilerStart(const char* prefix) {
   filename_prefix[prefix_length] = '\0';
 }
 
+extern "C" void IterateAllocatedObjects(AddressVisitor visitor, void* data) {
+  SpinLockHolder l(&heap_lock);
+
+  if (!is_on) return;
+
+  heap_profile->IterateAllocationAddresses(visitor, data);
+}
+
 extern "C" int IsHeapProfilerRunning() {
   SpinLockHolder l(&heap_lock);
   return is_on ? 1 : 0;   // return an int, because C code doesn't have bool
@@ -597,7 +621,17 @@ extern "C" void HeapProfilerStop() {
 extern "C" void HeapProfilerDump(const char* reason) {
   SpinLockHolder l(&heap_lock);
   if (is_on && !dumping) {
-    DumpProfileLocked(reason);
+    char filename_buffer[1000];
+    DumpProfileLocked(reason, filename_buffer, sizeof(filename_buffer));
+  }
+}
+
+extern "C" void HeapProfilerDumpWithFileName(const char* reason,
+                                             char* dumped_filename_buffer,
+                                             int filename_buffer_length) {
+  SpinLockHolder l(&heap_lock);
+  if (is_on && !dumping) {
+    DumpProfileLocked(reason, dumped_filename_buffer, filename_buffer_length);
   }
 }
 

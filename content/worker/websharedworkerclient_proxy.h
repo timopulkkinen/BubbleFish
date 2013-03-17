@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerClient.h"
 
 namespace WebKit {
@@ -16,6 +16,8 @@ class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebFrame;
 }
+
+namespace content {
 
 class SharedWorkerDevToolsAgent;
 class WebSharedWorkerStub;
@@ -97,5 +99,7 @@ class WebSharedWorkerClientProxy : public WebKit::WebSharedWorkerClient {
 
   DISALLOW_COPY_AND_ASSIGN(WebSharedWorkerClientProxy);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_WORKER_WEBWORKERCLIENT_PROXY_H_

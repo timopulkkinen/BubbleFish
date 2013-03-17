@@ -4,24 +4,26 @@
 
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
 
-TestAutofillExternalDelegate::TestAutofillExternalDelegate(
-    TabContents* tab_contents, AutofillManager* autofill_manager) :
-    AutofillExternalDelegate(tab_contents, autofill_manager) {}
+#include "ui/gfx/rect.h"
 
-TestAutofillExternalDelegate::~TestAutofillExternalDelegate() {}
+namespace autofill {
 
-void TestAutofillExternalDelegate::ApplyAutofillSuggestions(
-    const std::vector<string16>& autofill_values,
-    const std::vector<string16>& autofill_labels,
-    const std::vector<string16>& autofill_icons,
-    const std::vector<int>& autofill_unique_ids) {}
+void GenerateTestAutofillPopup(
+    AutofillExternalDelegate* autofill_external_delegate) {
+  int query_id = 1;
+  FormData form;
+  FormFieldData field;
+  field.is_focusable = true;
+  field.should_autocomplete = true;
+  gfx::RectF bounds(100.f, 100.f);
+  autofill_external_delegate->OnQuery(query_id, form, field, bounds, false);
 
-void TestAutofillExternalDelegate::OnQueryPlatformSpecific(
-    int query_id,
-    const webkit::forms::FormData& form,
-    const webkit::forms::FormField& field,
-    const gfx::Rect& bounds) {}
+  std::vector<string16> autofill_item;
+  autofill_item.push_back(string16());
+  std::vector<int> autofill_id;
+  autofill_id.push_back(0);
+  autofill_external_delegate->OnSuggestionsReturned(
+      query_id, autofill_item, autofill_item, autofill_item, autofill_id);
+}
 
-void TestAutofillExternalDelegate::HideAutofillPopupInternal() {}
-
-void TestAutofillExternalDelegate::SetBounds(const gfx::Rect& bounds) {}
+}  // namespace autofill

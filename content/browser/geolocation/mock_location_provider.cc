@@ -15,6 +15,7 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 
+namespace content {
 MockLocationProvider* MockLocationProvider::instance_ = NULL;
 
 MockLocationProvider::MockLocationProvider(MockLocationProvider** self_ref)
@@ -32,8 +33,7 @@ MockLocationProvider::~MockLocationProvider() {
   *self_ref_ = NULL;
 }
 
-void MockLocationProvider::HandlePositionChanged(
-    const content::Geoposition& position) {
+void MockLocationProvider::HandlePositionChanged(const Geoposition& position) {
   if (provider_loop_->BelongsToCurrentThread()) {
     // The location arbitrator unit tests rely on this method running
     // synchronously.
@@ -56,7 +56,7 @@ void MockLocationProvider::StopProvider() {
   state_ = STOPPED;
 }
 
-void MockLocationProvider::GetPosition(content::Geoposition* position) {
+void MockLocationProvider::GetPosition(Geoposition* position) {
   *position = position_;
 }
 
@@ -83,11 +83,10 @@ class AutoMockLocationProvider : public MockLocationProvider {
       // contemporary.
       position_.timestamp = base::Time::Now();
     } else {
-      position_.error_code =
-          content::Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
+      position_.error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
     }
   }
-  virtual bool StartProvider(bool high_accuracy) {
+  virtual bool StartProvider(bool high_accuracy) OVERRIDE {
     MockLocationProvider::StartProvider(high_accuracy);
     if (!requires_permission_to_start_) {
       UpdateListenersIfNeeded();
@@ -95,7 +94,7 @@ class AutoMockLocationProvider : public MockLocationProvider {
     return true;
   }
 
-  void OnPermissionGranted() {
+  virtual void OnPermissionGranted() OVERRIDE {
     MockLocationProvider::OnPermissionGranted();
     if (requires_permission_to_start_) {
       UpdateListenersIfNeeded();
@@ -132,3 +131,5 @@ LocationProviderBase* NewAutoFailMockLocationProvider() {
 LocationProviderBase* NewAutoSuccessMockNetworkLocationProvider() {
   return new AutoMockLocationProvider(true, true);
 }
+
+}  // namespace content

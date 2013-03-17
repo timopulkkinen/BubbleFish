@@ -29,7 +29,7 @@ class AppNotificationManagerTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, &ui_loop_),
         file_thread_(BrowserThread::FILE) {}
 
-  ~AppNotificationManagerTest() {}
+  virtual ~AppNotificationManagerTest() {}
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -70,7 +70,7 @@ class AppNotificationManagerTest : public testing::Test {
   MessageLoop ui_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<AppNotificationManager> mgr_;
 };

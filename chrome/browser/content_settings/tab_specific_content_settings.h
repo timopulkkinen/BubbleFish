@@ -12,7 +12,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/common/web_contents_user_data.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/common/content_settings.h"
@@ -21,6 +20,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "net/cookies/canonical_cookie.h"
 
 class CookiesTreeModel;
@@ -34,10 +34,14 @@ namespace net {
 class CookieOptions;
 }
 
+// This class manages state about permissions, content settings, cookies and
+// site data for a specific WebContents. It tracks which content was accessed
+// and which content was blocked. Based on this it provides information about
+// which types of content were accessed and blocked.
 class TabSpecificContentSettings
     : public content::WebContentsObserver,
       public content::NotificationObserver,
-      public WebContentsUserData<TabSpecificContentSettings> {
+      public content::WebContentsUserData<TabSpecificContentSettings> {
  public:
   // Classes that want to be notified about site data events must implement
   // this abstract class and add themselves as observer to the
@@ -135,7 +139,7 @@ class TabSpecificContentSettings
                                  const GURL& url,
                                  bool blocked_by_policy);
 
-  // Resets the |content_blocked_| and |content_accessed_| arrays, except for
+  // Resets the |content_blocked_| and |content_allowed_| arrays, except for
   // CONTENT_SETTINGS_TYPE_COOKIES related information.
   void ClearBlockedContentSettingsExceptForCookies();
 
@@ -161,9 +165,9 @@ class TabSpecificContentSettings
 
   void SetBlockageHasBeenIndicated(ContentSettingsType content_type);
 
-  // Returns whether a particular kind of content has been accessed. Currently
+  // Returns whether a particular kind of content has been allowed. Currently
   // only tracks cookies.
-  bool IsContentAccessed(ContentSettingsType content_type) const;
+  bool IsContentAllowed(ContentSettingsType content_type) const;
 
   const std::set<std::string>& BlockedResourcesForType(
       ContentSettingsType content_type) const;
@@ -186,7 +190,6 @@ class TabSpecificContentSettings
   void ClearPendingProtocolHandler() {
     pending_protocol_handler_ = ProtocolHandler::EmptyProtocolHandler();
   }
-
 
   // Sets the previous protocol handler which will be replaced by the
   // pending protocol handler.
@@ -226,6 +229,10 @@ class TabSpecificContentSettings
     load_plugins_link_enabled_ = enabled;
   }
 
+  // Called to indicate whether access to the Pepper broker was allowed or
+  // blocked.
+  void SetPepperBrokerAllowed(bool allowed);
+
   // content::WebContentsObserver overrides.
   virtual void RenderViewForInterstitialPageCreated(
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -235,9 +242,11 @@ class TabSpecificContentSettings
       const content::FrameNavigateParams& params) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void AppCacheAccessed(const GURL& manifest_url,
                                 bool blocked_by_policy) OVERRIDE;
@@ -245,6 +254,7 @@ class TabSpecificContentSettings
   // Message handlers. Public for testing.
   void OnContentBlocked(ContentSettingsType type,
                         const std::string& resource_identifier);
+  void OnContentAllowed(ContentSettingsType type);
 
   // These methods are invoked on the UI thread by the static functions above.
   // Public for testing.
@@ -272,6 +282,9 @@ class TabSpecificContentSettings
   void OnGeolocationPermissionSet(const GURL& requesting_frame,
                                   bool allowed);
 
+  // This method is called when a media stream is allowed.
+  void OnMediaStreamAllowed();
+
   // Adds the given |SiteDataObserver|. The |observer| is notified when a
   // locale shared object, like for example a cookie, is accessed.
   void AddSiteDataObserver(SiteDataObserver* observer);
@@ -281,12 +294,10 @@ class TabSpecificContentSettings
 
  private:
   explicit TabSpecificContentSettings(content::WebContents* tab);
-  friend class WebContentsUserData<TabSpecificContentSettings>;
+  friend class content::WebContentsUserData<TabSpecificContentSettings>;
 
   void AddBlockedResource(ContentSettingsType content_type,
                           const std::string& resource_identifier);
-
-  void OnContentAccessed(ContentSettingsType type);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -305,8 +316,8 @@ class TabSpecificContentSettings
   // Stores if the blocked content was messaged to the user.
   bool content_blockage_indicated_to_user_[CONTENT_SETTINGS_NUM_TYPES];
 
-  // Stores which content setting types actually were accessed.
-  bool content_accessed_[CONTENT_SETTINGS_NUM_TYPES];
+  // Stores which content setting types actually were allowed.
+  bool content_allowed_[CONTENT_SETTINGS_NUM_TYPES];
 
   // Stores the blocked resources for each content type.
   // Currently only used for plugins.

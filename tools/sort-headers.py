@@ -48,8 +48,10 @@ def IncludeCompareKey(line):
   # other headers.
   if line.startswith('<windows.h>'):  # Must be before e.g. shellapi.h
     return '0'
+  if line.startswith('<atlbase.h>'):  # Must be before atlapp.h.
+    return '1' + line
   if line.startswith('<unknwn.h>'):  # Must be before e.g. intshcut.h
-    return '1'
+    return '1' + line
 
   # C++ system headers should come after C system headers.
   if line.startswith('<'):
@@ -81,11 +83,13 @@ def SortHeader(infile, outfile):
     outfile.write(line)
 
 
-def DiffAndConfirm(filename, should_confirm):
-  """Shows a diff of what the tool would change the file named
-  filename to.  Shows a confirmation prompt if should_confirm is true.
-  Saves the resulting file if should_confirm is false or the user
-  answers Y to the confirmation prompt.
+def FixFileWithConfirmFunction(filename, confirm_function):
+  """Creates a fixed version of the file, invokes |confirm_function|
+  to decide whether to use the new file, and cleans up.
+
+  |confirm_function| takes two parameters, the original filename and
+  the fixed-up filename, and returns True to use the fixed-up file,
+  false to not use it.
   """
   fixfilename = filename + '.new'
   infile = open(filename, 'r')
@@ -95,12 +99,7 @@ def DiffAndConfirm(filename, should_confirm):
   outfile.close()  # Important so the below diff gets the updated contents.
 
   try:
-    diff = os.system('diff -u %s %s' % (filename, fixfilename))
-    if diff >> 8 == 0:  # Check exit code.
-      print '%s: no change' % filename
-      return
-
-    if not should_confirm or YesNo('Use new file (y/N)?'):
+    if confirm_function(filename, fixfilename):
       os.rename(fixfilename, filename)
   finally:
     try:
@@ -108,6 +107,23 @@ def DiffAndConfirm(filename, should_confirm):
     except OSError:
       # If the file isn't there, we don't care.
       pass
+
+
+def DiffAndConfirm(filename, should_confirm):
+  """Shows a diff of what the tool would change the file named
+  filename to.  Shows a confirmation prompt if should_confirm is true.
+  Saves the resulting file if should_confirm is false or the user
+  answers Y to the confirmation prompt.
+  """
+  def ConfirmFunction(filename, fixfilename):
+    diff = os.system('diff -u %s %s' % (filename, fixfilename))
+    if diff >> 8 == 0:  # Check exit code.
+      print '%s: no change' % filename
+      return False
+
+    return (not should_confirm or YesNo('Use new file (y/N)?'))
+
+  FixFileWithConfirmFunction(filename, ConfirmFunction)
 
 
 def main():

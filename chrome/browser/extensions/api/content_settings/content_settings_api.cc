@@ -9,6 +9,8 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -18,14 +20,14 @@
 #include "chrome/browser/extensions/api/preference/preference_api_constants.h"
 #include "chrome/browser/extensions/api/preference/preference_helpers.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_installer.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/content_settings.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "content/public/browser/plugin_service.h"
+#include "extensions/common/error_utils.h"
 
 using content::BrowserThread;
 using content::PluginService;
@@ -60,7 +62,7 @@ namespace extensions {
 namespace helpers = content_settings_helpers;
 namespace keys = content_settings_api_constants;
 
-bool ClearContentSettingsFunction::RunImpl() {
+bool ContentSettingsContentSettingClearFunction::RunImpl() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -87,14 +89,14 @@ bool ClearContentSettingsFunction::RunImpl() {
     }
   }
 
-  ContentSettingsStore* store =
-      profile_->GetExtensionService()->GetContentSettingsStore();
+  ContentSettingsStore* store = extensions::ExtensionSystem::Get(profile_)->
+      extension_service()->GetContentSettingsStore();
   store->ClearContentSettingsForExtension(extension_id(), scope);
 
   return true;
 }
 
-bool GetContentSettingFunction::RunImpl() {
+bool ContentSettingsContentSettingGetFunction::RunImpl() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -103,7 +105,7 @@ bool GetContentSettingFunction::RunImpl() {
 
   GURL primary_url(params->details.primary_url);
   if (!primary_url.is_valid()) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
+    error_ = ErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
         params->details.primary_url);
     return false;
   }
@@ -112,7 +114,7 @@ bool GetContentSettingFunction::RunImpl() {
   if (params->details.secondary_url.get()) {
     secondary_url = GURL(*params->details.secondary_url);
     if (!secondary_url.is_valid()) {
-      error_ = ExtensionErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
+      error_ = ErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
         *params->details.secondary_url);
       return false;
     }
@@ -167,7 +169,7 @@ bool GetContentSettingFunction::RunImpl() {
   return true;
 }
 
-bool SetContentSettingFunction::RunImpl() {
+bool ContentSettingsContentSettingSetFunction::RunImpl() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -202,7 +204,7 @@ bool SetContentSettingFunction::RunImpl() {
 
   std::string setting_str;
   EXTENSION_FUNCTION_VALIDATE(
-      params->details.setting.value().GetAsString(&setting_str));
+      params->details.setting->GetAsString(&setting_str));
   ContentSetting setting;
   EXTENSION_FUNCTION_VALIDATE(
       helpers::StringToContentSetting(setting_str, &setting));
@@ -240,15 +242,15 @@ bool SetContentSettingFunction::RunImpl() {
     return false;
   }
 
-  ContentSettingsStore* store =
-      profile_->GetExtensionService()->GetContentSettingsStore();
+  ContentSettingsStore* store = extensions::ExtensionSystem::Get(profile_)->
+      extension_service()->GetContentSettingsStore();
   store->SetExtensionContentSetting(extension_id(), primary_pattern,
                                     secondary_pattern, content_type,
                                     resource_identifier, setting, scope);
   return true;
 }
 
-bool GetResourceIdentifiersFunction::RunImpl() {
+bool ContentSettingsContentSettingGetResourceIdentifiersFunction::RunImpl() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -259,21 +261,23 @@ bool GetResourceIdentifiersFunction::RunImpl() {
 
   if (!g_testing_plugins_) {
     PluginService::GetInstance()->GetPlugins(
-        base::Bind(&GetResourceIdentifiersFunction::OnGotPlugins, this));
+        base::Bind(&ContentSettingsContentSettingGetResourceIdentifiersFunction::
+                   OnGotPlugins,
+                   this));
   } else {
     OnGotPlugins(*g_testing_plugins_);
   }
   return true;
 }
 
-void GetResourceIdentifiersFunction::OnGotPlugins(
+void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
     const std::vector<webkit::WebPluginInfo>& plugins) {
   PluginFinder* finder = PluginFinder::GetInstance();
   std::set<std::string> group_identifiers;
   ListValue* list = new ListValue();
   for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end(); ++it) {
-    PluginMetadata* plugin_metadata = finder->GetPluginMetadata(*it);
+    scoped_ptr<PluginMetadata> plugin_metadata(finder->GetPluginMetadata(*it));
     const std::string& group_identifier = plugin_metadata->identifier();
     if (group_identifiers.find(group_identifier) != group_identifiers.end())
       continue;
@@ -287,12 +291,15 @@ void GetResourceIdentifiersFunction::OnGotPlugins(
   SetResult(list);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE, base::Bind(
-          &GetResourceIdentifiersFunction::SendResponse, this, true));
+          &ContentSettingsContentSettingGetResourceIdentifiersFunction::
+          SendResponse,
+          this,
+          true));
 }
 
 // static
-void GetResourceIdentifiersFunction::SetPluginsForTesting(
-    const std::vector<webkit::WebPluginInfo>* plugins) {
+void ContentSettingsContentSettingGetResourceIdentifiersFunction::
+    SetPluginsForTesting(const std::vector<webkit::WebPluginInfo>* plugins) {
   g_testing_plugins_ = plugins;
 }
 

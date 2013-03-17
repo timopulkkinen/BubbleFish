@@ -8,24 +8,36 @@
 #include "base/memory/scoped_ptr.h"
 #include "ui/gfx/native_widget_types.h"
 
-class WebGraphicsContext3DCommandBufferImpl;
+namespace gfx {
+class GLShareGroup;
+}
+
+namespace WebKit {
+class WebGraphicsContext3D;
+}
 
 namespace content {
+class GLHelper;
 
 class ImageTransportFactoryAndroid {
  public:
-  ImageTransportFactoryAndroid();
-  ~ImageTransportFactoryAndroid();
+  virtual ~ImageTransportFactoryAndroid();
 
   static ImageTransportFactoryAndroid* GetInstance();
 
-  gfx::GLSurfaceHandle CreateSharedSurfaceHandle();
-  void DestroySharedSurfaceHandle(const gfx::GLSurfaceHandle& handle);
+  virtual uint32_t InsertSyncPoint() = 0;
+  virtual uint32_t CreateTexture() = 0;
+  virtual void DeleteTexture(uint32_t id) = 0;
+  virtual void AcquireTexture(
+      uint32 texture_id, const signed char* mailbox_name) = 0;
+  virtual void ReleaseTexture(
+      uint32 texture_id, const signed char* mailbox_name) = 0;
 
-  uint32_t InsertSyncPoint();
+  virtual WebKit::WebGraphicsContext3D* GetContext3D() = 0;
+  virtual GLHelper* GetGLHelper() = 0;
 
- private:
-  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context_;
+protected:
+  ImageTransportFactoryAndroid();
 };
 
 }  // namespace content

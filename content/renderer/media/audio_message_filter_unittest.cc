@@ -8,6 +8,7 @@
 #include "media/audio/audio_output_ipc.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace content {
 namespace {
 
 class MockAudioDelegate : public media::AudioOutputIPCDelegate {
@@ -70,7 +71,8 @@ class MockAudioDelegate : public media::AudioOutputIPCDelegate {
 TEST(AudioMessageFilterTest, Basic) {
   MessageLoop message_loop(MessageLoop::TYPE_IO);
 
-  scoped_refptr<AudioMessageFilter> filter(new AudioMessageFilter());
+  scoped_refptr<AudioMessageFilter> filter(new AudioMessageFilter(
+      message_loop.message_loop_proxy()));
 
   MockAudioDelegate delegate;
   int stream_id = filter->AddDelegate(&delegate);
@@ -101,14 +103,15 @@ TEST(AudioMessageFilterTest, Basic) {
   EXPECT_EQ(media::AudioOutputIPCDelegate::kPlaying, delegate.state());
   delegate.Reset();
 
-  message_loop.RunAllPending();
+  message_loop.RunUntilIdle();
   filter->RemoveDelegate(stream_id);
 }
 
 TEST(AudioMessageFilterTest, Delegates) {
   MessageLoop message_loop(MessageLoop::TYPE_IO);
 
-  scoped_refptr<AudioMessageFilter> filter(new AudioMessageFilter());
+  scoped_refptr<AudioMessageFilter> filter(new AudioMessageFilter(
+      message_loop.message_loop_proxy()));
 
   MockAudioDelegate delegate1;
   MockAudioDelegate delegate2;
@@ -135,8 +138,10 @@ TEST(AudioMessageFilterTest, Delegates) {
   EXPECT_TRUE(delegate2.state_changed_received());
   delegate2.Reset();
 
-  message_loop.RunAllPending();
+  message_loop.RunUntilIdle();
 
   filter->RemoveDelegate(stream_id1);
   filter->RemoveDelegate(stream_id2);
 }
+
+}  // namespace content

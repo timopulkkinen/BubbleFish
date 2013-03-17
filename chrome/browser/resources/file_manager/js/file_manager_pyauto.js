@@ -14,7 +14,7 @@
 var pyautoAPI = {
   /**
    * Add the item with given name to the current selection.
-   * @param {string} name Name of the item to add to selection
+   * @param {string} name Name of the item to add to selection.
    */
   addItemToSelection: function(name) {
     var entryExists = false;
@@ -28,7 +28,7 @@ var pyautoAPI = {
         break;
       }
     }
-    this.sendValue_(entryExists);
+    pyautoAPI.sendValue_(entryExists);
   },
 
   /**
@@ -41,7 +41,7 @@ var pyautoAPI = {
     for (var i = 0; i < dm.length; i++) {
       list.push(dm.item(i).name);
     }
-    this.sendJSONValue_(list);
+    pyautoAPI.sendJSONValue_(list);
   },
 
   /**
@@ -50,46 +50,46 @@ var pyautoAPI = {
    * @param {string} name Name given to item to be saved.
    */
   saveItemAs: function(name) {
-    if (fileManager.dialogType_ == FileManager.DialogType.SELECT_SAVEAS_FILE) {
+    if (fileManager.dialogType == DialogType.SELECT_SAVEAS_FILE) {
       fileManager.filenameInput_.value = name;
       fileManager.onOk_();
     } else {
       throw new Error('Cannot save an item in this dialog type.');
     }
-    this.sendDone_();
+    pyautoAPI.sendDone_();
   },
 
   /**
    * Open selected item.
    */
   openItem: function() {
-    switch (fileManager.dialogType_) {
-      case FileManager.DialogType.SELECT_FOLDER:
-      case FileManager.DialogType.SELECT_OPEN_FILE:
-      case FileManager.DialogType.SELECT_OPEN_MULTI_FILE:
+    switch (fileManager.dialogType) {
+      case DialogType.SELECT_FOLDER:
+      case DialogType.SELECT_OPEN_FILE:
+      case DialogType.SELECT_OPEN_MULTI_FILE:
         fileManager.onOk_();
         break;
       default:
         throw new Error('Cannot open an item in this dialog type.');
     }
-    this.sendDone_();
+    pyautoAPI.sendDone_();
   },
 
   /**
    * Execute the default task for the selected item.
    */
   executeDefaultTask: function() {
-    switch (fileManager.dialogType_) {
-      case FileManager.DialogType.FULL_PAGE:
-        if (fileManager.selection.tasks)
-          fileManager.selection.tasks.executeDefault();
+    switch (fileManager.dialogType) {
+      case DialogType.FULL_PAGE:
+        if (fileManager.getSelection().tasks)
+          fileManager.getSelection().tasks.executeDefault();
         else
           throw new Error('Cannot execute a task on an empty selection.');
         break;
       default:
         throw new Error('Cannot execute a task in this dialog type.');
     }
-    this.sendDone_();
+    pyautoAPI.sendDone_();
   },
 
   /**
@@ -107,16 +107,16 @@ var pyautoAPI = {
    * Copy selected items to clipboard.
    */
   copyItems: function() {
-    this.executeClipboardCommand_('copy');
-    this.sendDone_();
+    pyautoAPI.executeClipboardCommand_('copy');
+    pyautoAPI.sendDone_();
   },
 
   /**
    * Cut selected items to clipboard.
    */
   cutItems: function() {
-    this.executeClipboardCommand_('cut');
-    this.sendDone_();
+    pyautoAPI.executeClipboardCommand_('cut');
+    pyautoAPI.sendDone_();
   },
 
   /**
@@ -126,11 +126,11 @@ var pyautoAPI = {
     var dm = fileManager.directoryModel_;
     var onRescan = function() {
       dm.removeEventListener('rescan-completed', onRescan);
-      this.sendDone_();
-    }.bind(this);
+      pyautoAPI.sendDone_();
+    };
 
     dm.addEventListener('rescan-completed', onRescan);
-    this.executeClipboardCommand_('paste');
+    pyautoAPI.executeClipboardCommand_('paste');
   },
 
   /**
@@ -138,9 +138,9 @@ var pyautoAPI = {
    * @param {string} name New name of the item.
    */
   renameItem: function(name) {
-    var entry = fileManager.selection.entries[0];
-    fileManager.directoryModel_.renameEntry(entry, name, this.sendDone_,
-        this.sendDone_);
+    var entry = fileManager.getSelection().entries[0];
+    fileManager.directoryModel_.renameEntry(entry, name, pyautoAPI.sendDone_,
+        pyautoAPI.sendDone_);
   },
 
   /**
@@ -150,8 +150,8 @@ var pyautoAPI = {
     var dm = fileManager.directoryModel_;
     var onRescan = function() {
       dm.removeEventListener('rescan-completed', onRescan);
-      this.sendDone_();
-    }.bind(this);
+      pyautoAPI.sendDone_();
+    };
 
     dm.addEventListener('rescan-completed', onRescan);
     fileManager.deleteSelection();
@@ -165,8 +165,8 @@ var pyautoAPI = {
     var dm = fileManager.directoryModel_;
     var onRescan = function() {
       dm.removeEventListener('rescan-completed', onRescan);
-      this.sendDone_();
-    }.bind(this);
+      pyautoAPI.sendDone_();
+    };
 
     dm.addEventListener('rescan-completed', onRescan);
     fileManager.directoryModel_.createDirectory(name, function() {});
@@ -185,8 +185,8 @@ var pyautoAPI = {
 
     var onChanged = function() {
       dm.removeEventListener('directory-changed', onChanged);
-      this.sendDone_();
-    }.bind(this);
+      pyautoAPI.sendDone_();
+    };
 
     dm.addEventListener('directory-changed', onChanged);
     dm.changeDirectory(path);
@@ -196,17 +196,17 @@ var pyautoAPI = {
    * Get the absolute path of current directory.
    */
   currentDirectory: function() {
-    this.sendValue_(fileManager.getCurrentDirectory());
+    pyautoAPI.sendValue_(fileManager.getCurrentDirectory());
   },
 
   /**
    * Get remaining and total size of selected directory.
    */
   getSelectedDirectorySizeStats: function() {
-    var directoryURL = fileManager.selection.entries[0].toURL();
+    var directoryURL = fileManager.getSelection().entries[0].toURL();
     chrome.fileBrowserPrivate.getSizeStats(directoryURL, function(stats) {
-      this.sendJSONValue_(stats);
-    }.bind(this));
+      pyautoAPI.sendJSONValue_(stats);
+    });
   },
 
   /**
@@ -218,7 +218,7 @@ var pyautoAPI = {
     var initialized = fileManager &&
         fileManager.workerInitialized_ &&
         fileManager.getCurrentDirectory();
-    this.sendValue_(!!initialized);
+    pyautoAPI.sendValue_(!!initialized);
   },
 
   /**

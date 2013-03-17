@@ -12,18 +12,18 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/features/simple_feature_provider.h"
+#include "chrome/common/extensions/features/base_feature_provider.h"
+#include "chrome/common/extensions/features/simple_feature.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "googleurl/src/gurl.h"
 #include "grit/common_resources.h"
 #include "grit/extensions_api_resources.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using base::DictionaryValue;
@@ -76,7 +76,7 @@ bool HasUnprivilegedChild(const DictionaryValue* name_space_node,
 
 base::StringPiece ReadFromResource(int resource_id) {
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
-      resource_id, ui::SCALE_FACTOR_NONE);
+      resource_id);
 }
 
 scoped_ptr<ListValue> LoadSchemaList(const std::string& name,
@@ -287,7 +287,7 @@ void ExtensionAPI::LoadSchema(const std::string& name,
     if (!uses_feature_system)
       continue;
 
-    Feature* feature = new Feature();
+    SimpleFeature* feature = new SimpleFeature();
     feature->set_name(schema_namespace);
     feature->Parse(schema);
 
@@ -308,7 +308,7 @@ void ExtensionAPI::LoadSchema(const std::string& name,
         DictionaryValue* child = NULL;
         CHECK(child_list->GetDictionary(j, &child));
 
-        scoped_ptr<Feature> child_feature(new Feature(*feature));
+        scoped_ptr<SimpleFeature> child_feature(new SimpleFeature(*feature));
         child_feature->Parse(child);
         if (child_feature->Equals(*feature))
           continue;  // no need to store no-op features
@@ -336,146 +336,64 @@ ExtensionAPI::~ExtensionAPI() {
 
 void ExtensionAPI::InitDefaultConfiguration() {
   RegisterDependencyProvider(
-      "manifest", SimpleFeatureProvider::GetManifestFeatures());
+      "manifest", BaseFeatureProvider::GetManifestFeatures());
   RegisterDependencyProvider(
-      "permission", SimpleFeatureProvider::GetPermissionFeatures());
+      "permission", BaseFeatureProvider::GetPermissionFeatures());
 
   // Schemas to be loaded from resources.
   CHECK(unloaded_schemas_.empty());
   RegisterSchema("app", ReadFromResource(
       IDR_EXTENSION_API_JSON_APP));
-  RegisterSchema("bookmarks", ReadFromResource(
-      IDR_EXTENSION_API_JSON_BOOKMARKS));
-  RegisterSchema("bookmarkManagerPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_BOOKMARKMANAGERPRIVATE));
   RegisterSchema("browserAction", ReadFromResource(
       IDR_EXTENSION_API_JSON_BROWSERACTION));
   RegisterSchema("browsingData", ReadFromResource(
       IDR_EXTENSION_API_JSON_BROWSINGDATA));
-  RegisterSchema("chromeosInfoPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_CHROMEOSINFOPRIVATE));
-  RegisterSchema("cloudPrintPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_CLOUDPRINTPRIVATE));
   RegisterSchema("commands", ReadFromResource(
       IDR_EXTENSION_API_JSON_COMMANDS));
-  RegisterSchema("contentSettings", ReadFromResource(
-      IDR_EXTENSION_API_JSON_CONTENTSETTINGS));
-  RegisterSchema("contextMenus", ReadFromResource(
-      IDR_EXTENSION_API_JSON_CONTEXTMENUS));
-  RegisterSchema("cookies", ReadFromResource(
-      IDR_EXTENSION_API_JSON_COOKIES));
-  RegisterSchema("debugger", ReadFromResource(
-      IDR_EXTENSION_API_JSON_DEBUGGER));
+  RegisterSchema("declarativeContent", ReadFromResource(
+      IDR_EXTENSION_API_JSON_DECLARATIVE_CONTENT));
   RegisterSchema("declarativeWebRequest", ReadFromResource(
       IDR_EXTENSION_API_JSON_DECLARATIVE_WEBREQUEST));
-  RegisterSchema("devtools", ReadFromResource(
-      IDR_EXTENSION_API_JSON_DEVTOOLS));
-  RegisterSchema("events", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EVENTS));
-  RegisterSchema("experimental.accessibility", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_ACCESSIBILITY));
-  RegisterSchema("experimental.app", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_APP));
-  RegisterSchema("experimental.history", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_HISTORY));
-  RegisterSchema("experimental.infobars", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_INFOBARS));
   RegisterSchema("experimental.input.virtualKeyboard", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_INPUT_VIRTUALKEYBOARD));
-  RegisterSchema("experimental.offscreenTabs", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_OFFSCREENTABS));
-  RegisterSchema("experimental.power", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_POWER));
   RegisterSchema("experimental.processes", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_PROCESSES));
-  RegisterSchema("experimental.record", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_RECORD));
   RegisterSchema("experimental.rlz", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_RLZ));
   RegisterSchema("runtime", ReadFromResource(
       IDR_EXTENSION_API_JSON_RUNTIME));
   RegisterSchema("experimental.speechInput", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_SPEECHINPUT));
-  RegisterSchema("extension", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXTENSION));
   RegisterSchema("fileBrowserHandler", ReadFromResource(
       IDR_EXTENSION_API_JSON_FILEBROWSERHANDLER));
-  RegisterSchema("fileBrowserHandlerInternal", ReadFromResource(
-      IDR_EXTENSION_API_JSON_FILEBROWSERHANDLERINTERNAL));
   RegisterSchema("fileBrowserPrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_FILEBROWSERPRIVATE));
-  RegisterSchema("fontSettings", ReadFromResource(
-      IDR_EXTENSION_API_JSON_FONTSSETTINGS));
-  RegisterSchema("history", ReadFromResource(
-      IDR_EXTENSION_API_JSON_HISTORY));
-  RegisterSchema("i18n", ReadFromResource(
-      IDR_EXTENSION_API_JSON_I18N));
-  RegisterSchema("idle", ReadFromResource(
-      IDR_EXTENSION_API_JSON_IDLE));
   RegisterSchema("input.ime", ReadFromResource(
       IDR_EXTENSION_API_JSON_INPUT_IME));
   RegisterSchema("inputMethodPrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_INPUTMETHODPRIVATE));
-  RegisterSchema("managedModePrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_MANAGEDMODEPRIVATE));
-  RegisterSchema("management", ReadFromResource(
-      IDR_EXTENSION_API_JSON_MANAGEMENT));
-  RegisterSchema("mediaPlayerPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_MEDIAPLAYERPRIVATE));
-  RegisterSchema("metricsPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_METRICSPRIVATE));
-  RegisterSchema("echoPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_ECHOPRIVATE));
-  RegisterSchema("omnibox", ReadFromResource(
-      IDR_EXTENSION_API_JSON_OMNIBOX));
   RegisterSchema("pageAction", ReadFromResource(
       IDR_EXTENSION_API_JSON_PAGEACTION));
   RegisterSchema("pageActions", ReadFromResource(
       IDR_EXTENSION_API_JSON_PAGEACTIONS));
-  RegisterSchema("pageCapture", ReadFromResource(
-      IDR_EXTENSION_API_JSON_PAGECAPTURE));
-  RegisterSchema("permissions", ReadFromResource(
-      IDR_EXTENSION_API_JSON_PERMISSIONS));
   RegisterSchema("privacy", ReadFromResource(
       IDR_EXTENSION_API_JSON_PRIVACY));
   RegisterSchema("proxy", ReadFromResource(
       IDR_EXTENSION_API_JSON_PROXY));
   RegisterSchema("scriptBadge", ReadFromResource(
       IDR_EXTENSION_API_JSON_SCRIPTBADGE));
-  RegisterSchema("storage", ReadFromResource(
-      IDR_EXTENSION_API_JSON_STORAGE));
-  RegisterSchema("systemPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_SYSTEMPRIVATE));
-  RegisterSchema("tabs", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TABS));
-  RegisterSchema("terminalPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TERMINALPRIVATE));
-  RegisterSchema("test", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TEST));
-  RegisterSchema("topSites", ReadFromResource(
-      IDR_EXTENSION_API_JSON_TOPSITES));
   RegisterSchema("ttsEngine", ReadFromResource(
       IDR_EXTENSION_API_JSON_TTSENGINE));
   RegisterSchema("tts", ReadFromResource(
       IDR_EXTENSION_API_JSON_TTS));
   RegisterSchema("types", ReadFromResource(
       IDR_EXTENSION_API_JSON_TYPES));
-  RegisterSchema("wallpaperPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WALLPAPERPRIVATE));
-  RegisterSchema("webNavigation", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WEBNAVIGATION));
-  RegisterSchema("webRequest", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WEBREQUEST));
   RegisterSchema("webRequestInternal", ReadFromResource(
       IDR_EXTENSION_API_JSON_WEBREQUESTINTERNAL));
-  RegisterSchema("webSocketProxyPrivate", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WEBSOCKETPROXYPRIVATE));
   RegisterSchema("webstore", ReadFromResource(
       IDR_EXTENSION_API_JSON_WEBSTORE));
   RegisterSchema("webstorePrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_WEBSTOREPRIVATE));
-  RegisterSchema("windows", ReadFromResource(
-      IDR_EXTENSION_API_JSON_WINDOWS));
 
   // Schemas to be loaded via JSON generated from IDL files.
   GeneratedSchemas::Get(&unloaded_schemas_);
@@ -528,8 +446,8 @@ bool ExtensionAPI::IsPrivileged(const std::string& full_name) {
          iter != resolved_dependencies.end(); ++iter) {
       Feature* dependency = GetFeatureDependency(*iter);
       for (std::set<Feature::Context>::iterator context =
-               dependency->contexts()->begin();
-           context != dependency->contexts()->end(); ++context) {
+               dependency->GetContexts()->begin();
+           context != dependency->GetContexts()->end(); ++context) {
         if (*context != Feature::BLESSED_EXTENSION_CONTEXT)
           return false;
       }
@@ -587,11 +505,23 @@ const DictionaryValue* ExtensionAPI::GetSchema(const std::string& full_name) {
 
 namespace {
 
+const char* kDisallowedPlatformAppFeatures[] = {
+  // "app" refers to the the legacy app namespace for hosted apps.
+  "app",
+  "extension",
+  "tabs",
+  "windows"
+};
+
 bool IsFeatureAllowedForExtension(const std::string& feature,
                                   const extensions::Extension& extension) {
-  if (extension.is_platform_app() &&
-      (feature == "app" || feature == "extension"))
-    return false;
+  if (extension.is_platform_app()) {
+    for (size_t i = 0; i < arraysize(kDisallowedPlatformAppFeatures); ++i) {
+      if (feature == kDisallowedPlatformAppFeatures[i])
+        return false;
+    }
+  }
+
   return true;
 }
 
@@ -705,7 +635,7 @@ Feature* ExtensionAPI::GetFeature(const std::string& full_name) {
     result = parent_feature->second.get();
   }
 
-  if (result->contexts()->empty()) {
+  if (result->GetContexts()->empty()) {
     LOG(ERROR) << "API feature '" << full_name
                << "' must specify at least one context.";
     return NULL;

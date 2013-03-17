@@ -54,7 +54,7 @@ namespace ash {
 namespace internal {
 
 BezelGestureHandler::BezelGestureHandler()
-    : overlap_percent_(5),
+    : overlap_percent_(0),
       start_location_(BEZEL_START_UNSET),
       orientation_(SCROLL_ORIENTATION_UNSET),
       is_scrubbing_(false),
@@ -74,7 +74,9 @@ void BezelGestureHandler::ProcessGestureEvent(aura::Window* target,
       HandleBezelGestureStart(target, event);
 
       // TODO(sad|skuhne): Fix the bezel gestures for when the shelf is on the
-      //                   left/right of the screen.
+      //                   left/right of the screen. Also fix the
+      //                   overlay_percent_ at that time (currently just set to
+      //                   0 because left/right bezel gestures dont work).
       if (start_location_ == BEZEL_START_BOTTOM)
         shelf_handler_.ProcessGestureEvent(event);
       break;
@@ -117,7 +119,7 @@ bool BezelGestureHandler::HandleDeviceControl(
       delegate->SetBrightnessPercent(
           LimitBezelBrightnessFromSlider(percent), true);
   } else if (start_location_ == BEZEL_START_RIGHT) {
-    Shell::GetInstance()->tray_delegate()->GetVolumeControlDelegate()->
+    Shell::GetInstance()->system_tray_delegate()->GetVolumeControlDelegate()->
         SetVolumePercent(percent);
   } else {
     // No further events are necessary.
@@ -139,13 +141,14 @@ bool BezelGestureHandler::HandleApplicationControl(
     const ui::GestureEvent& event) {
   ash::AcceleratorController* accelerator =
       ash::Shell::GetInstance()->accelerator_controller();
-  if (start_location_ == BEZEL_START_LEFT && event.details().scroll_x() > 0)
+  if (start_location_ == BEZEL_START_LEFT && event.details().scroll_x() > 0) {
     accelerator->PerformAction(CYCLE_BACKWARD_LINEAR, ui::Accelerator());
-  else if (start_location_ == BEZEL_START_RIGHT &&
-             event.details().scroll_x() < 0)
+  } else if (start_location_ == BEZEL_START_RIGHT &&
+      event.details().scroll_x() < 0) {
     accelerator->PerformAction(CYCLE_FORWARD_LINEAR, ui::Accelerator());
-  else
+  } else {
     return false;
+  }
 
   // No further notifications for this gesture.
   return true;
@@ -154,7 +157,8 @@ bool BezelGestureHandler::HandleApplicationControl(
 void BezelGestureHandler::HandleBezelGestureStart(
     aura::Window* target,
     const ui::GestureEvent& event) {
-  gfx::Rect screen = gfx::Screen::GetDisplayNearestWindow(target).bounds();
+  gfx::Rect screen =
+      Shell::GetScreen()->GetDisplayNearestWindow(target).bounds();
   int overlap_area = screen.width() * overlap_percent_ / 100;
   orientation_ = SCROLL_ORIENTATION_UNSET;
 
@@ -208,7 +212,8 @@ void BezelGestureHandler::HandleBezelGestureUpdate(
         start_location_ = BEZEL_START_UNSET;
         return;
       }
-      gfx::Rect screen = gfx::Screen::GetDisplayNearestWindow(target).bounds();
+      gfx::Rect screen =
+          Shell::GetScreen()->GetDisplayNearestWindow(target).bounds();
       // Limit the user gesture "mostly" to the off screen area and check for
       // noise invocation.
       if (!GestureInBezelArea(screen, event) ||

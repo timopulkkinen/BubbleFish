@@ -450,8 +450,11 @@
             # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
             # file decide what to do on a per-OS basis; on Mac, internal plugins
             # go inside the framework, so this dependency is in chrome_dll.gypi.
-            '../third_party/adobe/flash/flash_player.gyp:flash_player',
             '../third_party/adobe/flash/flash_player.gyp:flapper_binaries',
+            # Copy CDM files to PRODUCT_DIR if applicable. Let the .gyp
+            # file decide what to do on a per-OS basis; on Mac, internal plugins
+            # go inside the framework, so this dependency is in chrome_dll.gypi.
+            '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',
           ],
         }],
         ['OS=="mac" and asan==1', {
@@ -486,6 +489,7 @@
         ['OS=="win"', {
           'dependencies': [
             'chrome_dll',
+            'chrome_nacl_win64',
             'chrome_version_resources',
             'installer_util',
             'image_pre_reader',
@@ -497,12 +501,13 @@
           ],
           'sources': [
             'app/chrome_exe.rc',
+            'common/crash_keys.cc',
+            'common/crash_keys.h',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
               'ImportLibrary': '$(OutDir)\\lib\\chrome_exe.lib',
-              'ProgramDatabaseFile': '$(OutDir)\\chrome_exe.pdb',
               'DelayLoadDLLs': [
                 'dbghelp.dll',
                 'dwmapi.dll',
@@ -528,6 +533,7 @@
               ],
               'action': ['cp', '-f', '<@(_inputs)', '<@(_outputs)'],
               'message': 'Copy first run complete sentinel file',
+              'msvs_cygwin_shell': 1,
             },
           ],
         }, {  # 'OS!="win"
@@ -538,7 +544,7 @@
         ['OS=="win" and component=="shared_library"', {
           'defines': ['COMPILE_CONTENT_STATICALLY'],
         }],
-        ['OS=="win" and (MSVS_VERSION=="2010" or MSVS_VERSION=="2010e")', {
+        ['OS=="win"', {
           'dependencies': [
             '../win8/metro_driver/metro_driver.gyp:*',
             '../win8/delegate_execute/delegate_execute.gyp:*',
@@ -563,7 +569,7 @@
         },
       ],
       'conditions': [
-        ['disable_nacl!=1', {
+        ['disable_nacl!=1 and target_arch=="ia32"', {
           'targets': [
             {
               'target_name': 'chrome_nacl_win64',
@@ -573,6 +579,7 @@
                 'app/breakpad_win.cc',
                 'app/crash_analysis_win.cc',
                 'app/hard_error_handler_win.cc',
+                'common/crash_keys.cc',
                 'nacl/nacl_exe_win_64.cc',
                 '../content/app/startup_helper_win.cc',
                 '../content/common/debug_flags.cc',  # Needed for sandbox_policy.cc
@@ -584,7 +591,6 @@
               'dependencies': [
                 'app/policy/cloud_policy_codegen.gyp:policy_win64',
                 'chrome_version_resources',
-                'common_constants_win64',
                 'installer_util_nacl_win64',
                 'nacl_win64',
                 '../breakpad/breakpad.gyp:breakpad_handler_win64',
@@ -593,6 +599,7 @@
                 '../base/base.gyp:base_nacl_win64',
                 '../base/base.gyp:base_static_win64',
                 '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+                '../chrome/common_constants.gyp:common_constants_win64',
                 '../crypto/crypto.gyp:crypto_nacl_win64',
                 '../ipc/ipc.gyp:ipc_win64',
                 '../sandbox/sandbox.gyp:sandbox_win64',
@@ -607,7 +614,6 @@
               'msvs_settings': {
                 'VCLinkerTool': {
                   'ImportLibrary': '$(OutDir)\\lib\\nacl64_exe.lib',
-                  'ProgramDatabaseFile': '$(OutDir)\\nacl64_exe.pdb',
                   'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
                 },
               },

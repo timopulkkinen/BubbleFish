@@ -150,8 +150,7 @@ cr.define('print_preview', function() {
     OPEN_SYSTEM_DIALOG_BUTTON: 'preview-area-open-system-dialog-button',
     OPEN_SYSTEM_DIALOG_BUTTON_THROBBER:
         'preview-area-open-system-dialog-button-throbber',
-    OVERLAY: 'preview-area-overlay-layer',
-    PDF_PLUGIN: 'preview-area-pdf-plugin'
+    OVERLAY: 'preview-area-overlay-layer'
   };
 
   /**
@@ -410,7 +409,8 @@ cr.define('print_preview', function() {
       }
       this.plugin_ = document.createElement('embed');
       // NOTE: The plugin's 'id' field must be set to 'pdf-viewer' since
-      // chrome/renderer/print_web_view_helper.cc actually references it.
+      // chrome/renderer/printing/print_web_view_helper.cc actually references
+      // it.
       this.plugin_.setAttribute('id', 'pdf-viewer');
       this.plugin_.setAttribute('class', 'preview-area-plugin');
       this.plugin_.setAttribute(
@@ -418,7 +418,8 @@ cr.define('print_preview', function() {
       this.plugin_.setAttribute('src', srcUrl);
       this.plugin_.setAttribute('aria-live', 'polite');
       this.plugin_.setAttribute('aria-atomic', 'true');
-      this.getElement().appendChild(this.plugin_);
+      this.getChildElement('.preview-area-plugin-wrapper').
+          appendChild(this.plugin_);
 
       global['onPreviewPluginLoad'] = this.onPluginLoad_.bind(this);
       this.plugin_.onload('onPreviewPluginLoad()');
@@ -519,6 +520,10 @@ cr.define('print_preview', function() {
      * @private
      */
     onPreviewGenerationFail_: function() {
+      if (this.loadingTimeout_) {
+        clearTimeout(this.loadingTimeout_);
+        this.loadingTimeout_ = null;
+      }
       this.showMessage_(PreviewArea.MessageId_.PREVIEW_FAILED);
       cr.dispatchSimpleEvent(
           this, PreviewArea.EventType.PREVIEW_GENERATION_FAIL);

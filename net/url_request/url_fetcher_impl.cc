@@ -29,6 +29,13 @@ void URLFetcherImpl::SetUploadData(const std::string& upload_content_type,
   core_->SetUploadData(upload_content_type, upload_content);
 }
 
+void URLFetcherImpl::SetUploadFilePath(
+    const std::string& upload_content_type,
+    const base::FilePath& file_path,
+    scoped_refptr<base::TaskRunner> file_task_runner) {
+  core_->SetUploadFilePath(upload_content_type, file_path, file_task_runner);
+}
+
 void URLFetcherImpl::SetChunkedUpload(const std::string& content_type) {
   core_->SetChunkedUpload(content_type);
 }
@@ -89,12 +96,12 @@ void URLFetcherImpl::SetAutomaticallyRetryOn5xx(bool retry) {
   core_->SetAutomaticallyRetryOn5xx(retry);
 }
 
-void URLFetcherImpl::SetMaxRetries(int max_retries) {
-  core_->SetMaxRetries(max_retries);
+void URLFetcherImpl::SetMaxRetriesOn5xx(int max_retries) {
+  core_->SetMaxRetriesOn5xx(max_retries);
 }
 
-int URLFetcherImpl::GetMaxRetries() const {
-  return core_->GetMaxRetries();
+int URLFetcherImpl::GetMaxRetriesOn5xx() const {
+  return core_->GetMaxRetriesOn5xx();
 }
 
 
@@ -102,8 +109,12 @@ base::TimeDelta URLFetcherImpl::GetBackoffDelay() const {
   return core_->GetBackoffDelay();
 }
 
+void URLFetcherImpl::SetAutomaticallyRetryOnNetworkChanges(int max_retries) {
+  core_->SetAutomaticallyRetryOnNetworkChanges(max_retries);
+}
+
 void URLFetcherImpl::SaveResponseToFileAtPath(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     scoped_refptr<base::TaskRunner> file_task_runner) {
   core_->SaveResponseToFileAtPath(file_path, file_task_runner);
 }
@@ -165,7 +176,7 @@ bool URLFetcherImpl::GetResponseAsString(
 
 bool URLFetcherImpl::GetResponseAsFilePath(
     bool take_ownership,
-    FilePath* out_response_path) const {
+    base::FilePath* out_response_path) const {
   return core_->GetResponseAsFilePath(take_ownership, out_response_path);
 }
 
@@ -177,6 +188,11 @@ void URLFetcherImpl::CancelAll() {
 // static
 void URLFetcherImpl::SetEnableInterceptionForTests(bool enabled) {
   URLFetcherCore::SetEnableInterceptionForTests(enabled);
+}
+
+// static
+void URLFetcherImpl::SetIgnoreCertificateRequests(bool ignored) {
+  URLFetcherCore::SetIgnoreCertificateRequests(ignored);
 }
 
 // static

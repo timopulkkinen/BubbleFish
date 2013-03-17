@@ -9,13 +9,17 @@
 #include "base/basictypes.h"
 #include "ui/base/models/simple_menu_model.h"
 
+namespace aura {
+class RootWindow;
+}
+
 namespace ash {
 
 // Submenu for choosing the alignment of the launcher.
 class ASH_EXPORT LauncherAlignmentMenu : public ui::SimpleMenuModel,
                                          public ui::SimpleMenuModel::Delegate {
  public:
-  LauncherAlignmentMenu();
+  explicit LauncherAlignmentMenu(aura::RootWindow* root);
   virtual ~LauncherAlignmentMenu();
 
   // ui::SimpleMenuModel::Delegate overrides:
@@ -32,7 +36,10 @@ class ASH_EXPORT LauncherAlignmentMenu : public ui::SimpleMenuModel,
     MENU_ALIGN_LEFT = 500,
     MENU_ALIGN_RIGHT,
     MENU_ALIGN_BOTTOM,
+    MENU_ALIGN_TOP,
   };
+
+  aura::RootWindow* root_window_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherAlignmentMenu);
 };

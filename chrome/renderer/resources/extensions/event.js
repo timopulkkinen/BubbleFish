@@ -41,44 +41,6 @@
         utils.lookup(eventType.functions, 'name', 'removeRules');
   }
 
-  // Local implementation of JSON.parse & JSON.stringify that protect us
-  // from being clobbered by an extension.
-  //
-  // TODO(aa): This makes me so sad. We shouldn't need it, as we can just pass
-  // Values directly over IPC without serializing to strings and use
-  // JSONValueConverter.
-  chromeHidden.JSON = new (function() {
-    var $Object = Object;
-    var $Array = Array;
-    var $jsonStringify = JSON.stringify;
-    var $jsonParse = JSON.parse;
-
-    this.stringify = function(thing) {
-      var customizedObjectToJSON = $Object.prototype.toJSON;
-      var customizedArrayToJSON = $Array.prototype.toJSON;
-      if (customizedObjectToJSON !== undefined) {
-        $Object.prototype.toJSON = null;
-      }
-      if (customizedArrayToJSON !== undefined) {
-        $Array.prototype.toJSON = null;
-      }
-      try {
-        return $jsonStringify(thing);
-      } finally {
-        if (customizedObjectToJSON !== undefined) {
-          $Object.prototype.toJSON = customizedObjectToJSON;
-        }
-        if (customizedArrayToJSON !== undefined) {
-          $Array.prototype.toJSON = customizedArrayToJSON;
-        }
-      }
-    };
-
-    this.parse = function(thing) {
-      return $jsonParse(thing);
-    };
-  })();
-
   // A map of event names to the event object that is registered to that name.
   var attachedNamedEvents = {};
 
@@ -246,9 +208,10 @@
       return;
 
     var dispatchArgs = function(args) {
-      result = event.dispatch_(args, listenerIDs);
+      var result = event.dispatch_(args, listenerIDs);
       if (result)
         DCHECK(!result.validationErrors, result.validationErrors);
+      return result;
     };
 
     if (eventArgumentMassagers[name])
@@ -365,7 +328,10 @@
       return {validationErrors: validationErrors};
     }
 
-    var listeners = this.attachmentStrategy_.getListenersByIDs(listenerIDs);
+    // Make a copy of the listeners in case the listener list is modified
+    // while dispatching the event.
+    var listeners =
+        this.attachmentStrategy_.getListenersByIDs(listenerIDs).slice();
 
     var results = [];
     for (var i = 0; i < listeners.length; i++) {
@@ -446,6 +412,10 @@
                   this.eventOptions_.actions);
 
     ensureRuleSchemasLoaded();
+    // We remove the first parameter from the validation to give the user more
+    // meaningful error messages.
+    validate([rules, opt_cb],
+             ruleFunctionSchemas.addRules.parameters.slice().splice(1));
     sendRequest("events.addRules", [this.eventName_, rules, opt_cb],
                 ruleFunctionSchemas.addRules.parameters);
   }
@@ -454,6 +424,10 @@
     if (!this.eventOptions_.supportsRules)
       throw new Error("This event does not support rules.");
     ensureRuleSchemasLoaded();
+    // We remove the first parameter from the validation to give the user more
+    // meaningful error messages.
+    validate([ruleIdentifiers, opt_cb],
+             ruleFunctionSchemas.removeRules.parameters.slice().splice(1));
     sendRequest("events.removeRules",
                 [this.eventName_, ruleIdentifiers, opt_cb],
                 ruleFunctionSchemas.removeRules.parameters);
@@ -463,6 +437,11 @@
     if (!this.eventOptions_.supportsRules)
       throw new Error("This event does not support rules.");
     ensureRuleSchemasLoaded();
+    // We remove the first parameter from the validation to give the user more
+    // meaningful error messages.
+    validate([ruleIdentifiers, cb],
+             ruleFunctionSchemas.getRules.parameters.slice().splice(1));
+
     sendRequest("events.getRules",
                 [this.eventName_, ruleIdentifiers, cb],
                 ruleFunctionSchemas.getRules.parameters);
@@ -479,6 +458,8 @@
 
   chromeHidden.dispatchOnUnload = function() {
     chromeHidden.onUnload.dispatch();
+    chromeHidden.wasUnloaded = true;
+
     for (var i = 0; i < allAttachedEvents.length; ++i) {
       var event = allAttachedEvents[i];
       if (event)

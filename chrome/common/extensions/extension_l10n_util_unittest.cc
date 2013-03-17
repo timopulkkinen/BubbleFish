@@ -2,23 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/message_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::Extension;
 using extensions::ExtensionInfo;
+using extensions::Manifest;
 using extensions::MessageBundle;
 
 namespace errors = extension_manifest_errors;
@@ -70,10 +71,10 @@ namespace {
 #endif
 
 TEST(ExtensionL10nUtil, GetValidLocalesEmptyLocaleFolder) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
 
   std::string error;
@@ -86,10 +87,10 @@ TEST(ExtensionL10nUtil, GetValidLocalesEmptyLocaleFolder) {
 }
 
 TEST(ExtensionL10nUtil, GetValidLocalesWithValidLocaleNoMessagesFile) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
   ASSERT_TRUE(file_util::CreateDirectory(src_path.AppendASCII("sr")));
 
@@ -103,13 +104,13 @@ TEST(ExtensionL10nUtil, GetValidLocalesWithValidLocaleNoMessagesFile) {
 }
 
 TEST(ExtensionL10nUtil, GetValidLocalesWithUnsupportedLocale) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
   // Supported locale.
-  FilePath locale_1 = src_path.AppendASCII("sr");
+  base::FilePath locale_1 = src_path.AppendASCII("sr");
   ASSERT_TRUE(file_util::CreateDirectory(locale_1));
   std::string data("whatever");
   ASSERT_TRUE(file_util::WriteFile(
@@ -130,7 +131,7 @@ TEST(ExtensionL10nUtil, GetValidLocalesWithUnsupportedLocale) {
 }
 
 TEST(ExtensionL10nUtil, GetValidLocalesWithValidLocalesAndMessagesFile) {
-  FilePath install_dir;
+  base::FilePath install_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extensions")
       .AppendASCII("good")
@@ -151,7 +152,7 @@ TEST(ExtensionL10nUtil, GetValidLocalesWithValidLocalesAndMessagesFile) {
 }
 
 TEST(ExtensionL10nUtil, LoadMessageCatalogsValidFallback) {
-  FilePath install_dir;
+  base::FilePath install_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extensions")
       .AppendASCII("good")
@@ -175,10 +176,10 @@ TEST(ExtensionL10nUtil, LoadMessageCatalogsValidFallback) {
 }
 
 TEST(ExtensionL10nUtil, LoadMessageCatalogsMissingFiles) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
 
   std::set<std::string> valid_locales;
@@ -194,13 +195,13 @@ TEST(ExtensionL10nUtil, LoadMessageCatalogsMissingFiles) {
 }
 
 TEST(ExtensionL10nUtil, LoadMessageCatalogsBadJSONFormat) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
 
-  FilePath locale = src_path.AppendASCII("sr");
+  base::FilePath locale = src_path.AppendASCII("sr");
   ASSERT_TRUE(file_util::CreateDirectory(locale));
 
   std::string data = "{ \"name\":";
@@ -221,13 +222,13 @@ TEST(ExtensionL10nUtil, LoadMessageCatalogsBadJSONFormat) {
 }
 
 TEST(ExtensionL10nUtil, LoadMessageCatalogsDuplicateKeys) {
-  ScopedTempDir temp;
+  base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
 
-  FilePath locale_1 = src_path.AppendASCII("en");
+  base::FilePath locale_1 = src_path.AppendASCII("en");
   ASSERT_TRUE(file_util::CreateDirectory(locale_1));
 
   std::string data =
@@ -237,7 +238,7 @@ TEST(ExtensionL10nUtil, LoadMessageCatalogsDuplicateKeys) {
       file_util::WriteFile(locale_1.Append(Extension::kMessagesFilename),
                            data.c_str(), data.length()));
 
-  FilePath locale_2 = src_path.AppendASCII("sr");
+  base::FilePath locale_2 = src_path.AppendASCII("sr");
   ASSERT_TRUE(file_util::CreateDirectory(locale_2));
 
   ASSERT_TRUE(
@@ -560,7 +561,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionFileHandlerTitle) {
 
 // Try with NULL manifest.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithNullManifest) {
-  ExtensionInfo info(NULL, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(NULL, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }
@@ -568,7 +569,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithNullManifest) {
 // Try with default and current locales missing.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestEmptyManifest) {
   DictionaryValue manifest;
-  ExtensionInfo info(&manifest, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(&manifest, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }
@@ -578,7 +579,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithDefaultLocale) {
   DictionaryValue manifest;
   manifest.SetString(keys::kDefaultLocale, "en_US");
 
-  ExtensionInfo info(&manifest, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(&manifest, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_TRUE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }
@@ -589,7 +590,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithCurrentLocale) {
   manifest.SetString(keys::kCurrentLocale,
                      extension_l10n_util::CurrentLocaleOrDefault());
 
-  ExtensionInfo info(&manifest, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(&manifest, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }
@@ -601,7 +602,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestSameCurrentLocale) {
   manifest.SetString(keys::kCurrentLocale,
                      extension_l10n_util::CurrentLocaleOrDefault());
 
-  ExtensionInfo info(&manifest, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(&manifest, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }
@@ -612,7 +613,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestDifferentCurrentLocale) {
   manifest.SetString(keys::kDefaultLocale, "en_US");
   manifest.SetString(keys::kCurrentLocale, "sr");
 
-  ExtensionInfo info(&manifest, "", FilePath(), Extension::LOAD);
+  ExtensionInfo info(&manifest, "", base::FilePath(), Manifest::UNPACKED);
 
   EXPECT_TRUE(extension_l10n_util::ShouldRelocalizeManifest(info));
 }

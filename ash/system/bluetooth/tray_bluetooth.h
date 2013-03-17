@@ -19,7 +19,7 @@ class BluetoothDetailedView;
 class TrayBluetooth : public SystemTrayItem,
                       public BluetoothObserver {
  public:
-  TrayBluetooth();
+  explicit TrayBluetooth(SystemTray* system_tray);
   virtual ~TrayBluetooth();
 
  private:
@@ -34,6 +34,7 @@ class TrayBluetooth : public SystemTrayItem,
 
   // Overridden from BluetoothObserver.
   virtual void OnBluetoothRefresh() OVERRIDE;
+  virtual void OnBluetoothDiscoveringChanged() OVERRIDE;
 
   tray::BluetoothDefaultView* default_;
   tray::BluetoothDetailedView* detailed_;

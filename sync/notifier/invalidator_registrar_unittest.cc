@@ -9,7 +9,7 @@
 #include "sync/notifier/fake_invalidation_handler.h"
 #include "sync/notifier/invalidator_registrar.h"
 #include "sync/notifier/invalidator_test_template.h"
-#include "sync/notifier/object_id_state_map_test_util.h"
+#include "sync/notifier/object_id_invalidation_map_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -43,6 +43,11 @@ class RegistrarInvalidator : public Invalidator {
     registrar_.UnregisterHandler(handler);
   }
 
+  virtual void Acknowledge(const invalidation::ObjectId& id,
+                           const AckHandle& ack_handle) OVERRIDE {
+    // Do nothing.
+  }
+
   virtual InvalidatorState GetInvalidatorState() const OVERRIDE {
     return registrar_.GetInvalidatorState();
   }
@@ -51,16 +56,13 @@ class RegistrarInvalidator : public Invalidator {
     // Do nothing.
   }
 
-  virtual void SetStateDeprecated(const std::string& state) OVERRIDE {
-    // Do nothing.
-  }
-
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE {
     // Do nothing.
   }
 
-  virtual void SendInvalidation(const ObjectIdStateMap& id_state_map) OVERRIDE {
+  virtual void SendInvalidation(
+      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE {
     // Do nothing.
   }
 
@@ -102,14 +104,10 @@ class RegistrarInvalidatorTestDelegate {
     invalidator_->GetRegistrar()->UpdateInvalidatorState(state);
   }
 
-  void TriggerOnIncomingInvalidation(const ObjectIdStateMap& id_state_map,
-                                     IncomingInvalidationSource source) {
+  void TriggerOnIncomingInvalidation(
+      const ObjectIdInvalidationMap& invalidation_map) {
     invalidator_->GetRegistrar()->DispatchInvalidationsToHandlers(
-        id_state_map, source);
-  }
-
-  static bool InvalidatorHandlesDeprecatedState() {
-    return false;
+        invalidation_map);
   }
 
  private:
@@ -122,11 +120,28 @@ INSTANTIATE_TYPED_TEST_CASE_P(
 
 class InvalidatorRegistrarTest : public testing::Test {};
 
+// Technically the tests below can be part of InvalidatorTest, but we
+// want to keep the number of death tests down.
+
+// When we expect a death via CHECK(), we can't match against the
+// CHECK() message since they are removed in official builds.
+
+#if GTEST_HAS_DEATH_TEST
+// Having registered handlers on destruction should cause a CHECK.
+TEST_F(InvalidatorRegistrarTest, RegisteredHandlerOnDestruction) {
+  scoped_ptr<InvalidatorRegistrar> registrar(new InvalidatorRegistrar());
+  FakeInvalidationHandler handler;
+
+  registrar->RegisterHandler(&handler);
+
+  EXPECT_DEATH({ registrar.reset(); }, "");
+
+  ASSERT_TRUE(registrar.get());
+  registrar->UnregisterHandler(&handler);
+}
+
 // Multiple registrations by different handlers on the same object ID should
 // cause a CHECK.
-//
-// Technically this can be part of InvalidatorTest, but we want to keep the
-// number of death tests down.
 TEST_F(InvalidatorRegistrarTest, MultipleRegistration) {
   const invalidation::ObjectId id1(ipc::invalidation::ObjectSource::TEST, "a");
   const invalidation::ObjectId id2(ipc::invalidation::ObjectSource::TEST, "a");
@@ -145,10 +160,12 @@ TEST_F(InvalidatorRegistrarTest, MultipleRegistration) {
   registrar.UpdateRegisteredIds(&handler1, ids);
 
   registrar.DetachFromThreadForTest();
-  // We expect a death via CHECK(). We can't match against the CHECK() message
-  // though since they are removed in official builds.
   EXPECT_DEATH({ registrar.UpdateRegisteredIds(&handler2, ids); }, "");
+
+  registrar.UnregisterHandler(&handler2);
+  registrar.UnregisterHandler(&handler1);
 }
+#endif  // GTEST_HAS_DEATH_TEST
 
 }  // namespace
 

@@ -17,12 +17,13 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+namespace content {
+
 // HostZoomMap needs to be deleted on the UI thread because it listens
 // to notifications on there (and holds a NotificationRegistrar).
-class CONTENT_EXPORT HostZoomMapImpl
-    : public NON_EXPORTED_BASE(content::HostZoomMap),
-      public content::NotificationObserver,
-      public base::SupportsUserData::Data {
+class CONTENT_EXPORT HostZoomMapImpl : public NON_EXPORTED_BASE(HostZoomMap),
+                                       public NotificationObserver,
+                                       public base::SupportsUserData::Data {
  public:
   HostZoomMapImpl();
   virtual ~HostZoomMapImpl();
@@ -33,6 +34,10 @@ class CONTENT_EXPORT HostZoomMapImpl
   virtual void SetZoomLevel(const std::string& host, double level) OVERRIDE;
   virtual double GetDefaultZoomLevel() const OVERRIDE;
   virtual void SetDefaultZoomLevel(double level) OVERRIDE;
+  virtual void AddZoomLevelChangedCallback(
+      const ZoomLevelChangedCallback& callback) OVERRIDE;
+  virtual void RemoveZoomLevelChangedCallback(
+      const ZoomLevelChangedCallback& callback) OVERRIDE;
 
   // Returns the temporary zoom level that's only valid for the lifetime of
   // the given WebContents (i.e. isn't saved and doesn't affect other
@@ -50,13 +55,16 @@ class CONTENT_EXPORT HostZoomMapImpl
                              int render_view_id,
                              double level);
 
-  // content::NotificationObserver implementation.
+  // NotificationObserver implementation.
   virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
   typedef std::map<std::string, double> HostZoomLevels;
+
+  // Callbacks called when zoom level changes.
+  std::vector<ZoomLevelChangedCallback> zoom_level_changed_callbacks_;
 
   // Copy of the pref data, so that we can read it on the IO thread.
   HostZoomLevels host_zoom_levels_;
@@ -76,9 +84,11 @@ class CONTENT_EXPORT HostZoomMapImpl
   // |temporary_zoom_levels_| to guarantee thread safety.
   mutable base::Lock lock_;
 
-  content::NotificationRegistrar registrar_;
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(HostZoomMapImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_HOST_ZOOM_MAP_IMPL_H_

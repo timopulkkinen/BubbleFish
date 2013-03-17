@@ -31,7 +31,6 @@ const bool kShowImportOnBookmarkBar = false;
 const bool kShowExitMenuItem = false;
 const bool kShowFeedbackMenuItem = true;
 const bool kShowHelpMenuItemIcon = true;
-const bool kShowSyncSetupMenuItem = false;
 const bool kShowUpgradeMenuItem = false;
 const bool kDownloadPageHasShowInFolder = true;
 const bool kSizeTabButtonToTopOfTabStrip = false;
@@ -76,7 +75,6 @@ const bool kShowExitMenuItem = true;
 #endif
 const bool kShowFeedbackMenuItem = false;
 const bool kShowHelpMenuItemIcon = false;
-const bool kShowSyncSetupMenuItem = true;
 const bool kShowUpgradeMenuItem = true;
 const bool kSizeTabButtonToTopOfTabStrip = false;
 #if defined(OS_ANDROID)
@@ -96,7 +94,6 @@ const bool kBrowserAliveWithNoWindows = false;
 #endif
 
 const int kBookmarkBarHeight = 28;
-const int kNewtabBookmarkBarHeight = 57;
 
 const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
     ui::ResourceBundle::BoldFont;

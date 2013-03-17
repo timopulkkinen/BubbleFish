@@ -6,23 +6,26 @@
 
 #include <string>
 
+#include "base/prefs/overlay_user_pref_store.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/overlay_user_pref_store.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/pref_names_util.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
-#include "unicode/uchar.h"
-#include "unicode/uscript.h"
+#include "third_party/icu/public/common/unicode/uchar.h"
+#include "third_party/icu/public/common/unicode/uscript.h"
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
@@ -33,70 +36,69 @@
 using content::WebContents;
 using webkit_glue::WebPreferences;
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(PrefsTabHelper);
+
 namespace {
 
 // Registers prefs only used for migration.
-static void RegisterPrefsToMigrate(PrefService* prefs) {
+void RegisterPrefsToMigrate(PrefRegistrySyncable* prefs) {
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldStandardFontFamily,
                                      IDS_STANDARD_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldFixedFontFamily,
                                      IDS_FIXED_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldSerifFontFamily,
                                      IDS_SERIF_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldSansSerifFontFamily,
                                      IDS_SANS_SERIF_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldCursiveFontFamily,
                                      IDS_CURSIVE_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldFantasyFontFamily,
                                      IDS_FANTASY_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kGlobalDefaultCharset,
                                      IDS_DEFAULT_ENCODING,
-                                     PrefService::SYNCABLE_PREF);
+                                     PrefRegistrySyncable::SYNCABLE_PREF);
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitGlobalDefaultFontSize,
                                       IDS_DEFAULT_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
+                                      PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitGlobalDefaultFixedFontSize,
                                       IDS_DEFAULT_FIXED_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
+                                      PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitGlobalMinimumFontSize,
                                       IDS_MINIMUM_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
+                                      PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedIntegerPref(
       prefs::kWebKitGlobalMinimumLogicalFontSize,
       IDS_MINIMUM_LOGICAL_FONT_SIZE,
-      PrefService::UNSYNCABLE_PREF);
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalStandardFontFamily,
                                      IDS_STANDARD_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalFixedFontFamily,
                                      IDS_FIXED_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalSerifFontFamily,
                                      IDS_SERIF_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalSansSerifFontFamily,
                                      IDS_SANS_SERIF_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalCursiveFontFamily,
                                      IDS_CURSIVE_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->RegisterLocalizedStringPref(prefs::kWebKitGlobalFantasyFontFamily,
                                      IDS_FANTASY_FONT_FAMILY,
-                                     PrefService::UNSYNCABLE_PREF);
+                                     PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // The list of prefs we want to observe.
 const char* kPrefsToObserve[] = {
-  prefs::kDefaultZoomLevel,
   prefs::kDefaultCharset,
-  prefs::kEnableReferrers,
-  prefs::kEnableDoNotTrack,
   prefs::kWebKitAllowDisplayingInsecureContent,
   prefs::kWebKitAllowRunningInsecureContent,
   prefs::kWebKitDefaultFixedFontSize,
@@ -120,20 +122,28 @@ const int kPrefsToObserveLength = arraysize(kPrefsToObserve);
 // Registers a preference under the path |map_name| for each script used for
 // per-script font prefs.  For example, if |map_name| is "fonts.serif", then
 // "fonts.serif.Arab", "fonts.serif.Hang", etc. are registered.
-void RegisterFontFamilyMap(PrefService* prefs, const char* map_name) {
+void RegisterFontFamilyMap(PrefRegistrySyncable* registry,
+                           const char* map_name,
+                           const std::set<std::string>& fonts_with_defaults) {
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
     std::string pref_name_str = base::StringPrintf("%s.%s", map_name, script);
     const char* pref_name = pref_name_str.c_str();
-    if (!prefs->FindPreference(pref_name))
-      prefs->RegisterStringPref(pref_name, "", PrefService::UNSYNCABLE_PREF);
+    if (fonts_with_defaults.find(pref_name) == fonts_with_defaults.end()) {
+      // We haven't already set a default value for this font preference, so set
+      // an empty string as the default.
+      registry->RegisterStringPref(
+          pref_name, "", PrefRegistrySyncable::UNSYNCABLE_PREF);
+    }
   }
 }
 
 // Registers |obs| to observe per-script font prefs under the path |map_name|.
-void RegisterFontFamilyMapObserver(PrefChangeRegistrar* registrar,
-                                   const char* map_name,
-                                   content::NotificationObserver* obs) {
+void RegisterFontFamilyMapObserver(
+    PrefChangeRegistrar* registrar,
+    const char* map_name,
+    const PrefChangeRegistrar::NamedChangeCallback& obs) {
+  DCHECK(StartsWithASCII(map_name, "webkit.webprefs.", true));
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
     std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
@@ -157,6 +167,7 @@ const FontDefault kFontDefaults[] = {
   { prefs::kWebKitSansSerifFontFamily, IDS_SANS_SERIF_FONT_FAMILY },
   { prefs::kWebKitCursiveFontFamily, IDS_CURSIVE_FONT_FAMILY },
   { prefs::kWebKitFantasyFontFamily, IDS_FANTASY_FONT_FAMILY },
+  { prefs::kWebKitPictographFontFamily, IDS_PICTOGRAPH_FONT_FAMILY },
 #if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN)
   { prefs::kWebKitStandardFontFamilyJapanese,
     IDS_STANDARD_FONT_FAMILY_JAPANESE },
@@ -329,18 +340,29 @@ const struct {
 
 const int kPrefsToMigrateLength = ARRAYSIZE_UNSAFE(kPrefNamesToMigrate);
 
-static void MigratePreferences(PrefService* prefs) {
-  RegisterPrefsToMigrate(prefs);
-  for (int i = 0; i < kPrefsToMigrateLength; ++i) {
-    const PrefService::Preference* pref =
-        prefs->FindPreference(kPrefNamesToMigrate[i].from);
-    if (!pref) continue;
-    if (!pref->IsDefaultValue()) {
-      prefs->Set(kPrefNamesToMigrate[i].to, *pref->GetValue());
-    }
-    prefs->ClearPref(kPrefNamesToMigrate[i].from);
-    prefs->UnregisterPreference(kPrefNamesToMigrate[i].from);
-  }
+// Sets a font family pref in |prefs| to |pref_value|.
+void OverrideFontFamily(WebPreferences* prefs,
+                        const std::string& generic_family,
+                        const std::string& script,
+                        const std::string& pref_value) {
+  WebPreferences::ScriptFontFamilyMap* map = NULL;
+  if (generic_family == "standard")
+    map = &prefs->standard_font_family_map;
+  else if (generic_family == "fixed")
+    map = &prefs->fixed_font_family_map;
+  else if (generic_family == "serif")
+    map = &prefs->serif_font_family_map;
+  else if (generic_family == "sansserif")
+    map = &prefs->sans_serif_font_family_map;
+  else if (generic_family == "cursive")
+    map = &prefs->cursive_font_family_map;
+  else if (generic_family == "fantasy")
+    map = &prefs->fantasy_font_family_map;
+  else if (generic_family == "pictograph")
+    map = &prefs->pictograph_font_family_map;
+  else
+    NOTREACHED() << "Unknown generic font family: " << generic_family;
+  (*map)[script] = UTF8ToUTF16(pref_value);
 }
 
 }  // namespace
@@ -350,21 +372,42 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
   PrefService* prefs = GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
   if (prefs) {
-    for (int i = 0; i < kPrefsToObserveLength; ++i)
-      pref_change_registrar_.Add(kPrefsToObserve[i], this);
+    base::Closure renderer_callback = base::Bind(
+        &PrefsTabHelper::UpdateRendererPreferences, base::Unretained(this));
+    pref_change_registrar_.Add(prefs::kDefaultZoomLevel, renderer_callback);
+    pref_change_registrar_.Add(prefs::kEnableDoNotTrack, renderer_callback);
+    pref_change_registrar_.Add(prefs::kEnableReferrers, renderer_callback);
+
+    PrefChangeRegistrar::NamedChangeCallback webkit_callback = base::Bind(
+        &PrefsTabHelper::OnWebPrefChanged, base::Unretained(this));
+    for (int i = 0; i < kPrefsToObserveLength; ++i) {
+      const char* pref_name = kPrefsToObserve[i];
+      DCHECK(std::string(pref_name) == prefs::kDefaultCharset ||
+             StartsWithASCII(pref_name, "webkit.webprefs.", true));
+      pref_change_registrar_.Add(pref_name, webkit_callback);
+    }
 
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitStandardFontFamilyMap, this);
+                                  prefs::kWebKitStandardFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitFixedFontFamilyMap, this);
+                                  prefs::kWebKitFixedFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitSerifFontFamilyMap, this);
+                                  prefs::kWebKitSerifFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitSansSerifFontFamilyMap, this);
+                                  prefs::kWebKitSansSerifFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitCursiveFontFamilyMap, this);
+                                  prefs::kWebKitCursiveFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitFantasyFontFamilyMap, this);
+                                  prefs::kWebKitFantasyFontFamilyMap,
+                                  webkit_callback);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitPictographFontFamilyMap,
+                                  webkit_callback);
   }
 
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -376,6 +419,11 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(GetProfile())));
+#endif
+#if defined(USE_AURA)
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED,
+                 content::NotificationService::AllSources());
 #endif
 }
 
@@ -389,77 +437,81 @@ void PrefsTabHelper::InitIncognitoUserPrefStore(
   // profile.  All preferences that store information about the browsing history
   // or behavior of the user should have this property.
   pref_store->RegisterOverlayPref(prefs::kBrowserWindowPlacement);
+#if defined(OS_ANDROID)
+  pref_store->RegisterOverlayPref(prefs::kProxy);
+#endif
 }
 
 // static
-void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
+void PrefsTabHelper::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   WebPreferences pref_defaults;
-  prefs->RegisterBooleanPref(prefs::kWebKitJavascriptEnabled,
-                             pref_defaults.javascript_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitWebSecurityEnabled,
-                             pref_defaults.web_security_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(
+  registry->RegisterBooleanPref(prefs::kWebKitJavascriptEnabled,
+                                pref_defaults.javascript_enabled,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitWebSecurityEnabled,
+                                pref_defaults.web_security_enabled,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
       prefs::kWebKitJavascriptCanOpenWindowsAutomatically,
       true,
-      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitLoadsImagesAutomatically,
-                             pref_defaults.loads_images_automatically,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitPluginsEnabled,
-                             pref_defaults.plugins_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitDomPasteEnabled,
-                             pref_defaults.dom_paste_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitShrinksStandaloneImagesToFit,
-                             pref_defaults.shrinks_standalone_images_to_fit,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref(prefs::kWebKitInspectorSettings,
-                                PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitTextAreasAreResizable,
-                             pref_defaults.text_areas_are_resizable,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitJavaEnabled,
-                             pref_defaults.java_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebkitTabsToLinks,
-                             pref_defaults.tabs_to_links,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitAllowRunningInsecureContent,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitAllowDisplayingInsecureContent,
-                             true,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEnableReferrers,
-                             true,
-                             PrefService::UNSYNCABLE_PREF);
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitLoadsImagesAutomatically,
+                                pref_defaults.loads_images_automatically,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitPluginsEnabled,
+                                pref_defaults.plugins_enabled,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitDomPasteEnabled,
+                                pref_defaults.dom_paste_enabled,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitShrinksStandaloneImagesToFit,
+                                pref_defaults.shrinks_standalone_images_to_fit,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kWebKitInspectorSettings,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitTextAreasAreResizable,
+                                pref_defaults.text_areas_are_resizable,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitJavaEnabled,
+                                pref_defaults.java_enabled,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebkitTabsToLinks,
+                                pref_defaults.tabs_to_links,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitAllowRunningInsecureContent,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitAllowDisplayingInsecureContent,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kEnableReferrers,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 #if defined(OS_ANDROID)
-  prefs->RegisterDoublePref(prefs::kWebKitFontScaleFactor,
-                            pref_defaults.font_scale_factor,
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitForceEnableZoom,
-                             pref_defaults.force_enable_zoom,
-                             PrefService::UNSYNCABLE_PREF);
+  registry->RegisterDoublePref(prefs::kWebKitFontScaleFactor,
+                               pref_defaults.font_scale_factor,
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebKitForceEnableZoom,
+                                pref_defaults.force_enable_zoom,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
 
 #if !defined(OS_MACOSX)
-  prefs->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
-                                     IDS_ACCEPT_LANGUAGES,
-                                     PrefService::SYNCABLE_PREF);
+  registry->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
+                                        IDS_ACCEPT_LANGUAGES,
+                                        PrefRegistrySyncable::SYNCABLE_PREF);
 #else
   // Not used in OSX.
-  prefs->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
-                                     IDS_ACCEPT_LANGUAGES,
-                                     PrefService::UNSYNCABLE_PREF);
+  registry->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
+                                        IDS_ACCEPT_LANGUAGES,
+                                        PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
-  prefs->RegisterLocalizedStringPref(prefs::kDefaultCharset,
-                                     IDS_DEFAULT_ENCODING,
-                                     PrefService::SYNCABLE_PREF);
+  registry->RegisterLocalizedStringPref(prefs::kDefaultCharset,
+                                        IDS_DEFAULT_ENCODING,
+                                        PrefRegistrySyncable::SYNCABLE_PREF);
 
   // Register font prefs that have defaults.
+  std::set<std::string> fonts_with_defaults;
   UScriptCode browser_script = GetScriptOfBrowserLocale();
   for (size_t i = 0; i < kFontDefaultsLength; ++i) {
     const FontDefault& pref = kFontDefaults[i];
@@ -478,43 +530,65 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
     // prefs (e.g., via the extensions workflow), or the problem turns out to
     // not be really critical after all.
     if (browser_script != pref_script) {
-      prefs->RegisterLocalizedStringPref(pref.pref_name,
-                                         pref.resource_id,
-                                         PrefService::UNSYNCABLE_PREF);
+      registry->RegisterLocalizedStringPref(
+          pref.pref_name,
+          pref.resource_id,
+          PrefRegistrySyncable::UNSYNCABLE_PREF);
+      fonts_with_defaults.insert(pref.pref_name);
     }
   }
 
   // Register font prefs that don't have defaults.
-  RegisterFontFamilyMap(prefs, prefs::kWebKitStandardFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitFixedFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitSerifFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitSansSerifFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitCursiveFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitFantasyFontFamilyMap);
+  RegisterFontFamilyMap(registry, prefs::kWebKitStandardFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitFixedFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitSerifFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitSansSerifFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitCursiveFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitFantasyFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(registry, prefs::kWebKitPictographFontFamilyMap,
+                        fonts_with_defaults);
 
-  prefs->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFontSize,
-                                      IDS_DEFAULT_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFixedFontSize,
-                                      IDS_DEFAULT_FIXED_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterLocalizedIntegerPref(prefs::kWebKitMinimumFontSize,
-                                      IDS_MINIMUM_FONT_SIZE,
-                                      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterLocalizedIntegerPref(
+  registry->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFontSize,
+                                         IDS_DEFAULT_FONT_SIZE,
+                                         PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFixedFontSize,
+                                         IDS_DEFAULT_FIXED_FONT_SIZE,
+                                         PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterLocalizedIntegerPref(prefs::kWebKitMinimumFontSize,
+                                         IDS_MINIMUM_FONT_SIZE,
+                                         PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterLocalizedIntegerPref(
       prefs::kWebKitMinimumLogicalFontSize,
       IDS_MINIMUM_LOGICAL_FONT_SIZE,
-      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterLocalizedBooleanPref(prefs::kWebKitUsesUniversalDetector,
-                                      IDS_USES_UNIVERSAL_DETECTOR,
-                                      PrefService::SYNCABLE_PREF);
-  prefs->RegisterLocalizedStringPref(prefs::kStaticEncodings,
-                                     IDS_STATIC_ENCODING_LIST,
-                                     PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kRecentlySelectedEncoding,
-                            "",
-                            PrefService::UNSYNCABLE_PREF);
-  MigratePreferences(prefs);
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterLocalizedBooleanPref(prefs::kWebKitUsesUniversalDetector,
+                                         IDS_USES_UNIVERSAL_DETECTOR,
+                                         PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterLocalizedStringPref(prefs::kStaticEncodings,
+                                        IDS_STATIC_ENCODING_LIST,
+                                        PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kRecentlySelectedEncoding,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  RegisterPrefsToMigrate(registry);
+}
+
+void PrefsTabHelper::MigrateUserPrefs(PrefService* prefs) {
+  for (int i = 0; i < kPrefsToMigrateLength; ++i) {
+    const PrefService::Preference* pref =
+        prefs->FindPreference(kPrefNamesToMigrate[i].from);
+    if (pref && !pref->IsDefaultValue()) {
+      prefs->Set(kPrefNamesToMigrate[i].to, *pref->GetValue());
+      prefs->ClearPref(kPrefNamesToMigrate[i].from);
+    }
+  }
 }
 
 void PrefsTabHelper::Observe(int type,
@@ -530,22 +604,12 @@ void PrefsTabHelper::Observe(int type,
       break;
     }
 #endif
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name_in = content::Details<std::string>(details).ptr();
-      DCHECK(content::Source<PrefService>(source).ptr() ==
-                 GetProfile()->GetPrefs());
-      if (*pref_name_in == prefs::kDefaultCharset ||
-          StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
-        UpdateWebPreferences();
-      } else if (*pref_name_in == prefs::kDefaultZoomLevel ||
-                 *pref_name_in == prefs::kEnableReferrers ||
-                 *pref_name_in == prefs::kEnableDoNotTrack) {
-        UpdateRendererPreferences();
-      } else {
-        NOTREACHED() << "unexpected pref change notification" << *pref_name_in;
-      }
+#if defined(USE_AURA)
+    case chrome::NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED: {
+      UpdateRendererPreferences();
       break;
     }
+#endif  // defined(USE_AURA)
     default:
       NOTREACHED();
   }
@@ -564,4 +628,36 @@ void PrefsTabHelper::UpdateRendererPreferences() {
 
 Profile* PrefsTabHelper::GetProfile() {
   return Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+}
+
+void PrefsTabHelper::OnWebPrefChanged(const std::string& pref_name) {
+  // When a font family pref's value goes from non-empty to the empty string, we
+  // must add it to the usual WebPreferences struct passed to the renderer.
+  //
+  // The empty string means to fall back to the pref for the Common script
+  // ("Zyyy").  For example, if chrome.fonts.serif.Cyrl is the empty string, it
+  // means to use chrome.fonts.serif.Zyyy for Cyrillic script. Prefs that are
+  // the empty string are normally not passed to WebKit, since there are so many
+  // of them that it would cause a performance regression. Not passing the pref
+  // is normally okay since WebKit does the desired fallback behavior regardless
+  // of whether the empty string is passed or the pref is not passed at all. But
+  // if the pref has changed from non-empty to the empty string, we must let
+  // WebKit know.
+  std::string generic_family;
+  std::string script;
+  if (pref_names_util::ParseFontNamePrefPath(pref_name,
+                                             &generic_family,
+                                             &script)) {
+    PrefService* prefs = GetProfile()->GetPrefs();
+    std::string pref_value = prefs->GetString(pref_name.c_str());
+    if (pref_value.empty()) {
+      WebPreferences web_prefs =
+          web_contents_->GetRenderViewHost()->GetWebkitPreferences();
+      OverrideFontFamily(&web_prefs, generic_family, script, "");
+      web_contents_->GetRenderViewHost()->UpdateWebkitPreferences(web_prefs);
+      return;
+    }
+  }
+
+  UpdateWebPreferences();
 }

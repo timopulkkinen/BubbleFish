@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace fileapi {
@@ -15,30 +15,30 @@ class FileSystemUsageCacheTest : public testing::Test {
  public:
   FileSystemUsageCacheTest() {}
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
   }
 
  protected:
-  FilePath GetUsageFilePath() {
+  base::FilePath GetUsageFilePath() {
     return data_dir_.path().Append(FileSystemUsageCache::kUsageFileName);
   }
 
  private:
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemUsageCacheTest);
 };
 
 TEST_F(FileSystemUsageCacheTest, CreateTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   EXPECT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, 0));
 }
 
 TEST_F(FileSystemUsageCacheTest, SetSizeTest) {
   static const int64 size = 240122;
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, size));
   EXPECT_EQ(size, FileSystemUsageCache::GetUsage(usage_file_path));
@@ -46,14 +46,14 @@ TEST_F(FileSystemUsageCacheTest, SetSizeTest) {
 
 TEST_F(FileSystemUsageCacheTest, SetLargeSizeTest) {
   static const int64 size = kint64max;
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, size));
   EXPECT_EQ(size, FileSystemUsageCache::GetUsage(usage_file_path));
 }
 
 TEST_F(FileSystemUsageCacheTest, IncAndGetSizeTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, 98214));
   ASSERT_TRUE(FileSystemUsageCache::IncrementDirty(usage_file_path));
@@ -63,7 +63,7 @@ TEST_F(FileSystemUsageCacheTest, IncAndGetSizeTest) {
 
 TEST_F(FileSystemUsageCacheTest, DecAndGetSizeTest) {
   static const int64 size = 71839;
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, size));
   // DecrementDirty for dirty = 0 is invalid. It returns false.
@@ -73,7 +73,7 @@ TEST_F(FileSystemUsageCacheTest, DecAndGetSizeTest) {
 
 TEST_F(FileSystemUsageCacheTest, IncDecAndGetSizeTest) {
   static const int64 size = 198491;
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, size));
   ASSERT_TRUE(FileSystemUsageCache::IncrementDirty(usage_file_path));
@@ -82,7 +82,7 @@ TEST_F(FileSystemUsageCacheTest, IncDecAndGetSizeTest) {
 }
 
 TEST_F(FileSystemUsageCacheTest, DecIncAndGetSizeTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, 854238));
   // DecrementDirty for dirty = 0 is invalid. It returns false.
@@ -96,7 +96,7 @@ TEST_F(FileSystemUsageCacheTest, DecIncAndGetSizeTest) {
 
 TEST_F(FileSystemUsageCacheTest, ManyIncsSameDecsAndGetSizeTest) {
   static const int64 size = 82412;
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, size));
   for (int i = 0; i < 20; i++)
@@ -107,7 +107,7 @@ TEST_F(FileSystemUsageCacheTest, ManyIncsSameDecsAndGetSizeTest) {
 }
 
 TEST_F(FileSystemUsageCacheTest, ManyIncsLessDecsAndGetSizeTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   ASSERT_EQ(FileSystemUsageCache::kUsageFileSize,
             FileSystemUsageCache::UpdateUsage(usage_file_path, 19319));
   for (int i = 0; i < 20; i++)
@@ -119,17 +119,17 @@ TEST_F(FileSystemUsageCacheTest, ManyIncsLessDecsAndGetSizeTest) {
 }
 
 TEST_F(FileSystemUsageCacheTest, GetSizeWithoutCacheFileTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   EXPECT_EQ(-1, FileSystemUsageCache::GetUsage(usage_file_path));
 }
 
 TEST_F(FileSystemUsageCacheTest, IncrementDirtyWithoutCacheFileTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   EXPECT_FALSE(FileSystemUsageCache::IncrementDirty(usage_file_path));
 }
 
 TEST_F(FileSystemUsageCacheTest, DecrementDirtyWithoutCacheFileTest) {
-  FilePath usage_file_path = GetUsageFilePath();
+  base::FilePath usage_file_path = GetUsageFilePath();
   EXPECT_FALSE(FileSystemUsageCache::IncrementDirty(usage_file_path));
 }
 

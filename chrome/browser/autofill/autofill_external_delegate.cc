@@ -8,6 +8,10 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/chrome_constants.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
@@ -15,43 +19,61 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(OS_ANDROID)
+#include "content/public/browser/android/content_view_core.h"
+#endif
+
 using content::RenderViewHost;
 using WebKit::WebAutofillClient;
 
-AutofillExternalDelegate::~AutofillExternalDelegate() {}
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(AutofillExternalDelegate);
+
+void AutofillExternalDelegate::CreateForWebContentsAndManager(
+    content::WebContents* web_contents,
+    AutofillManager* autofill_manager) {
+  if (FromWebContents(web_contents))
+    return;
+
+  web_contents->SetUserData(
+      UserDataKey(),
+      new AutofillExternalDelegate(web_contents, autofill_manager));
+}
 
 AutofillExternalDelegate::AutofillExternalDelegate(
-    TabContents* tab_contents,
+    content::WebContents* web_contents,
     AutofillManager* autofill_manager)
-    : tab_contents_(tab_contents),
+    : web_contents_(web_contents),
       autofill_manager_(autofill_manager),
-      password_autofill_manager_(
-          tab_contents ? tab_contents->web_contents() : NULL),
+      password_autofill_manager_(web_contents),
       autofill_query_id_(0),
       display_warning_if_disabled_(false),
+      has_autofill_suggestion_(false),
       has_shown_autofill_popup_for_current_edit_(false),
-      popup_visible_(false) {
+      registered_keyboard_listener_with_(NULL) {
+  DCHECK(autofill_manager);
+
+  registrar_.Add(this,
+                 content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
+                 content::Source<content::WebContents>(web_contents));
+  registrar_.Add(
+      this,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::Source<content::NavigationController>(
+          &(web_contents->GetController())));
 }
 
-void AutofillExternalDelegate::SelectAutofillSuggestionAtIndex(int unique_id) {
-  ClearPreviewedForm();
-
-  // Only preview the data if it is a profile.
-  if (unique_id > 0)
-    FillAutofillFormData(unique_id, true);
-}
+AutofillExternalDelegate::~AutofillExternalDelegate() {}
 
 void AutofillExternalDelegate::OnQuery(int query_id,
-                                       const webkit::forms::FormData& form,
-                                       const webkit::forms::FormField& field,
-                                       const gfx::Rect& bounds,
+                                       const FormData& form,
+                                       const FormFieldData& field,
+                                       const gfx::RectF& element_bounds,
                                        bool display_warning_if_disabled) {
   autofill_query_form_ = form;
   autofill_query_field_ = field;
   display_warning_if_disabled_ = display_warning_if_disabled;
   autofill_query_id_ = query_id;
-
-  OnQueryPlatformSpecific(query_id, form, field, bounds);
+  element_bounds_ = element_bounds;
 }
 
 void AutofillExternalDelegate::OnSuggestionsReturned(
@@ -77,16 +99,16 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
   ApplyAutofillWarnings(&values, &labels, &icons, &ids);
 
   // Only include "Autofill Options" special menu item if we have Autofill
-  // items, identified by |unique_ids| having at least one valid value.
-  bool has_autofill_item = false;
+  // suggestions.
+  bool has_autofill_suggestion_ = false;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (ids[i] > 0) {
-      has_autofill_item = true;
+      has_autofill_suggestion_ = true;
       break;
     }
   }
 
-  if (has_autofill_item)
+  if (has_autofill_suggestion_)
     ApplyAutofillOptions(&values, &labels, &icons, &ids);
 
   // Remove the separator if it is the last element.
@@ -101,38 +123,34 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
 
   if (values.empty()) {
     // No suggestions, any popup currently showing is obsolete.
-    HideAutofillPopup();
+    autofill_manager_->delegate()->HideAutofillPopup();
     return;
   }
 
   // Send to display.
   if (autofill_query_field_.is_focusable) {
-    popup_visible_ = true;
-    ApplyAutofillSuggestions(values, labels, icons, ids);
-
-    tab_contents_->autofill_manager()->OnDidShowAutofillSuggestions(
-        has_autofill_item && !has_shown_autofill_popup_for_current_edit_);
-    has_shown_autofill_popup_for_current_edit_ |= has_autofill_item;
+    autofill_manager_->delegate()->ShowAutofillPopup(
+        element_bounds_, values, labels, icons, ids, this);
   }
 }
 
 void AutofillExternalDelegate::OnShowPasswordSuggestions(
     const std::vector<string16>& suggestions,
-    const webkit::forms::FormField& field,
-    const gfx::Rect& bounds) {
+    const FormFieldData& field,
+    const gfx::RectF& element_bounds) {
   autofill_query_field_ = field;
+  element_bounds_ = element_bounds;
 
   if (suggestions.empty()) {
-    HideAutofillPopup();
+    autofill_manager_->delegate()->HideAutofillPopup();
     return;
   }
-
-  SetBounds(bounds);
 
   std::vector<string16> empty(suggestions.size());
   std::vector<int> password_ids(suggestions.size(),
                                 WebAutofillClient::MenuItemIDPasswordEntry);
-  ApplyAutofillSuggestions(suggestions, empty, empty, password_ids);
+  autofill_manager_->delegate()->ShowAutofillPopup(
+      element_bounds_, suggestions, empty, empty, password_ids, this);
 }
 
 void AutofillExternalDelegate::SetCurrentDataListValues(
@@ -140,105 +158,109 @@ void AutofillExternalDelegate::SetCurrentDataListValues(
     const std::vector<string16>& data_list_labels,
     const std::vector<string16>& data_list_icons,
     const std::vector<int>& data_list_unique_ids) {
-  // TODO(csharp): Modify the code to allow the data list values to change
-  // even if the popup is visible.
-  // http://crbug.com/131003
-  if (!popup_visible_) {
-    data_list_values_ = data_list_values;
-    data_list_labels_ = data_list_labels;
-    data_list_icons_ = data_list_icons;
-    data_list_unique_ids_ = data_list_unique_ids;
+  data_list_values_ = data_list_values;
+  data_list_labels_ = data_list_labels;
+  data_list_icons_ = data_list_icons;
+  data_list_unique_ids_ = data_list_unique_ids;
+}
+
+void AutofillExternalDelegate::OnPopupShown(
+    content::KeyboardListener* listener) {
+  if (!registered_keyboard_listener_with_) {
+    registered_keyboard_listener_with_ = web_contents_->GetRenderViewHost();
+    registered_keyboard_listener_with_->AddKeyboardListener(listener);
   }
+
+  autofill_manager_->OnDidShowAutofillSuggestions(
+      has_autofill_suggestion_ && !has_shown_autofill_popup_for_current_edit_);
+  has_shown_autofill_popup_for_current_edit_ |= has_autofill_suggestion_;
 }
 
-void AutofillExternalDelegate::RemoveAutocompleteEntry(const string16& value) {
-  if (tab_contents_) {
-    AutocompleteHistoryManager::FromWebContents(tab_contents_->web_contents())->
-        OnRemoveAutocompleteEntry(autofill_query_field_.name, value);
-  }
+void AutofillExternalDelegate::OnPopupHidden(
+    content::KeyboardListener* listener) {
+  if (registered_keyboard_listener_with_ == web_contents_->GetRenderViewHost())
+    web_contents_->GetRenderViewHost()->RemoveKeyboardListener(listener);
+
+  registered_keyboard_listener_with_ = NULL;
 }
 
-void AutofillExternalDelegate::RemoveAutofillProfileOrCreditCard(
-    int unique_id) {
-  autofill_manager_->RemoveAutofillProfileOrCreditCard(unique_id);
+void AutofillExternalDelegate::DidSelectSuggestion(int identifier) {
+  ClearPreviewedForm();
+
+  // Only preview the data if it is a profile.
+  if (identifier > 0)
+    FillAutofillFormData(identifier, true);
 }
 
+void AutofillExternalDelegate::DidAcceptSuggestion(const string16& value,
+                                                   int identifier) {
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
 
-void AutofillExternalDelegate::DidEndTextFieldEditing() {
-  HideAutofillPopup();
-
-  has_shown_autofill_popup_for_current_edit_ = false;
-}
-
-bool AutofillExternalDelegate::DidAcceptAutofillSuggestions(
-    const string16& value,
-    int unique_id,
-    unsigned index) {
-  // If the selected element is a warning we don't want to do anything.
-  if (unique_id == WebAutofillClient::MenuItemIDWarningMessage)
-    return false;
-
-  RenderViewHost* host =
-      tab_contents_->web_contents()->GetRenderViewHost();
-
-  if (unique_id == WebAutofillClient::MenuItemIDAutofillOptions) {
+  if (identifier == WebAutofillClient::MenuItemIDAutofillOptions) {
     // User selected 'Autofill Options'.
     autofill_manager_->OnShowAutofillDialog();
-  } else if (unique_id == WebAutofillClient::MenuItemIDClearForm) {
+  } else if (identifier == WebAutofillClient::MenuItemIDClearForm) {
     // User selected 'Clear form'.
     host->Send(new AutofillMsg_ClearForm(host->GetRoutingID()));
-  } else if (unique_id == WebAutofillClient::MenuItemIDPasswordEntry &&
+  } else if (identifier == WebAutofillClient::MenuItemIDPasswordEntry &&
              password_autofill_manager_.DidAcceptAutofillSuggestion(
                  autofill_query_field_, value)) {
     // DidAcceptAutofillSuggestion has already handled the work to fill in
     // the page as required.
-  } else if (unique_id == WebAutofillClient::MenuItemIDDataListEntry) {
+  } else if (identifier == WebAutofillClient::MenuItemIDDataListEntry) {
     host->Send(new AutofillMsg_AcceptDataListSuggestion(host->GetRoutingID(),
                                                         value));
-  } else if (unique_id == WebAutofillClient::MenuItemIDAutocompleteEntry) {
+  } else if (identifier == WebAutofillClient::MenuItemIDAutocompleteEntry) {
     // User selected an Autocomplete, so we fill directly.
-    host->Send(new AutofillMsg_SetNodeText(
-        host->GetRoutingID(),
-        value));
+    host->Send(new AutofillMsg_SetNodeText(host->GetRoutingID(), value));
   } else {
-    FillAutofillFormData(unique_id, false);
+    FillAutofillFormData(identifier, false);
   }
 
-  HideAutofillPopup();
+  autofill_manager_->delegate()->HideAutofillPopup();
+}
 
-  return true;
+void AutofillExternalDelegate::RemoveSuggestion(const string16& value,
+                                                int identifier) {
+  if (identifier > 0) {
+    autofill_manager_->RemoveAutofillProfileOrCreditCard(identifier);
+  } else {
+    autofill_manager_->RemoveAutocompleteEntry(autofill_query_field_.name,
+                                               value);
+  }
+}
+
+void AutofillExternalDelegate::DidEndTextFieldEditing() {
+  autofill_manager_->delegate()->HideAutofillPopup();
+
+  has_shown_autofill_popup_for_current_edit_ = false;
 }
 
 void AutofillExternalDelegate::ClearPreviewedForm() {
-  if (tab_contents_ && tab_contents_->web_contents()) {
-    RenderViewHost* host = tab_contents_->web_contents()->GetRenderViewHost();
-
-    if (host)
-      host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
-  }
-}
-
-void AutofillExternalDelegate::HideAutofillPopup() {
-  popup_visible_ = false;
-
-  HideAutofillPopupInternal();
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  if (host)
+    host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
 }
 
 void AutofillExternalDelegate::Reset() {
-  HideAutofillPopup();
+  autofill_manager_->delegate()->HideAutofillPopup();
 
   password_autofill_manager_.Reset();
 }
 
 void AutofillExternalDelegate::AddPasswordFormMapping(
-      const webkit::forms::FormField& form,
-      const webkit::forms::PasswordFormFillData& fill_data) {
-    password_autofill_manager_.AddPasswordFormMapping(form, fill_data);
+      const FormFieldData& form,
+      const PasswordFormFillData& fill_data) {
+  password_autofill_manager_.AddPasswordFormMapping(form, fill_data);
 }
 
 void AutofillExternalDelegate::FillAutofillFormData(int unique_id,
                                                     bool is_preview) {
-  RenderViewHost* host = tab_contents_->web_contents()->GetRenderViewHost();
+  // If the selected element is a warning we don't want to do anything.
+  if (unique_id == WebAutofillClient::MenuItemIDWarningMessage)
+    return;
+
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
 
   if (is_preview) {
     host->Send(new AutofillMsg_SetAutofillActionPreview(
@@ -346,12 +368,16 @@ void AutofillExternalDelegate::InsertDataListValues(
                               data_list_unique_ids_.end());
 }
 
-
-#if defined(OS_MACOSX)
-
-AutofillExternalDelegate* AutofillExternalDelegate::Create(
-    TabContents*, AutofillManager*) {
-  return NULL;
+void AutofillExternalDelegate::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
+    if (!*content::Details<bool>(details).ptr())
+      autofill_manager_->delegate()->HideAutofillPopup();
+  } else if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
+    autofill_manager_->delegate()->HideAutofillPopup();
+  } else {
+    NOTREACHED();
+  }
 }
-
-#endif

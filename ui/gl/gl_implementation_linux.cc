@@ -6,13 +6,17 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_egl_api_implementation.h"
+#include "ui/gl/gl_gl_api_implementation.h"
+#include "ui/gl/gl_glx_api_implementation.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_osmesa_api_implementation.h"
 #include "ui/gl/gl_switches.h"
 
 namespace gfx {
@@ -30,7 +34,7 @@ void GL_BINDING_CALL MarshalDepthRangeToDepthRangef(GLclampd z_near,
 }
 
 // Load a library, printing an error message on failure.
-base::NativeLibrary LoadLibrary(const FilePath& filename) {
+base::NativeLibrary LoadLibrary(const base::FilePath& filename) {
   std::string error;
   base::NativeLibrary library = base::LoadNativeLibrary(filename,
                                                         &error);
@@ -42,7 +46,7 @@ base::NativeLibrary LoadLibrary(const FilePath& filename) {
 }
 
 base::NativeLibrary LoadLibrary(const char* filename) {
-  return LoadLibrary(FilePath(filename));
+  return LoadLibrary(base::FilePath(filename));
 }
 
 }  // namespace
@@ -68,7 +72,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
 
   switch (implementation) {
     case kGLImplementationOSMesaGL: {
-      FilePath module_path;
+      base::FilePath module_path;
       if (!PathService::Get(base::DIR_MODULE, &module_path)) {
         LOG(ERROR) << "PathService::Get failed.";
         return false;
@@ -165,8 +169,8 @@ bool InitializeGLBindings(GLImplementation implementation) {
 
       // These two functions take single precision float rather than double
       // precision float parameters in GLES.
-      ::gfx::g_glClearDepth = MarshalClearDepthToClearDepthf;
-      ::gfx::g_glDepthRange = MarshalDepthRangeToDepthRangef;
+      ::gfx::g_driver_gl.fn.glClearDepthFn = MarshalClearDepthToClearDepthf;
+      ::gfx::g_driver_gl.fn.glDepthRangeFn = MarshalDepthRangeToDepthRangef;
       break;
     }
     case kGLImplementationMockGL: {

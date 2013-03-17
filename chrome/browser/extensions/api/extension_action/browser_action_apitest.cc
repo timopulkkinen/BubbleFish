@@ -9,17 +9,19 @@
 #endif
 
 #include "chrome/browser/extensions/browser_action_test_util.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
@@ -33,13 +35,9 @@
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/skia_util.h"
 
-#if defined (OS_MACOSX)
-#include "ui/gfx/image/image_unittest_util.h"
-#endif
-
 using content::WebContents;
-using extensions::Extension;
 
+namespace extensions {
 namespace {
 
 const char kEmptyImageDataError[] =
@@ -87,6 +85,11 @@ class BrowserActionApiTest : public ExtensionApiTest {
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
     return GetBrowserActionsBar().HasPopup();
   }
+
+  ExtensionAction* GetBrowserAction(const Extension& extension) {
+    return ExtensionActionManager::Get(browser()->profile())->
+        GetBrowserAction(extension);
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
@@ -105,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 
   // Test that we received the changes.
-  ExtensionAction* action = extension->browser_action();
+  ExtensionAction* action = GetBrowserAction(*extension);
   ASSERT_EQ("Modified", action->GetTitle(ExtensionAction::kDefaultTabId));
   ASSERT_EQ("badge", action->GetBadgeText(ExtensionAction::kDefaultTabId));
   ASSERT_EQ(SkColorSetARGB(255, 255, 255, 255),
@@ -115,7 +118,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
   ui_test_utils::NavigateToURL(browser(),
       test_server()->GetURL("files/extensions/test_file.txt"));
 
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   service->toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -129,14 +133,19 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
 #if defined (OS_MACOSX)
   // We need this on mac so we don't loose 2x representations from browser icon
   // in transformations gfx::ImageSkia -> NSImage -> gfx::ImageSkia.
-  gfx::test::SetSupportedScaleFactorsTo1xAnd2x();
+  std::vector<ui::ScaleFactor> supported_scale_factors;
+  supported_scale_factors.push_back(ui::SCALE_FACTOR_100P);
+  supported_scale_factors.push_back(ui::SCALE_FACTOR_200P);
+  ui::test::SetSupportedScaleFactors(supported_scale_factors);
 #endif
 
   // We should not be creating icons asynchronously, so we don't need an
   // observer.
-  ExtensionActionIconFactory icon_factory(extension,
-                                          extension->browser_action(),
-                                          NULL);
+  ExtensionActionIconFactory icon_factory(
+      profile(),
+      extension,
+      GetBrowserAction(*extension),
+      NULL);
   // Test that there is a browser action in the toolbar.
   ASSERT_EQ(1, GetBrowserActionsBar().NumberOfBrowserActions());
   EXPECT_TRUE(GetBrowserActionsBar().HasIcon(0));
@@ -322,7 +331,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest,
   EXPECT_EQ("hi!", GetBrowserActionsBar().GetTooltip(0));
 
   // Go back to first tab, changed title should reappear.
-  chrome::ActivateTabAt(browser(), 0, true);
+  browser()->tab_strip_model()->ActivateTabAt(0, true);
   EXPECT_EQ("Showing icon 2", GetBrowserActionsBar().GetTooltip(0));
 
   // Reload that tab, default title should come back.
@@ -373,9 +382,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
-  ExtensionAction* browser_action = extension->browser_action();
+  ExtensionAction* browser_action = GetBrowserAction(*extension);
   ASSERT_TRUE(browser_action)
       << "Browser action test extension should have a browser action.";
 
@@ -429,9 +438,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(
-      chrome::GetActiveWebContents(browser()));
+      browser()->tab_strip_model()->GetActiveWebContents());
 
-  ExtensionAction* browser_action = extension->browser_action();
+  ExtensionAction* browser_action = GetBrowserAction(*extension);
   ASSERT_TRUE(browser_action)
       << "Browser action test extension should have a browser action.";
 
@@ -470,7 +479,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
   // default.
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* incognito_browser =
-      new Browser(Browser::CreateParams(incognito_profile));
+      new Browser(Browser::CreateParams(incognito_profile,
+                                        browser()->host_desktop_type()));
 
   ASSERT_EQ(0,
             BrowserActionTestUtil(incognito_browser).NumberOfBrowserActions());
@@ -478,11 +488,13 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
   // Now enable the extension in incognito mode, and test that the browser
   // action shows up. Note that we don't update the existing window at the
   // moment, so we just create a new one.
-  browser()->profile()->GetExtensionService()->extension_prefs()->
-      SetIsIncognitoEnabled(extension->id(), true);
+  extensions::ExtensionSystem::Get(browser()->profile())->extension_service()->
+      extension_prefs()->SetIsIncognitoEnabled(extension->id(), true);
 
   chrome::CloseWindow(incognito_browser);
-  incognito_browser = new Browser(Browser::CreateParams(incognito_profile));
+  incognito_browser =
+      new Browser(Browser::CreateParams(incognito_profile,
+                                        browser()->host_desktop_type()));
   ASSERT_EQ(1,
             BrowserActionTestUtil(incognito_browser).NumberOfBrowserActions());
 
@@ -491,7 +503,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
 
   // The tooltips for each respective browser action.
   const char kTooltipA[] = "Make this page red";
@@ -521,7 +534,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
 
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* incognito_browser =
-      new Browser(Browser::CreateParams(incognito_profile));
+      new Browser(Browser::CreateParams(incognito_profile,
+                                        browser()->host_desktop_type()));
   BrowserActionTestUtil incognito_bar(incognito_browser);
 
   // Navigate just to have a tab in this window, otherwise wonky things happen.
@@ -570,9 +584,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
 
   // There is a background page and a browser action with no badge text.
   ExtensionProcessManager* manager =
-      browser()->profile()->GetExtensionProcessManager();
+      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
   ASSERT_TRUE(manager->GetBackgroundHostForExtension(extension->id()));
-  ExtensionAction* action = extension->browser_action();
+  ExtensionAction* action = GetBrowserAction(*extension);
   ASSERT_EQ("", action->GetBadgeText(ExtensionAction::kDefaultTabId));
 
   content::WindowedNotificationObserver host_destroyed_observer(
@@ -580,8 +594,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
       content::NotificationService::AllSources());
 
   // Click the browser action.
-  browser()->profile()->GetExtensionService()->toolbar_model()->
-      ExecuteBrowserAction(extension, browser(), NULL);
+  extensions::ExtensionSystem::Get(browser()->profile())->extension_service()->
+      toolbar_model()->ExecuteBrowserAction(extension, browser(), NULL);
 
   // It can take a moment for the background page to actually get destroyed
   // so we wait for the notification before checking that it's really gone
@@ -601,7 +615,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BadgeBackgroundColor) {
   ASSERT_EQ(1, GetBrowserActionsBar().NumberOfBrowserActions());
 
   // Test that CSS values (#FF0000) set color correctly.
-  ExtensionAction* action = extension->browser_action();
+  ExtensionAction* action = GetBrowserAction(*extension);
   ASSERT_EQ(SkColorSetARGB(255, 255, 0, 0),
             action->GetBadgeBackgroundColor(ExtensionAction::kDefaultTabId));
 
@@ -612,7 +626,6 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BadgeBackgroundColor) {
   ASSERT_TRUE(catcher.GetNextResult());
 
   // Test that CSS values (#0F0) set color correctly.
-  action = extension->browser_action();
   ASSERT_EQ(SkColorSetARGB(255, 0, 255, 0),
             action->GetBadgeBackgroundColor(ExtensionAction::kDefaultTabId));
 
@@ -621,7 +634,6 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BadgeBackgroundColor) {
   ASSERT_TRUE(catcher.GetNextResult());
 
   // Test that array values set color correctly.
-  action = extension->browser_action();
   ASSERT_EQ(SkColorSetARGB(255, 255, 255, 255),
             action->GetBadgeBackgroundColor(ExtensionAction::kDefaultTabId));
 }
@@ -647,3 +659,4 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Getters) {
 }
 
 }  // namespace
+}  // namespace extensions

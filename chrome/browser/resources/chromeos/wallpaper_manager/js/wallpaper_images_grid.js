@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ cr.define('wallpapers', function() {
   /**
    * Creates a new wallpaper thumbnails grid item.
    * @param {{baseURL: string, dynamicURL: string, layout: string,
-   *          author: string, authorWebsite: string}}
+   *          author: string, authorWebsite: string, availableOffline: boolean}}
    *     wallpaperInfo Wallpaper baseURL, dynamicURL, layout, author and
    *     author website.
    * @constructor
@@ -28,15 +28,47 @@ cr.define('wallpapers', function() {
   WallpaperThumbnailsGridItem.prototype = {
     __proto__: GridItem.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       GridItem.prototype.decorate.call(this);
+      // Removes garbage created by GridItem.
+      this.innerText = '';
       var imageEl = cr.doc.createElement('img');
-      // Thumbnail
-      imageEl.src = this.dataItem.baseURL + ThumbnailSuffix;
-      // Remove any garbage added by GridItem and ListItem decorators.
-      this.textContent = '';
+      imageEl.classList.add('thumbnail');
+      cr.defineProperty(imageEl, 'offline', cr.PropertyKind.BOOL_ATTR);
+      imageEl.offline = this.dataItem.availableOffline;
       this.appendChild(imageEl);
+
+      var self = this;
+      chrome.wallpaperPrivate.getThumbnail(this.dataItem.baseURL, 'ONLINE',
+                                           function(data) {
+        if (data) {
+          var blob = new Blob([new Int8Array(data)], {'type' : 'image\/png'});
+          imageEl.src = window.URL.createObjectURL(blob);
+          imageEl.addEventListener('load', function(e) {
+            window.URL.revokeObjectURL(this.src);
+          });
+        } else {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', self.dataItem.baseURL + ThumbnailSuffix, true);
+          xhr.responseType = 'arraybuffer';
+          xhr.send(null);
+          xhr.addEventListener('load', function(e) {
+            if (xhr.status === 200) {
+              chrome.wallpaperPrivate.saveThumbnail(self.dataItem.baseURL,
+                                                    xhr.response);
+              var blob = new Blob([new Int8Array(xhr.response)],
+                                  {'type' : 'image\/png'});
+              imageEl.src = window.URL.createObjectURL(blob);
+              // TODO(bshe): We currently use empty div to reserve space for
+              // thumbnail. Use a placeholder like "loading" image may better.
+              imageEl.addEventListener('load', function(e) {
+                window.URL.revokeObjectURL(this.src);
+              });
+            }
+          });
+        }
+      });
     },
   };
 
@@ -56,21 +88,21 @@ cr.define('wallpapers', function() {
   WallpaperThumbnailsGridSelectionController.prototype = {
     __proto__: GridSelectionController.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     getIndexBefore: function(index) {
       var result =
           GridSelectionController.prototype.getIndexBefore.call(this, index);
       return result == -1 ? this.getLastIndex() : result;
     },
 
-    /** @inheritDoc */
+    /** @override */
     getIndexAfter: function(index) {
       var result =
           GridSelectionController.prototype.getIndexAfter.call(this, index);
       return result == -1 ? this.getFirstIndex() : result;
     },
 
-    /** @inheritDoc */
+    /** @override */
     handleKeyDown: function(e) {
       if (e.keyIdentifier == 'Enter')
         cr.dispatchSimpleEvent(this.grid_, 'activate');
@@ -90,14 +122,39 @@ cr.define('wallpapers', function() {
   WallpaperThumbnailsGrid.prototype = {
     __proto__: Grid.prototype,
 
-    /** @inheritDoc */
+    /**
+     * The checkbox element.
+     */
+    checkmark_: undefined,
+
+    /**
+     * The item in data model which should have a checkmark.
+     * @type {{baseURL: string, dynamicURL: string, layout: string,
+     *         author: string, authorWebsite: string,
+     *         availableOffline: boolean}}
+     *     wallpaperInfo The information of the wallpaper to be set active.
+     */
+    activeItem_: undefined,
+    set activeItem(activeItem) {
+      if (this.activeItem_ != activeItem) {
+        this.activeItem_ = activeItem;
+        this.updateActiveThumb_();
+      }
+    },
+
+    /** @override */
     createSelectionController: function(sm) {
       return new WallpaperThumbnailsGridSelectionController(sm, this);
     },
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       Grid.prototype.decorate.call(this);
+      // checkmark_ needs to be initialized before set data model. Otherwise, we
+      // may try to access checkmark before initialization in
+      // updateActiveThumb_().
+      this.checkmark_ = cr.doc.createElement('div');
+      this.checkmark_.classList.add('check');
       this.dataModel = new ArrayDataModel([]);
       this.itemConstructor = WallpaperThumbnailsGridItem;
       this.selectionModel = new ListSingleSelectionModel();
@@ -148,6 +205,37 @@ cr.define('wallpapers', function() {
       this.columns = 0;
       this.redraw();
       this.focus();
+    },
+
+    /**
+     * Shows a checkmark on the active thumbnail and clears previous active one
+     * if any. Note if wallpaper was not set successfully, checkmark should not
+     * show on that thumbnail.
+     */
+    updateActiveThumb_: function() {
+      var selectedGridItem = this.getListItem(this.activeItem_);
+      if (this.checkmark_.parentNode &&
+          this.checkmark_.parentNode == selectedGridItem) {
+        return;
+      }
+
+      // Clears previous checkmark.
+      if (this.checkmark_.parentNode)
+        this.checkmark_.parentNode.removeChild(this.checkmark_);
+
+      if (!selectedGridItem)
+        return;
+      selectedGridItem.appendChild(this.checkmark_);
+    },
+
+    /**
+     * Redraws the viewport.
+     */
+    redraw: function() {
+      Grid.prototype.redraw.call(this);
+      // The active thumbnail maybe deleted in the above redraw(). Sets it again
+      // to make sure checkmark shows correctly.
+      this.updateActiveThumb_();
     }
   };
 

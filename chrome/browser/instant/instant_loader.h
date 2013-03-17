@@ -1,155 +1,134 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_
 #define CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_
 
-#include <string>
-
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
-#include "chrome/browser/history/history_types.h"
-#include "chrome/browser/instant/instant_commit_type.h"
+#include "base/timer.h"
+#include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_delegate.h"
 
-struct InstantAutocompleteResult;
-class InstantLoaderDelegate;
-class TabContents;
+class GURL;
+class Profile;
 
 namespace content {
-class NotificationDetails;
-class NotificationSource;
+struct OpenURLParams;
 class WebContents;
 }
 
-namespace gfx {
-class Rect;
-}
-
-// InstantLoader is created with an "Instant URL". It loads the URL and tells
-// its delegate (usually InstantController) of all interesting events. For
-// example, it determines if the page actually supports the Instant API
-// (http://dev.chromium.org/searchbox) and forwards messages (such as queries
-// and autocomplete suggestions) between the page and the delegate.
-class InstantLoader : public content::NotificationObserver {
+// InstantLoader is used to create and maintain a WebContents where we can
+// preload a page into. It is used by InstantOverlay and InstantNTP to
+// preload an Instant page.
+class InstantLoader : public content::NotificationObserver,
+                      public content::WebContentsDelegate,
+                      public CoreTabHelperDelegate {
  public:
-  // Returns the Instant loader for |web_contents| if it's used for Instant.
-  static InstantLoader* FromWebContents(content::WebContents* web_contents);
+  // InstantLoader calls these methods on its delegate in response to certain
+  // changes in the underlying contents.
+  class Delegate {
+   public:
+    // Called after someone has swapped in a different WebContents for ours.
+    virtual void OnSwappedContents() = 0;
 
-  // Creates a new empty WebContents. Use Init() to actually load |instant_url|.
-  // |tab_contents| is the page the preview will be shown on top of and
-  // potentially replace. |instant_url| is typically the instant_url field of
-  // the default search engine's TemplateURL, with the "{searchTerms}" parameter
-  // replaced with an empty string.
-  InstantLoader(InstantLoaderDelegate* delegate,
-                const std::string& instant_url,
-                const TabContents* tab_contents);
+    // Called when the underlying contents receive focus.
+    virtual void OnFocus() = 0;
+
+    // Called when the mouse pointer is down.
+    virtual void OnMouseDown() = 0;
+
+    // Called when the mouse pointer is released (or a drag event ends).
+    virtual void OnMouseUp() = 0;
+
+    // Called to open a URL using the underlying contents (see
+    // WebContentsDelegate::OpenURLFromTab). The Delegate should return the
+    // WebContents the URL is opened in, or NULL if the URL wasn't opened
+    // immediately.
+    virtual content::WebContents* OpenURLFromTab(
+        content::WebContents* source,
+        const content::OpenURLParams& params) = 0;
+
+   protected:
+    ~Delegate();
+  };
+
+  explicit InstantLoader(Delegate* delegate);
   virtual ~InstantLoader();
 
-  // Initializes |preview_contents_| and loads |instant_url_|.
-  void Init();
+  // Creates a new WebContents in the context of |profile| that will be used to
+  // load |instant_url|. The page is not actually loaded until Load() is
+  // called. Uses |active_contents|, if non-NULL, to initialize the size of the
+  // new contents. |on_stale_callback| will be called after kStalePageTimeoutMS
+  // has elapsed after Load() being called.
+  void Init(const GURL& instant_url,
+            Profile* profile,
+            const content::WebContents* active_contents,
+            const base::Closure& on_stale_callback);
 
-  // Tells the preview page that the user typed |user_text| into the omnibox.
-  // If |verbatim| is false, the page predicts the query the user means to type
-  // and fetches results for the prediction. If |verbatim| is true, |user_text|
-  // is taken as the exact query (no prediction is made).
-  void Update(const string16& user_text, bool verbatim);
+  // Loads |instant_url_| in |contents_|.
+  void Load();
 
-  // Tells the preview page of the bounds of the omnibox dropdown (in screen
-  // coordinates). This is used by the page to offset the results to avoid them
-  // being covered by the omnibox dropdown.
-  void SetOmniboxBounds(const gfx::Rect& bounds);
+  // Returns the contents currently held. May be NULL.
+  content::WebContents* contents() const { return contents_.get(); }
 
-  // Tells the preview page about the available autocomplete results.
-  void SendAutocompleteResults(
-      const std::vector<InstantAutocompleteResult>& results);
+  // Replaces the contents held with |contents|. Any existing contents is
+  // deleted. The expiration timer is not restarted.
+  void SetContents(scoped_ptr<content::WebContents> contents);
 
-  // Tells the preview page that the user pressed the up or down key. |count|
-  // is a repeat count, negative for moving up, positive for moving down.
-  void OnUpOrDownKeyPressed(int count);
+  // Releases the contents currently held. Must only be called if contents() is
+  // not NULL.
+  scoped_ptr<content::WebContents> ReleaseContents() WARN_UNUSED_RESULT;
 
-  // Tells the preview page that the searchbox has been focused.
-  void OnAutocompleteGotFocus();
-
-  // Tells the preview page that the searchbox has lost focus.
-  void OnAutocompleteLostFocus();
-
-  // Called by the history tab helper with the information that it would have
-  // added to the history service had this web contents not been used for
-  // Instant.
-  void DidNavigate(const history::HistoryAddPageArgs& add_page_args);
-
-  // Releases the preview TabContents passing ownership to the caller. This
-  // should be called when the preview is committed. Notifies the page but not
-  // the delegate. |text| is the final omnibox text being committed. NOTE: The
-  // caller should destroy this loader object right after this method, since
-  // none of the other methods will work once the preview has been released.
-  TabContents* ReleasePreviewContents(InstantCommitType type,
-                                      const string16& text) WARN_UNUSED_RESULT;
-
-  // The preview TabContents. The loader retains ownership. This will be
-  // non-NULL until ReleasePreviewContents() is called.
-  TabContents* preview_contents() const { return preview_contents_.get(); }
-
-  // Returns true if the preview page is known to support the Instant API. This
-  // starts out false, and becomes true whenever we get any message from the
-  // page. Once true, it never becomes false (the page isn't expected to drop
-  // Instant API support suddenly).
-  bool supports_instant() const { return supports_instant_; }
-
-  // Returns the URL that we're loading.
-  const std::string& instant_url() const { return instant_url_; }
-
-  // Returns info about the last navigation by the Instant page. If the page
-  // hasn't navigated since the last Update(), the URL is empty.
-  const history::HistoryAddPageArgs& last_navigation() const {
-    return last_navigation_;
-  }
-
-  // Returns true if the mouse or a touch pointer is down due to activating the
-  // preview content.
-  bool IsPointerDownFromActivate() const;
-
-  // content::NotificationObserver:
+ private:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
- private:
-  class WebContentsDelegateImpl;
+  // Overridden from CoreTabHelperDelegate:
+  virtual void SwapTabContents(content::WebContents* old_contents,
+                               content::WebContents* new_contents) OVERRIDE;
 
-  void SetupPreviewContents();
-  void CleanupPreviewContents();
-  void ReplacePreviewContents(content::WebContents* old_contents,
-                              content::WebContents* new_contents);
+  // Overridden from content::WebContentsDelegate:
+  virtual bool ShouldSuppressDialogs() OVERRIDE;
+  virtual bool ShouldFocusPageAfterCrash() OVERRIDE;
+  virtual void LostCapture() OVERRIDE;
+  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
+  virtual bool CanDownload(content::RenderViewHost* render_view_host,
+                           int request_id,
+                           const std::string& request_method) OVERRIDE;
+  virtual void HandleMouseDown() OVERRIDE;
+  virtual void HandleMouseUp() OVERRIDE;
+  virtual void HandlePointerActivate() OVERRIDE;
+  virtual void HandleGestureEnd() OVERRIDE;
+  virtual void DragEnded() OVERRIDE;
+  virtual bool OnGoToEntryOffset(int offset) OVERRIDE;
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
 
-  InstantLoaderDelegate* const loader_delegate_;
+  Delegate* const delegate_;
+  scoped_ptr<content::WebContents> contents_;
 
-  // See comments on the getter above.
-  scoped_ptr<TabContents> preview_contents_;
+  // The URL we will be loading.
+  GURL instant_url_;
 
-  // Delegate of the preview WebContents. Used to detect when the user does some
-  // gesture on the WebContents and the preview needs to be activated.
-  scoped_ptr<WebContentsDelegateImpl> preview_delegate_;
+  // Called when |stale_page_timer_| fires.
+  base::Closure on_stale_callback_;
 
-  // See comments on the getter above.
-  bool supports_instant_;
+  // Used to mark when the page is stale.
+  base::Timer stale_page_timer_;
 
-  // See comments on the getter above.
-  const std::string instant_url_;
-
-  // Used to get notifications about renderers coming and going.
+  // Used to get notifications about renderers.
   content::NotificationRegistrar registrar_;
 
-  // See comments on the getter above.
-  history::HistoryAddPageArgs last_navigation_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(InstantLoader);
+  DISALLOW_COPY_AND_ASSIGN(InstantLoader);
 };
 
 #endif  // CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_

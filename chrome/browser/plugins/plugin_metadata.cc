@@ -4,7 +4,11 @@
 
 #include "chrome/browser/plugins/plugin_metadata.h"
 
+#include <algorithm>
+
 #include "base/logging.h"
+#include "base/string_util.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/plugin_utils.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -23,13 +27,15 @@ PluginMetadata::PluginMetadata(const std::string& identifier,
                                bool url_for_display,
                                const GURL& plugin_url,
                                const GURL& help_url,
-                               const string16& group_name_matcher)
+                               const string16& group_name_matcher,
+                               const std::string& language)
     : identifier_(identifier),
       name_(name),
       group_name_matcher_(group_name_matcher),
       url_for_display_(url_for_display),
       plugin_url_(plugin_url),
-      help_url_(help_url) {
+      help_url_(help_url),
+      language_(language) {
 }
 
 PluginMetadata::~PluginMetadata() {
@@ -41,8 +47,30 @@ void PluginMetadata::AddVersion(const Version& version,
   versions_[version] = status;
 }
 
+void PluginMetadata::AddMimeType(const std::string& mime_type) {
+  all_mime_types_.push_back(mime_type);
+}
+
+void PluginMetadata::AddMatchingMimeType(const std::string& mime_type) {
+  matching_mime_types_.push_back(mime_type);
+}
+
+bool PluginMetadata::HasMimeType(const std::string& mime_type) const {
+  return std::find(all_mime_types_.begin(), all_mime_types_.end(), mime_type) !=
+      all_mime_types_.end();
+}
+
 bool PluginMetadata::MatchesPlugin(const webkit::WebPluginInfo& plugin) {
-  return plugin.name.find(group_name_matcher_) != string16::npos;
+  using webkit::npapi::PluginList;
+
+  for (size_t i = 0; i < matching_mime_types_.size(); ++i) {
+    // To have a match, every one of the |matching_mime_types_|
+    // must be handled by the plug-in.
+    if (!PluginList::SupportsType(plugin, matching_mime_types_[i], false))
+      return false;
+  }
+
+  return MatchPattern(plugin.name, group_name_matcher_);
 }
 
 // static
@@ -92,4 +120,16 @@ bool PluginMetadata::VersionComparator::operator() (const Version& lhs,
                                                     const Version& rhs) const {
   // Keep versions ordered by newest (biggest) first.
   return lhs.CompareTo(rhs) > 0;
+}
+
+scoped_ptr<PluginMetadata> PluginMetadata::Clone() const {
+  PluginMetadata* copy = new PluginMetadata(identifier_,
+                                            name_,
+                                            url_for_display_,
+                                            plugin_url_,
+                                            help_url_,
+                                            group_name_matcher_,
+                                            language_);
+  copy->versions_ = versions_;
+  return make_scoped_ptr(copy);
 }

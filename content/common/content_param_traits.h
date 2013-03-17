@@ -27,6 +27,8 @@ namespace ui {
 class Range;
 }
 
+namespace content {
+
 // Define the NPVariant_Param struct and its enum here since it needs manual
 // serialization code.
 enum NPVariant_ParamEnum {
@@ -64,6 +66,8 @@ struct NPIdentifier_Param {
   NPIdentifier identifier;
 };
 
+}  // namespace content
+
 namespace IPC {
 
 template <>
@@ -75,16 +79,16 @@ struct ParamTraits<net::IPEndPoint> {
 };
 
 template <>
-struct ParamTraits<NPVariant_Param> {
-  typedef NPVariant_Param param_type;
+struct ParamTraits<content::NPVariant_Param> {
+  typedef content::NPVariant_Param param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
 template <>
-struct ParamTraits<NPIdentifier_Param> {
-  typedef NPIdentifier_Param param_type;
+struct ParamTraits<content::NPIdentifier_Param> {
+  typedef content::NPIdentifier_Param param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -116,40 +120,10 @@ typedef const WebKit::WebInputEvent* WebInputEventPointer;
 template <>
 struct ParamTraits<WebInputEventPointer> {
   typedef WebInputEventPointer param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteData(reinterpret_cast<const char*>(p), p->size);
-  }
+  static void Write(Message* m, const param_type& p);
   // Note: upon read, the event has the lifetime of the message.
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
-    const char* data;
-    int data_length;
-    if (!m->ReadData(iter, &data, &data_length)) {
-      NOTREACHED();
-      return false;
-    }
-    if (data_length < static_cast<int>(sizeof(WebKit::WebInputEvent))) {
-      NOTREACHED();
-      return false;
-    }
-    param_type event = reinterpret_cast<param_type>(data);
-    // Check that the data size matches that of the event (we check the latter
-    // in the delegate).
-    if (data_length != static_cast<int>(event->size)) {
-      NOTREACHED();
-      return false;
-    }
-    *r = event;
-    return true;
-  }
-  static void Log(const param_type& p, std::string* l) {
-    l->append("(");
-    LogParam(p->size, l);
-    l->append(", ");
-    LogParam(p->type, l);
-    l->append(", ");
-    LogParam(p->timeStampSeconds, l);
-    l->append(")");
-  }
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 }  // namespace IPC

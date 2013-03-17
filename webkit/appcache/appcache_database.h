@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_interfaces.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace sql {
 class Connection;
@@ -27,9 +27,9 @@ class StatementID;
 
 namespace appcache {
 
-class APPCACHE_EXPORT AppCacheDatabase {
+class WEBKIT_STORAGE_EXPORT AppCacheDatabase {
  public:
-  struct APPCACHE_EXPORT GroupRecord {
+  struct WEBKIT_STORAGE_EXPORT GroupRecord {
     GroupRecord();
     ~GroupRecord();
 
@@ -40,7 +40,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
     base::Time last_access_time;
   };
 
-  struct APPCACHE_EXPORT CacheRecord {
+  struct WEBKIT_STORAGE_EXPORT CacheRecord {
     CacheRecord()
         : cache_id(0), group_id(0), online_wildcard(false), cache_size(0) {}
 
@@ -61,7 +61,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
     int64 response_size;
   };
 
-  struct APPCACHE_EXPORT NamespaceRecord {
+  struct WEBKIT_STORAGE_EXPORT NamespaceRecord {
     NamespaceRecord();
     ~NamespaceRecord();
 
@@ -81,7 +81,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
     GURL namespace_url;
   };
 
-  explicit AppCacheDatabase(const FilePath& path);
+  explicit AppCacheDatabase(const base::FilePath& path);
   ~AppCacheDatabase();
 
   void CloseConnection();
@@ -200,7 +200,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
   // and bodies are stored, and then creates a new database file.
   bool DeleteExistingAndCreateNewDatabase();
 
-  FilePath db_file_path_;
+  base::FilePath db_file_path_;
   scoped_ptr<sql::Connection> db_;
   scoped_ptr<sql::MetaTable> meta_table_;
   bool is_disabled_;

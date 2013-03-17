@@ -5,11 +5,13 @@
 #include "chrome/browser/history/expire_history_backend.h"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/archived_database.h"
@@ -46,7 +48,7 @@ const int kEarlyExpirationAdvanceDays = 3;
 class AllVisitsReader : public ExpiringVisitsReader {
  public:
   virtual bool Read(Time end_time, HistoryDatabase* db,
-                    VisitVector* visits, int max_visits) const {
+                    VisitVector* visits, int max_visits) const OVERRIDE {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -66,7 +68,7 @@ class AllVisitsReader : public ExpiringVisitsReader {
 class AutoSubframeVisitsReader : public ExpiringVisitsReader {
  public:
   virtual bool Read(Time end_time, HistoryDatabase* db,
-                    VisitVector* visits, int max_visits) const {
+                    VisitVector* visits, int max_visits) const OVERRIDE {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -266,6 +268,30 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
         visits.push_back(*visit);
     }
   }
+  ExpireVisits(visits);
+}
+
+void ExpireHistoryBackend::ExpireHistoryForTimes(
+    const std::vector<base::Time>& times) {
+  // |times| must be in reverse chronological order and have no
+  // duplicates, i.e. each member must be earlier than the one before
+  // it.
+  DCHECK(
+      std::adjacent_find(
+          times.begin(), times.end(), std::less_equal<base::Time>()) ==
+      times.end());
+
+  if (!main_db_)
+    return;
+
+  // There may be stuff in the text database manager's temporary cache.
+  if (text_db_)
+    text_db_->DeleteFromUncommittedForTimes(times);
+
+  // Find the affected visits and delete them.
+  // TODO(brettw): bug 1171164: We should query the archived database here, too.
+  VisitVector visits;
+  main_db_->GetVisitsForTimes(times, &visits);
   ExpireVisits(visits);
 }
 
@@ -691,6 +717,11 @@ void ExpireHistoryBackend::ScheduleExpireHistoryIndexFiles() {
 }
 
 void ExpireHistoryBackend::DoExpireHistoryIndexFiles() {
+  if (!text_db_) {
+    // The text database may have been closed since the task was scheduled.
+    return;
+  }
+
   Time::Exploded exploded;
   Time::Now().LocalExplode(&exploded);
   int cutoff_month =
@@ -698,12 +729,13 @@ void ExpireHistoryBackend::DoExpireHistoryIndexFiles() {
   TextDatabase::DBIdent cutoff_id =
       (cutoff_month / 12) * 100 + (cutoff_month % 12);
 
-  FilePath::StringType history_index_files_pattern = TextDatabase::file_base();
+  base::FilePath::StringType history_index_files_pattern =
+      TextDatabase::file_base();
   history_index_files_pattern.append(FILE_PATH_LITERAL("*"));
   file_util::FileEnumerator file_enumerator(
       text_db_->GetDir(), false, file_util::FileEnumerator::FILES,
       history_index_files_pattern);
-  for (FilePath file = file_enumerator.Next(); !file.empty();
+  for (base::FilePath file = file_enumerator.Next(); !file.empty();
        file = file_enumerator.Next()) {
     TextDatabase::DBIdent file_id = TextDatabase::FileNameToID(file);
     if (file_id < cutoff_id)

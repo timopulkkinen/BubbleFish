@@ -10,6 +10,7 @@
  * @param {Document} document Document to create canvases in.
  * @param {HTMLCanvasElement} canvas The canvas with the original image.
  * @param {function(callback)} saveFunction Function to save the image.
+ * @constructor
  */
 function CommandQueue(document, canvas, saveFunction) {
   this.document_ = document;
@@ -19,7 +20,7 @@ function CommandQueue(document, canvas, saveFunction) {
 
   this.baselineImage_ = canvas;
   this.currentImage_ = canvas;
-  this.previousImage_ = null;
+  this.previousImage_ = document.createElement('canvas');
 
   this.saveFunction_ = saveFunction;
 
@@ -98,20 +99,19 @@ CommandQueue.prototype.clearBusy_ = function() {
 
 /**
  * Commit the image change: save and unlock the UI.
+ * @param {number=} opt_delay Delay in ms (to avoid disrupting the animation).
  * @private
  */
-CommandQueue.prototype.commit_ = function() {
-  setTimeout(function() {
-        this.saveFunction_(this.clearBusy_.bind(this));
-      }.bind(this),
-      ImageView.ANIMATION_WAIT_INTERVAL);
+CommandQueue.prototype.commit_ = function(opt_delay) {
+  setTimeout(this.saveFunction_.bind(null, this.clearBusy_.bind(this)),
+      opt_delay || 0);
 };
 
 /**
  * Internal function to execute the command in a given context.
  *
  * @param {Command} command The command to execute.
- * @param {object} uiContext The UI context.
+ * @param {Object} uiContext The UI context.
  * @param {function} callback Completion callback.
  * @private
  */
@@ -120,15 +120,18 @@ CommandQueue.prototype.doExecute_ = function(command, uiContext, callback) {
     throw new Error('Cannot operate on null image');
 
   // Remember one previous image so that the first undo is as fast as possible.
-  this.previousImage_ = this.currentImage_;
-  var self = this;
+  this.previousImage_.width = this.currentImage_.width;
+  this.previousImage_.height = this.currentImage_.height;
+  var context = this.previousImage_.getContext('2d');
+  context.drawImage(this.currentImage_, 0, 0);
+
   command.execute(
       this.document_,
       this.currentImage_,
-      function(result) {
-        self.currentImage_ = result;
-        callback();
-      },
+      function(result, opt_delay) {
+        this.currentImage_ = result;
+        callback(opt_delay);
+      }.bind(this),
       uiContext);
 };
 
@@ -136,7 +139,7 @@ CommandQueue.prototype.doExecute_ = function(command, uiContext, callback) {
  * Executes the command.
  *
  * @param {Command} command Command to execute.
- * @param {boolean} opt_keep_redo true if redo stack should not be cleared.
+ * @param {boolean=} opt_keep_redo True if redo stack should not be cleared.
  */
 CommandQueue.prototype.execute = function(command, opt_keep_redo) {
   this.setBusy_();
@@ -171,29 +174,35 @@ CommandQueue.prototype.undo = function() {
   var self = this;
 
   function complete() {
-    if (self.UIContext_.imageView) {
-      command.revertView(self.currentImage_, self.UIContext_.imageView);
-    }
-    self.commit_();
+    var delay = command.revertView(
+        self.currentImage_, self.UIContext_.imageView);
+    self.commit_(delay);
   }
 
   if (this.previousImage_) {
     // First undo after an execute call.
-    this.currentImage_ = this.previousImage_;
-    this.previousImage_ = null;
+    this.currentImage_.width = this.previousImage_.width;
+    this.currentImage_.height = this.previousImage_.height;
+    var context = this.currentImage_.getContext('2d');
+    context.drawImage(this.previousImage_, 0, 0);
+
+    // Free memory.
+    this.previousImage_.width = 0;
+    this.previousImage_.height = 0;
+
     complete();
     // TODO(kaznacheev) Consider recalculating previousImage_ right here
     // by replaying the commands in the background.
   } else {
     this.currentImage_ = this.baselineImage_;
 
-    function replay(index) {
+    var replay = function(index) {
       if (index < self.undo_.length)
         self.doExecute_(self.undo_[index], {}, replay.bind(null, index + 1));
       else {
         complete();
       }
-    }
+    };
 
     replay(0);
   }
@@ -217,10 +226,21 @@ CommandQueue.prototype.redo = function() {
 };
 
 /**
+ * Closes internal buffers. Call to ensure, that internal buffers are freed
+ * as soon as possible.
+ */
+CommandQueue.prototype.close = function() {
+  // Free memory used by the undo buffer.
+  this.previousImage_.width = 0;
+  this.previousImage_.height = 0;
+};
+
+/**
  * Command object encapsulates an operation on an image and a way to visualize
  * its result.
  *
  * @param {string} name Command name.
+ * @constructor
  */
 function Command(name) {
   this.name_ = name;
@@ -241,11 +261,12 @@ Command.prototype.toString = function() {
  *
  * @param {Document} document Document on which to execute command.
  * @param {HTMLCanvasElement} srcCanvas Canvas to execute on.
- * @param {function(HTMLCanvasElement)} callback Callback to call on completion.
+ * @param {function(HTMLCanvasElement, number)} callback Callback to call on
+ *   completion.
  * @param {Object} uiContext Context to work in.
  */
 Command.prototype.execute = function(document, srcCanvas, callback, uiContext) {
-  setTimeout(callback.bind(null, null), 0);
+  console.error('Command.prototype.execute not implemented');
 };
 
 /**
@@ -253,9 +274,11 @@ Command.prototype.execute = function(document, srcCanvas, callback, uiContext) {
  *
  * @param {HTMLCanvasElement} canvas Image data to use.
  * @param {ImageView} imageView ImageView to revert.
+ * @return {number} Animation duration in ms.
  */
 Command.prototype.revertView = function(canvas, imageView) {
   imageView.replace(canvas);
+  return 0;
 };
 
 /**
@@ -263,8 +286,8 @@ Command.prototype.revertView = function(canvas, imageView) {
  *
  * @param {Document} document Document to create canvas in.
  * @param {HTMLCanvasElement} srcCanvas to copy optional dimensions from.
- * @param {int} opt_width new canvas width;
- * @param {int} opt_height new canvas height;
+ * @param {number=} opt_width new canvas width.
+ * @param {number=} opt_height new canvas height.
  * @return {HTMLCanvasElement} Newly created canvas.
  * @private
  */
@@ -279,7 +302,7 @@ Command.prototype.createCanvas_ = function(
 
 /**
  * Rotate command
- * @param {number} rotate90 Rotation angle in 90 degree increments (signed)
+ * @param {number} rotate90 Rotation angle in 90 degree increments (signed).
  * @constructor
  * @extends {Command}
  */
@@ -290,7 +313,7 @@ Command.Rotate = function(rotate90) {
 
 Command.Rotate.prototype = { __proto__: Command.prototype };
 
-/** @inheritDoc */
+/** @override */
 Command.Rotate.prototype.execute = function(
     document, srcCanvas, callback, uiContext) {
   var result = this.createCanvas_(
@@ -300,15 +323,16 @@ Command.Rotate.prototype.execute = function(
       (this.rotate90_ & 1) ? srcCanvas.width : srcCanvas.height);
   ImageUtil.drawImageTransformed(
       result, srcCanvas, 1, 1, this.rotate90_ * Math.PI / 2);
+  var delay;
   if (uiContext.imageView) {
-    uiContext.imageView.replaceAndAnimate(result, null, this.rotate90_);
+    delay = uiContext.imageView.replaceAndAnimate(result, null, this.rotate90_);
   }
-  setTimeout(callback.bind(null, result), 0);
+  setTimeout(callback, 0, result, delay);
 };
 
-/** @inheritDoc */
+/** @override */
 Command.Rotate.prototype.revertView = function(canvas, imageView) {
-  imageView.replaceAndAnimate(canvas, null, -this.rotate90_);
+  return imageView.replaceAndAnimate(canvas, null, -this.rotate90_);
 };
 
 
@@ -326,30 +350,31 @@ Command.Crop = function(imageRect) {
 
 Command.Crop.prototype = { __proto__: Command.prototype };
 
-/** @inheritDoc */
+/** @override */
 Command.Crop.prototype.execute = function(
     document, srcCanvas, callback, uiContext) {
   var result = this.createCanvas_(
       document, srcCanvas, this.imageRect_.width, this.imageRect_.height);
   Rect.drawImage(result.getContext('2d'), srcCanvas, null, this.imageRect_);
+  var delay;
   if (uiContext.imageView) {
-    uiContext.imageView.replaceAndAnimate(result, this.imageRect_, 0);
+    delay = uiContext.imageView.replaceAndAnimate(result, this.imageRect_, 0);
   }
-  setTimeout(callback.bind(null, result), 0);
+  setTimeout(callback, 0, result, delay);
 };
 
-/** @inheritDoc */
+/** @override */
 Command.Crop.prototype.revertView = function(canvas, imageView) {
-  imageView.animateAndReplace(canvas, this.imageRect_);
+  return imageView.animateAndReplace(canvas, this.imageRect_);
 };
 
 
 /**
  * Filter command.
  *
- * @param {string} name Command name
- * @param {function(ImageData,ImageData,number,number)} filter Filter function
- * @param {string} message Message to display when done
+ * @param {string} name Command name.
+ * @param {function(ImageData,ImageData,number,number)} filter Filter function.
+ * @param {string} message Message to display when done.
  * @constructor
  * @extends {Command}
  */
@@ -361,7 +386,7 @@ Command.Filter = function(name, filter, message) {
 
 Command.Filter.prototype = { __proto__: Command.prototype };
 
-/** @inheritDoc */
+/** @override */
 Command.Filter.prototype.execute = function(
     document, srcCanvas, callback, uiContext) {
   var result = this.createCanvas_(document, srcCanvas);

@@ -4,22 +4,22 @@
 
 #include "ash/wm/base_layout_manager.h"
 
-#include "ash/ash_switches.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace_controller.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
-#include "base/command_line.h"
+#include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/corewm/corewm_switches.h"
+#include "ui/views/corewm/window_util.h"
 
 namespace ash {
 namespace internal {
@@ -29,6 +29,7 @@ namespace internal {
 
 BaseLayoutManager::BaseLayoutManager(aura::RootWindow* root_window)
     : root_window_(root_window) {
+  Shell::GetInstance()->activation_client()->AddObserver(this);
   Shell::GetInstance()->AddShellObserver(this);
   root_window_->AddRootWindowObserver(this);
   root_window_->AddObserver(this);
@@ -42,6 +43,7 @@ BaseLayoutManager::~BaseLayoutManager() {
   for (WindowSet::const_iterator i = windows_.begin(); i != windows_.end(); ++i)
     (*i)->RemoveObserver(this);
   Shell::GetInstance()->RemoveShellObserver(this);
+  Shell::GetInstance()->activation_client()->RemoveObserver(this);
 }
 
 // static
@@ -71,7 +73,7 @@ void BaseLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
   // Only update the bounds if the window has a show state that depends on the
   // workspace area.
   if (wm::IsWindowMaximized(child) || wm::IsWindowFullscreen(child))
-    UpdateBoundsFromShowState(child, false);
+    UpdateBoundsFromShowState(child);
 }
 
 void BaseLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
@@ -136,11 +138,7 @@ void BaseLayoutManager::OnWindowPropertyChanged(aura::Window* window,
           old_state != ui::SHOW_STATE_MAXIMIZED))) {
       SetRestoreBoundsInParent(window, window->bounds());
     }
-    // Minimized state handles its own animations.
-    // TODO(sky): get animations to work with Workspace2.
-    bool animate = (old_state != ui::SHOW_STATE_MINIMIZED) &&
-        !WorkspaceController::IsWorkspace2Enabled();
-    UpdateBoundsFromShowState(window, animate);
+    UpdateBoundsFromShowState(window);
     ShowStateChanged(window, old_state);
   }
 }
@@ -153,6 +151,20 @@ void BaseLayoutManager::OnWindowDestroying(aura::Window* window) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// BaseLayoutManager, aura::client::ActivationChangeObserver implementation:
+
+void BaseLayoutManager::OnWindowActivated(aura::Window* gained_active,
+                                          aura::Window* lost_active) {
+  if (views::corewm::UseFocusController()) {
+    if (gained_active && wm::IsWindowMinimized(gained_active) &&
+        !gained_active->IsVisible()) {
+      gained_active->Show();
+      DCHECK(!wm::IsWindowMinimized(gained_active));
+    }
+  }
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // BaseLayoutManager, private:
 
 void BaseLayoutManager::ShowStateChanged(aura::Window* window,
@@ -160,7 +172,7 @@ void BaseLayoutManager::ShowStateChanged(aura::Window* window,
   if (wm::IsWindowMinimized(window)) {
     // Save the previous show state so that we can correctly restore it.
     window->SetProperty(internal::kRestoreShowStateKey, last_show_state);
-    SetWindowVisibilityAnimationType(
+    views::corewm::SetWindowVisibilityAnimationType(
         window, WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
 
     // Hide the window.
@@ -177,8 +189,7 @@ void BaseLayoutManager::ShowStateChanged(aura::Window* window,
   }
 }
 
-void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window,
-                                                  bool animate) {
+void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window) {
   switch (window->GetProperty(aura::client::kShowStateKey)) {
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_NORMAL: {
@@ -186,18 +197,16 @@ void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window,
       if (restore) {
         gfx::Rect bounds_in_parent =
             ScreenAsh::ConvertRectFromScreen(window->parent(), *restore);
-        MaybeAnimateToBounds(window,
-                             animate,
+        SetChildBoundsDirect(window,
                              BoundsWithScreenEdgeVisible(window,
                                                          bounds_in_parent));
       }
-      window->ClearProperty(aura::client::kRestoreBoundsKey);
+      ClearRestoreBounds(window);
       break;
     }
 
     case ui::SHOW_STATE_MAXIMIZED:
-      MaybeAnimateToBounds(window,
-                           animate,
+      SetChildBoundsDirect(window,
                            ScreenAsh::GetMaximizedWindowBoundsInParent(window));
       break;
 
@@ -211,21 +220,6 @@ void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window,
     default:
       break;
   }
-}
-
-void BaseLayoutManager::MaybeAnimateToBounds(aura::Window* window,
-                                             bool animate,
-                                             const gfx::Rect& new_bounds) {
-  // Only animate visible windows.
-  if (animate &&
-      window->TargetVisibility() &&
-      !window->GetProperty(aura::client::kAnimationsDisabledKey) &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAshWindowAnimationsDisabled)) {
-    CrossFadeToBounds(window, new_bounds);
-    return;
-  }
-  SetChildBoundsDirect(window, new_bounds);
 }
 
 void BaseLayoutManager::AdjustWindowSizesForScreenChange() {
@@ -249,7 +243,9 @@ void BaseLayoutManager::AdjustWindowSizesForScreenChange() {
       gfx::Rect display_rect =
           ScreenAsh::GetDisplayWorkAreaBoundsInParent(window);
       // Put as much of the window as possible within the display area.
-      window->SetBounds(window->bounds().AdjustToFit(display_rect));
+      gfx::Rect bounds = window->bounds();
+      bounds.AdjustToFit(display_rect);
+      window->SetBounds(bounds);
     }
   }
 }

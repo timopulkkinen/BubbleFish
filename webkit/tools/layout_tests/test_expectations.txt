@@ -32,6 +32,6 @@
 #
 # EVERYTHING BELOW THIS LINE WILL BE DELETED AT EVERY WEBKIT DEPS ROLL
 
-webkit.org/b/97206 http/tests/security/contentSecurityPolicy/eval-blocked-in-about-blank-iframe.html
-webkit.org/b/97206 http/tests/security/contentSecurityPolicy/function-constructor-blocked.html
-webkit.org/b/97206 http/tests/security/contentSecurityPolicy/eval-blocked.html [ Failure ]
+webkit.org/b/110887 fast/dom/Window/window-custom-prototype.html [ Failure ]
+webkit.org/b/110887 fast/js/JSON-parse.html [ Failure ]
+webkit.org/b/110887 fast/js/cyclic-prototypes.html [ Failure ]

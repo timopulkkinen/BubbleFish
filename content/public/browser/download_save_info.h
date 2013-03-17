@@ -5,7 +5,7 @@
 #ifndef CONTENT_PUBLIC_BROWSER_DOWNLOAD_SAVE_INFO_H_
 #define CONTENT_PUBLIC_BROWSER_DOWNLOAD_SAVE_INFO_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/linked_ptr.h"
 #include "content/common/content_export.h"
 #include "net/base/file_stream.h"
@@ -23,14 +23,14 @@ struct CONTENT_EXPORT DownloadSaveInfo {
   // If non-empty, contains the full target path of the download that has been
   // determined prior to download initiation. This is considered to be a trusted
   // path.
-  FilePath file_path;
+  base::FilePath file_path;
 
   // If non-empty, contains an untrusted filename suggestion. This can't contain
   // a path (only a filename), and is only effective if |file_path| is empty.
   string16 suggested_name;
 
   // If non-NULL, contains the source data stream for the file contents.
-  linked_ptr<net::FileStream> file_stream;
+  scoped_ptr<net::FileStream> file_stream;
 
   // The file offset at which to start the download.  May be 0.
   int64 offset;
@@ -44,6 +44,9 @@ struct CONTENT_EXPORT DownloadSaveInfo {
   // basis if |file_path| is not empty.
   // |prompt_for_save_location| defaults to false.
   bool prompt_for_save_location;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DownloadSaveInfo);
 };
 
 }  // namespace content

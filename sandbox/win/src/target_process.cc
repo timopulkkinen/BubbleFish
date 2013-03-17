@@ -110,6 +110,7 @@ TargetProcess::~TargetProcess() {
 // object.
 DWORD TargetProcess::Create(const wchar_t* exe_path,
                             const wchar_t* command_line,
+                            bool inherit_handles,
                             const base::win::StartupInformation& startup_info,
                             base::win::ScopedProcessInformation* target_info) {
   exe_name_.reset(_wcsdup(exe_path));
@@ -124,7 +125,7 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
   if (startup_info.has_extended_startup_info())
     flags |= EXTENDED_STARTUPINFO_PRESENT;
 
-  if (base::win::GetVersion() < base::win::VERSION_WIN8) {
+  if (job_ && base::win::GetVersion() < base::win::VERSION_WIN8) {
     // Windows 8 implements nested jobs, but for older systems we need to
     // break out of any job we're in to enforce our restrictions.
     flags |= CREATE_BREAKAWAY_FROM_JOB;
@@ -137,7 +138,7 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
                               cmd_line.get(),
                               NULL,   // No security attribute.
                               NULL,   // No thread attribute.
-                              FALSE,  // Do not inherit handles.
+                              inherit_handles,
                               flags,
                               NULL,   // Use the environment of the caller.
                               NULL,   // Use current directory of the caller.
@@ -149,13 +150,13 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
 
   DWORD win_result = ERROR_SUCCESS;
 
-  // Assign the suspended target to the windows job object.
-  if (!::AssignProcessToJobObject(job_, process_info.process_handle())) {
-    win_result = ::GetLastError();
-    // It might be a security breach if we let the target run outside the job
-    // so kill it before it causes damage.
-    ::TerminateProcess(process_info.process_handle(), 0);
-    return win_result;
+  if (job_) {
+    // Assign the suspended target to the windows job object.
+    if (!::AssignProcessToJobObject(job_, process_info.process_handle())) {
+      win_result = ::GetLastError();
+      ::TerminateProcess(process_info.process_handle(), 0);
+      return win_result;
+    }
   }
 
   if (initial_token_.IsValid()) {
@@ -165,6 +166,8 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
     HANDLE temp_thread = process_info.thread_handle();
     if (!::SetThreadToken(&temp_thread, initial_token_)) {
       win_result = ::GetLastError();
+      // It might be a security breach if we let the target run outside the job
+      // so kill it before it causes damage.
       ::TerminateProcess(process_info.process_handle(), 0);
       return win_result;
     }
@@ -196,7 +199,7 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
   }
 
   base_address_ = GetBaseAddress(exe_path, entry_point);
-  sandbox_process_info_.Swap(&process_info);
+  sandbox_process_info_.Set(process_info.Take());
   return win_result;
 }
 
@@ -322,10 +325,11 @@ void TargetProcess::Terminate() {
   ::TerminateProcess(sandbox_process_info_.process_handle(), 0);
 }
 
-
 TargetProcess* MakeTestTargetProcess(HANDLE process, HMODULE base_address) {
   TargetProcess* target = new TargetProcess(NULL, NULL, NULL, NULL);
-  target->sandbox_process_info_.Receive()->hProcess = process;
+  PROCESS_INFORMATION process_info = {};
+  process_info.hProcess = process;
+  target->sandbox_process_info_.Set(process_info);
   target->base_address_ = base_address;
   return target;
 }

@@ -48,5 +48,4 @@
 #
 # START OVERRIDES HERE
 
-
 # END OVERRIDES HERE (this line ensures that the file is newline-terminated)

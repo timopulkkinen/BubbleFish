@@ -4,16 +4,20 @@
 
 #include "content/browser/ssl/ssl_manager.h"
 
+#include <set>
+
 #include "base/bind.h"
+#include "base/supports_user_data.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
-#include "content/browser/renderer_host/resource_request_info_impl.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_policy.h"
 #include "content/browser/ssl/ssl_request_info.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/ssl_status_serialization.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/load_from_memory_cache_details.h"
 #include "content/public/browser/navigation_details.h"
@@ -23,21 +27,31 @@
 #include "content/public/common/ssl_status.h"
 #include "net/url_request/url_request.h"
 
-using content::BrowserThread;
-using content::NavigationController;
-using content::NavigationEntry;
-using content::NavigationEntryImpl;
-using content::ResourceDispatcherHostImpl;
-using content::ResourceRedirectDetails;
-using content::ResourceRequestDetails;
-using content::ResourceRequestInfoImpl;
-using content::SSLStatus;
-using content::WebContents;
+namespace content {
+
+namespace {
+
+const char kSSLManagerKeyName[] = "content_ssl_manager";
+
+class SSLManagerSet : public base::SupportsUserData::Data {
+ public:
+  SSLManagerSet() {
+  }
+
+  std::set<SSLManager*>& get() { return set_; }
+
+ private:
+  std::set<SSLManager*> set_;
+
+  DISALLOW_COPY_AND_ASSIGN(SSLManagerSet);
+};
+
+}  // namespace
 
 // static
 void SSLManager::OnSSLCertificateError(
     const base::WeakPtr<SSLErrorHandler::Delegate>& delegate,
-    const content::GlobalRequestID& id,
+    const GlobalRequestID& id,
     const ResourceType::Type resource_type,
     const GURL& url,
     int render_process_id,
@@ -70,12 +84,15 @@ void SSLManager::OnSSLCertificateError(
 }
 
 // static
-void SSLManager::NotifySSLInternalStateChanged(
-    NavigationControllerImpl* controller) {
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
-      content::Source<content::BrowserContext>(controller->GetBrowserContext()),
-      content::NotificationService::NoDetails());
+void SSLManager::NotifySSLInternalStateChanged(BrowserContext* context) {
+  SSLManagerSet* managers = static_cast<SSLManagerSet*>(
+      context->GetUserData(kSSLManagerKeyName));
+
+  for (std::set<SSLManager*>::iterator i = managers->get().begin();
+       i != managers->get().end(); ++i) {
+    (*i)->UpdateEntry(NavigationEntryImpl::FromNavigationEntry(
+                          (*i)->controller()->GetActiveEntry()));
+  }
 }
 
 SSLManager::SSLManager(NavigationControllerImpl* controller)
@@ -86,27 +103,34 @@ SSLManager::SSLManager(NavigationControllerImpl* controller)
 
   // Subscribe to various notifications.
   registrar_.Add(
-      this, content::NOTIFICATION_RESOURCE_RESPONSE_STARTED,
-      content::Source<WebContents>(controller_->web_contents()));
+      this, NOTIFICATION_RESOURCE_RESPONSE_STARTED,
+      Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
-      this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-      content::Source<WebContents>(controller_->web_contents()));
+      this, NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
+      Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
-      this, content::NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
-      content::Source<NavigationController>(controller_));
-  registrar_.Add(
-      this, content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
-      content::Source<content::BrowserContext>(
-          controller_->GetBrowserContext()));
+      this, NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
+      Source<NavigationController>(controller_));
+
+  SSLManagerSet* managers = static_cast<SSLManagerSet*>(
+      controller_->GetBrowserContext()->GetUserData(kSSLManagerKeyName));
+  if (!managers) {
+    managers = new SSLManagerSet;
+    controller_->GetBrowserContext()->SetUserData(kSSLManagerKeyName, managers);
+  }
+  managers->get().insert(this);
 }
 
 SSLManager::~SSLManager() {
+  SSLManagerSet* managers = static_cast<SSLManagerSet*>(
+      controller_->GetBrowserContext()->GetUserData(kSSLManagerKeyName));
+  managers->get().erase(this);
 }
 
 void SSLManager::DidCommitProvisionalLoad(
-    const content::NotificationDetails& in_details) {
-  content::LoadCommittedDetails* details =
-      content::Details<content::LoadCommittedDetails>(in_details).ptr();
+    const NotificationDetails& in_details) {
+  LoadCommittedDetails* details =
+      Details<LoadCommittedDetails>(in_details).ptr();
 
   NavigationEntryImpl* entry =
       NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry());
@@ -118,11 +142,11 @@ void SSLManager::DidCommitProvisionalLoad(
       net::CertStatus ssl_cert_status;
       int ssl_security_bits;
       int ssl_connection_status;
-      content::DeserializeSecurityInfo(details->serialized_security_info,
-                                       &ssl_cert_id,
-                                       &ssl_cert_status,
-                                       &ssl_security_bits,
-                                       &ssl_connection_status);
+      DeserializeSecurityInfo(details->serialized_security_info,
+                              &ssl_cert_id,
+                              &ssl_cert_status,
+                              &ssl_security_bits,
+                              &ssl_connection_status);
 
       // We may not have an entry if this is a navigation to an initial blank
       // page. Reset the SSL information and add the new data we have.
@@ -137,39 +161,41 @@ void SSLManager::DidCommitProvisionalLoad(
   UpdateEntry(entry);
 }
 
+void SSLManager::DidDisplayInsecureContent() {
+  UpdateEntry(
+      NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry()));
+}
+
 void SSLManager::DidRunInsecureContent(const std::string& security_origin) {
-  policy()->DidRunInsecureContent(
-      NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry()),
-      security_origin);
+  NavigationEntryImpl* navigation_entry =
+      NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry());
+  policy()->DidRunInsecureContent(navigation_entry, security_origin);
+  UpdateEntry(navigation_entry);
 }
 
 void SSLManager::Observe(int type,
-                         const content::NotificationSource& source,
-                         const content::NotificationDetails& details) {
+                         const NotificationSource& source,
+                         const NotificationDetails& details) {
   // Dispatch by type.
   switch (type) {
-    case content::NOTIFICATION_RESOURCE_RESPONSE_STARTED:
+    case NOTIFICATION_RESOURCE_RESPONSE_STARTED:
       DidStartResourceResponse(
-          content::Details<ResourceRequestDetails>(details).ptr());
+          Details<ResourceRequestDetails>(details).ptr());
       break;
-    case content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT:
+    case NOTIFICATION_RESOURCE_RECEIVED_REDIRECT:
       DidReceiveResourceRedirect(
-          content::Details<ResourceRedirectDetails>(details).ptr());
+          Details<ResourceRedirectDetails>(details).ptr());
       break;
-    case content::NOTIFICATION_LOAD_FROM_MEMORY_CACHE:
+    case NOTIFICATION_LOAD_FROM_MEMORY_CACHE:
       DidLoadFromMemoryCache(
-          content::Details<content::LoadFromMemoryCacheDetails>(details).ptr());
-      break;
-    case content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED:
-      DidChangeSSLInternalState();
+          Details<LoadFromMemoryCacheDetails>(details).ptr());
       break;
     default:
       NOTREACHED() << "The SSLManager received an unexpected notification.";
   }
 }
 
-void SSLManager::DidLoadFromMemoryCache(
-    content::LoadFromMemoryCacheDetails* details) {
+void SSLManager::DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details) {
   // Simulate loading this resource through the usual path.
   // Note that we specify SUB_RESOURCE as the resource type as WebCore only
   // caches sub-resources.
@@ -208,11 +234,6 @@ void SSLManager::DidReceiveResourceRedirect(ResourceRedirectDetails* details) {
   //               HTTP request to https://attacker.com/payload.js.
 }
 
-void SSLManager::DidChangeSSLInternalState() {
-  UpdateEntry(
-      NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry()));
-}
-
 void SSLManager::UpdateEntry(NavigationEntryImpl* entry) {
   // We don't always have a navigation entry to update, for example in the
   // case of the Web Inspector.
@@ -223,10 +244,8 @@ void SSLManager::UpdateEntry(NavigationEntryImpl* entry) {
 
   policy()->UpdateEntry(entry, controller_->web_contents());
 
-  if (!entry->GetSSL().Equals(original_ssl_status)) {
-    content::NotificationService::current()->Notify(
-        content::NOTIFICATION_SSL_VISIBLE_STATE_CHANGED,
-        content::Source<NavigationController>(controller_),
-        content::NotificationService::NoDetails());
-  }
+  if (!entry->GetSSL().Equals(original_ssl_status))
+    controller_->web_contents()->DidChangeVisibleSSLState();
 }
+
+}  // namespace content

@@ -4,11 +4,13 @@
 #include "chrome/browser/net/http_server_properties_manager.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -57,7 +59,10 @@ HttpServerPropertiesManager::HttpServerPropertiesManager(
   ui_cache_update_timer_.reset(
       new base::OneShotTimer<HttpServerPropertiesManager>);
   pref_change_registrar_.Init(pref_service_);
-  pref_change_registrar_.Add(prefs::kHttpServerProperties, this);
+  pref_change_registrar_.Add(
+      prefs::kHttpServerProperties,
+      base::Bind(&HttpServerPropertiesManager::OnHttpServerPropertiesChanged,
+                 base::Unretained(this)));
 }
 
 HttpServerPropertiesManager::~HttpServerPropertiesManager() {
@@ -86,16 +91,22 @@ void HttpServerPropertiesManager::ShutdownOnUIThread() {
 }
 
 // static
-void HttpServerPropertiesManager::RegisterPrefs(PrefService* prefs) {
+void HttpServerPropertiesManager::RegisterUserPrefs(
+    PrefRegistrySyncable* prefs) {
   prefs->RegisterDictionaryPref(prefs::kHttpServerProperties,
-                                PrefService::UNSYNCABLE_PREF);
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
+// This is required for conformance with the HttpServerProperties interface.
 void HttpServerPropertiesManager::Clear() {
+  Clear(base::Closure());
+}
+
+void HttpServerPropertiesManager::Clear(const base::Closure& completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   http_server_properties_impl_->Clear();
-  ScheduleUpdatePrefsOnIO();
+  UpdatePrefsFromCacheOnIO(completion);
 }
 
 bool HttpServerPropertiesManager::SupportsSpdy(
@@ -401,17 +412,23 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnIO(
   // preferences. Update the cached data with new data from preferences.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
+  UMA_HISTOGRAM_COUNTS("Net.CountOfSpdyServers", spdy_servers->size());
   http_server_properties_impl_->InitializeSpdyServers(spdy_servers, true);
 
   // Clear the cached data and use the new spdy_settings from preferences.
+  UMA_HISTOGRAM_COUNTS("Net.CountOfSpdySettings", spdy_settings_map->size());
   http_server_properties_impl_->InitializeSpdySettingsServers(
       spdy_settings_map);
 
   // Clear the cached data and use the new Alternate-Protocol server list from
   // preferences.
+  UMA_HISTOGRAM_COUNTS("Net.CountOfAlternateProtocolServers",
+                       alternate_protocol_map->size());
   http_server_properties_impl_->InitializeAlternateProtocolServers(
       alternate_protocol_map);
 
+  UMA_HISTOGRAM_COUNTS("Net.CountOfPipelineCapableServers",
+                       pipeline_capability_map->size());
   http_server_properties_impl_->InitializePipelineCapabilities(
       pipeline_capability_map);
 
@@ -441,7 +458,13 @@ void HttpServerPropertiesManager::StartPrefsUpdateTimerOnIO(
       &HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO);
 }
 
+// This is required so we can set this as the callback for a timer.
 void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO() {
+  UpdatePrefsFromCacheOnIO(base::Closure());
+}
+
+void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO(
+    const base::Closure& completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   base::ListValue* spdy_server_list = new base::ListValue;
@@ -469,7 +492,8 @@ void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO() {
                  base::Owned(spdy_server_list),
                  base::Owned(spdy_settings_map),
                  base::Owned(alternate_protocol_map),
-                 base::Owned(pipeline_capability_map)));
+                 base::Owned(pipeline_capability_map),
+                 completion));
 }
 
 // A local or temporary data structure to hold |supports_spdy|, SpdySettings,
@@ -500,7 +524,8 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     base::ListValue* spdy_server_list,
     net::SpdySettingsMap* spdy_settings_map,
     net::AlternateProtocolMap* alternate_protocol_map,
-    net::PipelineCapabilityMap* pipeline_capability_map) {
+    net::PipelineCapabilityMap* pipeline_capability_map,
+    const base::Closure& completion) {
 
   typedef std::map<net::HostPortPair, ServerPref> ServerPrefMap;
   ServerPrefMap server_pref_map;
@@ -634,23 +659,19 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
   pref_service_->Set(prefs::kHttpServerProperties,
                      http_server_properties_dict);
   setting_prefs_ = false;
+
+  // Note that |completion| will be fired after we have written everything to
+  // the Preferences, but likely before these changes are serialized to disk.
+  // This is not a problem though, as JSONPrefStore guarantees that this will
+  // happen, pretty soon, and even in the case we shut down immediately.
+  if (!completion.is_null())
+    completion.Run();
 }
 
-void HttpServerPropertiesManager::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void HttpServerPropertiesManager::OnHttpServerPropertiesChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(type == chrome::NOTIFICATION_PREF_CHANGED);
-  PrefService* prefs = content::Source<PrefService>(source).ptr();
-  DCHECK(prefs == pref_service_);
-  std::string* pref_name = content::Details<std::string>(details).ptr();
-  if (*pref_name == prefs::kHttpServerProperties) {
-    if (!setting_prefs_)
-      ScheduleUpdateCacheOnUI();
-  } else {
-    NOTREACHED();
-  }
+  if (!setting_prefs_)
+    ScheduleUpdateCacheOnUI();
 }
 
 }  // namespace chrome_browser_net

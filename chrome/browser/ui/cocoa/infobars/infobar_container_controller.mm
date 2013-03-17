@@ -6,14 +6,13 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -29,15 +28,16 @@ class InfoBarNotificationObserver : public content::NotificationObserver {
 
  private:
   // NotificationObserver implementation
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
-    InfoBarTabHelper* infobar_helper =
-        content::Source<InfoBarTabHelper>(source).ptr();
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
+    InfoBarService* infobar_service =
+        content::Source<InfoBarService>(source).ptr();
     switch (type) {
       case chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED:
         [controller_ addInfoBar:content::Details<InfoBarAddedDetails>(details)->
-                                    CreateInfoBar(infobar_helper)
+                                    CreateInfoBar(infobar_service)
                         animate:YES];
         break;
 
@@ -56,7 +56,7 @@ class InfoBarNotificationObserver : public content::NotificationObserver {
         [controller_ closeInfoBarsForDelegate:replaced_details->first
                                       animate:NO];
         [controller_ addInfoBar:replaced_details->second->
-                                    CreateInfoBar(infobar_helper)
+                                    CreateInfoBar(infobar_service)
                         animate:NO];
         break;
       }
@@ -136,21 +136,21 @@ class InfoBarNotificationObserver : public content::NotificationObserver {
   return controller;
 }
 
-- (void)changeTabContents:(TabContents*)contents {
+- (void)changeWebContents:(content::WebContents*)contents {
   registrar_.RemoveAll();
   [self removeAllInfoBars];
 
-  currentTabContents_ = contents;
-  if (currentTabContents_) {
-    InfoBarTabHelper* infobar_helper =
-        currentTabContents_->infobar_tab_helper();
-    for (size_t i = 0; i < infobar_helper->GetInfoBarCount(); ++i) {
-      InfoBar* infobar = infobar_helper->
-          GetInfoBarDelegateAt(i)->CreateInfoBar(infobar_helper);
+  currentWebContents_ = contents;
+  if (currentWebContents_) {
+    InfoBarService* infobarService =
+        InfoBarService::FromWebContents(currentWebContents_);
+    for (size_t i = 0; i < infobarService->GetInfoBarCount(); ++i) {
+      InfoBar* infobar = infobarService->
+          GetInfoBarDelegateAt(i)->CreateInfoBar(infobarService);
       [self addInfoBar:infobar animate:NO];
     }
 
-    content::Source<InfoBarTabHelper> source(infobar_helper);
+    content::Source<InfoBarService> source(infobarService);
     registrar_.Add(infoBarObserver_.get(),
                    chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED, source);
     registrar_.Add(infoBarObserver_.get(),
@@ -162,9 +162,9 @@ class InfoBarNotificationObserver : public content::NotificationObserver {
   [self positionInfoBarsAndRedraw];
 }
 
-- (void)tabDetachedWithContents:(TabContents*)contents {
-  if (currentTabContents_ == contents)
-    [self changeTabContents:NULL];
+- (void)tabDetachedWithContents:(content::WebContents*)contents {
+  if (currentWebContents_ == contents)
+    [self changeWebContents:NULL];
 }
 
 - (NSUInteger)infobarCount {

@@ -7,35 +7,63 @@
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
-AppListControllerAsh::AppListControllerAsh() {}
+AppListControllerDelegateAsh::AppListControllerDelegateAsh() {}
 
-AppListControllerAsh::~AppListControllerAsh() {}
+AppListControllerDelegateAsh::~AppListControllerDelegateAsh() {}
 
-void AppListControllerAsh::CloseView() {
+void AppListControllerDelegateAsh::DismissView() {
   DCHECK(ash::Shell::HasInstance());
   if (ash::Shell::GetInstance()->GetAppListTargetVisibility())
-    ash::Shell::GetInstance()->ToggleAppList();
+    ash::Shell::GetInstance()->ToggleAppList(NULL);
 }
 
-bool AppListControllerAsh::IsAppPinned(const std::string& extension_id) {
+gfx::NativeWindow AppListControllerDelegateAsh::GetAppListWindow() {
+  DCHECK(ash::Shell::HasInstance());
+  return ash::Shell::GetInstance()->GetAppListWindow();
+}
+
+bool AppListControllerDelegateAsh::IsAppPinned(
+    const std::string& extension_id) {
   return ChromeLauncherController::instance()->IsAppPinned(extension_id);
 }
 
-void AppListControllerAsh::PinApp(const std::string& extension_id) {
+void AppListControllerDelegateAsh::PinApp(const std::string& extension_id) {
   ChromeLauncherController::instance()->PinAppWithID(extension_id);
 }
 
-void AppListControllerAsh::UnpinApp(const std::string& extension_id) {
+void AppListControllerDelegateAsh::UnpinApp(const std::string& extension_id) {
   ChromeLauncherController::instance()->UnpinAppsWithID(extension_id);
 }
 
-bool AppListControllerAsh::CanPin() {
+bool AppListControllerDelegateAsh::CanPin() {
   return ChromeLauncherController::instance()->CanPin();
 }
 
-void AppListControllerAsh::ActivateApp(Profile* profile,
-                                       const std::string& extension_id,
-                                       int event_flags) {
-  ChromeLauncherController::instance()->OpenAppID(extension_id,
+bool AppListControllerDelegateAsh::CanShowCreateShortcutsDialog() {
+  return false;
+}
+
+void AppListControllerDelegateAsh::CreateNewWindow(bool incognito) {
+  if (incognito)
+    ChromeLauncherController::instance()->CreateNewIncognitoWindow();
+  else
+    ChromeLauncherController::instance()->CreateNewWindow();
+}
+
+void AppListControllerDelegateAsh::ActivateApp(
+    Profile* profile, const extensions::Extension* extension, int event_flags) {
+  ChromeLauncherController::instance()->ActivateApp(extension->id(),
+                                                    event_flags);
+  DismissView();
+}
+
+void AppListControllerDelegateAsh::LaunchApp(
+    Profile* profile, const extensions::Extension* extension, int event_flags) {
+  ChromeLauncherController::instance()->LaunchApp(extension->id(),
                                                   event_flags);
+  DismissView();
+}
+
+bool AppListControllerDelegateAsh::ShouldShowUserIcon() {
+  return false;
 }

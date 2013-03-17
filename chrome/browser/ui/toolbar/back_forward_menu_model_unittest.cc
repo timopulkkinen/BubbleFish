@@ -10,11 +10,12 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/test_browser_window.h"
@@ -46,7 +47,7 @@ class FaviconDelegate : public ui::MenuModelDelegate {
  public:
   FaviconDelegate() : was_called_(false) {}
 
-  void OnIconChanged(int model_index) {
+  virtual void OnIconChanged(int model_index) OVERRIDE {
     was_called_ = true;
     MessageLoop::current()->Quit();
   }
@@ -89,23 +90,23 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
   // will be pending after we ask to navigate there).
   void NavigateToOffset(int offset) {
     controller().GoToOffset(offset);
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   // Same as NavigateToOffset but goes to an absolute index.
   void NavigateToIndex(int index) {
     controller().GoToIndex(index);
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   // Goes back/forward and commits the load.
   void GoBack() {
     controller().GoBack();
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
   void GoForward() {
     controller().GoForward();
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   content::TestBrowserThread ui_thread_;
@@ -114,11 +115,11 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
 TEST_F(BackFwdMenuModelTest, BasicCase) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_EQ(0, forward_model->GetItemCount());
@@ -182,11 +183,11 @@ TEST_F(BackFwdMenuModelTest, BasicCase) {
 TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   // Seed the controller with 32 URLs
   LoadURLAndUpdateState("http://www.a.com/1", "A1");
@@ -264,11 +265,11 @@ TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
 TEST_F(BackFwdMenuModelTest, ChapterStops) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
     NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   // Seed the controller with 32 URLs.
   int i = 0;
@@ -475,7 +476,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
 TEST_F(BackFwdMenuModelTest, EscapeLabel) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_FALSE(back_model->ItemHasCommand(1));
@@ -506,8 +507,10 @@ TEST_F(BackFwdMenuModelTest, EscapeLabel) {
 TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   profile()->CreateHistoryService(true, false);
   profile()->CreateFaviconService();
+  Browser::CreateParams native_params(profile(),
+                                      chrome::HOST_DESKTOP_TYPE_NATIVE);
   scoped_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForProfile(profile()));
+      chrome::CreateBrowserWithTestWindowForParams(&native_params));
   FaviconDelegate favicon_delegate;
 
   BackForwardMenuModel back_model(
@@ -531,7 +534,8 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
           url1, base::Time::Now(), history::SOURCE_BROWSED);
   FaviconServiceFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS)->SetFavicons(
-          url1, url1_favicon, history::FAVICON, gfx::Image(new_icon_bitmap));
+          url1, url1_favicon, history::FAVICON,
+          gfx::Image::CreateFrom1xBitmap(new_icon_bitmap));
 
   // Will return the current icon (default) but start an anync call
   // to retrieve the favicon from the favicon service.
@@ -566,7 +570,7 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
                       new_icon_bitmap.getSize()));
 
   // Make sure the browser deconstructor doesn't have problems.
-  chrome::CloseAllTabs(browser.get());
+  browser->tab_strip_model()->CloseAllTabs();
   // This is required to prevent the message loop from hanging.
   profile()->DestroyHistoryService();
 }

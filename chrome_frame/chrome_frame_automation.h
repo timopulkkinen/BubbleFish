@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/stack_container.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_handle.h"
-#include "base/stack_container.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
@@ -107,7 +107,7 @@ class ChromeFrameLaunchParams :  // NOLINT
     public base::RefCountedThreadSafe<ChromeFrameLaunchParams> {
  public:
   ChromeFrameLaunchParams(const GURL& url, const GURL& referrer,
-                          const FilePath& profile_path,
+                          const base::FilePath& profile_path,
                           const std::wstring& profile_name,
                           const std::wstring& language,
                           bool incognito, bool widget_mode,
@@ -149,7 +149,7 @@ class ChromeFrameLaunchParams :  // NOLINT
     referrer_ = referrer;
   }
 
-  const FilePath& profile_path() const {
+  const base::FilePath& profile_path() const {
     return profile_path_;
   }
 
@@ -194,7 +194,7 @@ class ChromeFrameLaunchParams :  // NOLINT
   int launch_timeout_;
   GURL url_;
   GURL referrer_;
-  FilePath profile_path_;
+  base::FilePath profile_path_;
   std::wstring profile_name_;
   std::wstring language_;
   bool version_check_;
@@ -294,7 +294,7 @@ class ProxyFactory {
                                        LaunchDelegate* delegate);
 
  private:
-  typedef StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
+  typedef base::StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
   Vector proxies_;
   // Lock if we are going to call GetAutomationServer from more than one thread.
   base::Lock lock_;

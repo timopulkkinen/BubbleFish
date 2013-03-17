@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
@@ -21,8 +22,9 @@
 #include "content/public/common/result_codes.h"
 
 #if defined(OS_WIN)
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "content/common/sandbox_policy.h"
+#include "content/public/common/sandbox_init.h"
 #elif defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
 #elif defined(OS_ANDROID)
@@ -35,10 +37,10 @@
 #endif
 
 #if defined(OS_POSIX)
-#include "base/global_descriptors_posix.h"
+#include "base/posix/global_descriptors.h"
 #endif
 
-using content::BrowserThread;
+namespace content {
 
 // Having the functionality of ChildProcessLauncher be in an internal
 // ref counted object allows us to automatically terminate the process when the
@@ -50,7 +52,7 @@ class ChildProcessLauncher::Context
       : client_(NULL),
         client_thread_id_(BrowserThread::UI),
         termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
-        exit_code_(content::RESULT_CODE_NORMAL_EXIT),
+        exit_code_(RESULT_CODE_NORMAL_EXIT),
         starting_(true)
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
         , zygote_(false)
@@ -66,7 +68,7 @@ class ChildProcessLauncher::Context
 
   void Launch(
 #if defined(OS_WIN)
-      const FilePath& exposed_dir,
+      const base::FilePath& exposed_dir,
 #elif defined(OS_ANDROID)
       int ipcfd,
 #elif defined(OS_POSIX)
@@ -75,6 +77,7 @@ class ChildProcessLauncher::Context
       int ipcfd,
 #endif
       CommandLine* cmd_line,
+      int child_process_id,
       Client* client) {
     client_ = client;
 
@@ -92,6 +95,7 @@ class ChildProcessLauncher::Context
             &Context::LaunchInternal,
             make_scoped_refptr(this),
             client_thread_id_,
+            child_process_id,
 #if defined(OS_WIN)
             exposed_dir,
 #elif defined(OS_ANDROID)
@@ -109,7 +113,9 @@ class ChildProcessLauncher::Context
       // |this_object| is NOT thread safe. Only use it to post a task back.
       scoped_refptr<Context> this_object,
       BrowserThread::ID client_thread_id,
+      const base::TimeTicks begin_launch_time,
       base::ProcessHandle handle) {
+    RecordHistograms(begin_launch_time);
     if (BrowserThread::CurrentlyOn(client_thread_id)) {
       // This is always invoked on the UI thread which is commonly the
       // |client_thread_id| so we can shortcut one PostTask.
@@ -144,12 +150,37 @@ class ChildProcessLauncher::Context
     Terminate();
   }
 
+  static void RecordHistograms(const base::TimeTicks begin_launch_time) {
+    base::TimeDelta launch_time = base::TimeTicks::Now() - begin_launch_time;
+    if (BrowserThread::CurrentlyOn(BrowserThread::PROCESS_LAUNCHER)) {
+      RecordLaunchHistograms(launch_time);
+    } else {
+      BrowserThread::PostTask(
+          BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
+          base::Bind(&ChildProcessLauncher::Context::RecordLaunchHistograms,
+                     launch_time));
+    }
+  }
+
+  static void RecordLaunchHistograms(const base::TimeDelta launch_time) {
+    // Log the launch time, separating out the first one (which will likely be
+    // slower due to the rest of the browser initializing at the same time).
+    static bool done_first_launch = false;
+    if (done_first_launch) {
+      UMA_HISTOGRAM_TIMES("MPArch.ChildProcessLaunchSubsequent", launch_time);
+    } else {
+      UMA_HISTOGRAM_TIMES("MPArch.ChildProcessLaunchFirst", launch_time);
+      done_first_launch = true;
+    }
+  }
+
   static void LaunchInternal(
       // |this_object| is NOT thread safe. Only use it to post a task back.
       scoped_refptr<Context> this_object,
       BrowserThread::ID client_thread_id,
+      int child_process_id,
 #if defined(OS_WIN)
-      const FilePath& exposed_dir,
+      const base::FilePath& exposed_dir,
 #elif defined(OS_ANDROID)
       int ipcfd,
 #elif defined(OS_POSIX)
@@ -159,24 +190,29 @@ class ChildProcessLauncher::Context
 #endif
       CommandLine* cmd_line) {
     scoped_ptr<CommandLine> cmd_line_deleter(cmd_line);
+    base::TimeTicks begin_launch_time = base::TimeTicks::Now();
 
 #if defined(OS_WIN)
-    base::ProcessHandle handle = sandbox::StartProcessWithAccess(
-        cmd_line, exposed_dir);
+    base::ProcessHandle handle = StartProcessWithAccess(cmd_line, exposed_dir);
 #elif defined(OS_ANDROID)
+    // Android WebView runs in single process, ensure that we never get here
+    // when running in single process mode.
+    CHECK(!cmd_line->HasSwitch(switches::kSingleProcess));
+
     std::string process_type =
         cmd_line->GetSwitchValueASCII(switches::kProcessType);
-    std::vector<content::FileDescriptorInfo> files_to_register;
+    std::vector<FileDescriptorInfo> files_to_register;
     files_to_register.push_back(
-        content::FileDescriptorInfo(kPrimaryIPCChannel,
+        FileDescriptorInfo(kPrimaryIPCChannel,
                                     base::FileDescriptor(ipcfd, false)));
 
-    content::GetContentClient()->browser()->
-        GetAdditionalMappedFilesForChildProcess(*cmd_line, &files_to_register);
+    GetContentClient()->browser()->
+        GetAdditionalMappedFilesForChildProcess(*cmd_line, child_process_id,
+                                                &files_to_register);
 
-    content::StartSandboxedProcess(cmd_line->argv(), files_to_register,
+    StartSandboxedProcess(cmd_line->argv(), files_to_register,
         base::Bind(&ChildProcessLauncher::Context::OnSandboxedProcessStarted,
-                   this_object, client_thread_id));
+                   this_object, client_thread_id, begin_launch_time));
 
 #elif defined(OS_POSIX)
     base::ProcessHandle handle = base::kNullProcessHandle;
@@ -186,14 +222,15 @@ class ChildProcessLauncher::Context
 
     std::string process_type =
         cmd_line->GetSwitchValueASCII(switches::kProcessType);
-    std::vector<content::FileDescriptorInfo> files_to_register;
+    std::vector<FileDescriptorInfo> files_to_register;
     files_to_register.push_back(
-        content::FileDescriptorInfo(kPrimaryIPCChannel,
+        FileDescriptorInfo(kPrimaryIPCChannel,
                                     base::FileDescriptor(ipcfd, false)));
 
 #if !defined(OS_MACOSX)
-    content::GetContentClient()->browser()->
-        GetAdditionalMappedFilesForChildProcess(*cmd_line, &files_to_register);
+    GetContentClient()->browser()->
+        GetAdditionalMappedFilesForChildProcess(*cmd_line, child_process_id,
+                                                &files_to_register);
     if (use_zygote) {
       handle = ZygoteHostImpl::GetInstance()->ForkRequest(cmd_line->argv(),
                                                           files_to_register,
@@ -204,12 +241,11 @@ class ChildProcessLauncher::Context
     {
       // Convert FD mapping to FileHandleMappingVector
       base::FileHandleMappingVector fds_to_map;
-      for (std::vector<content::FileDescriptorInfo>::const_iterator
-           i = files_to_register.begin(); i != files_to_register.end(); ++i) {
-        const content::FileDescriptorInfo& fd_info = *i;
+      for (size_t i = 0; i < files_to_register.size(); ++i) {
         fds_to_map.push_back(std::make_pair(
-            fd_info.fd.fd,
-            fd_info.id + base::GlobalDescriptors::kBaseDescriptor));
+            files_to_register[i].fd.fd,
+            files_to_register[i].id +
+                base::GlobalDescriptors::kBaseDescriptor));
       }
 
 #if !defined(OS_MACOSX)
@@ -259,6 +295,8 @@ class ChildProcessLauncher::Context
     }
 #endif  // else defined(OS_POSIX)
 #if !defined(OS_ANDROID)
+  if (handle)
+    RecordHistograms(begin_launch_time);
   BrowserThread::PostTask(
       client_thread_id, FROM_HERE,
       base::Bind(
@@ -328,12 +366,12 @@ class ChildProcessLauncher::Context
       base::ProcessHandle handle) {
 #if defined(OS_ANDROID)
     LOG(INFO) << "ChromeProcess: Stopping process with handle " << handle;
-    content::StopSandboxedProcess(handle);
+    StopSandboxedProcess(handle);
 #else
     base::Process process(handle);
      // Client has gone away, so just kill the process.  Using exit code 0
     // means that UMA won't treat this as a crash.
-    process.Terminate(content::RESULT_CODE_NORMAL_EXIT);
+    process.Terminate(RESULT_CODE_NORMAL_EXIT);
     // On POSIX, we must additionally reap the child.
 #if defined(OS_POSIX)
 #if !defined(OS_MACOSX)
@@ -371,13 +409,14 @@ class ChildProcessLauncher::Context
 
 ChildProcessLauncher::ChildProcessLauncher(
 #if defined(OS_WIN)
-    const FilePath& exposed_dir,
+    const base::FilePath& exposed_dir,
 #elif defined(OS_POSIX)
     bool use_zygote,
     const base::EnvironmentVector& environ,
     int ipcfd,
 #endif
     CommandLine* cmd_line,
+    int child_process_id,
     Client* client) {
   context_ = new Context();
   context_->Launch(
@@ -391,6 +430,7 @@ ChildProcessLauncher::ChildProcessLauncher(
       ipcfd,
 #endif
       cmd_line,
+      child_process_id,
       client);
 }
 
@@ -408,6 +448,7 @@ base::ProcessHandle ChildProcessLauncher::GetHandle() {
 }
 
 base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
+    bool known_dead,
     int* exit_code) {
   base::ProcessHandle handle = context_->process_.handle();
   if (handle == base::kNullProcessHandle) {
@@ -419,7 +460,7 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   if (context_->zygote_) {
     context_->termination_status_ = ZygoteHostImpl::GetInstance()->
-        GetTerminationStatus(handle, &context_->exit_code_);
+        GetTerminationStatus(handle, known_dead, &context_->exit_code_);
   } else
 #endif
   {
@@ -455,3 +496,5 @@ void ChildProcessLauncher::SetTerminateChildOnShutdown(
   if (context_)
     context_->set_terminate_child_on_shutdown(terminate_on_shutdown);
 }
+
+}  // namespace content

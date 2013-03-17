@@ -3,22 +3,18 @@
  * found in the LICENSE file.
  */
 
-html[oobe=old] #gaia-signin {
-  -webkit-box-align: center;
-  -webkit-box-pack: center;
-  display: -webkit-box;
-  height: 470px;
-}
-
 #signin-right {
-  font-size: 12px;
+  -webkit-margin-before: 80px;
+  -webkit-margin-start: 30px;
   top: 60px;
   width: 200px;
 }
 
-html[oobe=old] #signin-right {
-  position: absolute;
+#signin-right,
+#enterprise-info-container {
+  font-size: 12px;
 }
+
 
 /*  For touch-optimized UI, make the links bigger. */
 @media (pointer:coarse) {
@@ -27,20 +23,8 @@ html[oobe=old] #signin-right {
   }
 }
 
-html[dir=ltr][oobe=old] #signin-right {
-  right: -150px;  /* ('gaia-sign'.width - 'signin-frame'.width) / 2 -
-                     desiredGap - 'signin-right'.width =
-                     (640 - 340) / 2 - 100 - 200 = -150
-                   */
-}
-
-html[dir=rtl][oobe=old] #signin-right {
-  left: -150px;
-}
-
-html[oobe=new] #signin-right {
-  -webkit-margin-before: 80px;
-  -webkit-margin-start: 30px;
+.no-right-panel #signin-right {
+  display: none;
 }
 
 .signin-text {
@@ -54,19 +38,29 @@ html[oobe=new] #signin-right {
   text-decoration: none;
 }
 
+.signin-link:focus {
+  -webkit-transition: outline-color 200ms;
+  /* Note: May use 1px solid here. */
+  outline-color: rgb(77, 144, 254);
+}
+
 #signin-frame {
-  height: 100%;
+  /* TODO(nkostylev): Figure out why height: 100% stopped working (gives
+    same resalt as not specifying it). Specifying content size from
+    .step-contents for now. Working at r182673, broken at r183121. */
+  background-color: transparent;
+  border-right: 1px solid lightgray;
+  height: 470px;
   width: 340px;
 }
 
-html[oobe=old] #signin-frame {
-  background-color: #fefefe;
-  border: 1px solid lightgray;
+html[dir=rtl] #signin-frame {
+  border-left: 1px solid lightgray;
+  border-right: none;
 }
 
-html[oobe=new] #signin-frame {
-  background-color: transparent;
-  border-right: 1px solid lightgray;
+.no-right-panel #signin-frame {
+  border: none;
 }
 
 /* Position to be aligned with the login box in iframe  */
@@ -76,4 +70,16 @@ html[oobe=new] #signin-frame {
   top: 77px;
   visibility: hidden;
   z-index: -1;
+}
+
+#enterprise-info-container {
+  bottom: 10px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  text-align: center;
+}
+
+#enterprise-info-container #enterprise-info {
+  display: inline-block;
 }

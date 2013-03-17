@@ -6,19 +6,38 @@
 #define UI_AURA_TEST_TEST_SCREEN_H_
 
 #include "base/compiler_specific.h"
-#include "ui/gfx/screen_impl.h"
+#include "ui/aura/window_observer.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
+
+namespace gfx {
+class Rect;
+}
 
 namespace aura {
 class RootWindow;
+class Window;
 
 // A minimal, testing Aura implementation of gfx::Screen.
-class TestScreen : public gfx::ScreenImpl {
+class TestScreen : public gfx::Screen,
+                   public WindowObserver {
  public:
-  explicit TestScreen(aura::RootWindow* root_window);
+  static TestScreen* Create();
+  // Creates a TestScreen that uses fullscreen for the display.
+  static TestScreen* CreateFullscreen();
   virtual ~TestScreen();
 
+  RootWindow* CreateRootWindowForPrimaryDisplay();
+
  protected:
-  // gfx::ScreenImpl overrides:
+  // WindowObserver overrides:
+  virtual void OnWindowBoundsChanged(Window* window,
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void OnWindowDestroying(Window* window) OVERRIDE;
+
+  // gfx::Screen overrides:
+  virtual bool IsDIPEnabled() OVERRIDE;
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
   virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE;
   virtual int GetNumDisplays() OVERRIDE;
@@ -29,11 +48,15 @@ class TestScreen : public gfx::ScreenImpl {
   virtual gfx::Display GetDisplayMatching(
       const gfx::Rect& match_rect) const OVERRIDE;
   virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
+  virtual void AddObserver(gfx::DisplayObserver* observer) OVERRIDE;
+  virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE;
 
  private:
-  gfx::Display GetMonitor() const;
+  explicit TestScreen(const gfx::Rect& screen_bounds);
 
   aura::RootWindow* root_window_;
+
+  gfx::Display display_;
 
   DISALLOW_COPY_AND_ASSIGN(TestScreen);
 };
