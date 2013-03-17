@@ -59,6 +59,7 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -116,7 +117,6 @@
 #include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/screen_capture_infobar_delegate.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
@@ -189,11 +189,11 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
-#include "chrome/browser/autofill/autofill_ie_toolbar_import_win.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "components/autofill/browser/autofill_ie_toolbar_import_win.h"
 #include "ui/base/win/shell.h"
 #endif  // OS_WIN
 
@@ -368,7 +368,7 @@ Browser::Browser(const CreateParams& params)
   tab_strip_model_->AddObserver(this);
 
   toolbar_model_.reset(new ToolbarModelImpl(toolbar_model_delegate_.get()));
-  search_model_.reset(new chrome::search::SearchModel(NULL));
+  search_model_.reset(new chrome::search::SearchModel());
   search_delegate_.reset(
       new chrome::search::SearchDelegate(search_model_.get(),
                                          toolbar_model_.get()));
@@ -1014,6 +1014,8 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
                                WebContents* new_contents,
                                int index,
                                bool user_gesture) {
+  content::RecordAction(UserMetricsAction("ActiveTabChanged"));
+
   // On some platforms we want to automatically reload tabs that are
   // killed when the user selects them.
   bool did_reload = false;
@@ -1241,24 +1243,38 @@ void Browser::MaybeUpdateBookmarkBarStateForInstantOverlay(
   }
 }
 
+void Browser::ShowDownload(content::DownloadItem* download) {
+  if (!window())
+    return;
+
+  // If the download occurs in a new tab, and it's not a save page
+  // download (started before initial navigation completed) close it.
+  WebContents* source = download->GetWebContents();
+  if (source && source->GetController().IsInitialNavigation() &&
+      tab_strip_model_->count() > 1 && !download->IsSavePackageDownload()) {
+    CloseContents(source);
+  }
+
+  // Some (app downloads) are not supposed to appear on the shelf.
+  if (!DownloadItemModel(download).ShouldShowInShelf())
+    return;
+
+  // GetDownloadShelf creates the download shelf if it was not yet created.
+  DownloadShelf* shelf = window()->GetDownloadShelf();
+  shelf->AddDownload(download);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, content::WebContentsDelegate implementation:
 
 WebContents* Browser::OpenURLFromTab(WebContents* source,
                                      const OpenURLParams& params) {
   chrome::NavigateParams nav_params(this, params.url, params.transition);
+  FillNavigateParamsFromOpenURLParams(&nav_params, params);
   nav_params.source_contents = source;
-  nav_params.referrer = params.referrer;
-  nav_params.extra_headers = params.extra_headers;
-  nav_params.disposition = params.disposition;
   nav_params.tabstrip_add_types = TabStripModel::ADD_NONE;
   nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   nav_params.user_gesture = true;
-  nav_params.override_encoding = params.override_encoding;
-  nav_params.is_renderer_initiated = params.is_renderer_initiated;
-  nav_params.transferred_global_request_id =
-      params.transferred_global_request_id;
-  nav_params.is_cross_site_redirect = params.is_cross_site_redirect;
   chrome::Navigate(&nav_params);
 
   return nav_params.target_contents;
@@ -1384,7 +1400,9 @@ void Browser::BeforeUnloadFired(WebContents* web_contents,
 }
 
 bool Browser::ShouldFocusLocationBarByDefault(WebContents* source) {
-  return chrome::search::IsInstantNTP(source);
+  const content::NavigationEntry* entry =
+      source->GetController().GetActiveEntry();
+  return chrome::search::NavEntryIsInstantNTP(source, entry);
 }
 
 void Browser::SetFocusToLocationBar(bool select_all) {
@@ -1406,15 +1424,10 @@ int Browser::GetExtraRenderViewHeight() const {
   return window_->GetExtraRenderViewHeight();
 }
 
+<<<<<<< HEAD
 void Browser::OnStartDownload(WebContents* source,
                               content::DownloadItem* download) {
-<<<<<<< HEAD
   return;
-=======
-  if (!DownloadItemModel(download).ShouldShowInShelf())
-    return;
-
->>>>>>> master
   WebContents* constrained = GetConstrainingWebContents(source);
   if (constrained != source) {
     // Download in a constrained popup is shown in the tab that opened it.
@@ -1436,6 +1449,8 @@ void Browser::OnStartDownload(WebContents* source,
     CloseContents(source);
 }
 
+=======
+>>>>>>> master
 void Browser::ViewSourceForTab(WebContents* source, const GURL& page_url) {
   DCHECK(source);
   chrome::ViewSource(this, source);
@@ -1869,7 +1884,7 @@ void Browser::UpdateToolbar(bool should_restore_state) {
 }
 
 void Browser::UpdateSearchState(WebContents* contents) {
-  if (chrome::search::IsInstantExtendedAPIEnabled(profile_))
+  if (chrome::search::IsInstantExtendedAPIEnabled())
     search_delegate_->OnTabActivated(contents);
 }
 
@@ -2161,15 +2176,15 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
     state = BookmarkBar::HIDDEN;
 #endif
 
+  // Don't allow detached bookmark bar to be shown in suggestions or results
+  // modes.
+  if (state == BookmarkBar::DETACHED && search_model_->mode().is_search())
+    state = BookmarkBar::HIDDEN;
+
   if (state == bookmark_bar_state_)
     return;
 
   bookmark_bar_state_ = state;
-
-  // Inform NTP page of change in bookmark bar state, so that it can adjust the
-  // theme image top offset if necessary.
-  if (instant_controller_)
-    instant_controller_->UpdateThemeInfo(true);
 
   if (!window_)
     return;  // This is called from the constructor when window_ is NULL.
