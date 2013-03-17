@@ -165,7 +165,9 @@ void NativeTextfieldViews::OnGestureEvent(ui::GestureEvent* event) {
       event->SetHandled();
       break;
     case ui::ET_GESTURE_DOUBLE_TAP:
+      OnBeforeUserAction();
       SelectAll(false);
+      OnAfterUserAction();
       event->SetHandled();
       break;
     case ui::ET_GESTURE_SCROLL_UPDATE:
@@ -356,6 +358,10 @@ void NativeTextfieldViews::SelectRect(const gfx::Point& start,
   OnAfterUserAction();
 }
 
+void NativeTextfieldViews::MoveCaretTo(const gfx::Point& point) {
+  SelectRect(point, point);
+}
+
 void NativeTextfieldViews::GetSelectionEndPoints(gfx::Rect* p1,
                                                  gfx::Rect* p2) {
   gfx::RenderText* render_text = GetRenderText();
@@ -491,19 +497,15 @@ string16 NativeTextfieldViews::GetSelectedText() const {
 }
 
 void NativeTextfieldViews::SelectAll(bool reversed) {
-  OnBeforeUserAction();
   model_->SelectAll(reversed);
   OnCaretBoundsChanged();
   SchedulePaint();
-  OnAfterUserAction();
 }
 
 void NativeTextfieldViews::ClearSelection() {
-  OnBeforeUserAction();
   model_->ClearSelection();
   OnCaretBoundsChanged();
   SchedulePaint();
-  OnAfterUserAction();
 }
 
 void NativeTextfieldViews::UpdateBorder() {
@@ -697,7 +699,7 @@ int NativeTextfieldViews::GetTextfieldBaseline() const {
 }
 
 void NativeTextfieldViews::ExecuteTextCommand(int command_id) {
-  ExecuteCommand(command_id);
+  ExecuteCommand(command_id, 0);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -743,7 +745,7 @@ string16 NativeTextfieldViews::GetLabelForCommandId(int command_id) const {
   return controller ? controller->GetLabelForCommandId(command_id) : string16();
 }
 
-void NativeTextfieldViews::ExecuteCommand(int command_id) {
+void NativeTextfieldViews::ExecuteCommand(int command_id, int event_flags) {
   touch_selection_controller_.reset();
   if (!IsCommandIdEnabled(command_id))
     return;
@@ -752,7 +754,7 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
   OnBeforeUserAction();
   TextfieldController* controller = textfield_->GetController();
   if (controller && controller->HandlesCommand(command_id)) {
-    controller->ExecuteCommand(command_id);
+    controller->ExecuteCommand(command_id, 0);
   } else {
     switch (command_id) {
       case IDS_APP_CUT:
@@ -771,7 +773,7 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
         SelectAll(false);
         break;
       default:
-        controller->ExecuteCommand(command_id);
+        controller->ExecuteCommand(command_id, 0);
         break;
     }
   }
@@ -1079,8 +1081,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
   // TODO(oshima): Refactor and consolidate with ExecuteCommand.
   if (key_event.type() == ui::ET_KEY_PRESSED) {
     ui::KeyboardCode key_code = key_event.key_code();
-    // TODO(oshima): shift-tab does not work. Figure out why and fix.
-    if (key_code == ui::VKEY_TAB)
+    if (key_code == ui::VKEY_TAB || key_event.IsUnicodeKeyCode())
       return false;
 
     OnBeforeUserAction();
@@ -1347,6 +1348,7 @@ void NativeTextfieldViews::HandleMousePressEvent(const ui::MouseEvent& event) {
           MoveCursorTo(event.location(), event.IsShiftDown());
         break;
       case 1:
+        MoveCursorTo(event.location(), false);
         model_->SelectWord();
         OnCaretBoundsChanged();
         break;

@@ -36,10 +36,8 @@ def Dispatch(options):
                                     'apks',
                                     constants.BROWSERTEST_SUITE_NAME + '.apk')
 
-  options.test_arguments = '--single_process %s' % options.test_arguments
-
   # Constructs a new TestRunner with the current options.
-  def RunnerFactory(device):
+  def RunnerFactory(device, shard_index):
     return test_runner.TestRunner(
         device,
         options.test_suite,

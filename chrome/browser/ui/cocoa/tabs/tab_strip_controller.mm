@@ -37,6 +37,7 @@
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_audio_indicator_view_mac.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_projecting_image_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
@@ -45,7 +46,6 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbbing_image_view.h"
-#import "chrome/browser/ui/cocoa/tracking_area.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
@@ -65,6 +65,7 @@
 #include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "ui/base/cocoa/tracking_area.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -110,9 +111,6 @@ const CGFloat kProjectingIconWidthAndHeight = 32.0;
 
 // Throbbing duration on webrtc "this web page is watching you" favicon overlay.
 const int kRecordingDurationMs = 1000;
-
-// Throbbing duration on audio playing animation.
-const int kAudioPlayingDurationMs = 2000;
 
 // Helper class for doing NSAnimationContext calls that takes a bool to disable
 // all the work.  Useful for code that wants to conditionally animate.
@@ -1575,6 +1573,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     if (newHasIcon) {
       if (newState == kTabDone) {
         NSImageView* imageView = [self iconImageViewForContents:contents];
+        TabAudioIndicatorViewMac* tabAudioIndicatorViewMac =
+            base::mac::ObjCCast<TabAudioIndicatorViewMac>(
+                [tabController iconView]);
 
         ui::ThemeProvider* theme = [[tabStripView_ window] themeProvider];
         if (theme && [tabController projecting]) {
@@ -1600,27 +1601,26 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
           NSRect frame =
               NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
           ThrobbingImageView* recordingView =
-              [[[ThrobbingImageView alloc] initWithFrame:frame
-                                         backgroundImage:[imageView image]
-                                              throbImage:recording
-                                              durationMS:kRecordingDurationMs]
-                  autorelease];
-
-          iconView = recordingView;
-        } else if (theme && chrome::IsPlayingAudio(contents)) {
-          NSImage* audioImage =
-              theme->GetNSImageNamed(IDR_AUDIO_ANIMATION, true);
-          NSRect frame =
-              NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
-          ThrobbingImageView* equalizerFaviconView =
               [[[ThrobbingImageView alloc]
                   initWithFrame:frame
                 backgroundImage:[imageView image]
-                     throbImage:audioImage
-                     durationMS:kAudioPlayingDurationMs] autorelease];
-          [equalizerFaviconView setTweenType:ui::Tween::LINEAR];
+                     throbImage:recording
+                     durationMS:kRecordingDurationMs
+                  throbPosition:kThrobPositionBottomRight] autorelease];
 
-          iconView = equalizerFaviconView;
+          iconView = recordingView;
+        } else if (chrome::IsPlayingAudio(contents) ||
+                   [tabAudioIndicatorViewMac isAnimating]) {
+          if (!tabAudioIndicatorViewMac) {
+            NSRect frame =
+                NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
+            tabAudioIndicatorViewMac = [[[TabAudioIndicatorViewMac alloc]
+                initWithFrame:frame] autorelease];
+          }
+          [tabAudioIndicatorViewMac
+              setIsPlayingAudio:chrome::IsPlayingAudio(contents)];
+          [tabAudioIndicatorViewMac setBackgroundImage:[imageView image]];
+          iconView = tabAudioIndicatorViewMac;
         } else {
           iconView = imageView;
         }

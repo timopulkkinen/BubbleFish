@@ -1153,6 +1153,11 @@ void GLES2TraceImplementation::AsyncTexImage2DCHROMIUM(
       pixels);
 }
 
+void GLES2TraceImplementation::WaitAsyncTexImage2DCHROMIUM(GLenum target) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::WaitAsyncTexImage2DCHROMIUM");  // NOLINT
+  gl_->WaitAsyncTexImage2DCHROMIUM(target);
+}
+
 void GLES2TraceImplementation::DiscardFramebufferEXT(
     GLenum target, GLsizei count, const GLenum* attachments) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::DiscardFramebufferEXT");
@@ -1165,9 +1170,20 @@ void GLES2TraceImplementation::LoseContextCHROMIUM(
   gl_->LoseContextCHROMIUM(current, other);
 }
 
+GLuint GLES2TraceImplementation::InsertSyncPointCHROMIUM() {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::InsertSyncPointCHROMIUM");
+  return gl_->InsertSyncPointCHROMIUM();
+}
+
 void GLES2TraceImplementation::WaitSyncPointCHROMIUM(GLuint sync_point) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::WaitSyncPointCHROMIUM");
   gl_->WaitSyncPointCHROMIUM(sync_point);
+}
+
+void GLES2TraceImplementation::DrawBuffersEXT(
+    GLsizei count, const GLenum* bufs) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::DrawBuffersEXT");
+  gl_->DrawBuffersEXT(count, bufs);
 }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_TRACE_IMPLEMENTATION_IMPL_AUTOGEN_H_

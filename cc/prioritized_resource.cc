@@ -95,12 +95,12 @@ void PrioritizedResource::setPixels(ResourceProvider* resourceProvider,
     if (m_isAbovePriorityCutoff)
         acquireBackingTexture(resourceProvider);
     DCHECK(m_backing);
-    resourceProvider->setPixels(resourceId(), image, imageRect, sourceRect, destOffset);
+    resourceProvider->SetPixels(resourceId(), image, imageRect, sourceRect, destOffset);
 
     // The component order may be bgra if we uploaded bgra pixels to rgba
     // texture. Mark contents as swizzled if image component order is
     // different than texture format.
-    m_contentsSwizzled = !PlatformColor::sameComponentOrder(m_format);
+    m_contentsSwizzled = !PlatformColor::SameComponentOrder(m_format);
 }
 
 void PrioritizedResource::link(Backing* backing)
@@ -150,32 +150,32 @@ PrioritizedResource::Backing::~Backing()
 
 void PrioritizedResource::Backing::deleteResource(ResourceProvider* resourceProvider)
 {
-    DCHECK(!proxy() || proxy()->isImplThread());
+    DCHECK(!proxy() || proxy()->IsImplThread());
     DCHECK(!m_resourceHasBeenDeleted);
 #ifndef NDEBUG
     DCHECK(resourceProvider == m_resourceProvider);
 #endif
 
-    resourceProvider->deleteResource(id());
+    resourceProvider->DeleteResource(id());
     set_id(0);
     m_resourceHasBeenDeleted = true;
 }
 
 bool PrioritizedResource::Backing::resourceHasBeenDeleted() const
 {
-    DCHECK(!proxy() || proxy()->isImplThread());
+    DCHECK(!proxy() || proxy()->IsImplThread());
     return m_resourceHasBeenDeleted;
 }
 
 bool PrioritizedResource::Backing::canBeRecycled() const
 {
-    DCHECK(!proxy() || proxy()->isImplThread());
+    DCHECK(!proxy() || proxy()->IsImplThread());
     return !m_wasAbovePriorityCutoffAtLastPriorityUpdate && !m_inDrawingImplTree;
 }
 
 void PrioritizedResource::Backing::updatePriority()
 {
-    DCHECK(!proxy() || proxy()->isImplThread() && proxy()->isMainThreadBlocked());
+    DCHECK(!proxy() || proxy()->IsImplThread() && proxy()->IsMainThreadBlocked());
     if (m_owner) {
         m_priorityAtLastPriorityUpdate = m_owner->requestPriority();
         m_wasAbovePriorityCutoffAtLastPriorityUpdate = m_owner->isAbovePriorityCutoff();
@@ -187,7 +187,7 @@ void PrioritizedResource::Backing::updatePriority()
 
 void PrioritizedResource::Backing::updateInDrawingImplTree()
 {
-    DCHECK(!proxy() || proxy()->isImplThread() && proxy()->isMainThreadBlocked());
+    DCHECK(!proxy() || proxy()->IsImplThread() && proxy()->IsMainThreadBlocked());
     m_inDrawingImplTree = !!owner();
     if (!m_inDrawingImplTree)
         DCHECK(m_priorityAtLastPriorityUpdate == PriorityCalculator::lowestPriority());

@@ -848,9 +848,6 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
 #endif
 
 #if !defined(NDEBUG)
-  // RotateScreen
-  EXPECT_TRUE(ProcessWithContext(
-      ui::Accelerator(ui::VKEY_HOME, ui::EF_CONTROL_DOWN)));
   // ToggleDesktopBackgroundMode
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)));
@@ -861,9 +858,11 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
 #endif //  OS_LINUX
 #endif //  !NDEBUG
 
+#if !defined(OS_WIN)
   // Exit
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN)));
+#endif
 
   // New tab
   EXPECT_TRUE(ProcessWithContext(
@@ -892,7 +891,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
 
   // Open file manager
   EXPECT_TRUE(ProcessWithContext(
-      ui::Accelerator(ui::VKEY_M, ui::EF_CONTROL_DOWN  | ui::EF_ALT_DOWN)));
+      ui::Accelerator(ui::VKEY_M, ui::EF_SHIFT_DOWN  | ui::EF_ALT_DOWN)));
 
   // Lock screen
   // NOTE: Accelerators that do not work on the lock screen need to be

@@ -5,41 +5,55 @@
 #ifndef UI_MESSAGE_CENTER_VIEWS_NOTIFICATION_VIEW_H_
 #define UI_MESSAGE_CENTER_VIEWS_NOTIFICATION_VIEW_H_
 
-#include "ui/message_center/notification_list.h"
+#include <vector>
+
 #include "ui/message_center/views/message_view.h"
 
 namespace message_center {
 
+class BoundedLabel;
+class NotificationChangeObserver;
+
 // View that displays all current types of notification (web, basic, image, and
 // list). Future notification types may be handled by other classes, in which
-// case instances of those classes would be returned by the
-// ViewForNotification() factory method below.
+// case instances of those classes would be returned by the Create() factory
+// method below.
 class NotificationView : public MessageView {
  public:
   // Creates appropriate MessageViews for notifications. Those currently are
-  // always NotificationView instances but in the future may be instances of
-  // other classes, with the class depending on the notification type.
+  // always NotificationView or MessageSimpleView instances but in the future
+  // may be instances of other classes, with the class depending on the
+  // notification type.
   static MessageView* Create(const Notification& notification,
-                             NotificationList::Delegate* list_delegate);
+                             NotificationChangeObserver* observer,
+                             bool expanded);
 
   virtual ~NotificationView();
 
-  // Overridden from View.
-  virtual void Layout() OVERRIDE;
+  // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual int GetHeightForWidth(int width) OVERRIDE;
+  virtual void Layout() OVERRIDE;
 
-  // Overridden from MessageView.
+  // Overridden from MessageView:
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
 
  private:
-  NotificationView(NotificationList::Delegate* list_delegate,
-                   const Notification& notification);
+  NotificationView(const Notification& notification,
+                   NotificationChangeObserver* observer,
+                   bool expanded);
 
-  views::View* MakeContentView(const Notification& notification);
-
-  views::View* content_view_;
-  std::vector<views::Button*> action_buttons_;
+  // Weak references to NotificationView descendants owned by their parents.
+  views::View* background_view_;
+  views::View* top_view_;
+  BoundedLabel* title_view_;
+  BoundedLabel* message_view_;
+  std::vector<views::View*> item_views_;
+  views::View* icon_view_;
+  views::View* bottom_view_;
+  views::View* image_view_;
+  std::vector<views::View*> action_buttons_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationView);
 };

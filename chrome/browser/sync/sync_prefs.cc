@@ -11,12 +11,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -74,9 +74,13 @@ void SyncPrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   RegisterDataTypePreferredPref(registry, syncer::BOOKMARKS, true);
   user_types.Remove(syncer::BOOKMARKS);
 
+  // All types are set to off by default, which forces a configuration to
+  // explicitly enable them. GetPreferredTypes() will ensure that any new
+  // implicit types are enabled when their pref group is, or via
+  // KeepEverythingSynced.
   for (syncer::ModelTypeSet::Iterator it = user_types.First();
        it.Good(); it.Inc()) {
-    RegisterDataTypePreferredPref(registry, it.Get(), true);
+    RegisterDataTypePreferredPref(registry, it.Get(), false);
   }
 
   registry->RegisterBooleanPref(prefs::kSyncManaged,
@@ -93,6 +97,10 @@ void SyncPrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
                                "",
                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
+
+  registry->RegisterStringPref(prefs::kSyncSessionsGUID,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // We will start prompting people about new data types after the launch of
   // SESSIONS - all previously launched data types are treated as if they are
@@ -279,6 +287,18 @@ std::string SyncPrefs::GetKeystoreEncryptionBootstrapToken() const {
 void SyncPrefs::SetKeystoreEncryptionBootstrapToken(const std::string& token) {
   DCHECK(CalledOnValidThread());
   pref_service_->SetString(prefs::kSyncKeystoreEncryptionBootstrapToken, token);
+}
+
+std::string SyncPrefs::GetSyncSessionsGUID() const {
+  DCHECK(CalledOnValidThread());
+  return
+      pref_service_ ?
+      pref_service_->GetString(prefs::kSyncSessionsGUID) : "";
+}
+
+void SyncPrefs::SetSyncSessionsGUID(const std::string& guid) {
+  DCHECK(CalledOnValidThread());
+  pref_service_->SetString(prefs::kSyncSessionsGUID, guid);
 }
 
 // static

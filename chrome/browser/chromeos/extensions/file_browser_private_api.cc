@@ -606,6 +606,7 @@ FileBrowserPrivateAPI::FileBrowserPrivateAPI(Profile* profile)
   registry->RegisterFunction<SetLastModifiedFunction>();
   registry->RegisterFunction<ZipSelectionFunction>();
   registry->RegisterFunction<ValidatePathNameLengthFunction>();
+  registry->RegisterFunction<OpenNewWindowFunction>();
 
   event_router_->ObserveFileSystemEvents();
 }
@@ -947,8 +948,12 @@ bool GetFileTasksFileBrowserFunction::FindAppTasks(
       task->SetString("title", (*i)->title);
       task->SetBoolean("isDefault", false);
 
-      GURL best_icon = extensions::IconsInfo::GetIconURL(
-          extension, kPreferredIconSize, ExtensionIconSet::MATCH_BIGGER);
+      GURL best_icon =
+          ExtensionIconSource::GetIconURL(extension,
+                                          kPreferredIconSize,
+                                          ExtensionIconSet::MATCH_BIGGER,
+                                          false,  // grayscale
+                                          NULL);  // exists
       if (!best_icon.is_empty())
         task->SetString("iconUrl", best_icon.spec());
       else
@@ -966,6 +971,9 @@ bool GetFileTasksFileBrowserFunction::RunImpl() {
   // First argument is the list of files to get tasks for.
   ListValue* files_list = NULL;
   if (!args_->GetList(0, &files_list))
+    return false;
+
+  if (files_list->GetSize() == 0)
     return false;
 
   // Second argument is the list of mime types of each of the files in the list.
@@ -1374,7 +1382,7 @@ void FileBrowserFunction::GetCacheFileByPathInternal(
 }
 
 bool SelectFileFunction::RunImpl() {
-  if (args_->GetSize() != 2) {
+  if (args_->GetSize() != 4) {
     return false;
   }
   std::string file_url;
@@ -1401,7 +1409,6 @@ void SelectFileFunction::GetSelectedFileInfoResponse(
   SelectFileDialogExtension::OnFileSelected(tab_id, files[0], index);
   SendResponse(true);
 }
-
 
 ViewFilesFunction::ViewFilesFunction() {
 }
@@ -1455,7 +1462,7 @@ SelectFilesFunction::~SelectFilesFunction() {
 }
 
 bool SelectFilesFunction::RunImpl() {
-  if (args_->GetSize() != 1) {
+  if (args_->GetSize() != 2) {
     return false;
   }
 
@@ -1652,8 +1659,14 @@ void RemoveMountFunction::GetSelectedFileInfoResponse(
     SendResponse(false);
     return;
   }
-  DiskMountManager::GetInstance()->UnmountPath(files[0].local_path.value(),
-                                               chromeos::UNMOUNT_OPTIONS_NONE);
+
+  // TODO(tbarzic): Send response when callback is received, it would make more
+  // sense than remembering issued unmount requests in file manager and showing
+  // errors for them when MountCompleted event is received.
+  DiskMountManager::GetInstance()->UnmountPath(
+      files[0].local_path.value(),
+      chromeos::UNMOUNT_OPTIONS_NONE,
+      DiskMountManager::UnmountPathCallback());
   SendResponse(true);
 }
 
@@ -1935,6 +1948,8 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING("ERROR_LONG_NAME", IDS_FILE_BROWSER_ERROR_LONG_NAME);
   SET_STRING("NEW_FOLDER_BUTTON_LABEL",
              IDS_FILE_BROWSER_NEW_FOLDER_BUTTON_LABEL);
+  SET_STRING("NEW_WINDOW_BUTTON_LABEL",
+             IDS_FILE_BROWSER_NEW_WINDOW_BUTTON_LABEL);
   SET_STRING("FILENAME_LABEL", IDS_FILE_BROWSER_FILENAME_LABEL);
   SET_STRING("PREPARING_LABEL", IDS_FILE_BROWSER_PREPARING_LABEL);
   SET_STRING("DRAGGING_MULTIPLE_ITEMS",
@@ -2138,6 +2153,7 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING("OPEN_LABEL", IDS_FILE_BROWSER_OPEN_LABEL);
   SET_STRING("SAVE_LABEL", IDS_FILE_BROWSER_SAVE_LABEL);
   SET_STRING("OK_LABEL", IDS_FILE_BROWSER_OK_LABEL);
+  SET_STRING("VIEW_LABEL", IDS_FILE_BROWSER_VIEW_LABEL);
 
   SET_STRING("DEFAULT_NEW_FOLDER_NAME",
              IDS_FILE_BROWSER_DEFAULT_NEW_FOLDER_NAME);
@@ -2337,7 +2353,9 @@ bool FileDialogStringsFunction::RunImpl() {
 #undef SET_STRING
 
   dict->SetBoolean("PDF_VIEW_ENABLED",
-      file_manager_util::ShouldBeOpenedWithPdfPlugin(profile(), ".pdf"));
+      file_manager_util::ShouldBeOpenedWithPlugin(profile(), ".pdf"));
+  dict->SetBoolean("SWF_VIEW_ENABLED",
+      file_manager_util::ShouldBeOpenedWithPlugin(profile(), ".swf"));
 
   webui::SetFontAndTextDirection(dict);
 
@@ -3199,7 +3217,9 @@ bool RequestDirectoryRefreshFunction::RunImpl() {
 
   base::FilePath directory_path = GetVirtualPathFromURL(file_system_context,
                                                   GURL(file_url_as_string));
-  system_service->file_system()->RequestDirectoryRefresh(directory_path);
+  system_service->file_system()->RefreshDirectory(
+      directory_path,
+      base::Bind(&drive::util::EmptyFileOperationCallback));
 
   return true;
 }
@@ -3325,4 +3345,15 @@ void ValidatePathNameLengthFunction::OnFilePathLimitRetrieved(
     size_t max_length) {
   SetResult(new base::FundamentalValue(current_length <= max_length));
   SendResponse(true);
+}
+
+OpenNewWindowFunction::OpenNewWindowFunction() {}
+
+OpenNewWindowFunction::~OpenNewWindowFunction() {}
+
+bool OpenNewWindowFunction::RunImpl() {
+  std::string url;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url));
+  file_manager_util::OpenNewWindow(profile_, GURL(url));
+  return true;
 }

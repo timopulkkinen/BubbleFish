@@ -46,10 +46,6 @@ class ExtensionFileUtilTest : public testing::Test {
   }
 };
 
-#if defined(OS_WIN)
-// http://crbug.com/106381
-#define InstallUninstallGarbageCollect DISABLED_InstallUninstallGarbageCollect
-#endif
 TEST_F(ExtensionFileUtilTest, InstallUninstallGarbageCollect) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -156,11 +152,6 @@ TEST_F(ExtensionFileUtilTest, LoadExtensionWithoutLocalesFolder) {
   EXPECT_TRUE(error.empty());
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/106381
-#define CheckIllegalFilenamesNoUnderscores \
-    DISABLED_CheckIllegalFilenamesNoUnderscores
-#endif
 TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesNoUnderscores) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -176,11 +167,6 @@ TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesNoUnderscores) {
                                                             &error));
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/106381
-#define CheckIllegalFilenamesOnlyReserved \
-    DISABLED_CheckIllegalFilenamesOnlyReserved
-#endif
 TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesOnlyReserved) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -193,11 +179,6 @@ TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesOnlyReserved) {
                                                             &error));
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/106381
-#define CheckIllegalFilenamesReservedAndIllegal \
-    DISABLED_CheckIllegalFilenamesReservedAndIllegal
-#endif
 TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesReservedAndIllegal) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -407,10 +388,6 @@ static scoped_refptr<Extension> LoadExtensionManifest(
       error);
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/108279
-#define ValidateThemeUTF8 DISABLED_ValidateThemeUTF8
-#endif
 TEST_F(ExtensionFileUtilTest, ValidateThemeUTF8) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -438,13 +415,7 @@ TEST_F(ExtensionFileUtilTest, ValidateThemeUTF8) {
   EXPECT_EQ(0U, warnings.size());
 }
 
-#if defined(OS_WIN)
-// This test hangs on Windows sometimes. http://crbug.com/110279
-#define MAYBE_BackgroundScriptsMustExist DISABLED_BackgroundScriptsMustExist
-#else
-#define MAYBE_BackgroundScriptsMustExist BackgroundScriptsMustExist
-#endif
-TEST_F(ExtensionFileUtilTest, MAYBE_BackgroundScriptsMustExist) {
+TEST_F(ExtensionFileUtilTest, BackgroundScriptsMustExist) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
@@ -589,8 +560,8 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
   std::string error;
   scoped_refptr<Extension> extension(extension_file_util::LoadExtension(
       ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
-  ASSERT_TRUE(extension == NULL);
-  ASSERT_STREQ("Could not load extension icon 'icon.png'.",
+  EXPECT_TRUE(extension == NULL);
+  EXPECT_STREQ("Could not load extension icon 'icon.png'.",
       error.c_str());
 
   // Try to install an extension with a zero-length browser action icon file.
@@ -601,8 +572,8 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
 
   scoped_refptr<Extension> extension2(extension_file_util::LoadExtension(
       ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
-  ASSERT_TRUE(extension2 == NULL);
-  ASSERT_STREQ("Could not load icon 'icon.png' for browser action.",
+  EXPECT_TRUE(extension2 == NULL);
+  EXPECT_STREQ("Could not load icon 'icon.png' for browser action.",
       error.c_str());
 
   // Try to install an extension with a zero-length page action icon file.
@@ -613,8 +584,8 @@ TEST_F(ExtensionFileUtilTest, CheckZeroLengthImageFile) {
 
   scoped_refptr<Extension> extension3(extension_file_util::LoadExtension(
       ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
-  ASSERT_TRUE(extension3 == NULL);
-  ASSERT_STREQ("Could not load icon 'icon.png' for page action.",
+  EXPECT_TRUE(extension3 == NULL);
+  EXPECT_STREQ("Could not load icon 'icon.png' for page action.",
       error.c_str());
 }
 

@@ -24,21 +24,26 @@ import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 
 /**
- We have to adapt and plumb android IME service and chrome text input API.
- ImeAdapter provides an interface in both ways native <-> java:
- 1. InputConnectionAdapter notifies native code of text composition state and
-    dispatch key events from java -> WebKit.
- 2. Native ImeAdapter notifies java side to clear composition text.
-
- The basic flow is:
- 1. When InputConnectionAdapter gets called with composition or result text:
-    If we receive a composition text or a result text, then we just need to
-    dispatch a synthetic key event with special keycode 229, and then dispatch
-    the composition or result text.
- 2. Intercept dispatchKeyEvent() method for key events not handled by IME, we
-    need to dispatch them to webkit and check webkit's reply. Then inject a
-    new key event for further processing if webkit didn't handle it.
-*/
+ * Adapts and plumbs android IME service onto the chrome text input API.
+ * ImeAdapter provides an interface in both ways native <-> java:
+ * 1. InputConnectionAdapter notifies native code of text composition state and
+ *    dispatch key events from java -> WebKit.
+ * 2. Native ImeAdapter notifies java side to clear composition text.
+ *
+ * The basic flow is:
+ * 1. When InputConnectionAdapter gets called with composition or result text:
+ *    If we receive a composition text or a result text, then we just need to
+ *    dispatch a synthetic key event with special keycode 229, and then dispatch
+ *    the composition or result text.
+ * 2. Intercept dispatchKeyEvent() method for key events not handled by IME, we
+ *   need to dispatch them to webkit and check webkit's reply. Then inject a
+ *   new key event for further processing if webkit didn't handle it.
+ *
+ * Note that the native peer object does not take any strong reference onto the
+ * instance of this java object, hence it is up to the client of this class (e.g.
+ * the ViewEmbedder implementor) to hold a strong reference to it for the required
+ * lifetime of the object.
+ */
 @JNINamespace("content")
 class ImeAdapter {
     interface ViewEmbedder {
@@ -111,16 +116,16 @@ class ImeAdapter {
     private int mNativeImeAdapterAndroid;
     private int mTextInputType;
 
-    private Context mContext;
+    private final Context mContext;
     private InputMethodManagerWrapper mInputMethodManagerWrapper;
-    private SelectionHandleController mSelectionHandleController;
-    private InsertionHandleController mInsertionHandleController;
+    private final SelectionHandleController mSelectionHandleController;
+    private final InsertionHandleController mInsertionHandleController;
     private AdapterInputConnection mInputConnection;
-    private ViewEmbedder mViewEmbedder;
-    private Handler mHandler;
+    private final ViewEmbedder mViewEmbedder;
+    private final Handler mHandler;
 
     private class DelayedDismissInput implements Runnable {
-        private int mNativeImeAdapter;
+        private final int mNativeImeAdapter;
 
         DelayedDismissInput(int nativeImeAdapter) {
             mNativeImeAdapter = nativeImeAdapter;
@@ -195,7 +200,7 @@ class ImeAdapter {
             if (showIfNeeded) {
                 showKeyboard();
             }
-        } else if (hasInputType()) {
+        } else if (hasInputType() && showIfNeeded) {
             showKeyboard();
         }
     }
@@ -471,8 +476,8 @@ class ImeAdapter {
     // It then adapts android's IME to chrome's RenderWidgetHostView using the
     // native ImeAdapterAndroid via the outer class ImeAdapter.
     public static class AdapterInputConnection extends BaseInputConnection {
-        private View mInternalView;
-        private ImeAdapter mImeAdapter;
+        private final View mInternalView;
+        private final ImeAdapter mImeAdapter;
         private boolean mSingleLine;
         private int mNumNestedBatchEdits = 0;
         private boolean mIgnoreTextInputStateUpdates = false;
@@ -498,7 +503,6 @@ class ImeAdapter {
 
             int prevSelectionStart = Selection.getSelectionStart(editable);
             int prevSelectionEnd = Selection.getSelectionEnd(editable);
-            int prevEditableLength = editable.length();
             int prevCompositionStart = getComposingSpanStart(editable);
             int prevCompositionEnd = getComposingSpanEnd(editable);
             String prevText = editable.toString();

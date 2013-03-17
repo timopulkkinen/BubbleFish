@@ -302,6 +302,10 @@ void Panel::Minimize() {
     collection_->MinimizePanel(this);
 }
 
+bool Panel::IsMinimizedBySystem() const {
+  return native_panel_->IsPanelMinimizedBySystem();
+}
+
 void Panel::Restore() {
   if (collection_)
     collection_->RestorePanel(this);
@@ -441,8 +445,13 @@ void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
   // activate a minimized panel on mouse-down regardless of our attempts to
   // prevent system activation. Attention state is not cleared in that case.
   // See Panel::OnActiveStateChanged().
-  // Therefore, we ensure activation and clearing of attention state here.
+  // Therefore, we ensure activation and clearing of attention state if the
+  // panel has been expanded. If the panel is in a stack, the titlebar click
+  // might minimize the panel and we do not want to activate it to make it
+  // expand again.
   // These are no-ops if no changes are needed.
+  if (IsMinimized())
+    return;
   Activate();
   FlashFrame(false);
 }

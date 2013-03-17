@@ -26,6 +26,7 @@
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
+#include "content/browser/accessibility/browser_accessibility_manager_win.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
@@ -67,6 +68,7 @@
 #include "ui/base/win/dpi.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
+#include "ui/base/win/touch_input.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_conversions.h"
@@ -514,18 +516,27 @@ RenderWidgetHostViewWin::GetNativeViewAccessible() {
     NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
   }
 
-  if (!GetBrowserAccessibilityManager()) {
-    // Return busy document tree while renderer accessibility tree loads.
-    AccessibilityNodeData::State busy_state =
-        static_cast<AccessibilityNodeData::State>(
-            1 << AccessibilityNodeData::STATE_BUSY);
-    SetBrowserAccessibilityManager(
-        BrowserAccessibilityManager::CreateEmptyDocument(
-            m_hWnd, busy_state, this));
-  }
+  CreateBrowserAccessibilityManagerIfNeeded();
 
   return GetBrowserAccessibilityManager()->GetRoot()->
       ToBrowserAccessibilityWin();
+}
+
+void RenderWidgetHostViewWin::CreateBrowserAccessibilityManagerIfNeeded() {
+  if (GetBrowserAccessibilityManager())
+    return;
+
+  HRESULT hr = ::CreateStdAccessibleObject(
+      m_hWnd, OBJID_WINDOW, IID_IAccessible,
+      reinterpret_cast<void **>(&window_iaccessible_));
+  DCHECK(SUCCEEDED(hr));
+
+  SetBrowserAccessibilityManager(
+      new BrowserAccessibilityManagerWin(
+          m_hWnd,
+          window_iaccessible_.get(),
+          BrowserAccessibilityManagerWin::GetEmptyDocument(),
+          this));
 }
 
 void RenderWidgetHostViewWin::MovePluginWindows(
@@ -1778,8 +1789,9 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
   }
 
   if (message == WM_LBUTTONDOWN && pointer_down_context_ &&
-      GetBrowserAccessibilityManager())
+      GetBrowserAccessibilityManager()) {
     GetBrowserAccessibilityManager()->GotMouseDown();
+  }
 
   if (message == WM_LBUTTONUP && ui::IsMouseEventFromTouch(message) &&
       base::win::IsMetroProcess())
@@ -2072,8 +2084,9 @@ WebKit::WebTouchPoint* WebTouchState::AddTouchPoint(
 bool WebTouchState::UpdateTouchPoint(
     WebKit::WebTouchPoint* touch_point,
     TOUCHINPUT* touch_input) {
-  CPoint coordinates(TOUCH_COORD_TO_PIXEL(touch_input->x),
-                     TOUCH_COORD_TO_PIXEL(touch_input->y));
+  CPoint coordinates(
+    TOUCH_COORD_TO_PIXEL(touch_input->x) / ui::win::GetUndocumentedDPIScale(),
+    TOUCH_COORD_TO_PIXEL(touch_input->y) / ui::win::GetUndocumentedDPIScale());
   int radius_x = 1;
   int radius_y = 1;
   if (touch_input->dwMask & TOUCHINPUTMASKF_CONTACTAREA) {
@@ -2131,8 +2144,8 @@ LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
       static_cast<int>(WebKit::WebTouchEvent::touchesLengthCap));
   TOUCHINPUT points[WebKit::WebTouchEvent::touchesLengthCap];
 
-  if (!total || !GetTouchInputInfo((HTOUCHINPUT)lparam, total,
-                                   points, sizeof(TOUCHINPUT))) {
+  if (!total || !ui::GetTouchInputInfoWrapper((HTOUCHINPUT)lparam, total,
+                                              points, sizeof(TOUCHINPUT))) {
     TRACE_EVENT0("browser", "EarlyOut_NothingToDo");
     return 0;
   }
@@ -2140,8 +2153,8 @@ LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
   if (total == 1 && (points[0].dwFlags & TOUCHEVENTF_DOWN)) {
     pointer_down_context_ = true;
     last_touch_location_ = gfx::Point(
-        TOUCH_COORD_TO_PIXEL(points[0].x),
-        TOUCH_COORD_TO_PIXEL(points[0].y));
+        TOUCH_COORD_TO_PIXEL(points[0].x) / ui::win::GetUndocumentedDPIScale(),
+        TOUCH_COORD_TO_PIXEL(points[0].y) / ui::win::GetUndocumentedDPIScale());
   }
 
   bool should_forward = render_widget_host_->ShouldForwardTouchEvent() &&
@@ -2275,13 +2288,7 @@ LRESULT RenderWidgetHostViewWin::OnMoveOrSize(
 
 void RenderWidgetHostViewWin::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
-  if (!GetBrowserAccessibilityManager()) {
-    SetBrowserAccessibilityManager(
-        BrowserAccessibilityManager::CreateEmptyDocument(
-            m_hWnd,
-            static_cast<AccessibilityNodeData::State>(0),
-            this));
-  }
+  CreateBrowserAccessibilityManagerIfNeeded();
   GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);
 }
 
@@ -2590,6 +2597,11 @@ void RenderWidgetHostViewWin::AccessibilitySetTextSelection(
 
 gfx::Point RenderWidgetHostViewWin::GetLastTouchEventLocation() const {
   return last_touch_location_;
+}
+
+void RenderWidgetHostViewWin::FatalAccessibilityTreeError() {
+  render_widget_host_->FatalAccessibilityTreeError();
+  SetBrowserAccessibilityManager(NULL);
 }
 
 LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,

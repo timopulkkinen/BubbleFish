@@ -53,6 +53,9 @@ class DebugColors {
   static SkColor CulledTileBorderColor();
   static int CulledTileBorderWidth(const LayerTreeImpl* tree_impl);
 
+  static SkColor SolidColorTileBorderColor();
+  static int SolidColorTileBorderWidth(const LayerTreeImpl* tree_impl);
+
   static SkColor DefaultCheckerboardColor();
   static SkColor EvictedTileCheckerboardColor();
   static SkColor InvalidatedTileCheckerboardColor();
@@ -88,8 +91,13 @@ class DebugColors {
   static SkColor NonPaintedFillColor();
   static SkColor MissingPictureFillColor();
 
+  static SkColor HUDBackgroundColor();
+  static SkColor HUDSeparatorLineColor();
+  static SkColor HUDIndicatorLineColor();
+
   static SkColor PlatformLayerTreeTextColor();
   static SkColor FPSDisplayTextAndGraphColor();
+  static SkColor MemoryDisplayTextColor();
   static SkColor PaintTimeDisplayTextAndGraphColor();
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(DebugColors);

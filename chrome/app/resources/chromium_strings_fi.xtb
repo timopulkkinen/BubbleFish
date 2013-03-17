@@ -17,16 +17,14 @@
 <translation id="7128196614940529818">Infomonitor Player-kehys on jo asennettu tämän tietokoneen kaikille käyttäjille. Jos haluat asentaa kehyksen käyttäjätasolla, poista ensin järjestelmänvalvojan järjestelmätasolla asentama kehys.</translation>
 <translation id="731644333568559921">Päivitä &amp;Infomonitor Player-käyttöjärjestelmä</translation>
 <translation id="7421823331379285070">Infomonitor Player vaatii Windows XP:n tai uudemman version. Kaikki ominaisuudet eivät välttämättä toimi.</translation>
+<translation id="7419987137528340081">Jos haluat pitää nykyiset Infomonitor Player (Chromium)-tietosi erillään, voit luoda käyttäjälle <ph name="USER_NAME"/> uuden tunnuksen.</translation>
 <translation id="3549345495227188780">Aloita Infomonitor Player-käyttöjärjestelmän käyttö</translation>
 <translation id="4330297532943865716">Tietokoneella havaittiin ristiriitainen Infomonitor Player tai Infomonitor Player-kehyksen asennus. Poista se ja yritä uudelleen.</translation>
 <translation id="6953661834318318668">Infomonitor Player-työkalupalkki</translation>
-<translation id="7097100943370017396">Infomonitor Player ei enää päivitetä, koska käyttöjärjestelmäsi on vanhentunut.</translation>
 <translation id="2245147136185581459">Infomonitor Playerin Captive Portal -havaitsin</translation>
 <translation id="4285930937574705105">Asennus epäonnistui tuntemattoman virheen takia. Jos Infomonitor Player on tällä hetkellä käynnissä, sulje se ja yritä uudelleen.</translation>
 <translation id="2589479092236095792">Infomonitor Playerin automaattisen täytön asetukset</translation>
-<translation id="658492233547000995">Käynnistä sovellukset Infomonitor Playerin sovellusten käynnistysohjelman avulla.</translation>
 <translation id="3555616473548901994">Poistaminen valmis.</translation>
-<translation id="3674409928058572366">Infomonitor Player App Host</translation>
 <translation id="2886012850691518054">Valinnainen: Lähetä Googlelle automaattisesti käyttötilastoja ja virheraportteja Chromiumin/Infomonitor Playerin kehittämiseksi.</translation>
 <translation id="3848258323044014972"><ph name="PAGE_TITLE"/> - Infomonitor Player</translation>
 <translation id="1989424089625731201">Yritit siirtyä osoitteeseen &lt;strong&gt;<ph name="DOMAIN"/>&lt;/strong&gt;, mutta palvelimen palauttama varmenne on virheellinen. Infomonitor Player ei voi käyttää virheellistä varmennetta eikä tunnistaa luotettavasti sivustoa, johon yrität muodostaa yhteyttä.</translation>
@@ -77,6 +75,7 @@ ja poista valinta kaikista välityspalvelimista, jotka on valittu.</translation>
 <translation id="4077262827416206768">Sulje kaikki Infomonitor Player-ikkunat ja käynnistä Infomonitor Player uudelleen, niin muutos tulee voimaan.</translation>
 <translation id="6944967875980567883">Infomonitor Playeriin ladatut moduulit</translation>
 <translation id="118298050220780080">Yritit siirtyä osoitteeseen &lt;strong&gt;<ph name="DOMAIN"/>&lt;/strong&gt;, mutta palvelimen palauttaman varmenteen on myöntänyt taho, johon tietokoneesi käyttöjärjestelmä ei luota. Tämä voi tarkoittaa, että palvelin on luonut omat suojaustietonsa itse, jolloin Infomonitor Player ei voi tunnistaa sitä luotettavasti, tai että hyökkääjä yrittää kaapata yhteyden.</translation>
+<translation id="7915138385500177190">Tietokoneestasi puuttuu Windowsin tärkeitä järjestelmätiedostoja, joten Infomonitor Player ei toimi oikein.</translation>
 <translation id="3296368748942286671">Jätä taustasovellukset käyntiin, kun Infomonitor Player suljetaan</translation>
 <translation id="473775607612524610">Päivitä</translation>
 <translation id="6055895534982063517">Infomonitor Playerista on saatavilla uusi versio, joka on entistäkin nopeampi.</translation>
@@ -91,10 +90,14 @@ ja poista valinta kaikista välityspalvelimista, jotka on valittu.</translation>
 <translation id="6970811910055250180">Päivitetään laitetta...</translation>
 <translation id="2485422356828889247">Poista</translation>
 <translation id="85843667276690461">Apua Infomonitor Playerin käytössä</translation>
+<translation id="3354334135076267965">Näytä Infomonitor Player-sovellusten käynnistysohjelman pikakuvake Windowsin tehtäväpalkissa.</translation>
 <translation id="263863604136125912">Käynnistä Infomonitor Player</translation>
+<translation id="9036189287518468038">Infomonitor Player-sovellusten käynnistysohjelma</translation>
 <translation id="2881203820889150661">Infomonitor Player ei voi luoda sovelluksen pikakuvaketta, koska nykyistä työpöytäympäristöä ei voi määrittää.</translation>
 <translation id="4886158514168859177">Tälle tietokoneelle on jo asennettu Infomonitor Player-kehyksen uudempi versio. Jos Infomonitor Player-kehys ei toimi, poista sen asennus ja yritä uudelleen.</translation>
 <translation id="911206726377975832">Poistetaanko myös selailutiedot?</translation>
+<translation id="8474264489072517623">Käynnistä sovelluksia Infmoonitor Player-sovellusten käynnistysohjelman avulla.</translation>
+<translation id="95514773681268843"><ph name="DOMAIN"/> edellyttää, että luet ja hyväksyt seuraavat käyttöehdot ennen tämän laitteen käyttöä. Nämä ehdot eivät laajenna, muokkaa tai rajoita Infomonitor Player(Chromium)-käyttöliittymän ehtoja.</translation>
 <translation id="1699664235656412242">Sulje kaikki Infomonitor Player-ikkunat (myös Windows 8 -tilassa käytettävät) ja yritä uudelleen.</translation>
 <translation id="6734080038664603509">Päivitä &amp;Infomonitor Player</translation>
 <translation id="8862326446509486874">Sinulla ei ole käyttöoikeuksia järjestelmätason asennukseen. Kokeile asennusohjelman suorittamista uudelleen järjestelmänvalvojana.</translation>
@@ -119,6 +122,8 @@ ja poista valinta kaikista välityspalvelimista, jotka on valittu.</translation>
         Jos ongelma ei ratkea, suosittelemme ottamaan vaihtoehdon uudelleen käyttöön, koska se parantaa suorituskykyä.</translation>
 <translation id="275588974610408078">Virheraportit eivät ole käytettävissä Infomonitor Playerissa.</translation>
 <translation id="5909170354645388250">Ei käytössä Infomonitor Playerissa. Paikkamerkki resurssikarttojen synkronoimiseksi. Odottaa yhtä argumenttia: $1.</translation>
+<translation id="7937630085815544518">Infomonitor Playeriin kirjautunut käyttäjä: <ph name="USER_EMAIL_ADDRESS"/>. Kirjaudu uudelleen sisään samalla tilillä.</translation>
+<translation id="2685838254101182273">Infomonitor Player on lakannut päivittymästä, eikä se enää tue käyttöjärjestelmäsi tätä versiota.</translation>
 <translation id="3582788516608077514">Päivitetään Infomonitor Playeria...</translation>
 <translation id="7223968959479464213">Tehtävänhallinta - Infomonitor Player</translation>
 <translation id="3838208658251026018">Infomonitor Player tuo seuraavia kohteita osiosta <ph name="BROWSER_COMPONENT"/>:</translation>
@@ -134,19 +139,22 @@ ja poista valinta kaikista välityspalvelimista, jotka on valittu.</translation>
 Kaikki ominaisuudet eivät ehkä ole käytettävissä. Määritä jokin muu profiilihakemisto tai käytä Infomonitor Playerin uudempaa versiota.</translation>
 <translation id="2712549016134575851">Ristiriita toisen asennetun sovelluksen kanssa havaittu.</translation>
 <translation id="4881709374218686648">Kirjauduit aiemmin sisään eri tilillä. Jos kirjaudut nyt sisään, tilien tiedot yhdistetään. Suosittelemme luomaan Infomonitor Player-sisällöllesi uuden Infomonitor Player-käyttäjän <ph name="BEGIN_LINK"/>asetukset-sivun<ph name="END_LINK"/> kautta.</translation>
+<translation id="5285406370705656673">Salli kirjautuminen Infmonitor Playeriin (Chromium).</translation>
 <translation id="9013087743919948559">Lisää Infomonitor Playeriin</translation>
 <translation id="6212496753309875659">Tälle tietokoneelle on jo asennettu Infomonitor Playerin uudempi versio. Jos Infomonitor Player ei toimi, poista sen asennus ja yritä uudelleen.</translation>
 <translation id="3014684866565908571">Infomonitor Player Utility</translation>
 <translation id="1298199220304005244">Hanki apua Infomonitor Player-käyttöjärjestelmän käytössä</translation>
 <translation id="1691304614444223855">Infomonitor Player-kehys on päivitetty. Käynnistä selain uudelleen. Infomonitor Player-versio: <ph name="TODO_0001"/>, Infomonitor Player-kehyksen versio: <ph name="TODO_0002"/></translation>
 <translation id="130631256467250065">Muutokset tulevat voimaan, kun käynnistät laitteen seuraavan kerran.</translation>
-<translation id="1105130903706696483">Infomonitor Playeria ei sammutettu oikein. Voit avata avoinna olleet sivut valitsemalla Palauta.</translation>
-<translation id="1929939181775079593">Infomonitor Player ei vastaa. Käynnistetäänkö uudelleen?</translation>
+<translation id="1105130903706696483">Chromiumia ei sammutettu oikein. Voit avata avoinna olleet sivut valitsemalla Palauta.</translation>
+<translation id="1929939181775079593">Chromium ei vastaa. Käynnistetäänkö uudelleen?</translation>
+<translation id="1414495520565016063">Olet kirjautunut Chromiumiin (Infomonitor Player)!</translation>
 <translation id="6089587093203430357">Instant</translation>
-<translation id="2966088006374919794">Infomonitor Playerin täytyy käynnistää ulkopuolinen sovellus <ph name="SCHEME"/>-linkkien käsittelyä varten. Pyyntöön liittyvä linkki on <ph name="PROTOLINK"/>.</translation>
-<translation id="8046283042877435986">Tällä sivustolla suositellaan Infomonitor Player-kehyksen käyttöä (jo asennettu).</translation>
-<translation id="6287463253129672858">Infomonitor Player-kehyksestä ei voi asentaa versiota, joka on tällä hetkellä käynnissä. Sulje Infomonitor Player-kehys ja yritä uudelleen.</translation>
-<translation id="2558235863893655150">Haluatko, että Infomonitor Player tallentaa salasanasi?</translation>
+<translation id="8520216698644798023">Windows-virhe havaittu</translation>
+<translation id="2966088006374919794">Chromiumin täytyy käynnistää ulkopuolinen sovellus <ph name="SCHEME"/>-linkkien käsittelyä varten. Pyyntöön liittyvä linkki on <ph name="PROTOLINK"/>.</translation>
+<translation id="8046283042877435986">Tällä sivustolla suositellaan Chromium-kehyksen käyttöä (jo asennettu).</translation>
+<translation id="6287463253129672858">Chromium-kehyksestä ei voi asentaa versiota, joka on tällä hetkellä käynnissä. Sulje Chromium-kehys ja yritä uudelleen.</translation>
+<translation id="2558235863893655150">Haluatko, että Chromium tallentaa salasanasi?</translation>
 <translation id="3398522627033804247">Siirry kohtaan
           <ph name="BEGIN_BOLD"/>
           Infomonitor Player-valikko &gt;
@@ -169,6 +177,7 @@ Kaikki ominaisuudet eivät ehkä ole käytettävissä. Määritä jokin muu prof
 <translation id="9171640504251796339">http://www.google.com/support/chrome/bin/answer.py?hl=<ph name="GRITLANGCODE_1"/>&amp;answer=161796</translation>
 <translation id="8865765905101981392">Internetselain</translation>
 <translation id="6424492062988593837">Infomonitor Playerista tuli juuri entistä parempi! Uusi versio on saatavilla.</translation>
+<translation id="6601972021154586963">Sovellusten käyttö edellyttää kirjautumista Chromiumiin. Näin Chromium voi synkronoida sovelluksesi, kirjanmerkkisi, historiasi, salasanasi ja muut asetuksesi eri laitteiden välillä.</translation>
 <translation id="2910007522516064972">Tietoja &amp;Infomonitor Playerista</translation>
 <translation id="8453117565092476964">Asennusarkisto on virheellinen. Lataa Infomonitor Player uudelleen.</translation>
 <translation id="2162026298602630383">Siirry kohtaan
@@ -183,20 +192,22 @@ Kaikki ominaisuudet eivät ehkä ole käytettävissä. Määritä jokin muu prof
           ja varmista, että määritykseksi on asetettu &quot;ei välityspalvelinta&quot; tai &quot;suora&quot;.</translation>
 <translation id="3249425904492147663">Yritit siirtyä verkkotunnukseen &lt;strong&gt;<ph name="DOMAIN"/>&lt;/strong&gt;, mutta palvelin palautti vanhentuneen varmenteen. Emme voi selvittää, onko varmenne vaarantunut voimassaolon päättymisen jälkeen. Infomonitor Player ei siis voi taata, että olet yhteydessä sivustoon &lt;strong&gt;<ph name="DOMAIN2"/>&lt;/strong&gt; etkä hyökkäyssivustoon. Tietokoneesi kellon asetus on <ph name="CURRENT_TIME"/>. Jos aika on väärä, korjaa se ja päivitä tämä sivu.</translation>
 <translation id="7196020411877309443">Miksi minulle näytetään tämä ilmoitus?</translation>
+<translation id="457845228957001925">Tärkeitä tietoja Infomonitor Player(Chromium)-tiedoistasi</translation>
 <translation id="7483335560992089831">Infomonitor Playerista ei voi asentaa versiota, joka on tällä hetkellä käynnissä. Sulje Infomonitor Player ja yritä uudelleen.</translation>
 <translation id="7641113255207688324">Infomonitor Player ei ole oletusselain.</translation>
-<translation id="6208388956150196549">Infomonitor Playerin sovellusten käynnistysohjelma</translation>
 <translation id="4458285410772214805">Kirjaudu ulos ja kirjaudu uudelleen sisään, jotta muutos tulee voimaan.</translation>
-<translation id="9109696651501887488">Näytä Infomonitor Playerin sovellusten käynnistysohjelman pikakuvake Windowsin tehtäväpalkissa.</translation>
 <translation id="2119636228670142020">Tietoja &amp;Infomonitor Player-käyttöjärjestelmästä</translation>
 <translation id="1708666629004767631">Infomonitor Playerista on saatavilla uusi, turvallisempi versio.</translation>
-<translation id="1539981464052805551">Copyright 2013 The Infomonitor Player Authors. Kaikki oikeudet pidätetään.</translation>
-<translation id="6606161915035466984">Näytä Infomonitor Player -sovellusten käynnistysohjelma.</translation>
+<translation id="1539981464052805551">Copyright 2013 Cemron Ltd and The Chromium Authors. Kaikki oikeudet pidätetään.</translation>
 <translation id="8616882682724010661">Katso, <ph name="BEGIN_LINK"/>mitä muuta hyötyä<ph name="END_LINK"/> Infomonitor Playeriin kirjautumisesta on.</translation>
 <translation id="378917192836375108">Infomonitor Playerin avulla voit soittaa Skypellä puhelinnumeroon klikkaamalla sitä verkossa!</translation>
 <translation id="8724049448828509830">Lataus on käynnissä. Haluatko sulkea Infomonitor Playerin ja peruuttaa latauksen?</translation>
 <translation id="3360567213983886831">Infomonitor Player Binaries</translation>
 <translation id="7503101070699687603">Infomonitor Player Plug-In Host</translation>
+translation id="2128780683974727821">Näytä Infomonitor Player (Chromium)-sovellusten käynnistysohjelma.</translation>
+<translation id="8985587603644336029">Joku on jo kirjautunut tällä tietokoneella Chromiumiin käyttäjätilillä <ph name="ACCOUNT_EMAIL_LAST"/>. Jos se ei ole sinun käyttäjätilisi, luo uusi Chromium-käyttäjä, jos haluat pitää tiedot erillään.
+
+Jos kirjaudut silti sisään, Chromium-tiedot, kuten kirjanmerkit, historia ja asetukset, yhdistetään tilin <ph name="ACCOUNT_EMAIL_NEW"/> tietoihin.</translation>
 <translation id="2739631515503418643">Latauksia on käynnissä. Haluatko sulkea Infomonitor Playerin ja peruuttaa lataukset?</translation>
 <translation id="9013262824292842194">Infomonitor Player edellyttää, että käyttöjärjestelmä on Windows Vista tai Windows XP SP2 tai uudempi.</translation>
 <translation id="1967743265616885482">Samanniminen moduuli on aiheuttanut aiemmin ristiriitoja Infomonitor Playerin kanssa.</translation>
@@ -214,5 +225,8 @@ Infomonitor Player ei voi palauttaa asetuksiasi.</translation>
 <translation id="2572494885440352020">Infomonitor Player Helper</translation>
 <translation id="442817494342774222">Infomonitor Player on asetettu käynnistymään automaattisesti tietokoneen käynnistyksen yhteydessä.</translation>
 <translation id="8974095189086268230">Infomonitor Player-käyttöjärjestelmän ovat tehneet mahdolliseksi muut <ph name="BEGIN_LINK_CROS_OSS"/>avoimen lähdekoodin ohjelmistot<ph name="END_LINK_CROS_OSS"/>.</translation>
+<translation id="313551035350905294">Olet kirjautumassa sisään hallinnoidulla tilillä ja antamassa tilin järjestelmänvalvojalle oikeuden hallita Chromium-profiiliasi. Chromium-tietosi, kuten sovelluksesi, kirjanmerkkisi, historiasi, salasanasi ja muut asetuksesi, yhdistetään pysyvästi käyttäjätiliin <ph name="USER_NAME"/>. Voit poistaa nämä tiedot Google-tilien hallintapaneelissa, mutta et voi liittää tietoja toiseen tiliin.</translation>
+<translation id="8823523095753232532">Linkitä Infomonitor Player (Chromium)-tietoni tähän tiliin</translation>
 <translation id="1221340462641866827">Infomonitor Player-käyttöjärjestelmä ei tue ulkopuolisten sovellusten käynnistämistä <ph name="SCHEME"/>-linkkien käsittelyä varten. Pyyntöön liittyvä linkki on <ph name="PROTOLINK"/>.</translation>
+<translation id="5032989939245619637">Tallenna tiedot Infomoniotr Playeriin</translation>
 </translationbundle>

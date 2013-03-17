@@ -11,7 +11,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -77,8 +77,7 @@ void TokenService::Initialize(const char* const source,
   getter_ = profile->GetRequestContext();
   // Since the user can create a bookmark in incognito, sync may be running.
   // Thus we have to go for explicit access.
-  web_data_service_ = WebDataServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+  web_data_service_ = WebDataService::FromBrowserContext(profile);
   source_ = std::string(source);
 
   CommandLine* cmd_line = CommandLine::ForCurrentProcess();
@@ -99,10 +98,6 @@ void TokenService::Initialize(const char* const source,
     SaveAuthTokenToDB(service, token);
   }
 }
-
-// TODO(petewil) We should refactor the token_service so it does not both
-// store tokens and fetch them.  Move the key-value storage out of
-// token_service, and leave the token fetching in token_service.
 
 void TokenService::AddAuthTokenManually(const std::string& service,
                                         const std::string& auth_token) {
@@ -405,10 +400,6 @@ void TokenService::LoadTokensIntoMemory(
   }
   LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens,
       GaiaConstants::kGaiaOAuth2LoginRefreshToken);
-  // TODO(petewil): Remove next line when we refactor key-value
-  // storage out of token_service - http://crbug.com/177125.
-  LoadSingleTokenIntoMemory(db_tokens, in_memory_tokens,
-      GaiaConstants::kObfuscatedGaiaId);
 
   if (credentials_.lsid.empty() && credentials_.sid.empty()) {
     // Look for GAIA SID and LSID tokens.  If we have both, and the current

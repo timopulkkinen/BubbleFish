@@ -9,10 +9,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
@@ -20,10 +21,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
-
-namespace errors = extension_manifest_errors;
-namespace keys = extension_manifest_keys;
-namespace values = extension_manifest_values;
 
 namespace extensions {
 
@@ -83,7 +80,14 @@ bool Contains(const std::vector<string16>& warnings,
 
 class PermissionsTest : public testing::Test {
   virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
     (new BackgroundManifestHandler)->Register();
+    (new PluginsHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    ManifestHandler::ClearRegistryForTesting();
+    testing::Test::TearDown();
   }
 };
 
@@ -658,7 +662,6 @@ TEST_F(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kActiveTab);
   skip.insert(APIPermission::kAlarms);
   skip.insert(APIPermission::kAppCurrentWindowInternal);
-  skip.insert(APIPermission::kAppNotifications);
   skip.insert(APIPermission::kAppRuntime);
   skip.insert(APIPermission::kAppWindow);
   skip.insert(APIPermission::kBrowsingData);
@@ -688,12 +691,13 @@ TEST_F(PermissionsTest, PermissionMessages) {
 
   // These are warned as part of host permission checks.
   skip.insert(APIPermission::kDeclarativeContent);
+  skip.insert(APIPermission::kDeclarativeWebRequest);
+  skip.insert(APIPermission::kNativeMessaging);
   skip.insert(APIPermission::kPageCapture);
   skip.insert(APIPermission::kProxy);
+  skip.insert(APIPermission::kTabCapture);
   skip.insert(APIPermission::kWebRequest);
   skip.insert(APIPermission::kWebRequestBlocking);
-  skip.insert(APIPermission::kDeclarativeWebRequest);
-  skip.insert(APIPermission::kTabCapture);
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -725,6 +729,7 @@ TEST_F(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kMetricsPrivate);
   skip.insert(APIPermission::kNetworkingPrivate);
   skip.insert(APIPermission::kRtcPrivate);
+  skip.insert(APIPermission::kStreamsPrivate);
   skip.insert(APIPermission::kSystemPrivate);
   skip.insert(APIPermission::kTerminalPrivate);
   skip.insert(APIPermission::kWallpaperPrivate);

@@ -43,7 +43,10 @@
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
+#include "printing/metafile.h"
+#include "printing/metafile_skia_wrapper.h"
 #include "printing/units.h"
+#include "skia/ext/platform_device.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
@@ -60,6 +63,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPrintScalingOption.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedUserGesture.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebUserGestureIndicator.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -88,17 +92,7 @@
 
 #if defined(OS_MACOSX)
 #include "printing/metafile_impl.h"
-#if !defined(USE_SKIA)
-#include "base/mac/mac_util.h"
-#include "base/mac/scoped_cftyperef.h"
-#endif  // !defined(USE_SKIA)
 #endif  // defined(OS_MACOSX)
-
-#if defined(USE_SKIA)
-#include "printing/metafile.h"
-#include "printing/metafile_skia_wrapper.h"
-#include "skia/ext/platform_device.h"
-#endif
 
 #if defined(OS_WIN)
 #include "base/metrics/histogram.h"
@@ -141,6 +135,7 @@ using WebKit::WebPrintScalingOption;
 using WebKit::WebScopedUserGesture;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
+using WebKit::WebUserGestureIndicator;
 using WebKit::WebView;
 
 namespace webkit {
@@ -350,6 +345,7 @@ PluginInstance::PluginInstance(
       instance_interface_(instance_interface),
       pp_instance_(0),
       container_(container),
+      layer_bound_to_fullscreen_(false),
       plugin_url_(plugin_url),
       full_frame_(false),
       sent_initial_did_change_view_(false),
@@ -523,10 +519,8 @@ unsigned PluginInstance::GetBackingTextureId() {
 }
 
 void PluginInstance::CommitBackingTexture() {
-  if (fullscreen_container_)
-    fullscreen_container_->Invalidate();
-  else if (texture_layer_)
-    texture_layer_->setNeedsDisplay();
+  if (texture_layer_)
+    texture_layer_->SetNeedsDisplay();
 }
 
 void PluginInstance::InstanceCrashed() {
@@ -784,8 +778,7 @@ bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
       // Allow the user gesture to be pending after the plugin handles the
       // event. This allows out-of-process plugins to respond to the user
       // gesture after processing has finished here.
-      WebFrame* frame = container_->element().document().frame();
-      if (frame->isProcessingUserGesture()) {
+      if (WebUserGestureIndicator::isProcessingUserGesture()) {
         pending_user_gesture_ =
             ::ppapi::EventTimeToPPTimeTicks(event.timeStampSeconds);
       }
@@ -1320,10 +1313,8 @@ int PluginInstance::PrintBegin(const WebPrintParams& print_params) {
   if (!num_pages)
     return 0;
   current_print_settings_ = print_settings;
-#if defined(USE_SKIA)
   canvas_ = NULL;
   ranges_.clear();
-#endif  // USE_SKIA
   return num_pages;
 }
 
@@ -1332,7 +1323,6 @@ bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
   DCHECK(plugin_print_interface_);
   PP_PrintPageNumberRange_Dev page_range;
   page_range.first_page_number = page_range.last_page_number = page_number;
-#if defined(USE_SKIA)
   // The canvas only has a metafile on it for print preview.
   bool save_for_later =
       (printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas) != NULL);
@@ -1343,9 +1333,7 @@ bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
     ranges_.push_back(page_range);
     canvas_ = canvas;
     return true;
-  } else
-#endif  // USE_SKIA
-  {
+  } else {
     return PrintPageHelper(&page_range, 1, canvas);
   }
 #else  // defined(ENABLED_PRINTING)
@@ -1380,12 +1368,10 @@ bool PluginInstance::PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
 void PluginInstance::PrintEnd() {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
-#if defined(USE_SKIA)
   if (!ranges_.empty())
     PrintPageHelper(&(ranges_.front()), ranges_.size(), canvas_.get());
   canvas_ = NULL;
   ranges_.clear();
-#endif  // USE_SKIA
 
   DCHECK(plugin_print_interface_);
   if (plugin_print_interface_)
@@ -1637,7 +1623,7 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
 #endif  // defined(OS_WIN)
 
   bool ret = false;
-#if defined(OS_LINUX) || (defined(OS_MACOSX) && defined(USE_SKIA))
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   // On Linux we just set the final bits in the native metafile
   // (NativeMetafile and PreviewMetafile must have compatible formats,
   // i.e. both PDF for this to work).
@@ -1646,24 +1632,6 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
   DCHECK(metafile != NULL);
   if (metafile)
     ret = metafile->InitFromData(mapper.data(), mapper.size());
-#elif defined(OS_MACOSX)
-  printing::NativeMetafile metafile;
-  // Create a PDF metafile and render from there into the passed in context.
-  if (metafile.InitFromData(mapper.data(), mapper.size())) {
-    // Flip the transform.
-    CGContextRef cgContext = canvas;
-    gfx::ScopedCGContextSaveGState save_gstate(cgContext)
-    CGContextTranslateCTM(cgContext, 0,
-                          current_print_settings_.printable_area.size.height);
-    CGContextScaleCTM(cgContext, 1.0, -1.0);
-    CGRect page_rect;
-    page_rect.origin.x = current_print_settings_.printable_area.point.x;
-    page_rect.origin.y = current_print_settings_.printable_area.point.y;
-    page_rect.size.width = current_print_settings_.printable_area.size.width;
-    page_rect.size.height = current_print_settings_.printable_area.size.height;
-
-    ret = metafile.RenderPage(1, cgContext, page_rect, true, false, true, true);
-  }
 #elif defined(OS_WIN)
   printing::Metafile* metafile =
     printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
@@ -1730,27 +1698,33 @@ void PluginInstance::UpdateLayer() {
   if (!container_)
     return;
 
-  // If we have a fullscreen_container_ (under PPB_FlashFullscreen) then the
-  // plugin is fullscreen (for Flash) or transitioning to fullscreen. In either
-  // case we do not want a layer.
-  bool want_layer = GetBackingTextureId() && !fullscreen_container_;
+  bool want_layer = GetBackingTextureId();
 
-  if (want_layer == !!texture_layer_.get())
+  if (want_layer == !!texture_layer_.get() &&
+      layer_bound_to_fullscreen_ == !!fullscreen_container_)
     return;
 
-  if (!want_layer) {
-    texture_layer_->willModifyTexture();
-    texture_layer_->clearClient();
-    container_->setWebLayer(NULL);
+  if (texture_layer_) {
+    texture_layer_->WillModifyTexture();
+    texture_layer_->ClearClient();
+    if (!layer_bound_to_fullscreen_)
+      container_->setWebLayer(NULL);
+    else if (fullscreen_container_)
+      fullscreen_container_->SetLayer(NULL);
     web_layer_.reset();
     texture_layer_ = NULL;
-  } else {
-    DCHECK(bound_graphics_3d_.get());
-    texture_layer_ = cc::TextureLayer::create(this);
-    web_layer_.reset(new WebKit::WebLayerImpl(texture_layer_));
-    container_->setWebLayer(web_layer_.get());
-    texture_layer_->setContentsOpaque(bound_graphics_3d_->IsOpaque());
   }
+  if (want_layer) {
+    DCHECK(bound_graphics_3d_.get());
+    texture_layer_ = cc::TextureLayer::Create(this);
+    web_layer_.reset(new WebKit::WebLayerImpl(texture_layer_));
+    if (fullscreen_container_)
+      fullscreen_container_->SetLayer(web_layer_.get());
+    else
+      container_->setWebLayer(web_layer_.get());
+    texture_layer_->SetContentsOpaque(bound_graphics_3d_->IsOpaque());
+  }
+  layer_bound_to_fullscreen_ = !!fullscreen_container_;
 }
 
 void PluginInstance::AddPluginObject(PluginObject* plugin_object) {
@@ -2151,6 +2125,7 @@ PP_Bool PluginInstance::GetScreenSize(PP_Instance instance, PP_Size* size) {
     case ::ppapi::FLASH_FILE_SINGLETON_ID:
     case ::ppapi::FLASH_FULLSCREEN_SINGLETON_ID:
     case ::ppapi::FLASH_SINGLETON_ID:
+    case ::ppapi::TRUETYPE_FONT_SINGLETON_ID:
       NOTIMPLEMENTED();
       return NULL;
     case ::ppapi::GAMEPAD_SINGLETON_ID:

@@ -36,6 +36,8 @@ class ThumbnailSource : public content::URLDataSource {
   virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
   virtual MessageLoop* MessageLoopForRequestPath(
       const std::string& path) const OVERRIDE;
+  virtual bool ShouldServiceRequest(
+      const net::URLRequest* request) const OVERRIDE;
 
  private:
   virtual ~ThumbnailSource();
@@ -46,6 +48,13 @@ class ThumbnailSource : public content::URLDataSource {
 
   // ThumbnailService.
   scoped_refptr<thumbnails::ThumbnailService> thumbnail_service_;
+
+  // Transient copy of the request in play. Valid between
+  // ShouldServiceRequest() and StartDataRequest().
+  mutable const net::URLRequest* current_request_;
+
+  // Only used when servicing requests on the UI thread.
+  Profile* const profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailSource);
 };

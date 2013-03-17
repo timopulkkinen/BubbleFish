@@ -62,9 +62,11 @@ class InstantPage : public content::WebContentsObserver {
     // Called when the page wants to be shown. Usually in response to Update()
     // or SendAutocompleteResults().
     virtual void ShowInstantOverlay(const content::WebContents* contents,
-                                    InstantShownReason reason,
                                     int height,
                                     InstantSizeUnits units) = 0;
+
+    // Called when the page wants the omnibox to be focused.
+    virtual void FocusOmnibox(const content::WebContents* contents) = 0;
 
     // Called when the page wants the omnibox to start capturing user key
     // strokes. If this call is processed successfully, the omnibox will not
@@ -87,10 +89,10 @@ class InstantPage : public content::WebContentsObserver {
                                WindowOpenDisposition disposition) = 0;
 
     // Called when the SearchBox wants to delete a Most Visited item.
-    virtual void DeleteMostVisitedItem(const GURL& url) = 0;
+    virtual void DeleteMostVisitedItem(uint64 most_visited_item_id) = 0;
 
     // Called when the SearchBox wants to undo a Most Visited deletion.
-    virtual void UndoMostVisitedDeletion(const GURL& url) = 0;
+    virtual void UndoMostVisitedDeletion(uint64 most_visited_item_id) = 0;
 
     // Called when the SearchBox wants to undo all Most Visited deletions.
     virtual void UndoAllMostVisitedDeletions() = 0;
@@ -138,6 +140,9 @@ class InstantPage : public content::WebContentsObserver {
   // Tells the page about the font information.
   void InitializeFonts();
 
+  // Grant renderer-side chrome-search: access rights for select origins.
+  void GrantChromeSearchAccessFromOrigin(const GURL& origin_url);
+
   // Tells the renderer to determine if the page supports the Instant API, which
   // results in a call to InstantSupportDetermined() when the reply is received.
   void DetermineIfPageSupportsInstant();
@@ -165,7 +170,7 @@ class InstantPage : public content::WebContentsObserver {
   void KeyCaptureChanged(bool is_key_capture_enabled);
 
   // Tells the page about new Most Visited data.
-  void SendMostVisitedItems(const std::vector<MostVisitedItem>& items);
+  void SendMostVisitedItems(const std::vector<InstantMostVisitedItem>& items);
 
  protected:
   explicit InstantPage(Delegate* delegate);
@@ -185,6 +190,7 @@ class InstantPage : public content::WebContentsObserver {
   virtual bool ShouldProcessAboutToNavigateMainFrame();
   virtual bool ShouldProcessSetSuggestions();
   virtual bool ShouldProcessShowInstantOverlay();
+  virtual bool ShouldProcessFocusOmnibox();
   virtual bool ShouldProcessStartCapturingKeyStrokes();
   virtual bool ShouldProcessStopCapturingKeyStrokes();
   virtual bool ShouldProcessNavigateToURL();
@@ -211,17 +217,17 @@ class InstantPage : public content::WebContentsObserver {
                         const std::vector<InstantSuggestion>& suggestions);
   void OnInstantSupportDetermined(int page_id, bool supports_instant);
   void OnShowInstantOverlay(int page_id,
-                            InstantShownReason reason,
                             int height,
                             InstantSizeUnits units);
+  void OnFocusOmnibox(int page_id);
   void OnStartCapturingKeyStrokes(int page_id);
   void OnStopCapturingKeyStrokes(int page_id);
   void OnSearchBoxNavigate(int page_id,
                            const GURL& url,
                            content::PageTransition transition,
                            WindowOpenDisposition disposition);
-  void OnDeleteMostVisitedItem(const GURL& url);
-  void OnUndoMostVisitedDeletion(const GURL& url);
+  void OnDeleteMostVisitedItem(uint64 most_visited_item_id);
+  void OnUndoMostVisitedDeletion(uint64 most_visited_item_id);
   void OnUndoAllMostVisitedDeletions();
 
   Delegate* const delegate_;

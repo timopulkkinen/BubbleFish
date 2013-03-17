@@ -41,6 +41,25 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   // Adds an item and its identifying key to the model. Keys needn't be unique.
   void AddKeyedItem(const std::string& key, const string16& display_label);
 
+  // As above, but also accepts an image which will be displayed alongside the
+  // text.
+  void AddKeyedItemWithIcon(const std::string& key,
+                            const string16& display_label,
+                            const gfx::Image& icon);
+
+  // Adds a label with a sublabel and its identifying key to the model.
+  // Keys needn't be unique.
+  void AddKeyedItemWithSublabel(const std::string& key,
+                                const string16& display_label,
+                                const string16& display_sublabel);
+
+  // As above, but also accepts an image which will be displayed alongside the
+  // text.
+  void AddKeyedItemWithSublabelAndIcon(const std::string& key,
+                                       const string16& display_label,
+                                       const string16& display_sublabel,
+                                       const gfx::Image& icon);
+
   // Resets the model to empty.
   void Reset();
 
@@ -59,7 +78,7 @@ class SuggestionsMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
  private:
   // The items this model represents, in presentation order. The first
@@ -101,7 +120,7 @@ class AccountChooserModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
   // Should be called when the Wallet server returns an error.
   void SetHadWalletError();
@@ -144,6 +163,8 @@ class MonthComboboxModel : public ui::ComboboxModel {
  public:
   MonthComboboxModel();
   virtual ~MonthComboboxModel();
+
+  static string16 FormatMonth(int index);
 
   // ui::Combobox implementation:
   virtual int GetItemCount() const OVERRIDE;

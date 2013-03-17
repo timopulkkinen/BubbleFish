@@ -15,7 +15,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/storage_monitor/media_storage_util.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 namespace chrome {
 
@@ -226,7 +226,7 @@ void MediaGalleriesPreferences::AddDefaultGalleriesIfFreshProfile() {
       continue;
 
     base::FilePath relative_path;
-    StorageMonitor::StorageInfo info;
+    StorageInfo info;
     if (MediaStorageUtil::GetDeviceInfoFromPath(path, &info, &relative_path)) {
       // TODO(gbillock): Add in the volume metadata here when available.
       AddGalleryWithName(info.device_id, info.name, relative_path,
@@ -279,7 +279,7 @@ void MediaGalleriesPreferences::RemoveGalleryChangeObserver(
 }
 
 void MediaGalleriesPreferences::OnRemovableStorageAttached(
-    const StorageMonitor::StorageInfo& info) {
+    const StorageInfo& info) {
   if (!MediaStorageUtil::IsMediaDevice(info.device_id))
     return;
 
@@ -300,7 +300,7 @@ void MediaGalleriesPreferences::OnRemovableStorageAttached(
 bool MediaGalleriesPreferences::LookUpGalleryByPath(
     const base::FilePath& path,
     MediaGalleryPrefInfo* gallery_info) const {
-  StorageMonitor::StorageInfo info;
+  StorageInfo info;
   base::FilePath relative_path;
   if (!MediaStorageUtil::GetDeviceInfoFromPath(path, &info, &relative_path)) {
     if (gallery_info)

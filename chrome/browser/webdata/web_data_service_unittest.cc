@@ -17,16 +17,16 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_profile.h"
-#include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_test_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/form_field_data.h"
 #include "chrome/test/base/thread_observer_helper.h"
+#include "components/autofill/browser/autofill_profile.h"
+#include "components/autofill/browser/credit_card.h"
+#include "components/autofill/common/form_field_data.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
@@ -62,9 +62,6 @@ class AutofillDBThreadObserverHelper : public DBThreadObserverHelper {
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
                    content::NotificationService::AllSources());
-    registrar_.Add(&observer_,
-                   chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED,
-                   content::NotificationService::AllSources());
   }
 };
 
@@ -86,14 +83,20 @@ class WebDataServiceTest : public testing::Test {
   virtual void TearDown() {
     wds_->ShutdownOnUIThread();
     wds_ = NULL;
-    base::WaitableEvent done(false, false);
-    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
-    done.Wait();
+    WaitForDatabaseThread();
 
     db_thread_.Stop();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
+  }
+
+  void WaitForDatabaseThread() {
+    base::WaitableEvent done(false, false);
+    BrowserThread::PostTask(
+        BrowserThread::DB,
+        FROM_HERE,
+        base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
+    done.Wait();
   }
 
   MessageLoopForUI message_loop_;
@@ -399,20 +402,8 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
 
 TEST_F(WebDataServiceAutofillTest, CreditAdd) {
   CreditCard card;
-  const AutofillCreditCardChange expected_change(
-      AutofillCreditCardChange::ADD, card.guid(), &card);
-
-  EXPECT_CALL(
-      *observer_helper_->observer(),
-      Observe(
-          int(chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED),
-              content::Source<WebDataService>(wds_.get()),
-              Property(&content::Details<const AutofillCreditCardChange>::ptr,
-                       Pointee(expected_change)))).
-      WillOnce(SignalEvent(&done_event_));
-
   wds_->AddCreditCard(card);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
@@ -428,10 +419,8 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
   CreditCard credit_card;
 
   // Add a credit card.
-  EXPECT_CALL(*observer_helper_->observer(), Observe(_, _, _)).
-      WillOnce(SignalEvent(&done_event_));
   wds_->AddCreditCard(credit_card);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
@@ -443,18 +432,8 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
   STLDeleteElements(&consumer.result());
 
   // Remove the credit card.
-  const AutofillCreditCardChange expected_change(
-      AutofillCreditCardChange::REMOVE, credit_card.guid(), NULL);
-  EXPECT_CALL(
-      *observer_helper_->observer(),
-      Observe(
-          int(chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED),
-              content::Source<WebDataService>(wds_.get()),
-              Property(&content::Details<const AutofillCreditCardChange>::ptr,
-                       Pointee(expected_change)))).
-      WillOnce(SignalEvent(&done_event_));
   wds_->RemoveCreditCard(credit_card.guid());
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that it was removed.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer2;
@@ -470,13 +449,9 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   CreditCard card2;
   card2.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Alice"));
 
-  EXPECT_CALL(*observer_helper_->observer(), Observe(_, _, _)).
-      Times(2).
-      WillOnce(DoDefault()).
-      WillOnce(SignalEvent(&done_event_));
   wds_->AddCreditCard(card1);
   wds_->AddCreditCard(card2);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that they got added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
@@ -490,20 +465,9 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
 
   CreditCard card1_changed(card1);
   card1_changed.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Bill"));
-  const AutofillCreditCardChange expected_change(
-      AutofillCreditCardChange::UPDATE, card1.guid(), &card1_changed);
-
-  EXPECT_CALL(
-      *observer_helper_->observer(),
-      Observe(
-          int(chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED),
-              content::Source<WebDataService>(wds_.get()),
-              Property(&content::Details<const AutofillCreditCardChange>::ptr,
-                       Pointee(expected_change)))).
-      WillOnce(SignalEvent(&done_event_));
 
   wds_->UpdateCreditCard(card1_changed);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that the updates were made.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer2;
@@ -537,15 +501,12 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
   STLDeleteElements(&profile_consumer.result());
 
   // Add a credit card.
-  EXPECT_CALL(*observer_helper_->observer(), Observe(_, _, _)).
-      WillOnce(SignalEvent(&done_event_));
   CreditCard credit_card;
   wds_->AddCreditCard(credit_card);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that it was added.
-  AutofillWebDataServiceConsumer<std::vector<CreditCard*> >
-      card_consumer;
+  AutofillWebDataServiceConsumer<std::vector<CreditCard*> > card_consumer;
   handle = wds_->GetCreditCards(&card_consumer);
   MessageLoop::current()->Run();
   EXPECT_EQ(handle, card_consumer.handle());
@@ -564,22 +525,10 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
                        Pointee(expected_profile_change)))).
       WillOnce(SignalEvent(&done_event_));
 
-  // Check that GUID-based notification was sent for the credit card.
-  const AutofillCreditCardChange expected_card_change(
-      AutofillCreditCardChange::REMOVE, credit_card.guid(), NULL);
-  EXPECT_CALL(
-      *observer_helper_->observer(),
-      Observe(
-          int(chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED),
-              content::Source<WebDataService>(wds_.get()),
-              Property(&content::Details<const AutofillCreditCardChange>::ptr,
-                       Pointee(expected_card_change)))).
-      WillOnce(SignalEvent(&done_event_));
-
   // Remove the profile using time range of "all time".
   wds_->RemoveAutofillProfilesAndCreditCardsModifiedBetween(Time(), Time());
   done_event_.TimedWait(test_timeout_);
-  done_event_.TimedWait(test_timeout_);
+  WaitForDatabaseThread();
 
   // Check that the profile was removed.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> >
@@ -591,8 +540,7 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
   ASSERT_EQ(0U, profile_consumer2.result().size());
 
   // Check that the credit card was removed.
-  AutofillWebDataServiceConsumer<std::vector<CreditCard*> >
-      card_consumer2;
+  AutofillWebDataServiceConsumer<std::vector<CreditCard*> > card_consumer2;
   handle2 = wds_->GetCreditCards(&card_consumer2);
   MessageLoop::current()->Run();
   EXPECT_EQ(handle2, card_consumer2.handle());

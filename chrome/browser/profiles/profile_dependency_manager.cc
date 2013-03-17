@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <iterator>
 
 #include "apps/app_restore_service_factory.h"
+#include "apps/shortcut_manager_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -36,10 +37,13 @@
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/page_launcher/page_launcher_api.h"
+#include "chrome/browser/extensions/api/plugins/plugins_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_api.h"
 #include "chrome/browser/extensions/api/session_restore/session_restore_api.h"
+#include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
+#include "chrome/browser/extensions/api/system_info/system_info_api.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/api/themes/theme_api.h"
@@ -48,6 +52,7 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/manifest_url_parser.h"
+#include "chrome/browser/extensions/token_cache/token_cache_service_factory.h"
 #include "chrome/browser/extensions/web_accessible_resources_parser.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
@@ -97,7 +102,7 @@
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/user_policy_signin_service_factory.h"
+#include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -262,6 +267,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   DownloadServiceFactory::GetInstance();
 #if defined(ENABLE_EXTENSIONS)
   apps::AppRestoreServiceFactory::GetInstance();
+  apps::ShortcutManagerFactory::GetInstance();
   extensions::ActivityLogFactory::GetInstance();
   extensions::BookmarksAPI::GetFactoryInstance();
   extensions::BluetoothAPIFactory::GetInstance();
@@ -295,6 +301,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #endif
   extensions::OmniboxAPI::GetFactoryInstance();
   extensions::PageLauncherAPI::GetFactoryInstance();
+  extensions::PluginsAPI::GetFactoryInstance();
   extensions::PreferenceAPI::GetFactoryInstance();
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::PushMessagingAPI::GetFactoryInstance();
@@ -302,6 +309,8 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #if defined(ENABLE_INPUT_SPEECH)
   extensions::SpeechInputAPI::GetFactoryInstance();
 #endif
+  extensions::StreamsPrivateAPI::GetFactoryInstance();
+  extensions::SystemInfoAPI::GetFactoryInstance();
   extensions::SuggestedLinksRegistryFactory::GetInstance();
   extensions::TabCaptureRegistryFactory::GetInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
@@ -367,6 +376,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #if defined(ENABLE_THEMES)
   ThemeServiceFactory::GetInstance();
 #endif
+  TokenCacheServiceFactory::GetInstance();
   TokenServiceFactory::GetInstance();
   UserStyleSheetWatcherFactory::GetInstance();
   WebDataServiceFactory::GetInstance();

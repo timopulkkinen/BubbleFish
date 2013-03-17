@@ -7,10 +7,11 @@
 #include "ash/shell.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
 #include "chrome/browser/chromeos/ui/app_launch_view.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/webstore_standalone_installer.h"
+#include "chrome/browser/extensions/webstore_startup_installer.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/extension.h"
@@ -18,7 +19,7 @@
 
 using content::BrowserThread;
 using extensions::Extension;
-using extensions::WebstoreStandaloneInstaller;
+using extensions::WebstoreStartupInstaller;
 
 namespace chromeos {
 
@@ -52,22 +53,19 @@ StartupAppLauncher::~StartupAppLauncher() {
 
 void StartupAppLauncher::Start() {
   launch_splash_start_time_ = base::TimeTicks::Now().ToInternalValue();
+  DVLOG(1) << "Starting... connection = "
+           <<  net::NetworkChangeNotifier::GetConnectionType();
   chromeos::ShowAppLaunchSplashScreen();
 
-  if (IsAppInstalled(profile_, app_id_)) {
-    Launch();
-    return;
-  }
-
   // Set a maximum allowed wait time for network.
-  const int kMaxNetworkWaitSeconds = 5;
+  const int kMaxNetworkWaitSeconds = 5 * 60;
   network_wait_timer_.Start(
       FROM_HERE,
       base::TimeDelta::FromSeconds(kMaxNetworkWaitSeconds),
       this, &StartupAppLauncher::OnNetworkWaitTimedout);
 
-  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
-  OnConnectionTypeChanged(net::NetworkChangeNotifier::GetConnectionType());
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  OnNetworkChanged(net::NetworkChangeNotifier::GetConnectionType());
 }
 
 void StartupAppLauncher::OnLaunchSuccess() {
@@ -106,7 +104,14 @@ void StartupAppLauncher::Launch() {
       extension_service()->GetInstalledExtension(app_id_);
   CHECK(extension);
 
-  // Always the app in a window.
+  // Set the app_id for the current instance of KioskAppUpdateService.
+  KioskAppUpdateService* update_service =
+      KioskAppUpdateServiceFactory::GetForProfile(profile_);
+  DCHECK(update_service);
+  if (update_service)
+    update_service->set_app_id(app_id_);
+
+  // Always open the app in a window.
   chrome::OpenApplication(chrome::AppLaunchParams(profile_,
                                                   extension,
                                                   extension_misc::LAUNCH_WINDOW,
@@ -115,13 +120,20 @@ void StartupAppLauncher::Launch() {
 }
 
 void StartupAppLauncher::BeginInstall() {
-  installer_ = new WebstoreStandaloneInstaller(
+  DVLOG(1) << "BeginInstall... connection = "
+           <<  net::NetworkChangeNotifier::GetConnectionType();
+
+  chromeos::UpdateAppLaunchSplashScreenState(
+      chromeos::APP_LAUNCH_STATE_INSTALLING_APPLICATION);
+  if (IsAppInstalled(profile_, app_id_)) {
+    Launch();
+    return;
+  }
+
+  installer_ = new WebstoreStartupInstaller(
       app_id_,
-      WebstoreStandaloneInstaller::DO_NOT_REQUIRE_VERIFIED_SITE,
-      WebstoreStandaloneInstaller::SKIP_PROMPT,
-      GURL(),
       profile_,
-      NULL,
+      false,
       base::Bind(&StartupAppLauncher::InstallCallback, AsWeakPtr()));
   installer_->BeginInstall();
 }
@@ -143,19 +155,25 @@ void StartupAppLauncher::InstallCallback(bool success,
 }
 
 void StartupAppLauncher::OnNetworkWaitTimedout() {
+  LOG(WARNING) << "OnNetworkWaitTimedout... connection = "
+               <<  net::NetworkChangeNotifier::GetConnectionType();
   // Timeout in waiting for online. Try the install anyway.
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
   BeginInstall();
 }
 
-void StartupAppLauncher::OnConnectionTypeChanged(
+void StartupAppLauncher::OnNetworkChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
-  const bool online = type != net::NetworkChangeNotifier::CONNECTION_NONE;
-  if (online) {
-    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  DVLOG(1) << "OnNetworkChanged... connection = "
+           <<  net::NetworkChangeNotifier::GetConnectionType();
+  if (!net::NetworkChangeNotifier::IsOffline()) {
+    DVLOG(1) << "Network up and running!";
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
     network_wait_timer_.Stop();
 
     BeginInstall();
+  } else {
+    DVLOG(1) << "Network not running yet!";
   }
 }
 

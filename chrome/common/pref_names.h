@@ -11,6 +11,8 @@
 
 #include "build/build_config.h"
 
+#include "components/autofill/common/autofill_pref_names.h"
+
 namespace prefs {
 
 // Profile prefs. Please add Local State prefs below instead.
@@ -68,6 +70,7 @@ extern const char kDefaultCharset[];
 extern const char kAcceptLanguages[];
 extern const char kStaticEncodings[];
 extern const char kShowBookmarkBar[];
+extern const char kShowAppsShortcutInBookmarkBar[];
 extern const char kBookmarkEditorExpandedNodes[];
 extern const char kWebKitCommonScript[];
 extern const char kWebKitStandardFontFamily[];
@@ -148,7 +151,6 @@ extern const char kWebKitForceEnableZoom[];
 #endif
 extern const char kPasswordManagerEnabled[];
 extern const char kPasswordManagerAllowShowPasswords[];
-extern const char kPasswordGenerationEnabled[];
 extern const char kAutologinEnabled[];
 extern const char kReverseAutologinEnabled[];
 extern const char kReverseAutologinRejectedEmailList[];
@@ -380,10 +382,6 @@ extern const char kClearSiteDataOnExit[];
 extern const char kDefaultZoomLevel[];
 extern const char kPerHostZoomLevels[];
 extern const char kAutofillDialogPayWithoutWallet[];
-extern const char kAutofillEnabled[];
-extern const char kAutofillAuxiliaryProfilesEnabled[];
-extern const char kAutofillPositiveUploadRate[];
-extern const char kAutofillNegativeUploadRate[];
 extern const char kEditBookmarksEnabled[];
 
 extern const char kEnableTranslate[];
@@ -774,6 +772,7 @@ extern const char kCustomHandlersEnabled[];
 extern const char kUserCreatedLoginItem[];
 extern const char kUserRemovedLoginItem[];
 extern const char kBackgroundModeEnabled[];
+extern const char kHardwareAccelerationModeEnabled[];
 
 extern const char kDevicePolicyRefreshRate[];
 extern const char kUserPolicyRefreshRate[];

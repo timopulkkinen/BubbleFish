@@ -186,6 +186,7 @@ const Experiment::Choice kChromeCaptivePortalDetectionChoices[] = {
   { IDS_FLAGS_SHILL_CAPTIVE_PORTAL_DETECTOR,
     switches::kDisableChromeCaptivePortalDetector, ""}
 };
+
 #endif
 
 const Experiment::Choice kImplSidePaintingChoices[] = {
@@ -284,13 +285,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPrintRaster)
   },
 #endif  // OS_WIN
-  {
-    "crxless-web-apps",
-    IDS_FLAGS_CRXLESS_WEB_APPS_NAME,
-    IDS_FLAGS_CRXLESS_WEB_APPS_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableCrxlessWebApps)
-  },
   {
     "ignore-gpu-blacklist",
     IDS_FLAGS_IGNORE_GPU_BLACKLIST_NAME,
@@ -401,12 +395,12 @@ const Experiment kExperiments[] = {
 #endif
   },
   {
-    "enable-webrtc",
-    IDS_FLAGS_ENABLE_WEBRTC_NAME,
-    IDS_FLAGS_ENABLE_WEBRTC_DESCRIPTION,
+    "disable-webrtc",
+    IDS_FLAGS_DISABLE_WEBRTC_NAME,
+    IDS_FLAGS_DISABLE_WEBRTC_DESCRIPTION,
     kOsAndroid,
 #if defined(OS_ANDROID)
-    SINGLE_VALUE_TYPE(switches::kEnableWebRTC)
+    SINGLE_VALUE_TYPE(switches::kDisableWebRTC)
 #else
     SINGLE_VALUE_TYPE("")
 #endif
@@ -558,13 +552,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kSyncTabFavicons)
   },
   {
-    "sync-app-notifications",
-    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_NAME,
-    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kDisableSyncAppNotifications)
-  },
-  {
     "sync-keystore-encryption",
     IDS_FLAGS_SYNC_KEYSTORE_ENCRYPTION_NAME,
     IDS_FLAGS_SYNC_KEYSTORE_ENCRYPTION_DESCRIPTION,
@@ -576,7 +563,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_NAME,
     IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_DESCRIPTION,
     kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableGestureTapHighlight)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableGestureTapHighlight,
+                              switches::kDisableGestureTapHighlight)
   },
   {
     "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
@@ -614,13 +602,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_PANELS_DESCRIPTION,
     kOsDesktop,
     SINGLE_VALUE_TYPE(switches::kEnablePanels)
-  },
-  {
-    "enable-panel-stacking",
-    IDS_FLAGS_ENABLE_PANEL_STACKING_NAME,
-    IDS_FLAGS_ENABLE_PANEL_STACKING_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnablePanelStacking)
   },
   {
     // See http://crbug.com/120416 for how to remove this flag.
@@ -707,11 +688,7 @@ const Experiment kExperiments[] = {
     "per-tile-painting",
     IDS_FLAGS_PER_TILE_PAINTING_NAME,
     IDS_FLAGS_PER_TILE_PAINTING_DESCRIPTION,
-#if defined(USE_SKIA)
     kOsMac | kOsLinux | kOsCrOS,
-#else
-    0,
-#endif
     SINGLE_VALUE_TYPE(cc::switches::kEnablePerTilePainting)
   },
   {
@@ -826,13 +803,6 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kTouchOptimizedUIChoices)
   },
   {
-    "enable-webkit-text-subpixel-positioning",
-    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_NAME,
-    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(gfx::switches::kEnableWebkitTextSubpixelPositioning)
-  },
-  {
     "disable-touch-adjustment",
     IDS_DISABLE_TOUCH_ADJUSTMENT_NAME,
     IDS_DISABLE_TOUCH_ADJUSTMENT_DESCRIPTION,
@@ -937,11 +907,11 @@ const Experiment kExperiments[] = {
   },
 #if defined(USE_ASH)
   {
-    "show-launcher-alignment-menu",
-    IDS_FLAGS_SHOW_LAUNCHER_ALIGNMENT_MENU_NAME,
-    IDS_FLAGS_SHOW_LAUNCHER_ALIGNMENT_MENU_DESCRIPTION,
+    "hide-launcher-alignment-menu",
+    IDS_FLAGS_HIDE_LAUNCHER_ALIGNMENT_MENU_NAME,
+    IDS_FLAGS_HIDE_LAUNCHER_ALIGNMENT_MENU_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kShowLauncherAlignmentMenu)
+    SINGLE_VALUE_TYPE(switches::kHideLauncherAlignmentMenu)
   },
   {
     "show-touch-hud",
@@ -1022,6 +992,13 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableAppMode),
   },
+  {
+    "force-fullscreen-app",
+    IDS_FLAGS_FORCE_FULLSCREEN_APP_NAME,
+    IDS_FLAGS_FORCE_FULLSCREEN_APP_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kForceFullscreenApp),
+  },
 #endif  // defined(OS_CHROMEOS)
   {
     "views-textfield",
@@ -1030,13 +1007,6 @@ const Experiment kExperiments[] = {
     kOsWin,
     ENABLE_DISABLE_VALUE_TYPE(switches::kEnableViewsTextfield,
                               switches::kDisableViewsTextfield),
-  },
-  {
-    "old-checkbox-style",
-    IDS_FLAGS_OLD_CHECKBOX_STYLE,
-    IDS_FLAGS_OLD_CHECKBOX_STYLE_DESCRIPTION,
-    kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kOldCheckboxStyle),
   },
   {
     "enable-new-dialog-style",
@@ -1060,13 +1030,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAshDebugShortcuts),
   },
 #endif
-  {
-    "enable-webaudio-input",
-    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_NAME,
-    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableWebAudioInput),
-  },
   {
     "enable-contacts",
     IDS_FLAGS_ENABLE_CONTACTS_NAME,
@@ -1093,11 +1056,11 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableWorkspaceScrubbing),
   },
-  { "ash-immersive-mode",
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_NAME,
-    IDS_FLAGS_ASH_IMMERSIVE_MODE_DESCRIPTION,
+  { "ash-disable-immersive-mode",
+    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_NAME,
+    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshImmersiveMode),
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableImmersiveMode),
   },
 #if defined(OS_LINUX)
   { "ash-enable-memory-monitor",
@@ -1109,11 +1072,11 @@ const Experiment kExperiments[] = {
 #endif
 #endif
 #if defined(OS_CHROMEOS)
-  { "ash-enable-new-network-status-area",
-    IDS_FLAGS_ASH_ENABLE_NEW_NETWORK_STATUS_AREA_NAME,
-    IDS_FLAGS_ASH_ENABLE_NEW_NETWORK_STATUS_AREA_DESCRIPTION,
+  { "ash-disable-new-network-status-area",
+    IDS_FLAGS_ASH_DISABLE_NEW_NETWORK_STATUS_AREA_NAME,
+    IDS_FLAGS_ASH_DISABLE_NEW_NETWORK_STATUS_AREA_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshEnableNewNetworkStatusArea),
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableNewNetworkStatusArea),
   },
   {
     "enable-carrier-switching",
@@ -1145,21 +1108,10 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnablePasswordGeneration)
   },
   {
-    "crash-on-gpu-hang",
-    IDS_FLAGS_CRASH_ON_GPU_HANG_NAME,
-    IDS_FLAGS_CRASH_ON_GPU_HANG_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kCrashOnGpuHang)
-  },
-  {
     "enable-deferred-image-decoding",
     IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_NAME,
     IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_DESCRIPTION,
-#if defined(USE_SKIA)
     kOsMac | kOsLinux | kOsCrOS,
-#else
-    0,
-#endif
     SINGLE_VALUE_TYPE(switches::kEnableDeferredImageDecoding)
   },
   {
@@ -1170,11 +1122,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPerformanceMonitorGathering)
   },
   {
-    "enable-new-autofill-ui",
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_UI_NAME,
-    IDS_FLAGS_ENABLE_NEW_AUTOFILL_UI_DESCRIPTION,
+    "enable-native-autofill-ui",
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_NAME,
+    IDS_FLAGS_ENABLE_NATIVE_AUTOFILL_UI_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnableNewAutofillUi)
+    SINGLE_VALUE_TYPE(switches::kEnableNativeAutofillUi)
   },
   {
     "show-app-list-shortcut",
@@ -1257,6 +1209,8 @@ const Experiment kExperiments[] = {
     kOsAndroid,
     MULTI_VALUE_TYPE(kImplSidePaintingChoices)
   },
+  // TODO(sky): ifdef needed until focus sorted out in DesktopNativeWidgetAura.
+#if !defined(USE_AURA)
   {
     "track-active-visit-time",
     IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_NAME,
@@ -1264,6 +1218,7 @@ const Experiment kExperiments[] = {
     kOsWin,
     SINGLE_VALUE_TYPE(switches::kTrackActiveVisitTime)
   },
+#endif
 #if defined(OS_ANDROID)
   {
     "disable-gesture-requirement-for-media-playback",
@@ -1271,6 +1226,24 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_DESCRIPTION,
     kOsAndroid,
     SINGLE_VALUE_TYPE(switches::kDisableGestureRequirementForMediaPlayback)
+  },
+#endif
+#if defined(OS_CHROMEOS)
+  {
+    "enable-experimental-bluetooth",
+    IDS_FLAGS_ENABLE_EXPERIMENTAL_BLUETOOTH_NAME,
+    IDS_FLAGS_ENABLE_EXPERIMENTAL_BLUETOOTH_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(chromeos::switches::kEnableExperimentalBluetooth)
+  },
+#endif
+#if defined(ENABLE_GOOGLE_NOW)
+  {
+    "enable-google-now",
+    IDS_FLAGS_ENABLE_GOOGLE_NOW_INTEGRATION_NAME,
+    IDS_FLAGS_ENABLE_GOOGLE_NOW_INTEGRATION_DESCRIPTION,
+    kOsWin | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableGoogleNowIntegration)
   },
 #endif
 };

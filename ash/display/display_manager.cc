@@ -4,20 +4,20 @@
 
 #include "ash/display/display_manager.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
-#include "ash/host/root_window_host_factory.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -83,7 +83,13 @@ DEFINE_WINDOW_PROPERTY_KEY(int64, kDisplayIdKey,
 
 DisplayManager::DisplayManager()
     : first_display_id_(gfx::Display::kInvalidDisplayID),
-      force_bounds_changed_(false) {
+      mirrored_display_id_(gfx::Display::kInvalidDisplayID),
+      num_connected_displays_(0),
+      force_bounds_changed_(false),
+      change_display_upon_host_resize_(false) {
+#if defined(OS_CHROMEOS)
+  change_display_upon_host_resize_ = !base::chromeos::IsRunningOnChromeOS();
+#endif
   Init();
 }
 
@@ -96,7 +102,7 @@ void DisplayManager::CycleDisplay() {
 }
 
 // static
-void DisplayManager::ToggleDisplayScale() {
+void DisplayManager::ToggleDisplayScaleFactor() {
   Shell::GetInstance()->display_manager()->ScaleDisplayImpl();
 }
 
@@ -144,6 +150,8 @@ const gfx::Display& DisplayManager::FindDisplayContainingPoint(
 
 void DisplayManager::SetOverscanInsets(int64 display_id,
                                        const gfx::Insets& insets_in_dip) {
+  // TODO(oshima): insets has to be rotated according to the
+  // the current display rotation.
   display_info_[display_id].SetOverscanInsets(true, insets_in_dip);
   DisplayInfoList display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
@@ -161,6 +169,59 @@ void DisplayManager::ClearCustomOverscanInsets(int64 display_id) {
     display_info_list.push_back(GetDisplayInfo(*iter));
   }
   UpdateDisplays(display_info_list);
+}
+
+void DisplayManager::SetDisplayRotation(int64 display_id,
+                                        gfx::Display::Rotation rotation) {
+  if (!IsDisplayRotationEnabled())
+    return;
+  DisplayInfoList display_info_list;
+  for (DisplayList::const_iterator iter = displays_.begin();
+       iter != displays_.end(); ++iter) {
+    DisplayInfo info = GetDisplayInfo(*iter);
+    if (info.id() == display_id)
+      info.set_rotation(rotation);
+    display_info_list.push_back(info);
+  }
+  UpdateDisplays(display_info_list);
+}
+
+void DisplayManager::SetDisplayUIScale(int64 display_id,
+                                       float ui_scale) {
+  if (!IsDisplayUIScalingEnabled())
+    return;
+  DisplayInfoList display_info_list;
+  for (DisplayList::const_iterator iter = displays_.begin();
+       iter != displays_.end(); ++iter) {
+    DisplayInfo info = GetDisplayInfo(*iter);
+    if (info.id() == display_id)
+      info.set_ui_scale(ui_scale);
+    display_info_list.push_back(info);
+  }
+  UpdateDisplays(display_info_list);
+}
+
+
+bool DisplayManager::IsDisplayRotationEnabled() const {
+  static bool enabled = !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kAshDisableDisplayRotation);
+  return enabled;
+}
+
+bool DisplayManager::IsDisplayUIScalingEnabled() const {
+  static bool enabled = !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kAshDisableUIScaling);
+  if (!enabled)
+    return false;
+  // UI Scaling is effective only when the internal display has
+  // 2x density (currently Pixel).
+  int64 display_id = gfx::Display::InternalDisplayId();
+#if defined(OS_CHROMEOS)
+  // On linux desktop, allow ui scaling on the first dislpay.
+  if (!base::chromeos::IsRunningOnChromeOS())
+    display_id = Shell::GetInstance()->display_manager()->first_display_id();
+#endif
+  return GetDisplayForId(display_id).device_scale_factor() == 2.0f;
 }
 
 gfx::Insets DisplayManager::GetOverscanInsets(int64 display_id) const {
@@ -186,17 +247,29 @@ void DisplayManager::OnNativeDisplaysChanged(
     return;
   }
   first_display_id_ = updated_displays[0].id();
-
+  std::set<int> y_coords;
   bool internal_display_connected = false;
+  num_connected_displays_ = updated_displays.size();
+  mirrored_display_id_ = gfx::Display::kInvalidDisplayID;
+  DisplayInfoList new_display_info_list;
   for (DisplayInfoList::const_iterator iter = updated_displays.begin();
-       iter != updated_displays.end() && !internal_display_connected;
+       iter != updated_displays.end();
        ++iter) {
-    internal_display_connected = IsInternalDisplayId(iter->id());
-    if (internal_display_connected)
-      internal_display_info_.reset(new DisplayInfo(*iter));
+    if (!internal_display_connected) {
+      internal_display_connected = IsInternalDisplayId(iter->id());
+      if (internal_display_connected)
+        internal_display_info_.reset(new DisplayInfo(*iter));
+    }
+    // Mirrored monitors have the same y coordinates.
+    int y = iter->bounds_in_pixel().y();
+    if (y_coords.find(y) != y_coords.end()) {
+      InsertAndUpdateDisplayInfo(*iter);
+      mirrored_display_id_ = iter->id();
+    } else {
+      y_coords.insert(y);
+      new_display_info_list.push_back(*iter);
+    }
   }
-  DisplayInfoList new_display_info_list = updated_displays;
-
   if (HasInternalDisplay() && !internal_display_connected) {
     if (!internal_display_info_.get()) {
       // TODO(oshima): Get has_custom value.
@@ -207,24 +280,14 @@ void DisplayManager::OnNativeDisplaysChanged(
       internal_display_info_->SetBounds(gfx::Rect(0, 0, 800, 600));
     }
     new_display_info_list.push_back(*internal_display_info_.get());
+    // An internal display is always considered *connected*.
+    num_connected_displays_++;
   }
-
   UpdateDisplays(new_display_info_list);
 }
 
 void DisplayManager::UpdateDisplays(
     const std::vector<DisplayInfo>& updated_display_info_list) {
-#if defined(OS_CHROMEOS)
-  // Overscan is always enabled when not running on the device
-  // in order for unit tests to work.
-  bool can_overscan =
-      !base::chromeos::IsRunningOnChromeOS() ||
-      (Shell::GetInstance()->output_configurator()->output_state() !=
-       chromeos::STATE_DUAL_MIRROR &&
-       updated_display_info_list.size() == 1);
-#else
-  bool can_overscan = true;
-#endif
   DisplayInfoList new_display_info_list = updated_display_info_list;
   std::sort(displays_.begin(), displays_.end(), DisplaySortFunctor());
   std::sort(new_display_info_list.begin(),
@@ -246,7 +309,7 @@ void DisplayManager::UpdateDisplays(
     if (curr_iter == displays_.end()) {
       // more displays in new list.
       added_display_indices.push_back(new_displays.size());
-      InsertAndUpdateDisplayInfo(*new_info_iter, can_overscan);
+      InsertAndUpdateDisplayInfo(*new_info_iter);
       new_displays.push_back(
           CreateDisplayFromDisplayInfoById(new_info_iter->id()));
       ++new_info_iter;
@@ -258,15 +321,21 @@ void DisplayManager::UpdateDisplays(
       const gfx::Display& current_display = *curr_iter;
       // Copy the info because |CreateDisplayFromInfo| updates the instance.
       const DisplayInfo current_display_info = GetDisplayInfo(current_display);
-      InsertAndUpdateDisplayInfo(*new_info_iter, can_overscan);
+      InsertAndUpdateDisplayInfo(*new_info_iter);
       gfx::Display new_display =
           CreateDisplayFromDisplayInfoById(new_info_iter->id());
       const DisplayInfo& new_display_info = GetDisplayInfo(new_display);
+      // TODO(oshima): Rotating square dislay doesn't work as the size
+      // won't change. This doesn't cause a problem now as there is no
+      // such display. This will be fixed by comparing the rotation as
+      // well when the rotation variable is added to gfx::Display.
       if (force_bounds_changed_ ||
           (current_display_info.bounds_in_pixel() !=
            new_display_info.bounds_in_pixel()) ||
           (current_display.device_scale_factor() !=
-           new_display.device_scale_factor())) {
+           new_display.device_scale_factor()) ||
+          (current_display_info.size_in_pixel() !=
+           new_display.GetSizeInPixel())) {
         changed_display_indices.push_back(new_displays.size());
       }
 
@@ -281,7 +350,7 @@ void DisplayManager::UpdateDisplays(
     } else {
       // more displays in new list between ids, which means it is added.
       added_display_indices.push_back(new_displays.size());
-      InsertAndUpdateDisplayInfo(*new_info_iter, can_overscan);
+      InsertAndUpdateDisplayInfo(*new_info_iter);
       new_displays.push_back(
           CreateDisplayFromDisplayInfoById(new_info_iter->id()));
       ++new_info_iter;
@@ -321,24 +390,6 @@ void DisplayManager::UpdateDisplays(
   if (!changed_display_indices.empty() && base::chromeos::IsRunningOnChromeOS())
     ui::ClearX11DefaultRootWindow();
 #endif
-}
-
-RootWindow* DisplayManager::CreateRootWindowForDisplay(
-    const gfx::Display& display) {
-  static int root_window_count = 0;
-  const gfx::Rect& bounds_in_pixel = GetDisplayInfo(display).bounds_in_pixel();
-  RootWindow::CreateParams params(bounds_in_pixel);
-  params.host = Shell::GetInstance()->root_window_host_factory()->
-      CreateRootWindowHost(bounds_in_pixel);
-  aura::RootWindow* root_window = new aura::RootWindow(params);
-  root_window->SetName(StringPrintf("RootWindow-%d", root_window_count++));
-
-  // No need to remove RootWindowObserver because
-  // the DisplayManager object outlives RootWindow objects.
-  root_window->AddRootWindowObserver(this);
-  root_window->SetProperty(kDisplayIdKey, display.id());
-  root_window->Init();
-  return root_window;
 }
 
 gfx::Display* DisplayManager::GetDisplayAt(size_t index) {
@@ -421,31 +472,27 @@ const DisplayInfo& DisplayManager::GetDisplayInfo(
   return iter->second;
 }
 
-std::string DisplayManager::GetDisplayNameFor(
-    const gfx::Display& display) {
-  if (!display.is_valid())
+std::string DisplayManager::GetDisplayNameForId(int64 id) {
+  if (id == gfx::Display::kInvalidDisplayID)
     return l10n_util::GetStringUTF8(IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME);
 
-  std::map<int64, DisplayInfo>::const_iterator iter =
-      display_info_.find(display.id());
+  std::map<int64, DisplayInfo>::const_iterator iter = display_info_.find(id);
   if (iter != display_info_.end() && !iter->second.name().empty())
     return iter->second.name();
 
-  return base::StringPrintf("Display %d", static_cast<int>(display.id()));
+  return base::StringPrintf("Display %d", static_cast<int>(id));
 }
 
 void DisplayManager::OnRootWindowResized(const aura::RootWindow* root,
                                          const gfx::Size& old_size) {
-  bool user_may_change_root = false;
-#if defined(OS_CHROMEOS)
-  user_may_change_root = !base::chromeos::IsRunningOnChromeOS();
-#endif
-  if (user_may_change_root) {
+  if (change_display_upon_host_resize_) {
     gfx::Display& display = FindDisplayForRootWindow(root);
-    if (display.size() != root->GetHostSize()) {
-      display.SetSize(root->GetHostSize());
-      display_info_[display.id()].UpdateBounds(
-          gfx::Rect(root->GetHostOrigin(), root->GetHostSize()));
+    gfx::Size old_display_size_in_pixel = display.GetSizeInPixel();
+    display_info_[display.id()].SetBounds(
+        gfx::Rect(root->GetHostOrigin(), root->GetHostSize()));
+    const gfx::Size& new_root_size = root->bounds().size();
+    if (old_size != new_root_size) {
+      display.SetSize(display_info_[display.id()].size_in_pixel());
       Shell::GetInstance()->screen()->NotifyBoundsChanged(display);
     }
   }
@@ -464,6 +511,7 @@ void DisplayManager::Init() {
   if (displays_.empty())
     AddDisplayFromSpec(std::string() /* default */);
   first_display_id_ = displays_[0].id();
+  num_connected_displays_ = displays_.size();
 }
 
 void DisplayManager::CycleDisplayImpl() {
@@ -480,7 +528,7 @@ void DisplayManager::CycleDisplayImpl() {
     new_display_info_list.push_back(DisplayInfo::CreateFromSpec(
         StringPrintf("%d+%d-500x400", host_bounds.x(), host_bounds.bottom())));
   }
-  OnNativeDisplaysChanged(new_display_info_list);
+  UpdateDisplays(new_display_info_list);
 }
 
 void DisplayManager::ScaleDisplayImpl() {
@@ -493,7 +541,7 @@ void DisplayManager::ScaleDisplayImpl() {
         display_info.device_scale_factor() == 1.0f ? 2.0f : 1.0f);
     new_display_info_list.push_back(display_info);
   }
-  OnNativeDisplaysChanged(new_display_info_list);
+  UpdateDisplays(new_display_info_list);
 }
 
 gfx::Display& DisplayManager::FindDisplayForRootWindow(
@@ -518,7 +566,7 @@ gfx::Display& DisplayManager::FindDisplayForId(int64 id) {
 
 void DisplayManager::AddDisplayFromSpec(const std::string& spec) {
   DisplayInfo display_info = DisplayInfo::CreateFromSpec(spec);
-  InsertAndUpdateDisplayInfo(display_info, false);
+  InsertAndUpdateDisplayInfo(display_info);
   gfx::Display display = CreateDisplayFromDisplayInfoById(display_info.id());
   displays_.push_back(display);
 }
@@ -561,16 +609,29 @@ void DisplayManager::EnsurePointerInDisplays() {
   root_window->MoveCursorTo(target_location);
 }
 
-void DisplayManager::InsertAndUpdateDisplayInfo(const DisplayInfo& new_info,
-                                                bool can_overscan) {
+void DisplayManager::InsertAndUpdateDisplayInfo(const DisplayInfo& new_info) {
   std::map<int64, DisplayInfo>::iterator info =
       display_info_.find(new_info.id());
   if (info != display_info_.end())
     info->second.CopyFromNative(new_info);
   else
     display_info_[new_info.id()] = new_info;
+  bool on_chromeos = false;
+#if defined(OS_CHROMEOS)
+  on_chromeos = base::chromeos::IsRunningOnChromeOS();
+#endif
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if ((new_info.id() == gfx::Display::InternalDisplayId() || !on_chromeos) &&
+      command_line->HasSwitch(switches::kAshInternalDisplayUIScale)) {
+    double scale_in_double = 1.0;
+    std::string value = CommandLine::ForCurrentProcess()->
+        GetSwitchValueASCII(switches::kAshInternalDisplayUIScale);
+    if (!base::StringToDouble(value, &scale_in_double))
+      LOG(ERROR) << "Failed to parse the display scale:" << value;
+    display_info_[new_info.id()].set_ui_scale(scale_in_double);
+  }
 
-  display_info_[new_info.id()].UpdateOverscanInfo(can_overscan);
+  display_info_[new_info.id()].UpdateDisplaySize();
 }
 
 gfx::Display DisplayManager::CreateDisplayFromDisplayInfoById(int64 id) {
@@ -578,17 +639,14 @@ gfx::Display DisplayManager::CreateDisplayFromDisplayInfoById(int64 id) {
   const DisplayInfo& display_info = display_info_[id];
 
   gfx::Display new_display(display_info.id());
-  new_display.SetScaleAndBounds(
-      display_info.device_scale_factor(), display_info.bounds_in_pixel());
+  gfx::Rect bounds_in_pixel(display_info.size_in_pixel());
 
-  // If the display is primary, then simply set the origin to (0,0).
-  // The secondary display's bounds will be updated by
-  // |DisplayController::UpdateDisplayBoundsForLayout|, so no need
-  // to change there.
-  if (DisplayController::HasPrimaryDisplay()  &&
-      display_info.id() == DisplayController::GetPrimaryDisplay().id()) {
-    new_display.set_bounds(gfx::Rect(new_display.bounds().size()));
-  }
+  // Simply set the origin to (0,0).  The primary display's origin is
+  // always (0,0) and the secondary display's bounds will be updated
+  // by |DisplayController::UpdateDisplayBoundsForLayout|.
+  new_display.SetScaleAndBounds(
+      display_info.device_scale_factor(), gfx::Rect(bounds_in_pixel.size()));
+  new_display.set_rotation(display_info.rotation());
   return new_display;
 }
 

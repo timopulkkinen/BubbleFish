@@ -57,7 +57,7 @@ bool GetMassStorageDeviceDetails(const base::FilePath& device_path,
     *total_size_in_bytes = 1000000;
   if (unique_id) {
     *unique_id = "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\";
-    (*unique_id)[11] = path.value()[0];
+    (*unique_id)[11] = device_path.value()[0];
   }
   if (name)
     *name = path.Append(L" Drive").LossyDisplayName();
@@ -68,14 +68,12 @@ bool GetMassStorageDeviceDetails(const base::FilePath& device_path,
   return true;
 }
 
-}  // namespace
+} // namespace
 
 // TestVolumeMountWatcherWin ---------------------------------------------------
 
-TestVolumeMountWatcherWin::TestVolumeMountWatcherWin() {
-  get_attached_devices_callback_ = base::Bind(&NoAttachedDevices);
-  get_device_details_callback_ = base::Bind(&GetMassStorageDeviceDetails);
-}
+TestVolumeMountWatcherWin::TestVolumeMountWatcherWin()
+    : attached_devices_fake_(false) {}
 
 TestVolumeMountWatcherWin::~TestVolumeMountWatcherWin() {
 }
@@ -98,7 +96,7 @@ void TestVolumeMountWatcherWin::AddDeviceForTesting(
 }
 
 void TestVolumeMountWatcherWin::SetAttachedDevicesFake() {
-  get_attached_devices_callback_ = base::Bind(&FakeGetAttachedDevices);
+  attached_devices_fake_ = true;
 }
 
 void TestVolumeMountWatcherWin::FlushWorkerPoolForTesting() {
@@ -121,32 +119,19 @@ void TestVolumeMountWatcherWin::ReleaseDeviceCheck() {
   device_check_complete_event_->Signal();
 }
 
-bool TestVolumeMountWatcherWin::GetDeviceInfo(
-    const base::FilePath& device_path,
-    string16* device_location,
-    std::string* unique_id,
-    string16* name,
-    bool* removable,
-    uint64* total_size_in_bytes) const {
-  return VolumeMountWatcherWin::GetDeviceInfo(
-      device_path, device_location, unique_id, name, removable,
-      total_size_in_bytes);
+VolumeMountWatcherWin::GetDeviceDetailsCallbackType
+  TestVolumeMountWatcherWin::GetDeviceDetailsCallback() const {
+  return base::Bind(&GetMassStorageDeviceDetails);
 }
 
-std::vector<base::FilePath> TestVolumeMountWatcherWin::GetAttachedDevices() {
-  return get_attached_devices_callback_.Run();
+VolumeMountWatcherWin::GetAttachedDevicesCallbackType
+  TestVolumeMountWatcherWin::GetAttachedDevicesCallback() const {
+  return attached_devices_fake_ ?
+      base::Bind(&FakeGetAttachedDevices) : base::Bind(&NoAttachedDevices);
 }
 
-bool TestVolumeMountWatcherWin::GetRawDeviceInfo(
-    const base::FilePath& device_path,
-    string16* device_location,
-    std::string* unique_id,
-    string16* name,
-    bool* removable,
-    uint64* total_size_in_bytes) {
-  return GetMassStorageDeviceDetails(
-      device_path, device_location, unique_id, name, removable,
-      total_size_in_bytes);
+void TestVolumeMountWatcherWin::ShutdownWorkerPool() {
+  device_info_worker_pool_->Shutdown();
 }
 
 }  // namespace test

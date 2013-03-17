@@ -9,7 +9,7 @@
 
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/app_icon_loader.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -265,7 +265,8 @@ class ChromeLauncherController
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE = 0;
   virtual ash::LauncherMenuModel* CreateApplicationMenu(
-      const ash::LauncherItem& item) OVERRIDE = 0;
+      const ash::LauncherItem& item,
+      int event_flags) OVERRIDE = 0;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE = 0;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE = 0;
 

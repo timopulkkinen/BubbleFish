@@ -44,6 +44,8 @@ class DriveMetadataStore
   typedef base::Callback<void(SyncStatusCode status, bool created)>
       InitializationCallback;
 
+  static const base::FilePath::CharType kDatabaseName[];
+
   DriveMetadataStore(const base::FilePath& base_dir,
                      base::SequencedTaskRunner* file_task_runner);
   ~DriveMetadataStore();
@@ -67,7 +69,7 @@ class DriveMetadataStore
 
   // Lookups and reads the database entry for |url|.
   SyncStatusCode ReadEntry(const fileapi::FileSystemURL& url,
-                                    DriveMetadata* metadata) const;
+                           DriveMetadata* metadata) const;
 
   // Returns true if |origin| is a batch sync origin, i.e. the origin's entire
   // file list hasn't been fully fetched and processed yet.
@@ -99,13 +101,16 @@ class DriveMetadataStore
   SyncStatusCode GetConflictURLs(
       fileapi::FileSystemURLSet* urls) const;
 
-  // Returns a set of URLs and Resource IDs for files te be fetched.
+  // Returns a set of URLs and Resource IDs for files to be fetched.
   SyncStatusCode GetToBeFetchedFiles(URLAndResourceIdList* list) const;
 
   // Returns resource id for |origin|. |origin| must be a batch sync origin or
   // an incremental sync origin.
   std::string GetResourceIdForOrigin(const GURL& origin) const;
 
+  // TODO(nhiroki): Remove functions related to the sync root directory from
+  // DriveMetadataStore and DriveMetadataDB since these are no longer necessary.
+  // http://crbug.com/181507.
   const std::string& sync_root_directory() const {
     DCHECK(CalledOnValidThread());
     return sync_root_directory_resource_id_;

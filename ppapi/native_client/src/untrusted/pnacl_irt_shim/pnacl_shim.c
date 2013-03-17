@@ -26,6 +26,7 @@
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
 #include "ppapi/c/dev/ppb_trace_event_dev.h"
+#include "ppapi/c/dev/ppb_truetype_font_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/dev/ppb_video_decoder_dev.h"
@@ -41,6 +42,8 @@
 #include "ppapi/c/dev/ppp_video_decoder_dev.h"
 #include "ppapi/c/dev/ppp_widget_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
+#include "ppapi/c/extensions/dev/ppb_alarms_dev.h"
+#include "ppapi/c/extensions/dev/ppb_events_dev.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_console.h"
@@ -204,6 +207,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Testing_Dev_0_91;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInput_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInput_Dev_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3;
@@ -263,6 +267,8 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Flash_BrowserOperations_1_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Instance_Private_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1;
 /* END Declarations for all Wrapper Infos. */
 
 /* Not generating wrapper methods for PPB_Audio_1_0 */
@@ -1987,6 +1993,46 @@ uint32_t Pnacl_M18_PPB_Testing_Dev_GetLiveVars(struct PP_Var live_vars[], uint32
 
 /* Not generating wrapper methods for PPB_Trace_Event_Dev_0_1 */
 
+/* Begin wrapper methods for PPB_TrueTypeFont_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetFontFamilies(PP_Instance instance, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetFontFamilies(instance, output, callback);
+}
+
+static __attribute__((pnaclcall))
+PP_Resource Pnacl_M26_PPB_TrueTypeFont_Dev_Create(PP_Instance instance, const struct PP_TrueTypeFontDesc_Dev* desc) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->Create(instance, desc);
+}
+
+static __attribute__((pnaclcall))
+PP_Bool Pnacl_M26_PPB_TrueTypeFont_Dev_IsFont(PP_Resource resource) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->IsFont(resource);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_Describe(PP_Resource font, struct PP_TrueTypeFontDesc_Dev* desc, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->Describe(font, desc, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetTableTags(PP_Resource font, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetTableTags(font, output, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M26_PPB_TrueTypeFont_Dev_GetTable(PP_Resource font, uint32_t table, int32_t offset, int32_t max_data_length, struct PP_ArrayOutput output, struct PP_CompletionCallback callback) {
+  const struct PPB_TrueTypeFont_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1.real_iface;
+  return iface->GetTable(font, table, offset, max_data_length, output, callback);
+}
+
+/* End wrapper methods for PPB_TrueTypeFont_Dev_0_1 */
+
 /* Begin wrapper methods for PPB_URLUtil_Dev_0_6 */
 
 static __attribute__((pnaclcall))
@@ -3617,6 +3663,56 @@ static struct PP_Var Pnacl_M18_PPP_Instance_Private_GetInstanceObject(PP_Instanc
 
 /* End wrapper methods for PPP_Instance_Private_0_1 */
 
+/* Begin wrapper methods for PPB_Ext_Alarms_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_Create(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_AlarmCreateInfo_Dev alarm_info) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->Create(instance, name, alarm_info);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_Ext_Alarms_Dev_Get(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_Alarm_Dev* alarm, struct PP_CompletionCallback callback) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  return iface->Get(instance, name, alarm, callback);
+}
+
+static __attribute__((pnaclcall))
+int32_t Pnacl_M27_PPB_Ext_Alarms_Dev_GetAll(PP_Instance instance, PP_Ext_Alarms_Alarm_Dev_Array* alarms, struct PP_CompletionCallback callback) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  return iface->GetAll(instance, alarms, callback);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_Clear(PP_Instance instance, struct PP_Var name) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->Clear(instance, name);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Alarms_Dev_ClearAll(PP_Instance instance) {
+  const struct PPB_Ext_Alarms_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1.real_iface;
+  iface->ClearAll(instance);
+}
+
+/* End wrapper methods for PPB_Ext_Alarms_Dev_0_1 */
+
+/* Begin wrapper methods for PPB_Ext_Events_Dev_0_1 */
+
+static __attribute__((pnaclcall))
+uint32_t Pnacl_M27_PPB_Ext_Events_Dev_AddListener(PP_Instance instance, struct PP_Ext_EventListener listener) {
+  const struct PPB_Ext_Events_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1.real_iface;
+  return iface->AddListener(instance, listener);
+}
+
+static __attribute__((pnaclcall))
+void Pnacl_M27_PPB_Ext_Events_Dev_RemoveListener(PP_Instance instance, uint32_t listener_id) {
+  const struct PPB_Ext_Events_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1.real_iface;
+  iface->RemoveListener(instance, listener_id);
+}
+
+/* End wrapper methods for PPB_Ext_Events_Dev_0_1 */
+
 /* Not generating wrapper interface for PPB_Audio_1_0 */
 
 /* Not generating wrapper interface for PPB_AudioConfig_1_0 */
@@ -4064,6 +4160,15 @@ struct PPB_Testing_Dev_0_91 Pnacl_Wrappers_PPB_Testing_Dev_0_91 = {
 
 /* Not generating wrapper interface for PPB_Trace_Event_Dev_0_1 */
 
+struct PPB_TrueTypeFont_Dev_0_1 Pnacl_Wrappers_PPB_TrueTypeFont_Dev_0_1 = {
+    .GetFontFamilies = (int32_t (*)(PP_Instance instance, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetFontFamilies,
+    .Create = (PP_Resource (*)(PP_Instance instance, const struct PP_TrueTypeFontDesc_Dev* desc))&Pnacl_M26_PPB_TrueTypeFont_Dev_Create,
+    .IsFont = (PP_Bool (*)(PP_Resource resource))&Pnacl_M26_PPB_TrueTypeFont_Dev_IsFont,
+    .Describe = (int32_t (*)(PP_Resource font, struct PP_TrueTypeFontDesc_Dev* desc, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_Describe,
+    .GetTableTags = (int32_t (*)(PP_Resource font, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetTableTags,
+    .GetTable = (int32_t (*)(PP_Resource font, uint32_t table, int32_t offset, int32_t max_data_length, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetTable
+};
+
 struct PPB_URLUtil_Dev_0_6 Pnacl_Wrappers_PPB_URLUtil_Dev_0_6 = {
     .Canonicalize = (struct PP_Var (*)(struct PP_Var url, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_Canonicalize,
     .ResolveRelativeToURL = (struct PP_Var (*)(struct PP_Var base_url, struct PP_Var relative_string, struct PP_URLComponents_Dev* components))&Pnacl_M17_PPB_URLUtil_Dev_ResolveRelativeToURL,
@@ -4454,6 +4559,19 @@ struct PPP_ContentDecryptor_Private_0_6 Pnacl_Wrappers_PPP_ContentDecryptor_Priv
 
 struct PPP_Instance_Private_0_1 Pnacl_Wrappers_PPP_Instance_Private_0_1 = {
     .GetInstanceObject = (struct PP_Var (*)(PP_Instance instance))&Pnacl_M18_PPP_Instance_Private_GetInstanceObject
+};
+
+struct PPB_Ext_Alarms_Dev_0_1 Pnacl_Wrappers_PPB_Ext_Alarms_Dev_0_1 = {
+    .Create = (void (*)(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_AlarmCreateInfo_Dev alarm_info))&Pnacl_M27_PPB_Ext_Alarms_Dev_Create,
+    .Get = (int32_t (*)(PP_Instance instance, struct PP_Var name, PP_Ext_Alarms_Alarm_Dev* alarm, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_Ext_Alarms_Dev_Get,
+    .GetAll = (int32_t (*)(PP_Instance instance, PP_Ext_Alarms_Alarm_Dev_Array* alarms, struct PP_CompletionCallback callback))&Pnacl_M27_PPB_Ext_Alarms_Dev_GetAll,
+    .Clear = (void (*)(PP_Instance instance, struct PP_Var name))&Pnacl_M27_PPB_Ext_Alarms_Dev_Clear,
+    .ClearAll = (void (*)(PP_Instance instance))&Pnacl_M27_PPB_Ext_Alarms_Dev_ClearAll
+};
+
+struct PPB_Ext_Events_Dev_0_1 Pnacl_Wrappers_PPB_Ext_Events_Dev_0_1 = {
+    .AddListener = (uint32_t (*)(PP_Instance instance, struct PP_Ext_EventListener listener))&Pnacl_M27_PPB_Ext_Events_Dev_AddListener,
+    .RemoveListener = (void (*)(PP_Instance instance, uint32_t listener_id))&Pnacl_M27_PPB_Ext_Events_Dev_RemoveListener
 };
 
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Audio_1_0 = {
@@ -4924,6 +5042,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1 = {
+  .iface_macro = PPB_TRUETYPEFONT_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_TrueTypeFont_Dev_0_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6 = {
   .iface_macro = PPB_URLUTIL_DEV_INTERFACE_0_6,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_URLUtil_Dev_0_6,
@@ -5278,6 +5402,18 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Instance_Private_0_1 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1 = {
+  .iface_macro = PPB_EXT_ALARMS_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_Ext_Alarms_Dev_0_1,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1 = {
+  .iface_macro = PPB_EXT_EVENTS_DEV_INTERFACE_0_1,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_Ext_Events_Dev_0_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_Audio_1_0,
   &Pnacl_WrapperInfo_PPB_AudioConfig_1_0,
@@ -5351,6 +5487,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_TextInput_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_TextInput_Dev_0_2,
   &Pnacl_WrapperInfo_PPB_Trace_Event_Dev_0_1,
+  &Pnacl_WrapperInfo_PPB_TrueTypeFont_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_URLUtil_Dev_0_6,
   &Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_2,
   &Pnacl_WrapperInfo_PPB_VideoCapture_Dev_0_3,
@@ -5393,6 +5530,8 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_4,
   &Pnacl_WrapperInfo_PPB_UMA_Private_0_1,
   &Pnacl_WrapperInfo_PPB_X509Certificate_Private_0_1,
+  &Pnacl_WrapperInfo_PPB_Ext_Alarms_Dev_0_1,
+  &Pnacl_WrapperInfo_PPB_Ext_Events_Dev_0_1,
   NULL
 };
 

@@ -21,7 +21,6 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/browser/extensions/convert_web_app.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
@@ -33,7 +32,6 @@
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -53,6 +51,11 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
+#endif
 
 using content::BrowserThread;
 using content::UserMetricsAction;
@@ -106,7 +109,6 @@ CrxInstaller::CrxInstaller(
       creation_flags_(Extension::NO_FLAGS),
       off_store_install_allow_reason_(OffStoreInstallDisallowed),
       did_handle_successfully_(true),
-      record_oauth2_grant_(false),
       error_on_unsupported_requirements_(false),
       requirements_checker_(new RequirementsChecker()),
       has_requirement_errors_(false),
@@ -127,9 +129,8 @@ CrxInstaller::CrxInstaller(
     // Mark the extension as approved, but save the expected manifest and ID
     // so we can check that they match the CRX's.
     approved_ = true;
-    expected_manifest_.reset(approval->parsed_manifest->DeepCopy());
+    expected_manifest_.reset(approval->manifest->DeepCopy());
     expected_id_ = approval->extension_id;
-    record_oauth2_grant_ = approval->record_oauth2_grant;
   }
 
   show_dialog_callback_ = approval->show_dialog_callback;
@@ -375,7 +376,9 @@ void CrxInstaller::OnUnpackSuccess(const base::FilePath& temp_dir,
   temp_dir_ = temp_dir;
 
   if (original_manifest)
-    original_manifest_.reset(original_manifest->DeepCopy());
+    original_manifest_.reset(new Manifest(
+        Manifest::INVALID_LOCATION,
+        scoped_ptr<DictionaryValue>(original_manifest->DeepCopy())));
 
   // We don't have to delete the unpack dir explicity since it is a child of
   // the temp dir.
@@ -423,8 +426,34 @@ void CrxInstaller::OnRequirementsChecked(
     has_requirement_errors_ = true;
   }
 
+#if defined(ENABLE_MANAGED_USERS)
+  // Check whether the profile is managed.
+  ManagedUserService* service =
+      ManagedUserServiceFactory::GetForProfile(profile_);
+  if (service->ProfileIsManaged()) {
+        service->RequestAuthorization(
+        base::Bind(&CrxInstaller::OnAuthorizationResult,
+                   this));
+    return;
+  }
+#endif
   ConfirmInstall();
 }
+
+#if defined(ENABLE_MANAGED_USERS)
+void CrxInstaller::OnAuthorizationResult(bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (success) {
+    ManagedUserService* service =
+        ManagedUserServiceFactory::GetForProfile(profile_);
+    DCHECK(service);
+    service->AddElevationForExtension(extension_->id());
+  }
+  // In case the authorization was not successful, ConfirmInstall will give an
+  // appropriate error to the user.
+  ConfirmInstall();
+}
+#endif
 
 void CrxInstaller::ConfirmInstall() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -435,12 +464,22 @@ void CrxInstaller::ConfirmInstall() {
   // update an existing extension or app.
   CheckUpdateFromSettingsPage();
 
+  // For managed users the call UserMayLoad returns false if the profile is not
+  // elevated.
   string16 error;
   if (!ExtensionSystem::Get(profile_)->management_policy()->
       UserMayLoad(extension_, &error)) {
     ReportFailureFromUIThread(CrxInstallerError(error));
     return;
   }
+
+#if defined(ENABLE_MANAGED_USERS)
+  // Reset the elevation of managed users.
+  ManagedUserService* service =
+      ManagedUserServiceFactory::GetForProfile(profile_);
+  if (service->ProfileIsManaged())
+    service->RemoveElevationForExtension(extension_->id());
+#endif
 
   GURL overlapping_url;
   const Extension* overlapping_extension =
@@ -484,8 +523,7 @@ void CrxInstaller::InstallUIProceed() {
   // and if it is false, this function is called in response to
   // ExtensionInstallPrompt::ConfirmInstall().
   if (update_from_settings_page_) {
-    frontend_weak_->GrantPermissionsAndEnableExtension(
-        extension_.get(), client_->record_oauth2_grant());
+    frontend_weak_->GrantPermissionsAndEnableExtension(extension_.get());
   } else {
     if (!installer_task_runner_->PostTask(
             FROM_HERE,
@@ -645,15 +683,12 @@ void CrxInstaller::ReportSuccessFromUIThread() {
     if (client_)
       client_->OnInstallSuccess(extension_.get(), install_icon_.get());
 
-    if (client_ && !approved_)
-      record_oauth2_grant_ = client_->record_oauth2_grant();
-
     // We update the extension's granted permissions if the user already
     // approved the install (client_ is non NULL), or we are allowed to install
     // this silently.
     if (client_ || allow_silent_install_) {
       PermissionsUpdater perms_updater(profile());
-      perms_updater.GrantActivePermissions(extension_, record_oauth2_grant_);
+      perms_updater.GrantActivePermissions(extension_);
     }
   }
 

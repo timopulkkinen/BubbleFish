@@ -328,6 +328,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void SetEditCommandsForNextKeyEvent(
       const std::vector<EditCommand>& commands);
 
+  // Gets the accessibility mode.
+  AccessibilityMode accessibility_mode() const {
+    return accessibility_mode_;
+  }
+
   // Send a message to the renderer process to change the accessibility mode.
   void SetAccessibilityMode(AccessibilityMode mode);
 
@@ -354,6 +359,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Relay a request from assistive technology to set text selection.
   void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset);
+
+  // Kill the renderer because we got a fatal accessibility error.
+  void FatalAccessibilityTreeError();
 
   // Executes the edit command on the RenderView.
   void ExecuteEditCommand(const std::string& command,
@@ -560,7 +568,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
                                          int32 route_id,
                                          const gfx::Size& size,
                                          int32 gpu_process_host_id);
-  void OnSwapCompositorFrame(const cc::CompositorFrame& frame);
+  bool OnSwapCompositorFrame(const IPC::Message& message);
   void OnUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
   void OnUpdateIsDelayed();
   void OnInputEventAck(WebKit::WebInputEvent::Type event_type,
@@ -734,6 +742,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // mechanism as for mouse moves (just dropping old events when multiple ones
   // would be queued) results in very slow scrolling.
   WheelEventQueue coalesced_mouse_wheel_events_;
+
+  AccessibilityMode accessibility_mode_;
 
   // (Similar to |mouse_move_pending_|.) True while waiting for SelectRange_ACK.
   bool select_range_pending_;

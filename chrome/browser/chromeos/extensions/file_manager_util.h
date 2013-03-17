@@ -67,6 +67,10 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type type);
 // |path|. In this case the tab will automatically close on |path| unmount.
 void ViewRemovableDrive(const base::FilePath& path);
 
+// Opens a new window of the Files.app on the specified url using the
+// provided profile. If |profile| is null, then the default one is used.
+void OpenNewWindow(Profile* profile, const GURL& url);
+
 // Opens an action choice dialog for an external drive.
 // One of the actions is opening the File Manager.
 void OpenActionChoiceDialog(const base::FilePath& path);
@@ -87,7 +91,8 @@ bool ExecuteBuiltinHandler(
     const base::FilePath& path,
     const std::string& internal_task_id);
 
-bool ShouldBeOpenedWithPdfPlugin(Profile* profile, const char* file_extension);
+// Checks whether a pepper plugin for |file_extension| is enabled.
+bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension);
 
 // Converts the vector of progress status to their JSON (Value) form.
 base::ListValue* ProgressStatusVectorToListValue(

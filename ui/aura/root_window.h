@@ -24,6 +24,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 
@@ -46,7 +47,7 @@ class ViewProp;
 }
 
 namespace aura {
-
+class TestScreen;
 class RootWindow;
 class RootWindowHost;
 class RootWindowObserver;
@@ -62,11 +63,15 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
                                public aura::RootWindowHostDelegate {
  public:
   struct AURA_EXPORT CreateParams {
-    // CreateParams with initial_bounds and default host.
+    // CreateParams with initial_bounds and default host in pixel.
     explicit CreateParams(const gfx::Rect& initial_bounds);
     ~CreateParams() {}
 
     gfx::Rect initial_bounds;
+
+    gfx::Insets initial_insets;
+
+    float initial_root_window_scale;
 
     // A host to use in place of the default one that RootWindow will create.
     // NULL by default.
@@ -96,14 +101,21 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Stop listening events in preparation for shutdown.
   void PrepareForShutdown();
 
+  // Repost event for re-processing. Used when exiting context menus.
+  void RepostEvent(const ui::LocatedEvent& event);
+
   RootWindowHostDelegate* AsRootWindowHostDelegate();
 
-  // Sets the size of the root window.
+  // Gets/sets the size of the host window.
   void SetHostSize(const gfx::Size& size_in_pixel);
   gfx::Size GetHostSize() const;
 
-  // Sets the bounds of the host window.
-  void SetHostBounds(const gfx::Rect& size_in_pixel);
+  // Sets the bounds and insets of the host window.
+  void SetHostBounds(const gfx::Rect& size_in_pizel);
+  void SetHostBoundsAndInsetsAndRootWindowScale(
+      const gfx::Rect& bounds_in_pixel,
+      const gfx::Insets& insets_in_pixel,
+      float root_window_scale);
 
   // Returns where the RootWindow is on screen.
   gfx::Point GetHostOrigin() const;
@@ -178,6 +190,14 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Converts |point| from native screen coordinate system to the root window's.
   void ConvertPointFromNativeScreen(gfx::Point* point) const;
+
+  // Converts |point| from the root window's coordinate system to the
+  // host window's.
+  void ConvertPointToHost(gfx::Point* point) const;
+
+  // Converts |point| from the host window's coordinate system to the
+  // root window's.
+  void ConvertPointFromHost(gfx::Point* point) const;
 
   // Gesture Recognition -------------------------------------------------------
 
@@ -268,8 +288,13 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Exposes RootWindowHost::QueryMouseLocation() for test purposes.
   bool QueryMouseLocationForTest(gfx::Point* point) const;
 
+  // Clears internal mouse state (such as mouse ups should be sent to the same
+  // window that ate mouse downs).
+  void ClearMouseHandlers();
+
  private:
   friend class Window;
+  friend class TestScreen;
 
   // The parameter for OnWindowHidden() to specify why window is hidden.
   enum WindowHiddenReason {
@@ -315,6 +340,12 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // |window| itself).
   void CleanupGestureRecognizerState(Window* window);
 
+  // Updates the root window's size using |host_size|, current
+  // transform and insets.
+  void UpdateWindowSize(const gfx::Size& host_size);
+
+  void SetTransformInternal(const gfx::Transform& transform);
+
   // Overridden from ui::EventDispatcherDelegate.
   virtual bool CanDispatchToTarget(EventTarget* target) OVERRIDE;
 
@@ -352,8 +383,9 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // NOTE: because these methods dispatch events from RootWindowHost the
   // coordinates are in terms of the root.
   bool DispatchMouseEventImpl(ui::MouseEvent* event);
+  bool DispatchMouseEventRepost(ui::MouseEvent* event);
   bool DispatchMouseEventToTarget(ui::MouseEvent* event, Window* target);
-  void DispatchHeldMouseMove();
+  void DispatchHeldEvents();
 
   // Parses the switch describing the initial size for the host window and
   // returns bounds for the window.
@@ -366,6 +398,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Creates and dispatches synthesized mouse move event using the
   // current mouse location.
   void SynthesizeMouseMoveEvent();
+
+  gfx::Transform GetRootTransform() const;
 
   scoped_ptr<ui::Compositor> compositor_;
 
@@ -406,11 +440,21 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // while the count is > 0.
   int mouse_move_hold_count_;
   scoped_ptr<ui::MouseEvent> held_mouse_move_;
-  // Used to schedule DispatchHeldMouseMove() when |mouse_move_hold_count_| goes
+  // Used to schedule DispatchHeldEvents() when |mouse_move_hold_count_| goes
   // to 0.
-  base::WeakPtrFactory<RootWindow> held_mouse_event_factory_;
+  base::WeakPtrFactory<RootWindow> held_event_factory_;
+
+  // Allowing for reposting of events. Used when exiting context menus.
+  scoped_ptr<ui::LocatedEvent>  held_repostable_event_;
+  base::WeakPtrFactory<RootWindow> repostable_event_factory_;
 
   scoped_ptr<ui::ViewProp> prop_;
+
+  // The scale of the root window. This is used to expand the
+  // area of the root window (useful in HighDPI display).
+  // Note that this should not be confused with the device scale
+  // factor, which specfies the pixel density of the display.
+  float root_window_scale_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindow);
 };

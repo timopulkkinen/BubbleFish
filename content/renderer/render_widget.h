@@ -12,10 +12,12 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "cc/rendering_stats.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/paint_aggregator.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
@@ -44,10 +46,11 @@ class SyncMessage;
 namespace WebKit {
 class WebGestureEvent;
 class WebInputEvent;
+class WebLayerTreeViewClient;
 class WebMouseEvent;
-struct WebRenderingStatsImpl;
-struct WebPoint;
 class WebTouchEvent;
+struct WebPoint;
+struct WebRenderingStatsImpl;
 }
 
 namespace cc { class OutputSurface; }
@@ -77,6 +80,7 @@ class CONTENT_EXPORT RenderWidget
     : public IPC::Listener,
       public IPC::Sender,
       NON_EXPORTED_BASE(virtual public WebKit::WebWidgetClient),
+      NON_EXPORTED_BASE(public WebGraphicsContext3DSwapBuffersClient),
       public base::RefCounted<RenderWidget> {
  public:
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
@@ -125,6 +129,7 @@ class CONTENT_EXPORT RenderWidget
   virtual void didAutoResize(const WebKit::WebSize& new_size);
   virtual void didActivateCompositor(int input_handler_identifier);
   virtual void didDeactivateCompositor();
+  virtual void initializeLayerTreeView();
   virtual void initializeLayerTreeView(
       WebKit::WebLayerTreeViewClient* client,
       const WebKit::WebLayer& root_layer,
@@ -180,7 +185,8 @@ class CONTENT_EXPORT RenderWidget
 
   // Directs the host to begin a smooth scroll. This scroll should have the same
   // performance characteristics as a user-initiated scroll. Returns an ID of
-  // the scroll gesture.
+  // the scroll gesture. |mouse_event_x| and |mouse_event_y| are expected to be
+  // in local DIP coordinates.
   void BeginSmoothScroll(bool scroll_down,
                          const SmoothScrollCompletionCallback& callback,
                          int pixels_to_scroll,
@@ -206,6 +212,8 @@ class CONTENT_EXPORT RenderWidget
   virtual void InstrumentDidBeginFrame() {}
   virtual void InstrumentDidCancelFrame() {}
   virtual void InstrumentWillComposite() {}
+
+  virtual bool AllowPartialSwap() const;
 
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
@@ -260,7 +268,7 @@ class CONTENT_EXPORT RenderWidget
   void DoDeferredUpdate();
   void DoDeferredClose();
   void DoDeferredSetWindowRect(const WebKit::WebRect& pos);
-  virtual void Composite();
+  virtual void Composite(base::TimeTicks frame_begin_time);
 
   // Set the background of the render widget to a bitmap. The bitmap will be
   // tiled in both directions if it isn't big enough to fill the area. This is
@@ -317,6 +325,11 @@ class CONTENT_EXPORT RenderWidget
   void OnShowImeIfNeeded();
 #endif
 
+  // Notify the compositor about a change in viewport size. This should be
+  // used only with auto resize mode WebWidgets, as normal WebWidgets should
+  // go through OnResize.
+  void AutoResizeCompositor();
+
   virtual void SetDeviceScaleFactor(float device_scale_factor);
 
   // Override points to notify derived classes that a paint has happened.
@@ -336,14 +349,17 @@ class CONTENT_EXPORT RenderWidget
   // OnSwapBuffersComplete() when swaps complete, and OnSwapBuffersAborted if
   // the context is lost.
   virtual bool SupportsAsynchronousSwapBuffers();
+  virtual GURL GetURLForGraphicsContext3D();
 
   virtual bool ForceCompositingModeEnabled();
 
-  // Notifies scheduler that the RenderWidget's subclass has finished or aborted
-  // a swap buffers.
-  void OnSwapBuffersPosted();
-  void OnSwapBuffersComplete();
-  void OnSwapBuffersAborted();
+  // WebGraphicsContext3DSwapBuffersClient implementation.
+
+  // Called by a GraphicsContext associated with this view when swapbuffers
+  // is posted, completes or is aborted.
+  virtual void OnViewContextSwapBuffersPosted() OVERRIDE;
+  virtual void OnViewContextSwapBuffersComplete() OVERRIDE;
+  virtual void OnViewContextSwapBuffersAborted() OVERRIDE;
 
   // Detects if a suitable opaque plugin covers the given paint bounds with no
   // compositing necessary.
@@ -465,6 +481,10 @@ class CONTENT_EXPORT RenderWidget
   // at the given point.
   virtual bool HasTouchEventHandlersAt(const gfx::Point& point) const;
 
+  // Creates a 3D context associated with this view.
+  WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
+      const WebKit::WebGraphicsContext3D::Attributes& attributes);
+
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
   int32 routing_id_;
@@ -518,6 +538,10 @@ class CONTENT_EXPORT RenderWidget
   // True if we are expecting an UpdateRect_ACK message (i.e., that a
   // UpdateRect message has been sent).
   bool update_reply_pending_;
+
+  // Whether the WebWidget is in auto resize mode, which is used for example
+  // by extension popups.
+  bool auto_resize_mode_;
 
   // True if we need to send an UpdateRect message to notify the browser about
   // an already-completed auto-resize.
@@ -661,6 +685,8 @@ class CONTENT_EXPORT RenderWidget
 
   // Specified whether the compositor will run in its own thread.
   bool is_threaded_compositing_enabled_;
+
+  base::WeakPtrFactory<RenderWidget> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

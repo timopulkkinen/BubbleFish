@@ -7,6 +7,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -66,7 +67,8 @@ class FakeLauncher : public NativeProcessLauncher {
   virtual void Launch(const GURL& origin,
                       const std::string& native_host_name,
                       LaunchedCallback callback) const OVERRIDE {
-    callback.Run(base::GetCurrentProcessHandle(), read_file_, write_file_);
+    callback.Run(NativeProcessLauncher::RESULT_SUCCESS,
+                 read_file_, write_file_);
   }
 
  private:
@@ -84,8 +86,6 @@ class NativeMessagingTest : public ::testing::Test,
   }
 
   virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableNativeMessaging);
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     // Change the user data dir so native apps will be looked for in the test
     // directory.
@@ -110,12 +110,25 @@ class NativeMessagingTest : public ::testing::Test,
   virtual void PostMessageFromNativeProcess(
       int port_id,
       const std::string& message) OVERRIDE  {
-    last_posted_message_ = message;
+    last_message_ = message;
+
+    // Parse the message.
+    base::Value* parsed = base::JSONReader::Read(message);
+    base::DictionaryValue* dict_value;
+    if (parsed && parsed->GetAsDictionary(&dict_value)) {
+      last_message_parsed_.reset(dict_value);
+    } else {
+      LOG(ERROR) << "Failed to parse " << message;
+      last_message_parsed_.reset();
+      delete parsed;
+    }
+
     if (read_message_run_loop_)
       read_message_run_loop_->Quit();
   }
 
-  virtual void CloseChannel(int port_id, bool error) OVERRIDE {
+  virtual void CloseChannel(int port_id,
+                            const std::string& error_message) OVERRIDE {
   }
 
  protected:
@@ -144,7 +157,8 @@ class NativeMessagingTest : public ::testing::Test,
   scoped_ptr<base::RunLoop> read_message_run_loop_;
   scoped_ptr<content::TestBrowserThread> ui_thread_;
   scoped_ptr<content::TestBrowserThread> io_thread_;
-  std::string last_posted_message_;
+  std::string last_message_;
+  scoped_ptr<base::DictionaryValue> last_message_parsed_;
 };
 
 // Read a single message from a local file.
@@ -161,12 +175,12 @@ TEST_F(NativeMessagingTest, SingleSendMessageRead) {
   read_message_run_loop_.reset(new base::RunLoop());
   read_message_run_loop_->RunUntilIdle();
 
-  if (last_posted_message_.empty()) {
+  if (last_message_.empty()) {
     read_message_run_loop_.reset(new base::RunLoop());
     native_message_process_host_->ReadNowForTesting();
     read_message_run_loop_->Run();
   }
-  EXPECT_EQ(kTestMessage, last_posted_message_);
+  EXPECT_EQ(kTestMessage, last_message_);
 }
 
 // Tests sending a single message. The message should get written to
@@ -199,7 +213,7 @@ TEST_F(NativeMessagingTest, SingleSendMessageWrite) {
 }
 
 // Test send message with a real client. The client just echo's back the text
-// it recieved.
+// it received.
 TEST_F(NativeMessagingTest, EchoConnect) {
   base::ScopedTempDir temp_dir;
   base::FilePath manifest_path = temp_dir.path().AppendASCII(
@@ -220,13 +234,31 @@ TEST_F(NativeMessagingTest, EchoConnect) {
   native_message_process_host_->Send("{\"text\": \"Hello.\"}");
   read_message_run_loop_.reset(new base::RunLoop());
   read_message_run_loop_->Run();
-  EXPECT_EQ("{\"id\": 1, \"echo\": {\"text\": \"Hello.\"}}",
-            last_posted_message_);
+  ASSERT_FALSE(last_message_.empty());
+  ASSERT_TRUE(last_message_parsed_);
+
+  std::string expected_url = std::string("chrome-extension://") +
+      kTestNativeMessagingExtensionId + "/";
+  int id;
+  EXPECT_TRUE(last_message_parsed_->GetInteger("id", &id));
+  EXPECT_EQ(1, id);
+  std::string text;
+  EXPECT_TRUE(last_message_parsed_->GetString("echo.text", &text));
+  EXPECT_EQ("Hello.", text);
+  std::string url;
+  EXPECT_TRUE(last_message_parsed_->GetString("caller_url", &url));
+  EXPECT_EQ(expected_url, url);
+
 
   native_message_process_host_->Send("{\"foo\": \"bar\"}");
   read_message_run_loop_.reset(new base::RunLoop());
   read_message_run_loop_->Run();
-  EXPECT_EQ("{\"id\": 2, \"echo\": {\"foo\": \"bar\"}}", last_posted_message_);
+  EXPECT_TRUE(last_message_parsed_->GetInteger("id", &id));
+  EXPECT_EQ(2, id);
+  EXPECT_TRUE(last_message_parsed_->GetString("echo.foo", &text));
+  EXPECT_EQ("bar", text);
+  EXPECT_TRUE(last_message_parsed_->GetString("caller_url", &url));
+  EXPECT_EQ(expected_url, url);
 }
 
 }  // namespace extensions

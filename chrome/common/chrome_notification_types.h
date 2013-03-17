@@ -314,7 +314,11 @@ enum NotificationType {
   NOTIFICATION_FAVICON_CHANGED,
 
   // Sent by FaviconTabHelper when a tab's favicon has been successfully
-  // updated.
+  // updated. The details are a bool indicating whether the
+  // NavigationEntry's favicon URL has changed since the previous
+  // NOTIFICATION_FAVICON_UPDATED notification. The details are true if
+  // there was no previous NOTIFICATION_FAVICON_UPDATED notification for the
+  // current NavigationEntry.
   NOTIFICATION_FAVICON_UPDATED,
 
   // Profiles -----------------------------------------------------------------
@@ -665,15 +669,6 @@ enum NotificationType {
   // found update.
   NOTIFICATION_EXTENSION_UPDATE_FOUND,
 
-  // An installed app changed notification state (added or removed
-  // notifications). The source is a Profile, and the details are a string
-  // with the extension id of the app.
-  NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
-
-  // Finished loading app notification manager.
-  // The source is AppNotificationManager, and the details are NoDetails.
-  NOTIFICATION_APP_NOTIFICATION_MANAGER_LOADED,
-
   // Component Updater -------------------------------------------------------
 
   // Sent when the component updater starts doing update checks. If no
@@ -722,10 +717,6 @@ enum NotificationType {
   // Sent when an AutofillProfile has been added/removed/updated in the
   // WebDatabase.  The detail is an AutofillProfileChange.
   NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-
-  // Sent when an Autofill CreditCard has been added/removed/updated in the
-  // WebDatabase.  The detail is an AutofillCreditCardChange.
-  NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED,
 
   // Sent when multiple Autofill entries have been modified by Sync.
   // The source is the WebDataService in use by Sync.  No details are specified.
@@ -902,16 +893,6 @@ enum NotificationType {
   // The source is the Profile. The details are a
   // GoogleServiceSignoutDetails object.
   NOTIFICATION_GOOGLE_SIGNED_OUT,
-
-  // Autofill Notifications --------------------------------------------------
-
-  // Sent when a popup with Autofill suggestions is shown in the renderer.
-  // The source is the corresponding RenderViewHost. There are not details.
-  NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS,
-
-  // Sent when a form is previewed or filled with Autofill suggestions.
-  // The source is the corresponding RenderViewHost. There are not details.
-  NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
 
   // Download Notifications --------------------------------------------------
 
@@ -1115,6 +1096,9 @@ enum NotificationType {
   // Sent when the Instant Controller has sent the Most Visited Items to the
   // renderer.
   NOTIFICATION_INSTANT_SENT_MOST_VISITED_ITEMS,
+
+  // Sent when the Instant Controller sets an omnibox suggestion.
+  NOTIFICATION_INSTANT_SET_SUGGESTION,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
   // The Source is the Profile the CaptivePortalService belongs to, and the

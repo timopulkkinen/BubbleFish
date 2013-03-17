@@ -21,6 +21,7 @@
         'additional_input_paths': [
           '<(PRODUCT_DIR)/android_webview_test_apk/assets/asset_file.html',
           '<(PRODUCT_DIR)/android_webview_test_apk/assets/asset_icon.png',
+          '<(PRODUCT_DIR)/android_webview_test_apk/assets/full_screen_video_test.html',
         ],
       },
       'copies': [
@@ -29,6 +30,7 @@
           'files': [
             '<(java_in_dir)/assets/asset_file.html',
             '<(java_in_dir)/assets/asset_icon.png',
+            '<(java_in_dir)/assets/full_screen_video_test.html',
           ],
         },
       ],
@@ -78,7 +80,7 @@
           '../android_webview/unittestjava/src/org/chromium/android_webview/unittest/InputStreamUnittest.java',
       ],
       'variables': {
-        'jni_gen_dir': 'android_webview_unittests',
+        'jni_gen_package': 'android_webview_unittests',
       },
       'includes': [ '../build/jni_generator.gypi' ],
     },

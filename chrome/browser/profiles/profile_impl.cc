@@ -55,7 +55,6 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -81,6 +80,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -97,8 +98,8 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/managed_mode_policy_provider.h"
 #if !defined(OS_CHROMEOS)
-#include "chrome/browser/policy/user_cloud_policy_manager.h"
-#include "chrome/browser/policy/user_cloud_policy_manager_factory.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #endif
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
@@ -406,6 +407,8 @@ ProfileImpl::ProfileImpl(
             ExtensionPrefValueMapFactory::GetForProfile(this), false),
         pref_registry_,
         async_prefs));
+    // Register on BrowserContext.
+    components::UserPrefs::Set(this, prefs_.get());
   }
 
   startup_metric_utils::ScopedSlowStartupUMA
@@ -574,15 +577,14 @@ void ProfileImpl::InitHostZoomMap() {
       prefs_->GetDictionary(prefs::kPerHostZoomLevels);
   // Careful: The returned value could be NULL if the pref has never been set.
   if (host_zoom_dictionary != NULL) {
-    for (DictionaryValue::key_iterator i(host_zoom_dictionary->begin_keys());
-         i != host_zoom_dictionary->end_keys(); ++i) {
-      const std::string& host(*i);
+    for (DictionaryValue::Iterator i(*host_zoom_dictionary); !i.IsAtEnd();
+         i.Advance()) {
+      const std::string& host(i.key());
       double zoom_level = 0;
 
-      bool success = host_zoom_dictionary->GetDoubleWithoutPathExpansion(
-          host, &zoom_level);
+      bool success = i.value().GetAsDouble(&zoom_level);
       DCHECK(success);
-      host_zoom_map->SetZoomLevel(host, zoom_level);
+      host_zoom_map->SetZoomLevelForHost(host, zoom_level);
     }
   }
 
@@ -818,22 +820,9 @@ base::FilePath ProfileImpl::GetPrefFilePath() {
 }
 
 net::URLRequestContextGetter* ProfileImpl::CreateRequestContext(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   return io_data_.CreateMainRequestContextGetter(
-      blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(),
-      developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(),
-      chrome_devtools_protocol_handler.Pass(),
+      protocol_handlers,
       g_browser_process->local_state(),
       g_browser_process->io_thread());
 }
@@ -885,20 +874,9 @@ net::URLRequestContextGetter*
 ProfileImpl::CreateRequestContextForStoragePartition(
     const base::FilePath& partition_path,
     bool in_memory,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   return io_data_.CreateIsolatedAppRequestContextGetter(
-      partition_path, in_memory, blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(), developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(), chrome_devtools_protocol_handler.Pass());
+      partition_path, in_memory, protocol_handlers);
 }
 
 net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
@@ -978,18 +956,20 @@ void ProfileImpl::OnDefaultZoomLevelChanged() {
       pref_change_registrar_.prefs()->GetDouble(prefs::kDefaultZoomLevel));
 }
 
-void ProfileImpl::OnZoomLevelChanged(const std::string& host) {
-  if (host.empty())
+void ProfileImpl::OnZoomLevelChanged(
+    const HostZoomMap::ZoomLevelChange& change) {
+
+  if (change.mode != HostZoomMap::ZOOM_CHANGED_FOR_HOST)
     return;
   HostZoomMap* host_zoom_map = HostZoomMap::GetForBrowserContext(this);
-  double level = host_zoom_map->GetZoomLevel(host);
+  double level = change.zoom_level;
   DictionaryPrefUpdate update(prefs_.get(), prefs::kPerHostZoomLevels);
   DictionaryValue* host_zoom_dictionary = update.Get();
   if (level == host_zoom_map->GetDefaultZoomLevel()) {
-    host_zoom_dictionary->RemoveWithoutPathExpansion(host, NULL);
+    host_zoom_dictionary->RemoveWithoutPathExpansion(change.host, NULL);
   } else {
     host_zoom_dictionary->SetWithoutPathExpansion(
-        host, Value::CreateDoubleValue(level));
+        change.host, Value::CreateDoubleValue(level));
   }
 }
 

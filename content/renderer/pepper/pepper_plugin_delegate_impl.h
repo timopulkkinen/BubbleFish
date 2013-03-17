@@ -18,7 +18,6 @@
 #include "base/observer_list.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/renderer/mouse_lock_dispatcher.h"
-#include "content/renderer/pepper/pepper_parent_context_provider.h"
 #include "content/renderer/render_view_pepper_helper.h"
 #include "ppapi/shared_impl/private/ppb_tcp_server_socket_shared.h"
 #include "ppapi/shared_impl/private/tcp_socket_private_impl.h"
@@ -53,6 +52,7 @@ struct WebCompositionUnderline;
 }
 
 namespace content {
+class ContextProviderCommandBuffer;
 class GamepadSharedMemoryReader;
 class PepperBrokerImpl;
 class PepperDeviceEnumerationEventHandler;
@@ -62,7 +62,6 @@ class PepperPluginDelegateImpl
     : public webkit::ppapi::PluginDelegate,
       public RenderViewPepperHelper,
       public base::SupportsWeakPtr<PepperPluginDelegateImpl>,
-      public PepperParentContextProvider,
       public RenderViewObserver {
  public:
   explicit PepperPluginDelegateImpl(RenderViewImpl* render_view);
@@ -381,10 +380,6 @@ class PepperPluginDelegateImpl
       int plugin_child_id,
       bool is_external);
 
-  // Implementation of PepperParentContextProvider.
-  virtual WebGraphicsContext3DCommandBufferImpl*
-      GetParentContextForPlatformContext3D() OVERRIDE;
-
   MouseLockDispatcher::LockTarget* GetOrCreateLockTargetAdapter(
       webkit::ppapi::PluginInstance* instance);
   void UnSetAndDeleteLockTargetAdapter(webkit::ppapi::PluginInstance* instance);
@@ -430,6 +425,8 @@ class PepperPluginDelegateImpl
 
   scoped_ptr<PepperDeviceEnumerationEventHandler>
       device_enumeration_event_handler_;
+
+  scoped_refptr<ContextProviderCommandBuffer> offscreen_context3d_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginDelegateImpl);
 };

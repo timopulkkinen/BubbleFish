@@ -10,18 +10,18 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/storage_monitor/media_device_notifications_utils.h"
+#include "chrome/browser/storage_monitor/removable_device_constants.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_thread.h"
+#include "ui/base/text/bytes_formatting.h"
 
 #if defined(OS_LINUX)  // Implies OS_CHROMEOS
 #include "chrome/browser/storage_monitor/media_transfer_protocol_device_observer_linux.h"
 #endif
 
 using content::BrowserThread;
-
-const char kRootPath[] = "/";
 
 namespace chrome {
 
@@ -47,6 +47,10 @@ const char kFixedMassStoragePrefix[] = "path:";
 const char kMtpPtpPrefix[] = "mtp:";
 const char kMacImageCapture[] = "ic:";
 
+#if !defined(OS_WIN)
+const char kRootPath[] = "/";
+#endif
+
 void ValidatePathOnFileThread(
     const base::FilePath& path,
     const MediaStorageUtil::BoolCallback& callback) {
@@ -55,7 +59,7 @@ void ValidatePathOnFileThread(
                           base::Bind(callback, file_util::PathExists(path)));
 }
 
-typedef std::vector<StorageMonitor::StorageInfo> StorageInfoList;
+typedef std::vector<StorageInfo> StorageInfoList;
 
 bool IsRemovableStorageAttached(const std::string& id) {
   StorageInfoList devices = StorageMonitor::GetInstance()->GetAttachedStorage();
@@ -122,6 +126,47 @@ string16 GetDisplayNameForSubFolder(const string16& device_name,
 }
 
 }  // namespace
+
+// static
+bool MediaStorageUtil::HasDcim(const base::FilePath::StringType& mount_point) {
+  DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  base::FilePath dcim_path(mount_point);
+  base::FilePath::StringType dcim_dir(kDCIMDirectoryName);
+  if (!file_util::DirectoryExists(dcim_path.Append(dcim_dir))) {
+    // Check for lowercase 'dcim' as well.
+    base::FilePath dcim_path_lower(
+        dcim_path.Append(StringToLowerASCII(dcim_dir)));
+    if (!file_util::DirectoryExists(dcim_path_lower))
+      return false;
+  }
+  return true;
+}
+
+// static
+string16 MediaStorageUtil::GetFullProductName(const std::string& vendor_name,
+                                              const std::string& model_name) {
+  if (vendor_name.empty() && model_name.empty())
+    return string16();
+
+  std::string product_name;
+  if (vendor_name.empty())
+    product_name = model_name;
+  else if (model_name.empty())
+    product_name = vendor_name;
+  else
+    product_name = vendor_name + ", " + model_name;
+  return IsStringUTF8(product_name) ?
+      UTF8ToUTF16("(" + product_name + ")") : string16();
+}
+
+// static
+string16 MediaStorageUtil::GetDisplayNameForDevice(uint64 storage_size_in_bytes,
+                                                   const string16& name) {
+  DCHECK(!name.empty());
+  return (storage_size_in_bytes == 0) ?
+      name : ui::FormatBytes(storage_size_in_bytes) + ASCIIToUTF16(" ") + name;
+}
 
 // static
 std::string MediaStorageUtil::MakeDeviceId(Type type,
@@ -251,15 +296,14 @@ void MediaStorageUtil::FilterAttachedDevices(DeviceIdSet* devices,
 }
 
 // TODO(kmadhusu) Write unit tests for GetDeviceInfoFromPath().
-bool MediaStorageUtil::GetDeviceInfoFromPath(
-      const base::FilePath& path,
-      StorageMonitor::StorageInfo* device_info,
-      base::FilePath* relative_path) {
+bool MediaStorageUtil::GetDeviceInfoFromPath(const base::FilePath& path,
+                                             StorageInfo* device_info,
+                                             base::FilePath* relative_path) {
   if (!path.IsAbsolute())
     return false;
 
   bool found_device = false;
-  StorageMonitor::StorageInfo info;
+  StorageInfo info;
   StorageMonitor* monitor = StorageMonitor::GetInstance();
   found_device = monitor->GetStorageInfoForPath(path, &info);
 

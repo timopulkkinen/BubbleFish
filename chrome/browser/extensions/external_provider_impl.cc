@@ -4,6 +4,9 @@
 
 #include "chrome/browser/extensions/external_provider_impl.h"
 
+#include <set>
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
@@ -13,6 +16,7 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
@@ -34,11 +38,9 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/policy/app_pack_updater.h"
+#include "chrome/browser/chromeos/policy/app_pack_updater.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#endif
-
-#if !defined(OS_CHROMEOS)
+#else
 #include "chrome/browser/extensions/default_apps.h"
 #endif
 
@@ -93,16 +95,15 @@ void ExternalProviderImpl::SetPrefs(DictionaryValue* prefs) {
   if (!service_) return;
 
   prefs_.reset(prefs);
-  ready_ = true; // Queries for extensions are allowed from this point.
+  ready_ = true;  // Queries for extensions are allowed from this point.
 
   // Set of unsupported extensions that need to be deleted from prefs_.
   std::set<std::string> unsupported_extensions;
 
   // Notify ExtensionService about all the extensions this provider has.
-  for (DictionaryValue::key_iterator i = prefs_->begin_keys();
-       i != prefs_->end_keys(); ++i) {
-    const std::string& extension_id = *i;
-    DictionaryValue* extension;
+  for (DictionaryValue::Iterator i(*prefs_); !i.IsAtEnd(); i.Advance()) {
+    const std::string& extension_id = i.key();
+    const DictionaryValue* extension = NULL;
 
     if (!Extension::IdIsValid(extension_id)) {
       LOG(WARNING) << "Malformed extension dictionary: key "
@@ -110,7 +111,7 @@ void ExternalProviderImpl::SetPrefs(DictionaryValue* prefs) {
       continue;
     }
 
-    if (!prefs_->GetDictionaryWithoutPathExpansion(extension_id, &extension)) {
+    if (!i.value().GetAsDictionary(&extension)) {
       LOG(WARNING) << "Malformed extension dictionary: key "
                    << extension_id.c_str()
                    << " has a value that is not a dictionary.";
@@ -118,7 +119,7 @@ void ExternalProviderImpl::SetPrefs(DictionaryValue* prefs) {
     }
 
     base::FilePath::StringType external_crx;
-    Value* external_version_value;
+    const Value* external_version_value = NULL;
     std::string external_version;
     std::string external_update_url;
 
@@ -155,7 +156,7 @@ void ExternalProviderImpl::SetPrefs(DictionaryValue* prefs) {
     }
 
     // Check that extension supports current browser locale.
-    ListValue* supported_locales = NULL;
+    const ListValue* supported_locales = NULL;
     if (extension->GetList(kSupportedLocales, &supported_locales)) {
       std::vector<std::string> browser_locales;
       l10n_util::GetParentLocales(g_browser_process->GetApplicationLocale(),
@@ -237,7 +238,7 @@ void ExternalProviderImpl::SetPrefs(DictionaryValue* prefs) {
       service_->OnExternalExtensionFileFound(extension_id, &version, path,
                                              crx_location_, creation_flags,
                                              auto_acknowledge_);
-    } else { // if (has_external_update_url)
+    } else {  // if (has_external_update_url)
       CHECK(has_external_update_url);  // Checking of keys above ensures this.
       if (download_location_ == Manifest::INVALID_LOCATION) {
         LOG(WARNING) << "This provider does not support installing external "
@@ -337,6 +338,10 @@ void ExternalProviderImpl::CreateExternalProviders(
   // It would only slowdown tests and make them flaky.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableDefaultApps))
+    return;
+
+  // No external app install in app mode.
+  if (chrome::IsRunningInForcedAppMode())
     return;
 
   // On Mac OS, items in /Library/... should be written by the superuser.

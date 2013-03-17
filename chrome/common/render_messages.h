@@ -118,7 +118,6 @@ IPC_ENUM_TRAITS(ChromeViewHostMsg_GetPluginInfo_Status::Value)
 IPC_ENUM_TRAITS(InstantCompleteBehavior)
 IPC_ENUM_TRAITS(InstantSizeUnits)
 IPC_ENUM_TRAITS(InstantSuggestionType)
-IPC_ENUM_TRAITS(InstantShownReason)
 IPC_ENUM_TRAITS(search_provider::OSDDType)
 IPC_ENUM_TRAITS(search_provider::InstallState)
 IPC_ENUM_TRAITS(ThemeBackgroundImageAlignment)
@@ -167,7 +166,8 @@ IPC_STRUCT_TRAITS_BEGIN(InstantAutocompleteResult)
   IPC_STRUCT_TRAITS_MEMBER(relevance)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(MostVisitedItem)
+IPC_STRUCT_TRAITS_BEGIN(InstantMostVisitedItem)
+  IPC_STRUCT_TRAITS_MEMBER(most_visited_item_id)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(title)
 IPC_STRUCT_TRAITS_END()
@@ -176,6 +176,7 @@ IPC_STRUCT_TRAITS_BEGIN(InstantSuggestion)
   IPC_STRUCT_TRAITS_MEMBER(text)
   IPC_STRUCT_TRAITS_MEMBER(behavior)
   IPC_STRUCT_TRAITS_MEMBER(type)
+  IPC_STRUCT_TRAITS_MEMBER(query)
 IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS(chrome::search::Mode::Type)
@@ -205,7 +206,6 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(theme_id)
   IPC_STRUCT_TRAITS_MEMBER(image_horizontal_alignment)
   IPC_STRUCT_TRAITS_MEMBER(image_vertical_alignment)
-  IPC_STRUCT_TRAITS_MEMBER(image_top_offset)
   IPC_STRUCT_TRAITS_MEMBER(image_tiling)
   IPC_STRUCT_TRAITS_MEMBER(image_height)
 IPC_STRUCT_TRAITS_END()
@@ -340,16 +340,19 @@ IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFontInformation,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxKeyCaptureChanged,
                     bool /* is_key_capture_enabled */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_InstantMostVisitedItemsChanged,
-                    std::vector<MostVisitedItem> /* items */)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxGrantChromeSearchAccessFromOrigin,
+                    GURL /* origin_url */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_InstantDeleteMostVisitedItem,
-                    GURL /* url */)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
+                    std::vector<InstantMostVisitedItem> /* items */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_InstantUndoMostVisitedDeletion,
-                    GURL /* url */)
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem,
+                    uint64 /* most_visited_item_id */)
 
-IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions)
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion,
+                    uint64 /* most_visited_item_id */)
+
+IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions)
 
 // Toggles visual muting of the render view area. This is on when a constrained
 // window is showing.
@@ -668,7 +671,7 @@ IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_FocusedNodeTouched,
 
 // Suggest results -----------------------------------------------------------
 
-// Sent by Instant to populate the omnibox with query suggestions.
+// Sent by Instant to populate the omnibox with query or URL suggestions.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_SetSuggestions,
                     int /* page_id */,
                     std::vector<InstantSuggestion> /* suggestions */)
@@ -686,11 +689,14 @@ IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_SearchBoxNavigate,
                     WindowOpenDisposition /* disposition */)
 
 // Sent by the Instant overlay asking to show itself with the given height.
-IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_ShowInstantOverlay,
+IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_ShowInstantOverlay,
                     int /* page_id */,
-                    InstantShownReason /* reason */,
                     int /* height */,
                     InstantSizeUnits /* units */)
+
+// Sent by Instant to focus the omnibox.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_FocusOmnibox,
+                    int /* page_id */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_StartCapturingKeyStrokes,
                     int /* page_id */)

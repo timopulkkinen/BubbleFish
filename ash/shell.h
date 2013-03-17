@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/system/user/login_status.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
 #include "base/basictypes.h"
@@ -62,10 +62,6 @@ class TooltipController;
 class VisibilityController;
 class WindowModalityController;
 }
-}
-
-namespace message_center {
-class MessageCenter;
 }
 
 namespace ash {
@@ -444,8 +440,12 @@ class ASH_EXPORT Shell
     return root_window_host_factory_.get();
   }
 
-  // MessageCenter is a global list of currently displayed notifications.
-  message_center::MessageCenter* message_center();
+  LauncherModel* launcher_model() {
+    return launcher_model_.get();
+  }
+
+  // Returns the launcher delegate, creating if necesary.
+  LauncherDelegate* GetLauncherDelegate();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
@@ -461,13 +461,6 @@ class ASH_EXPORT Shell
   virtual ~Shell();
 
   void Init();
-
-  LauncherModel* launcher_model() {
-    return launcher_model_.get();
-  }
-
-  // Returns the launcher delegate, creating if necesary.
-  LauncherDelegate* GetLauncherDelegate();
 
   // Initializes the root window and root window controller so that it
   // can host browser windows.
@@ -588,8 +581,6 @@ class ASH_EXPORT Shell
   // Receives output change events and udpates the display manager.
   scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
 #endif  // defined(OS_CHROMEOS)
-
-  scoped_ptr<message_center::MessageCenter> message_center_;
 
   // |native_cursor_manager_| is owned by |cursor_manager_|, but we keep a
   // pointer to vend to test code.

@@ -149,8 +149,8 @@ OmniboxAPI::OmniboxAPI(Profile* profile)
 OmniboxAPI::~OmniboxAPI() {
 }
 
-base::LazyInstance<ProfileKeyedAPIFactory<OmniboxAPI> >
-g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<ProfileKeyedAPIFactory<OmniboxAPI> >
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 ProfileKeyedAPIFactory<OmniboxAPI>* OmniboxAPI::GetFactoryInstance() {
@@ -217,6 +217,12 @@ gfx::Image OmniboxAPI::GetOmniboxIcon(const std::string& extension_id) {
 gfx::Image OmniboxAPI::GetOmniboxPopupIcon(const std::string& extension_id) {
   return gfx::Image::CreateFrom1xBitmap(
       omnibox_popup_icon_manager_.GetIcon(extension_id));
+}
+
+template <>
+void ProfileKeyedAPIFactory<OmniboxAPI>::DeclareFactoryDependencies() {
+  DependsOn(ExtensionSystemFactory::GetInstance());
+  DependsOn(TemplateURLServiceFactory::GetInstance());
 }
 
 bool OmniboxSendSuggestionsFunction::RunImpl() {

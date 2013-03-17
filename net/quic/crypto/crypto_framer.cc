@@ -4,9 +4,9 @@
 
 #include "net/quic/crypto/crypto_framer.h"
 
+#include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/quic_data_reader.h"
 #include "net/quic/quic_data_writer.h"
-#include "net/quic/quic_protocol.h"
 
 using base::StringPiece;
 
@@ -26,11 +26,12 @@ class OneShotVisitor : public CryptoFramerVisitorInterface {
         error_(false) {
   }
 
-  void OnError(CryptoFramer* framer) {
+  virtual void OnError(CryptoFramer* framer) OVERRIDE {
     error_ = true;
   }
 
-  void OnHandshakeMessage(const CryptoHandshakeMessage& message) {
+  virtual void OnHandshakeMessage(
+      const CryptoHandshakeMessage& message) OVERRIDE {
     *out_ = message;
   }
 

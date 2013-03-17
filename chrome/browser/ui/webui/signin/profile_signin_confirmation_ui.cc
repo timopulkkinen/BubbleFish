@@ -28,6 +28,7 @@ ProfileSigninConfirmationUI::ProfileSigninConfirmationUI(content::WebUI* web_ui)
   html_source->AddLocalizedString(
       "continueButtonText",
       IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_NO);
+  html_source->AddLocalizedString("okButtonText", IDS_OK);
   html_source->AddLocalizedString(
       "cancelButtonText",
       IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_CANCEL);
@@ -48,6 +49,8 @@ ProfileSigninConfirmationUI::ProfileSigninConfirmationUI(content::WebUI* web_ui)
 
   html_source->AddResourcePath("profile_signin_confirmation.js",
                                IDR_PROFILE_SIGNIN_CONFIRMATION_JS);
+  html_source->AddResourcePath("profile_signin_confirmation.css",
+                               IDR_PROFILE_SIGNIN_CONFIRMATION_CSS);
   html_source->SetDefaultResource(IDR_PROFILE_SIGNIN_CONFIRMATION_HTML);
 
   Profile* profile = Profile::FromWebUI(web_ui);

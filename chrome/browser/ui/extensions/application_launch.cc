@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/extensions/application_launch.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -73,6 +76,35 @@ GURL UrlForExtension(const Extension* extension,
   return url;
 }
 
+ui::WindowShowState DetermineWindowShowState(
+    Profile* profile,
+    extension_misc::LaunchContainer container,
+    const Extension* extension) {
+  if (!extension ||
+      container != extension_misc::LAUNCH_WINDOW) {
+    return ui::SHOW_STATE_DEFAULT;
+  }
+
+  if (chrome::ShouldForceFullscreenApp())
+    return ui::SHOW_STATE_FULLSCREEN;
+
+#if defined(USE_ASH)
+  // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
+  // LAUNCH_WINDOW launches in a normal app window.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  ExtensionPrefs::LaunchType launch_type =
+      service->extension_prefs()->GetLaunchType(
+          extension, ExtensionPrefs::LAUNCH_DEFAULT);
+  if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
+    return ui::SHOW_STATE_MAXIMIZED;
+  else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
+    return ui::SHOW_STATE_NORMAL;
+#endif
+
+  return ui::SHOW_STATE_DEFAULT;
+}
+
 WebContents* OpenApplicationWindow(
     Profile* profile,
     const Extension* extension,
@@ -94,30 +126,16 @@ WebContents* OpenApplicationWindow(
   if (extension) {
     window_bounds.set_width(extension->launch_width());
     window_bounds.set_height(extension->launch_height());
-  } else if (!override_bounds.IsEmpty()) {
-    window_bounds = override_bounds;
   }
+  if (!override_bounds.IsEmpty())
+    window_bounds = override_bounds;
 
   Browser::CreateParams params(type, profile, chrome::GetActiveDesktop());
   params.app_name = app_name;
   params.initial_bounds = window_bounds;
-
-#if defined(USE_ASH)
-  if (extension &&
-      container == extension_misc::LAUNCH_WINDOW) {
-    // In ash, LAUNCH_FULLSCREEN launches in a maximized app window and
-    // LAUNCH_WINDOW launches in a normal app window.
-    ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-    ExtensionPrefs::LaunchType launch_type =
-        service->extension_prefs()->GetLaunchType(
-            extension, ExtensionPrefs::LAUNCH_DEFAULT);
-    if (launch_type == ExtensionPrefs::LAUNCH_FULLSCREEN)
-      params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
-    else if (launch_type == ExtensionPrefs::LAUNCH_WINDOW)
-      params.initial_show_state = ui::SHOW_STATE_NORMAL;
-  }
-#endif
+  params.initial_show_state = DetermineWindowShowState(profile,
+                                                       container,
+                                                       extension);
 
   Browser* browser = NULL;
 #if defined(OS_WIN)
@@ -256,6 +274,7 @@ AppLaunchParams::AppLaunchParams(Profile* profile,
       container(container),
       disposition(disposition),
       override_url(),
+      override_bounds(),
       command_line(NULL) {}
 
 AppLaunchParams::AppLaunchParams(Profile* profile,
@@ -266,6 +285,7 @@ AppLaunchParams::AppLaunchParams(Profile* profile,
       container(extension_misc::LAUNCH_NONE),
       disposition(disposition),
       override_url(),
+      override_bounds(),
       command_line(NULL) {
   ExtensionService* service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
@@ -285,6 +305,7 @@ AppLaunchParams::AppLaunchParams(Profile* profile,
       container(extension_misc::LAUNCH_NONE),
       disposition(ui::DispositionFromEventFlags(event_flags)),
       override_url(),
+      override_bounds(),
       command_line(NULL) {
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB) {
     container = extension_misc::LAUNCH_TAB;
@@ -308,6 +329,7 @@ WebContents* OpenApplication(const AppLaunchParams& params) {
   const extensions::Extension* extension = params.extension;
   extension_misc::LaunchContainer container = params.container;
   const GURL& override_url = params.override_url;
+  const gfx::Rect& override_bounds = params.override_bounds;
 
   WebContents* tab = NULL;
   ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(profile)->
@@ -330,7 +352,7 @@ WebContents* OpenApplication(const AppLaunchParams& params) {
     case extension_misc::LAUNCH_PANEL:
     case extension_misc::LAUNCH_WINDOW:
       tab = OpenApplicationWindow(profile, extension, container,
-                                  override_url, NULL, gfx::Rect());
+                                  override_url, NULL, override_bounds);
       break;
     case extension_misc::LAUNCH_TAB: {
       tab = OpenApplicationTab(profile, extension, override_url,

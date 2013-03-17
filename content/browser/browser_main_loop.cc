@@ -45,9 +45,9 @@
 #include "crypto/nss_util.h"
 #include "media/audio/audio_manager.h"
 #include "net/base/network_change_notifier.h"
-#include "net/base/ssl_config_service.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/tcp_client_socket.h"
+#include "net/ssl/ssl_config_service.h"
 #include "ui/base/clipboard/clipboard.h"
 
 #if defined(USE_AURA)
@@ -69,8 +69,8 @@
 
 #include "content/browser/system_message_window_win.h"
 #include "content/common/sandbox_policy.h"
-#include "ui/base/l10n/l10n_util_win.h"
 #include "net/base/winsock_init.h"
+#include "ui/base/l10n/l10n_util_win.h"
 #endif
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
@@ -402,9 +402,7 @@ void BrowserMainLoop::MainMessageLoopStart() {
     parts_->PostMainMessageLoopStart();
 
 #if defined(OS_ANDROID)
-  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl(
-      parameters_.command_line.HasSwitch(
-          switches::kMediaPlayerInRenderProcess)));
+  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl());
   DataFetcherImplAndroid::Init(base::android::AttachCurrentThread());
 #endif
 

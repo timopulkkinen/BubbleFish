@@ -19,6 +19,7 @@
 #include "remoting/host/audio_scheduler.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
+#include "remoting/host/session_controller.h"
 #include "remoting/host/video_scheduler.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
@@ -47,12 +48,7 @@ ClientSession::ClientSession(
       connection_(connection.Pass()),
       connection_factory_(connection_.get()),
       client_jid_(connection_->session()->jid()),
-      // TODO(alexeypa): delay creation of |desktop_environment_| until
-      // the curtain is enabled.
-      desktop_environment_(desktop_environment_factory->Create(
-          client_jid_,
-          base::Bind(&protocol::ConnectionToClient::Disconnect,
-                     connection_factory_.GetWeakPtr()))),
+      desktop_environment_factory_(desktop_environment_factory),
       input_tracker_(&host_input_filter_),
       remote_input_filter_(&input_tracker_),
       mouse_clamping_filter_(&remote_input_filter_),
@@ -88,16 +84,27 @@ ClientSession::ClientSession(
 #endif  // defined(OS_WIN)
 }
 
+ClientSession::~ClientSession() {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!audio_scheduler_);
+  DCHECK(!event_executor_);
+  DCHECK(!session_controller_);
+  DCHECK(!video_scheduler_);
+
+  connection_.reset();
+}
+
 void ClientSession::NotifyClientResolution(
     const protocol::ClientResolution& resolution) {
   if (resolution.has_dips_width() && resolution.has_dips_height()) {
     VLOG(1) << "Received ClientResolution (dips_width="
             << resolution.dips_width() << ", dips_height="
             << resolution.dips_height() << ")";
-    event_handler_->OnClientResolutionChanged(
-        this,
-        SkISize::Make(resolution.dips_width(), resolution.dips_height()),
-        SkIPoint::Make(kDefaultDPI, kDefaultDPI));
+    if (session_controller_) {
+      session_controller_->OnClientResolutionChanged(
+          SkIPoint::Make(kDefaultDPI, kDefaultDPI),
+          SkISize::Make(resolution.dips_width(), resolution.dips_height()));
+    }
   }
 }
 
@@ -146,10 +153,20 @@ void ClientSession::OnConnectionChannelsConnected(
   DCHECK_EQ(connection_.get(), connection);
   DCHECK(!audio_scheduler_);
   DCHECK(!event_executor_);
+  DCHECK(!session_controller_);
   DCHECK(!video_scheduler_);
 
+  scoped_ptr<DesktopEnvironment> desktop_environment =
+      desktop_environment_factory_->Create(
+          client_jid_,
+          base::Bind(&protocol::ConnectionToClient::Disconnect,
+                     connection_factory_.GetWeakPtr()));
+
+  // Create the session controller.
+  session_controller_ = desktop_environment->CreateSessionController();
+
   // Create and start the event executor.
-  event_executor_ = desktop_environment_->CreateEventExecutor(
+  event_executor_ = desktop_environment->CreateEventExecutor(
       input_task_runner_, ui_task_runner_);
   event_executor_->Start(CreateClipboardProxy());
 
@@ -168,8 +185,8 @@ void ClientSession::OnConnectionChannelsConnected(
       video_capture_task_runner_,
       video_encode_task_runner_,
       network_task_runner_,
-      desktop_environment_->CreateVideoCapturer(video_capture_task_runner_,
-                                                video_encode_task_runner_),
+      desktop_environment->CreateVideoCapturer(video_capture_task_runner_,
+                                               video_encode_task_runner_),
       video_encoder.Pass(),
       connection_->client_stub(),
       &mouse_clamping_filter_);
@@ -181,7 +198,7 @@ void ClientSession::OnConnectionChannelsConnected(
     audio_scheduler_ = AudioScheduler::Create(
         audio_task_runner_,
         network_task_runner_,
-        desktop_environment_->CreateAudioCapturer(audio_task_runner_),
+        desktop_environment->CreateAudioCapturer(audio_task_runner_),
         audio_encoder.Pass(),
         connection_->audio_stub());
   }
@@ -225,6 +242,7 @@ void ClientSession::OnConnectionClosed(
 
   client_clipboard_factory_.InvalidateWeakPtrs();
   event_executor_.reset();
+  session_controller_.reset();
 
   // Notify the ChromotingHost that this client is disconnected.
   // TODO(sergeyu): Log failure reason?
@@ -262,15 +280,6 @@ void ClientSession::Disconnect() {
   connection_->Disconnect();
 }
 
-void ClientSession::Stop() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!audio_scheduler_);
-  DCHECK(!event_executor_);
-  DCHECK(!video_scheduler_);
-
-  connection_.reset();
-}
-
 void ClientSession::LocalMouseMoved(const SkIPoint& mouse_pos) {
   DCHECK(CalledOnValidThread());
   remote_input_filter_.LocalMouseMoved(mouse_pos);
@@ -284,13 +293,6 @@ void ClientSession::SetDisableInputs(bool disable_inputs) {
 
   disable_input_filter_.set_enabled(!disable_inputs);
   disable_clipboard_filter_.set_enabled(!disable_inputs);
-}
-
-ClientSession::~ClientSession() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!audio_scheduler_);
-  DCHECK(!event_executor_);
-  DCHECK(!video_scheduler_);
 }
 
 scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
@@ -333,11 +335,6 @@ scoped_ptr<AudioEncoder> ClientSession::CreateAudioEncoder(
 
   NOTIMPLEMENTED();
   return scoped_ptr<AudioEncoder>(NULL);
-}
-
-// static
-void ClientSessionTraits::Destruct(const ClientSession* client) {
-  client->network_task_runner_->DeleteSoon(FROM_HERE, client);
 }
 
 }  // namespace remoting

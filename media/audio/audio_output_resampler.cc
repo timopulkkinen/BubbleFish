@@ -221,7 +221,7 @@ bool AudioOutputResampler::OpenStream() {
   // Finally fall back to a fake audio output device.
   output_params_.Reset(
       AudioParameters::AUDIO_FAKE, params_.channel_layout(),
-      params_.input_channels(), params_.sample_rate(),
+      params_.channels(), params_.input_channels(), params_.sample_rate(),
       params_.bits_per_sample(), params_.frames_per_buffer());
   Initialize();
   if (dispatcher_->OpenStream()) {
@@ -245,8 +245,12 @@ bool AudioOutputResampler::StartStream(
   } else {
     resampler_callback = it->second;
   }
+
   resampler_callback->Start(callback);
-  return dispatcher_->StartStream(resampler_callback, stream_proxy);
+  bool result = dispatcher_->StartStream(resampler_callback, stream_proxy);
+  if (!result)
+    resampler_callback->Stop();
+  return result;
 }
 
 void AudioOutputResampler::StreamVolumeSet(AudioOutputProxy* stream_proxy,

@@ -14,7 +14,6 @@
 #include "base/logging.h"
 #include "base/platform_file.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -43,10 +42,10 @@
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/browser/personal_data_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/download_manager.h"
@@ -55,13 +54,13 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/net_errors.h"
-#include "net/base/server_bound_cert_service.h"
-#include "net/base/server_bound_cert_store.h"
-#include "net/base/transport_security_state.h"
 #include "net/cookies/cookie_store.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/infinite_cache.h"
+#include "net/http/transport_security_state.h"
+#include "net/ssl/server_bound_cert_service.h"
+#include "net/ssl/server_bound_cert_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "webkit/dom_storage/dom_storage_types.h"
@@ -238,18 +237,8 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       content::RecordAction(UserMetricsAction("ClearBrowsingData_History"));
       waiting_for_clear_history_ = true;
 
-      // The HistoryService special-cases an end time of base::Time() to
-      // efficiently remove the whole history database. Support that here by
-      // passing base::Time() into HistoryService::ExpireHistoryBetween rather
-      // than base::Time::Max().
-      //
-      // TODO(sky?): Adjust HistoryService so that it understands Time::Max()
-      //     and deals well with non-max/non-null time periods: see
-      //     http://crbug.com/145680 for details.
-      base::Time history_end_ = delete_end_ == base::Time::Max() ?
-            base::Time() : delete_end_;
-      history_service->ExpireHistoryBetween(restrict_urls,
-          delete_begin_, history_end_,
+      history_service->ExpireLocalAndRemoteHistoryBetween(
+          restrict_urls, delete_begin_, delete_end_,
           base::Bind(&BrowsingDataRemover::OnHistoryDeletionDone,
                      base::Unretained(this)),
           &history_task_tracker_);
@@ -447,8 +436,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   if (remove_mask & REMOVE_FORM_DATA) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Autofill"));
     scoped_refptr<WebDataService> web_data_service =
-        WebDataServiceFactory::GetForProfile(profile_,
-                                             Profile::EXPLICIT_ACCESS);
+        WebDataService::FromBrowserContext(profile_);
 
     if (web_data_service.get()) {
       waiting_for_clear_form_ = true;

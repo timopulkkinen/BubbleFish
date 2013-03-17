@@ -368,7 +368,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   // blocked. However, an extension might redirect the request to another URL,
   // which is not blocked.
   if (url_blacklist_manager_ &&
-      url_blacklist_manager_->IsURLBlocked(request->url())) {
+      url_blacklist_manager_->IsRequestBlocked(*request)) {
     // URL access blocked by policy.
 	VLOG(1) << __FUNCTION__ << " URL is blacklisted for extensions: " << "\"" << request->url().spec() << "\"";
 
@@ -376,7 +376,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &request->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
 
@@ -664,7 +664,7 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &socket->url().possibly_invalid_spec()));
-    return net::ERR_NETWORK_ACCESS_DENIED;
+    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
   }
 #endif
   return net::OK;

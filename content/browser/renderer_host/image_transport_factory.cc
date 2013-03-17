@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/non_thread_safe.h"
 #include "cc/output_surface.h"
 #include "cc/output_surface_client.h"
@@ -33,12 +34,16 @@
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_setup.h"
+#include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/test_web_graphics_context_3d.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 
 #if defined(OS_WIN)
+#include "content/browser/renderer_host/software_output_device_win.h"
 #include "ui/surface/accelerated_surface_win.h"
+#elif defined(USE_X11)
+#include "content/browser/renderer_host/software_output_device_x11.h"
 #endif
 
 namespace content {
@@ -46,16 +51,15 @@ namespace {
 
 ImageTransportFactory* g_factory;
 
-class DefaultTransportFactory
-    : public ui::DefaultContextFactory,
-      public ImageTransportFactory {
+// An ImageTransportFactory that disables transport.
+class NoTransportFactory : public ImageTransportFactory {
  public:
-  DefaultTransportFactory() {
-    ui::DefaultContextFactory::Initialize();
+  explicit NoTransportFactory(ui::ContextFactory* context_factory)
+      : context_factory_(context_factory) {
   }
 
   virtual ui::ContextFactory* AsContextFactory() OVERRIDE {
-    return this;
+    return context_factory_.get();
   }
 
   virtual gfx::GLSurfaceHandle CreateSharedSurfaceHandle() OVERRIDE {
@@ -86,7 +90,7 @@ class DefaultTransportFactory
     return 0;
   }
 
-  void WaitSyncPoint(uint32 sync_point) OVERRIDE {
+  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE {
   }
 
   // We don't generate lost context events, so we don't need to keep track of
@@ -99,7 +103,8 @@ class DefaultTransportFactory
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DefaultTransportFactory);
+  scoped_ptr<ui::ContextFactory> context_factory_;
+  DISALLOW_COPY_AND_ASSIGN(NoTransportFactory);
 };
 
 class OwnedTexture : public ui::Texture, ImageTransportFactoryObserver {
@@ -305,6 +310,16 @@ class BrowserCompositorOutputSurface
         output_surface_proxy_(output_surface_proxy),
         compositor_message_loop_(compositor_message_loop),
         compositor_(compositor) {
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kUIMaxFramesPending)) {
+      std::string string_value = command_line->GetSwitchValueASCII(
+        switches::kUIMaxFramesPending);
+      int int_value;
+      if (base::StringToInt(string_value, &int_value))
+        capabilities_.max_frames_pending = int_value;
+      else
+        LOG(ERROR) << "Trouble parsing --" << switches::kUIMaxFramesPending;
+    }
     DetachFromThread();
   }
 
@@ -552,22 +567,40 @@ class GpuProcessTransportFactory
     return context.release();
   }
 
+  // Crash given that we are unable to show any UI whatsoever. On Windows we
+  // also trigger code in breakpad causes a system process to show message box.
+  // In all cases a crash dump is generated.
+  void FatalGPUError(const char* message) {
+#if defined(OS_WIN)
+    // 0xC01E0200 corresponds to STATUS_GRAPHICS_GPU_EXCEPTION_ON_DEVICE.
+    ::RaiseException(0xC01E0200, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#else
+    LOG(FATAL) << message;
+#endif
+  }
+
   class MainThreadContextProvider : public ContextProviderCommandBuffer {
    public:
-    explicit MainThreadContextProvider(GpuProcessTransportFactory* factory)
-        : factory_(factory) {}
+    static scoped_refptr<MainThreadContextProvider> Create(
+        GpuProcessTransportFactory* factory) {
+      scoped_refptr<MainThreadContextProvider> provider =
+          new MainThreadContextProvider(factory);
+      if (!provider->InitializeOnMainThread())
+        return NULL;
+      return provider;
+    }
 
    protected:
+    explicit MainThreadContextProvider(GpuProcessTransportFactory* factory)
+        : factory_(factory) {}
     virtual ~MainThreadContextProvider() {}
 
     virtual scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
-        CreateOffscreenContext3d() {
+        CreateOffscreenContext3d() OVERRIDE {
       return make_scoped_ptr(factory_->CreateOffscreenContext());
     }
 
     virtual void OnLostContext() OVERRIDE {
-      ContextProviderCommandBuffer::OnLostContext();
-
       MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(&GpuProcessTransportFactory::OnLostMainThreadSharedContext,
@@ -582,21 +615,32 @@ class GpuProcessTransportFactory
       OffscreenContextProviderForMainThread() OVERRIDE {
     if (!shared_contexts_main_thread_ ||
         shared_contexts_main_thread_->DestroyedOnMainThread()) {
-      shared_contexts_main_thread_ = new MainThreadContextProvider(this);
+      shared_contexts_main_thread_ = MainThreadContextProvider::Create(this);
+      if (shared_contexts_main_thread_ &&
+          !shared_contexts_main_thread_->BindToCurrentThread())
+        shared_contexts_main_thread_ = NULL;
     }
     return shared_contexts_main_thread_;
   }
 
   class CompositorThreadContextProvider : public ContextProviderCommandBuffer {
    public:
-    explicit CompositorThreadContextProvider(
-        GpuProcessTransportFactory* factory) : factory_(factory) {}
+    static scoped_refptr<CompositorThreadContextProvider> Create(
+        GpuProcessTransportFactory* factory) {
+      scoped_refptr<CompositorThreadContextProvider> provider =
+          new CompositorThreadContextProvider(factory);
+      if (!provider->InitializeOnMainThread())
+        return NULL;
+      return provider;
+    }
 
    protected:
+    explicit CompositorThreadContextProvider(
+        GpuProcessTransportFactory* factory) : factory_(factory) {}
     virtual ~CompositorThreadContextProvider() {}
 
     virtual scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
-        CreateOffscreenContext3d() {
+        CreateOffscreenContext3d() OVERRIDE {
       return make_scoped_ptr(factory_->CreateOffscreenContext());
     }
 
@@ -609,7 +653,7 @@ class GpuProcessTransportFactory
     if (!shared_contexts_compositor_thread_ ||
         shared_contexts_compositor_thread_->DestroyedOnMainThread()) {
       shared_contexts_compositor_thread_ =
-          new CompositorThreadContextProvider(this);
+          CompositorThreadContextProvider::Create(this);
     }
     return shared_contexts_compositor_thread_;
   }
@@ -617,15 +661,10 @@ class GpuProcessTransportFactory
   void CreateSharedContextLazy() {
     scoped_refptr<cc::ContextProvider> provider =
         OffscreenContextProviderForMainThread();
-    if (!provider->InitializeOnMainThread()) {
+    if (!provider) {
       // If we can't recreate contexts, we won't be able to show the UI.
       // Better crash at this point.
-      LOG(FATAL) << "Failed to initialize UI shared context.";
-    }
-    if (!provider->BindToCurrentThread()) {
-      // If we can't recreate contexts, we won't be able to show the UI.
-      // Better crash at this point.
-      LOG(FATAL) << "Failed to make UI shared context current.";
+      FatalGPUError("Failed to initialize UI shared context.");
     }
   }
 
@@ -662,12 +701,45 @@ void CompositorSwapClient::OnLostContext() {
   // Note: previous line destroyed this. Don't access members from now on.
 }
 
-WebKit::WebGraphicsContext3D* CreateTestContext() {
-  ui::TestWebGraphicsContext3D* test_context =
-      new ui::TestWebGraphicsContext3D();
-  test_context->Initialize();
-  return test_context;
-}
+class SoftwareContextFactory : public ui::ContextFactory {
+ public:
+  SoftwareContextFactory() {}
+  virtual ~SoftwareContextFactory() {}
+  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() OVERRIDE {
+    return NULL;
+  }
+  virtual cc::OutputSurface* CreateOutputSurface(
+      ui::Compositor* compositor) OVERRIDE {
+#if defined(OS_WIN)
+    scoped_ptr<SoftwareOutputDeviceWin> software_device(
+        new SoftwareOutputDeviceWin(compositor));
+    return new cc::OutputSurface(
+        software_device.PassAs<cc::SoftwareOutputDevice>());
+#elif defined(USE_X11)
+    scoped_ptr<SoftwareOutputDeviceX11> software_device(
+        new SoftwareOutputDeviceX11(compositor));
+    return new cc::OutputSurface(
+        software_device.PassAs<cc::SoftwareOutputDevice>());
+#else
+    NOTIMPLEMENTED();
+    return NULL;
+#endif
+  }
+  virtual void RemoveCompositor(ui::Compositor* compositor) OVERRIDE {}
+
+  virtual scoped_refptr<cc::ContextProvider>
+  OffscreenContextProviderForMainThread() OVERRIDE {
+    return NULL;
+  }
+
+  virtual scoped_refptr<cc::ContextProvider>
+  OffscreenContextProviderForCompositorThread() OVERRIDE {
+    return NULL;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SoftwareContextFactory);
+};
 
 }  // anonymous namespace
 
@@ -678,11 +750,11 @@ void ImageTransportFactory::Initialize() {
     ui::SetupTestCompositor();
   }
   if (ui::IsTestCompositorEnabled()) {
-    g_factory = new DefaultTransportFactory();
-    WebKitPlatformSupportImpl::SetOffscreenContextFactoryForTest(
-        CreateTestContext);
+    g_factory = new NoTransportFactory(new ui::TestContextFactory);
+  } else if (command_line->HasSwitch(switches::kUIEnableSoftwareCompositing)) {
+    g_factory = new NoTransportFactory(new SoftwareContextFactory);
   } else {
-    g_factory = new GpuProcessTransportFactory();
+    g_factory = new GpuProcessTransportFactory;
   }
   ui::ContextFactory::SetInstance(g_factory->AsContextFactory());
 }

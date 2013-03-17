@@ -103,12 +103,7 @@ bool DesktopSessionAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_END_MESSAGE_MAP()
   }
 
-  // Close the channel if the received message wasn't expected.
-  if (!handled) {
-    LOG(ERROR) << "An unexpected IPC message received: type=" << message.type();
-    OnChannelError();
-  }
-
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
 }
 
@@ -217,7 +212,9 @@ void DesktopSessionAgent::OnStartSessionAgent(
       authenticated_jid.substr(0, authenticated_jid.find('/')));
 
   // Start monitoring local input.
-  local_input_monitor_ = LocalInputMonitor::Create();
+  local_input_monitor_ = LocalInputMonitor::Create(caller_task_runner_,
+                                                   input_task_runner_,
+                                                   caller_task_runner_);
   local_input_monitor_->Start(this, disconnect_session);
 
   // Start the audio capturer.

@@ -22,7 +22,6 @@
 
 namespace aura {
 namespace client {
-class DefaultCaptureClient;
 class FocusClient;
 class ScreenPositionClient;
 }
@@ -30,6 +29,7 @@ class ScreenPositionClient;
 
 namespace views {
 class DesktopActivationClient;
+class DesktopCaptureClient;
 class DesktopDispatcherClient;
 class X11DesktopWindowMoveClient;
 class X11WindowEventFilter;
@@ -134,9 +134,6 @@ class VIEWS_EXPORT DesktopRootWindowHostLinux
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
                               const gfx::ImageSkia& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const string16& name) OVERRIDE;
-  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
-  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
   virtual void FlashFrame(bool flash_frame) OVERRIDE;
   virtual void OnNativeWidgetFocus() OVERRIDE;
@@ -151,6 +148,8 @@ class VIEWS_EXPORT DesktopRootWindowHostLinux
   virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
+  virtual void SetInsets(const gfx::Insets& insets) OVERRIDE;
   virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
@@ -202,7 +201,7 @@ class VIEWS_EXPORT DesktopRootWindowHostLinux
   aura::RootWindow* root_window_;
 
   // aura:: objects that we own.
-  scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
+  scoped_ptr<DesktopCaptureClient> capture_client_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
   scoped_ptr<DesktopActivationClient> activation_client_;
   scoped_ptr<views::corewm::CursorManager> cursor_client_;

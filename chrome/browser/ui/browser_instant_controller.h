@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_INSTANT_CONTROLLER_H_
 #define CHROME_BROWSER_UI_BROWSER_INSTANT_CONTROLLER_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/public/pref_change_registrar.h"
@@ -17,8 +19,6 @@
 
 class Browser;
 struct InstantSuggestion;
-class PrefRegistrySyncable;
-class PrefService;
 class Profile;
 class ThemeService;
 
@@ -37,12 +37,6 @@ class BrowserInstantController : public content::NotificationObserver,
  public:
   explicit BrowserInstantController(Browser* browser);
   virtual ~BrowserInstantController();
-
-  // Returns true if Instant is enabled in a visible, overlay-showing mode.
-  static bool IsInstantEnabled(Profile* profile);
-
-  // Registers Instant related preferences.
-  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // If |url| is the new tab page URL, set |target_contents| to the preloaded
   // NTP contents from InstantController. If |source_contents| is not NULL, we
@@ -86,8 +80,9 @@ class BrowserInstantController : public content::NotificationObserver,
   // to the user clicking on it.
   void InstantOverlayFocused();
 
-  // Invoked by |instant_| to give the omnibox focus invisibly.
-  void FocusOmniboxInvisibly();
+  // Invoked by |instant_| to give the omnibox focus, with the option of making
+  // the caret invisible.
+  void FocusOmnibox(bool caret_visibility);
 
   // Invoked by |instant_| to get the currently active tab, over which the
   // overlay would be shown.
@@ -99,9 +94,8 @@ class BrowserInstantController : public content::NotificationObserver,
   // Invoked by |browser_| when the active tab is about to be deactivated.
   void TabDeactivated(content::WebContents* contents);
 
-  // Invoked by |instant_| or |browser_| to update theme information for NTP.
-  // Set |parse_theme_info| to true to force re-parsing of theme information.
-  void UpdateThemeInfo(bool parse_theme_info);
+  // Invoked by |instant_| to update theme information for NTP.
+  void UpdateThemeInfo();
 
   // Invoked by the InstantController when it wants to open a URL.
   void OpenURL(const GURL& url,
@@ -114,7 +108,7 @@ class BrowserInstantController : public content::NotificationObserver,
  private:
   // Sets the value of |instant_| based on value from profile. Invoked
   // on pref change.
-  void ResetInstant();
+  void ResetInstant(const std::string& pref_name);
 
   // Overridden from search::SearchModelObserver:
   virtual void ModeChanged(const search::Mode& old_mode,

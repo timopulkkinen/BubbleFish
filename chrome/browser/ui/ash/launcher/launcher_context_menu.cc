@@ -69,8 +69,6 @@ void LauncherContextMenu::Init() {
   if (is_valid_item()) {
     if (item_.type == ash::TYPE_APP_SHORTCUT ||
         item_.type == ash::TYPE_WINDOWED_APP) {
-      DCHECK(item_.type == ash::TYPE_APP_SHORTCUT &&
-             controller_->IsPinned(item_.id));
       // V1 apps can be started from the menu - but V2 apps should not.
       if  (!controller_->IsPlatformApp(item_.id)) {
         AddItem(MENU_OPEN_NEW, string16());
@@ -85,7 +83,8 @@ void LauncherContextMenu::Init() {
         AddItem(MENU_CLOSE,
                 l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_CLOSE));
       }
-      if (!controller_->IsPlatformApp(item_.id)) {
+      if (!controller_->IsPlatformApp(item_.id) &&
+          item_.type != ash::TYPE_WINDOWED_APP) {
         AddSeparator(ui::NORMAL_SEPARATOR);
         AddCheckItemWithStringId(
             LAUNCH_TYPE_REGULAR_TAB,
@@ -143,13 +142,13 @@ void LauncherContextMenu::Init() {
     AddCheckItemWithStringId(
         MENU_AUTO_HIDE, IDS_AURA_LAUNCHER_CONTEXT_MENU_AUTO_HIDE);
   }
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowLauncherAlignmentMenu)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kHideLauncherAlignmentMenu)) {
     AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
                            IDS_AURA_LAUNCHER_CONTEXT_MENU_POSITION,
                            &launcher_alignment_menu_);
   }
-#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
   AddItem(MENU_CHANGE_WALLPAPER,
        l10n_util::GetStringUTF16(IDS_AURA_SET_DESKTOP_WALLPAPER));
 #endif
@@ -207,7 +206,7 @@ bool LauncherContextMenu::IsCommandIdEnabled(int command_id) const {
     case MENU_PIN:
       return item_.type == ash::TYPE_PLATFORM_APP ||
           controller_->IsPinnable(item_.id);
-#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
     case MENU_CHANGE_WALLPAPER:
       return ash::Shell::GetInstance()->user_wallpaper_delegate()->
           CanOpenSetWallpaperPage();
@@ -233,7 +232,7 @@ bool LauncherContextMenu::GetAcceleratorForCommandId(
   return false;
 }
 
-void LauncherContextMenu::ExecuteCommand(int command_id) {
+void LauncherContextMenu::ExecuteCommand(int command_id, int event_flags) {
   switch (static_cast<MenuItem>(command_id)) {
     case MENU_OPEN_NEW:
       controller_->Launch(item_.id, ui::EF_NONE);
@@ -271,7 +270,7 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
       break;
     case MENU_ALIGNMENT_MENU:
       break;
-#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
     case MENU_CHANGE_WALLPAPER:
       ash::Shell::GetInstance()->user_wallpaper_delegate()->
           OpenSetWallpaperPage();

@@ -96,12 +96,12 @@ class ChangeListProcessor {
 
   // Helper function to add |entry_proto| to its parent. Updates changed_dirs_
   // as a side effect.
-  void AddEntryToParent(const DriveEntryProto& entry_proto);
+  void AddEntry(const DriveEntryProto& entry_proto);
 
-  // Callback for DriveResourceMetadata::AddEntryToParent.
-  void NotifyForAddEntryToParent(bool is_directory,
-                                 DriveFileError error,
-                                 const base::FilePath& file_path);
+  // Callback for DriveResourceMetadata::AddEntry.
+  void NotifyForAddEntry(bool is_directory,
+                         DriveFileError error,
+                         const base::FilePath& file_path);
 
   // Removes entry pointed to by |resource_id| from its parent. Updates
   // changed_dirs_ as a side effect.
@@ -136,19 +136,25 @@ class ChangeListProcessor {
       const base::FilePath& file_path,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  // Updates the upload url of the root directory with root_upload_url_.
-  void UpdateRootUploadUrl();
+  // Updates the root directory entry. upload_url and changestamp will be
+  // updated. Calls |closure| upon completion regardless of whether the
+  // update was successful or not.  |closure| must not be null.
+  void UpdateRootEntry(const base::Closure& closure);
 
-  // Callback for DriveResourceMetadata::GetEntryInfoByPath for the root proto.
-  // Updates root upload url in the root proto, and refreshes the proto.
-  void OnGetRootEntryProto(DriveFileError error,
-                           scoped_ptr<DriveEntryProto> root_proto);
+  // Part of UpdateRootEntry(). Called after
+  // DriveResourceMetadata::GetEntryInfoByPath is complete. Updates the root
+  // proto, and refreshes the root entry with the proto.
+  void UpdateRootEntryAfterGetEntry(const base::Closure& closure,
+                                    DriveFileError error,
+                                    scoped_ptr<DriveEntryProto> root_proto);
 
-  // Callback for DriveResourceMetadata::RefreshEntry after the root upload
-  // url is set.
-  void OnUpdateRootUploadUrl(DriveFileError error,
-                             const base::FilePath& root_path,
-                             scoped_ptr<DriveEntryProto> root_proto);
+  // Part of UpdateRootEntry(). Called after
+  // DriveResourceMetadata::RefreshEntry() is complete. Calls OnComplete() to
+  // finish the change list processing.
+  void UpdateRootEntryAfterRefreshEntry(const base::Closure& closure,
+                                        DriveFileError error,
+                                        const base::FilePath& root_path,
+                                        scoped_ptr<DriveEntryProto> root_proto);
 
   // Runs after all entries have been processed.
   void OnComplete();

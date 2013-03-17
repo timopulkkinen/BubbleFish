@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/debug/alias.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
@@ -17,6 +18,7 @@
 #include "base/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
@@ -32,7 +34,6 @@
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
-#include "remoting/host/basic_desktop_environment.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -41,7 +42,6 @@
 #include "remoting/host/curtain_mode.h"
 #include "remoting/host/curtaining_host_observer.h"
 #include "remoting/host/desktop_environment.h"
-#include "remoting/host/desktop_resizer.h"
 #include "remoting/host/desktop_session_connector.h"
 #include "remoting/host/dns_blackhole_checker.h"
 #include "remoting/host/event_executor.h"
@@ -58,9 +58,9 @@
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/logging.h"
+#include "remoting/host/me2me_desktop_environment.h"
 #include "remoting/host/network_settings.h"
 #include "remoting/host/policy_hack/policy_watcher.h"
-#include "remoting/host/resizing_host_observer.h"
 #include "remoting/host/service_urls.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
@@ -285,7 +285,7 @@ class HostProcess
 
   std::string host_id_;
   protocol::SharedSecretHash host_secret_hash_;
-  HostKeyPair key_pair_;
+  scoped_refptr<RsaKeyPair> key_pair_;
   std::string oauth_refresh_token_;
   std::string serialized_config_;
   std::string xmpp_login_;
@@ -299,8 +299,6 @@ class HostProcess
   scoped_ptr<CurtainingHostObserver> curtaining_host_observer_;
   bool curtain_required_;
 
-  scoped_ptr<DesktopResizer> desktop_resizer_;
-  scoped_ptr<ResizingHostObserver> resizing_host_observer_;
   scoped_ptr<XmppSignalStrategy> signal_strategy_;
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
@@ -329,7 +327,6 @@ HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
       state_(HOST_INITIALIZING),
       allow_nat_traversal_(true),
       curtain_required_(false),
-      desktop_resizer_(DesktopResizer::Create()),
 #if defined(REMOTING_MULTI_PROCESS)
       desktop_session_connector_(NULL),
 #endif  // defined(REMOTING_MULTI_PROCESS)
@@ -511,7 +508,7 @@ void HostProcess::CreateAuthenticatorFactory() {
   if (state_ != HOST_STARTED)
     return;
 
-  std::string local_certificate = key_pair_.GenerateCertificate();
+  std::string local_certificate = key_pair_->GenerateCertificate();
   if (local_certificate.empty()) {
     LOG(ERROR) << "Failed to generate host certificate.";
     ShutdownHost(kInitializationFailed);
@@ -520,7 +517,7 @@ void HostProcess::CreateAuthenticatorFactory() {
 
   scoped_ptr<protocol::AuthenticatorFactory> factory(
       new protocol::Me2MeHostAuthenticatorFactory(
-          local_certificate, *key_pair_.private_key(), host_secret_hash_));
+          local_certificate, key_pair_, host_secret_hash_));
 #if defined(OS_POSIX)
   // On Linux and Mac, perform a PAM authorization step after authentication.
   factory.reset(new PamAuthorizationFactory(factory.Pass()));
@@ -535,8 +532,7 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
 #if defined(REMOTING_MULTI_PROCESS)
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(HostProcess, message)
-    IPC_MESSAGE_HANDLER(ChromotingDaemonNetworkMsg_Crash,
-                        OnCrash)
+    IPC_MESSAGE_HANDLER(ChromotingDaemonMsg_Crash, OnCrash)
     IPC_MESSAGE_HANDLER(ChromotingDaemonNetworkMsg_Configuration,
                         OnConfigUpdated)
     IPC_MESSAGE_FORWARD(
@@ -548,7 +544,10 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
                         DesktopSessionConnector::OnTerminalDisconnected)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
+
 #else  // !defined(REMOTING_MULTI_PROCESS)
   return false;
 #endif  // !defined(REMOTING_MULTI_PROCESS)
@@ -604,7 +603,7 @@ void HostProcess::StartOnUiThread() {
 
 #else  // !defined(OS_WIN)
   DesktopEnvironmentFactory* desktop_environment_factory =
-      new BasicDesktopEnvironmentFactory(true);
+      new Me2MeDesktopEnvironmentFactory();
 #endif  // !defined(OS_WIN)
 
   desktop_environment_factory_.reset(desktop_environment_factory);
@@ -685,7 +684,15 @@ bool HostProcess::ApplyConfig(scoped_ptr<JsonHostConfig> config) {
     return false;
   }
 
-  if (!key_pair_.Load(*config)) {
+  std::string key_base64;
+  if (!config->GetString(kPrivateKeyConfigPath, &key_base64)) {
+    LOG(ERROR) << "Private key couldn't be read from the config file.";
+    return false;
+  }
+
+  key_pair_ = RsaKeyPair::FromString(key_base64);
+  if (!key_pair_) {
+    LOG(ERROR) << "Invalid private key in the config file.";
     return false;
   }
 
@@ -939,7 +946,8 @@ void HostProcess::StartHost() {
 #endif
 
   heartbeat_sender_.reset(new HeartbeatSender(
-      this, host_id_, signal_strategy_.get(), &key_pair_, directory_bot_jid_));
+      this, host_id_, signal_strategy_.get(), key_pair_,
+      directory_bot_jid_));
 
   host_change_notification_listener_.reset(new HostChangeNotificationListener(
       this, host_id_, signal_strategy_.get(), directory_bot_jid_));
@@ -956,9 +964,6 @@ void HostProcess::StartHost() {
   host_event_logger_ =
       HostEventLogger::Create(host_->AsWeakPtr(), kApplicationName);
 #endif  // !defined(REMOTING_MULTI_PROCESS)
-
-  resizing_host_observer_.reset(
-      new ResizingHostObserver(desktop_resizer_.get(), host_->AsWeakPtr()));
 
 #if defined(REMOTING_RDP_SESSION)
   // TODO(alexeypa): do not create |curtain_| in this case.
@@ -1060,7 +1065,6 @@ void HostProcess::ShutdownOnNetworkThread() {
   host_change_notification_listener_.reset();
   signaling_connector_.reset();
   signal_strategy_.reset();
-  resizing_host_observer_.reset();
 
   if (state_ == HOST_STOPPING_TO_RESTART) {
     StartHost();
@@ -1090,7 +1094,14 @@ void HostProcess::ShutdownOnNetworkThread() {
 void HostProcess::OnCrash(const std::string& function_name,
                           const std::string& file_name,
                           const int& line_number) {
-  CHECK(false);
+  char message[1024];
+  base::snprintf(message, sizeof(message),
+                 "Requested by %s at %s, line %d.",
+                 function_name.c_str(), file_name.c_str(), line_number);
+  base::debug::Alias(message);
+
+  // The daemon requested us to crash the process.
+  CHECK(false) << message;
 }
 
 int HostProcessMain() {

@@ -4,6 +4,7 @@
 
 #include "content/browser/gpu/gpu_process_host.h"
 
+#include "base/base64.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -12,11 +13,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
+#include "base/sha1.h"
 #include "base/threading/thread.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/gpu/shader_disk_cache.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
@@ -28,8 +31,10 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
+#include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
@@ -335,7 +340,8 @@ GpuProcessHost::GpuProcessHost(int host_id, GpuProcessKind kind)
       in_process_(false),
       software_rendering_(false),
       kind_(kind),
-      process_launched_(false) {
+      process_launched_(false),
+      uma_memory_stats_received_(false) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess) ||
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessGPU)) {
     in_process_ = true;
@@ -417,7 +423,7 @@ GpuProcessHost::~GpuProcessHost() {
         // The gpu process is too unstable to use. Disable it for current
         // session.
         hardware_gpu_enabled_ = false;
-        GpuDataManagerImpl::GetInstance()->BlacklistCard();
+        GpuDataManagerImpl::GetInstance()->DisableHardwareAcceleration();
 #endif
       }
     }
@@ -431,17 +437,24 @@ GpuProcessHost::~GpuProcessHost() {
 
   UMA_HISTOGRAM_COUNTS_100("GPU.AtExitSurfaceCount",
                            GpuSurfaceTracker::Get()->GetSurfaceCount());
-  UMA_HISTOGRAM_COUNTS_100("GPU.AtExitWindowCount",
-                           uma_memory_stats_.window_count);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.AtExitMBytesAllocated",
-      uma_memory_stats_.bytes_allocated_current / 1024 / 1024, 1, 2000, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.AtExitMBytesAllocatedMax",
-      uma_memory_stats_.bytes_allocated_max / 1024 / 1024, 1, 2000, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.AtExitMBytesLimit",
-      uma_memory_stats_.bytes_limit / 1024 / 1024, 1, 2000, 50);
+  UMA_HISTOGRAM_BOOLEAN("GPU.AtExitReceivedMemoryStats",
+                        uma_memory_stats_received_);
+
+  if (uma_memory_stats_received_) {
+    UMA_HISTOGRAM_COUNTS_100("GPU.AtExitManagedMemoryClientCount",
+                             uma_memory_stats_.client_count);
+    UMA_HISTOGRAM_COUNTS_100("GPU.AtExitContextGroupCount",
+                             uma_memory_stats_.context_group_count);
+    UMA_HISTOGRAM_CUSTOM_COUNTS(
+        "GPU.AtExitMBytesAllocated",
+        uma_memory_stats_.bytes_allocated_current / 1024 / 1024, 1, 2000, 50);
+    UMA_HISTOGRAM_CUSTOM_COUNTS(
+        "GPU.AtExitMBytesAllocatedMax",
+        uma_memory_stats_.bytes_allocated_max / 1024 / 1024, 1, 2000, 50);
+    UMA_HISTOGRAM_CUSTOM_COUNTS(
+        "GPU.AtExitMBytesLimit",
+        uma_memory_stats_.bytes_limit / 1024 / 1024, 1, 2000, 50);
+  }
 
   if (status == base::TERMINATION_STATUS_NORMAL_TERMINATION ||
       status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
@@ -466,9 +479,31 @@ GpuProcessHost::~GpuProcessHost() {
   // URLs from accessing client 3D APIs without prompting.
   BlockLiveOffscreenContexts();
 
+  std::string message;
+  switch (status) {
+    case base::TERMINATION_STATUS_NORMAL_TERMINATION:
+      message = "The GPU process exited normally. Everything is okay.";
+      break;
+    case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
+      message = base::StringPrintf(
+          "The GPU process exited with code %d.",
+          exit_code);
+      break;
+    case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+      message = "You killed the GPU process! Why?";
+      break;
+    case base::TERMINATION_STATUS_PROCESS_CRASHED:
+      message = "The GPU process crashed!";
+      break;
+    default:
+      break;
+  }
+
   BrowserThread::PostTask(BrowserThread::UI,
                           FROM_HERE,
-                          base::Bind(&GpuProcessHostUIShim::Destroy, host_id_));
+                          base::Bind(&GpuProcessHostUIShim::Destroy,
+                                     host_id_,
+                                     message));
 }
 
 bool GpuProcessHost::Init() {
@@ -495,8 +530,7 @@ bool GpuProcessHost::Init() {
   if (!Send(new GpuMsg_Initialize()))
     return false;
 
-  return Send(new GpuMsg_SetVideoMemoryWindowCount(
-      GpuDataManagerImpl::GetInstance()->GetWindowCount()));
+  return true;
 }
 
 void GpuProcessHost::RouteOnUIThread(const IPC::Message& message) {
@@ -557,6 +591,11 @@ bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceRelease,
                         OnAcceleratedSurfaceRelease)
 #endif
+    IPC_MESSAGE_HANDLER(GpuHostMsg_DestroyChannel,
+                        OnDestroyChannel)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_CacheShader,
+                        OnCacheShader)
+
     IPC_MESSAGE_UNHANDLED(RouteOnUIThread(message))
   IPC_END_MESSAGE_MAP()
 
@@ -589,6 +628,11 @@ void GpuProcessHost::EstablishGpuChannel(
     channel_requests_.push(callback);
   } else {
     callback.Run(IPC::ChannelHandle(), GPUInfo());
+  }
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableGpuShaderDiskCache)) {
+    CreateChannelCache(client_id, gpu::kDefaultMaxProgramCacheMemoryBytes);
   }
 }
 
@@ -761,6 +805,7 @@ void GpuProcessHost::OnDidDestroyOffscreenContext(const GURL& url) {
 void GpuProcessHost::OnGpuMemoryUmaStatsReceived(
     const GPUMemoryUmaStats& stats) {
   TRACE_EVENT0("gpu", "GpuProcessHost::OnGpuMemoryUmaStatsReceived");
+  uma_memory_stats_received_ = true;
   uma_memory_stats_ = stats;
 }
 
@@ -917,6 +962,8 @@ void GpuProcessHost::OnProcessLaunched() {
 
 void GpuProcessHost::OnProcessCrashed(int exit_code) {
   SendOutstandingReplies();
+  GpuDataManagerImpl::GetInstance()->ProcessCrashed(
+      process_->GetTerminationStatus(NULL));
 }
 
 bool GpuProcessHost::software_rendering() {
@@ -969,7 +1016,6 @@ bool GpuProcessHost::LaunchGpuProcess(const std::string& channel_id) {
 
   // Propagate relevant command line switches.
   static const char* const kSwitchNames[] = {
-    switches::kCrashOnGpuHang,
     switches::kDisableAcceleratedVideoDecode,
     switches::kDisableBreakpad,
     switches::kDisableGLMultisampling,
@@ -1059,6 +1105,58 @@ void GpuProcessHost::BlockLiveOffscreenContexts() {
     GpuDataManagerImpl::GetInstance()->BlockDomainFrom3DAPIs(
         *iter, GpuDataManagerImpl::DOMAIN_GUILT_UNKNOWN);
   }
+}
+
+std::string GpuProcessHost::GetShaderPrefixKey() {
+  if (shader_prefix_key_.empty()) {
+    GPUInfo info = GpuDataManagerImpl::GetInstance()->GetGPUInfo();
+
+    std::string in_str = GetContentClient()->GetProduct() + "-" +
+        info.gl_vendor + "-" + info.gl_renderer + "-" +
+        info.driver_version + "-" + info.driver_vendor;
+
+    base::Base64Encode(base::SHA1HashString(in_str), &shader_prefix_key_);
+  }
+
+  return shader_prefix_key_;
+}
+
+void GpuProcessHost::LoadedShader(const std::string& key,
+                                  const std::string& data) {
+  std::string prefix = GetShaderPrefixKey();
+  if (!key.compare(0, prefix.length(), prefix))
+    Send(new GpuMsg_LoadedShader(data));
+}
+
+void GpuProcessHost::CreateChannelCache(int32 client_id, size_t cache_size) {
+  TRACE_EVENT0("gpu", "GpuProcessHost::CreateChannelCache");
+
+  scoped_refptr<ShaderDiskCache> cache =
+      ShaderCacheFactory::GetInstance()->Get(client_id);
+  if (!cache)
+    return;
+
+  cache->set_max_cache_size(cache_size);
+  cache->set_host_id(host_id_);
+
+  client_id_to_shader_cache_[client_id] = cache;
+}
+
+void GpuProcessHost::OnDestroyChannel(int32 client_id) {
+  TRACE_EVENT0("gpu", "GpuProcessHost::OnDestroyChannel");
+  client_id_to_shader_cache_.erase(client_id);
+}
+
+void GpuProcessHost::OnCacheShader(int32 client_id,
+                                   const std::string& key,
+                                   const std::string& shader) {
+  TRACE_EVENT0("gpu", "GpuProcessHost::OnCacheShader");
+  ClientIdToShaderCacheMap::iterator iter =
+      client_id_to_shader_cache_.find(client_id);
+  // If the cache doesn't exist then this is an off the record profile.
+  if (iter == client_id_to_shader_cache_.end())
+    return;
+  iter->second->Cache(GetShaderPrefixKey() + ":" + key, shader);
 }
 
 }  // namespace content

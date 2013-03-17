@@ -113,7 +113,7 @@ void FakeDriveFileSyncClient::GetResourceEntry(
 void FakeDriveFileSyncClient::ListFiles(
     const std::string& directory_resource_id,
     const ResourceListCallback& callback) {
-  NOTREACHED();
+  ListChanges(0, callback);
 }
 
 void FakeDriveFileSyncClient::ListChanges(
@@ -217,6 +217,11 @@ void FakeDriveFileSyncClient::DeleteFile(
 GURL FakeDriveFileSyncClient::ResourceIdToResourceLink(
     const std::string& resource_id) const {
   return url_generator_.GenerateContentUrl(resource_id);
+}
+
+void FakeDriveFileSyncClient::EnsureSyncRootIsNotInMyDrive(
+    const std::string& sync_root_resource_id) const {
+  // Nothing to do.
 }
 
 void FakeDriveFileSyncClient::PushRemoteChange(

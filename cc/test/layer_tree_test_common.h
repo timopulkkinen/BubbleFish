@@ -35,8 +35,9 @@ public:
     virtual void treeActivatedOnThread(LayerTreeHostImpl*) { }
     virtual void initializedRendererOnThread(LayerTreeHostImpl*, bool success) { }
     virtual bool prepareToDrawOnThread(
-        LayerTreeHostImpl*, LayerTreeHostImpl::FrameData&, bool result);
+        LayerTreeHostImpl*, LayerTreeHostImpl::FrameData*, bool result);
     virtual void drawLayersOnThread(LayerTreeHostImpl*) { }
+    virtual void swapBuffersOnThread(LayerTreeHostImpl* host_impl, bool result) { }
     virtual void animateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
     virtual void updateAnimationState(LayerTreeHostImpl*, bool hasUnfinishedAnimation) { }
     virtual void willAnimateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
@@ -125,7 +126,7 @@ protected:
 
     virtual void runTest(bool threaded);
 
-    Thread* implThread() { return proxy() ? proxy()->implThread() : 0; }
+    Thread* ImplThread() { return proxy() ? proxy()->ImplThread() : 0; }
     Proxy* proxy() const { return m_layerTreeHost ? m_layerTreeHost->proxy() : 0; }
 
     LayerTreeSettings m_settings;
@@ -163,21 +164,22 @@ class MockLayerTreeHostImpl : public LayerTreeHostImpl {
 public:
     static scoped_ptr<MockLayerTreeHostImpl> create(TestHooks*, const LayerTreeSettings&, LayerTreeHostImplClient*, Proxy*);
 
-    virtual void beginCommit() OVERRIDE;
-    virtual void commitComplete() OVERRIDE;
-    virtual bool prepareToDraw(FrameData&) OVERRIDE;
-    virtual void drawLayers(FrameData&) OVERRIDE;
-    virtual bool activatePendingTreeIfNeeded() OVERRIDE;
-    virtual bool initializeRenderer(scoped_ptr<OutputSurface> outputSurface) OVERRIDE;
-    virtual void setVisible(bool visible) OVERRIDE;
+    virtual void BeginCommit() OVERRIDE;
+    virtual void CommitComplete() OVERRIDE;
+    virtual bool PrepareToDraw(FrameData* frame) OVERRIDE;
+    virtual void DrawLayers(FrameData* frame, base::TimeTicks frameBeginTime) OVERRIDE;
+    virtual bool SwapBuffers() OVERRIDE;
+    virtual bool ActivatePendingTreeIfNeeded() OVERRIDE;
+    virtual bool InitializeRenderer(scoped_ptr<OutputSurface> outputSurface) OVERRIDE;
+    virtual void SetVisible(bool visible) OVERRIDE;
 
     // Make these public.
     typedef std::vector<LayerImpl*> LayerList;
 
 protected:
-    virtual void animateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime) OVERRIDE;
-    virtual void updateAnimationState() OVERRIDE;
-    virtual base::TimeDelta lowFrequencyAnimationInterval() const OVERRIDE;
+    virtual void AnimateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime) OVERRIDE;
+    virtual void UpdateAnimationState() OVERRIDE;
+    virtual base::TimeDelta LowFrequencyAnimationInterval() const OVERRIDE;
 
 private:
     MockLayerTreeHostImpl(TestHooks*, const LayerTreeSettings&, LayerTreeHostImplClient*, Proxy*);

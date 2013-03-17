@@ -66,6 +66,17 @@ def RunBisectionScript(config, working_directory, path_to_file, path_to_goma):
          '--working_directory', working_directory,
          '--output_buildbot_annotations']
 
+  if config['repeat_count']:
+    cmd.extend(['-r', config['repeat_count']])
+
+  if config['truncate_percent']:
+    cmd.extend(['-t', config['truncate_percent']])
+
+  if os.name == 'nt':
+    cmd.extend(['--build_preference', 'ninja'])
+  else:
+    cmd.extend(['--build_preference', 'make'])
+
   goma_file = ''
   if path_to_goma:
     path_to_goma = os.path.abspath(path_to_goma)
@@ -85,6 +96,8 @@ def RunBisectionScript(config, working_directory, path_to_file, path_to_goma):
       print 'Error: goma failed to start.'
       print
       return return_code
+
+  cmd = [str(c) for c in cmd]
 
   return_code = subprocess.call(cmd)
 

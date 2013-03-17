@@ -22,7 +22,6 @@ CONTENT_EXPORT extern const char kBrowserCrashTest[];
 CONTENT_EXPORT extern const char kBrowserSubprocessPath[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kChromeFrame[];
-CONTENT_EXPORT extern const char kCrashOnGpuHang[];
 CONTENT_EXPORT extern const char kDisable2dCanvasAntialiasing[];
 CONTENT_EXPORT extern const char kDisable3DAPIs[];
 CONTENT_EXPORT extern const char kDisableAccelerated2dCanvas[];
@@ -82,7 +81,7 @@ CONTENT_EXPORT extern const char kDisableSpeechInput[];
 extern const char kSpeechRecognitionWebserviceKey[];
 #if defined(OS_ANDROID)
 CONTENT_EXPORT extern const char kEnableWebAudio[];
-CONTENT_EXPORT extern const char kEnableWebRTC[];
+CONTENT_EXPORT extern const char kDisableWebRTC[];
 #else
 CONTENT_EXPORT extern const char kDisableWebAudio[];
 #endif
@@ -94,9 +93,8 @@ CONTENT_EXPORT extern const char kReduceSecurityForDomAutomationTests[];
 CONTENT_EXPORT extern const char kEnableAcceleratedPainting[];
 CONTENT_EXPORT extern const char kEnableAcceleratedFilters[];
 extern const char kEnableAccessibilityLogging[];
-CONTENT_EXPORT extern const char kEnableBrowserPluginCompositing[];
+CONTENT_EXPORT extern const char kDisableBrowserPluginCompositing[];
 CONTENT_EXPORT extern const char kEnableBrowserPluginForAllViewTypes[];
-CONTENT_EXPORT extern const char kEnableBrowserPluginPointerLock[];
 CONTENT_EXPORT extern const char kEnableCompositingForFixedPosition[];
 CONTENT_EXPORT extern const char kEnableHighDpiCompositingForFixedPosition[];
 CONTENT_EXPORT extern const char kDisableCompositingForFixedPosition[];
@@ -111,6 +109,7 @@ CONTENT_EXPORT extern const char kEnableFixedLayout[];
 CONTENT_EXPORT extern const char kDisableFullScreen[];
 CONTENT_EXPORT extern const char kEnableTextServicesFramework[];
 extern const char kEnableGestureTapHighlight[];
+extern const char kDisableGestureTapHighlight[];
 extern const char kEnableGpuBenchmarking[];
 extern const char kEnableGpuClientTracing[];
 extern const char kEnableMemoryBenchmarking[];
@@ -184,8 +183,6 @@ extern const char kRendererCmdPrefix[];
 CONTENT_EXPORT extern const char kRendererProcess[];
 extern const char kRendererProcessLimit[];
 extern const char kRendererStartupDialog[];
-// TODO(jam): this doesn't belong in content.
-CONTENT_EXPORT extern const char kServiceProcess[];
 extern const char kShowCompositedLayerBorders[];
 extern const char kShowCompositedLayerTree[];
 extern const char kShowFPSCounter[];
@@ -229,7 +226,6 @@ extern const char kEnableVisualWordMovement[];
 CONTENT_EXPORT extern const char kUseMobileUserAgent[];
 
 #if defined(OS_ANDROID)
-extern const char kMediaPlayerInRenderProcess[];
 extern const char kDisableMediaHistoryLogging[];
 extern const char kDisableGestureRequirementForMediaPlayback[];
 extern const char kNetworkCountryIso[];

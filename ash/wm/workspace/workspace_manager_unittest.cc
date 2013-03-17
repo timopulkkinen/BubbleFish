@@ -7,6 +7,8 @@
 #include "ash/ash_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/status_area_widget.h"
@@ -14,7 +16,6 @@
 #include "ash/test/shell_test_api.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/property_util.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/workspace.h"
@@ -29,6 +30,7 @@
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 
@@ -76,8 +78,12 @@ class WorkspaceManagerTest : public test::AshTestBase {
     return manager_->active_workspace_;
   }
 
-  ShelfLayoutManager* shelf_layout_manager() {
+  ShelfWidget* shelf_widget() {
     return Shell::GetPrimaryRootWindowController()->shelf();
+  }
+
+  ShelfLayoutManager* shelf_layout_manager() {
+    return Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
   }
 
   bool GetWindowOverlapsShelf() {
@@ -815,7 +821,7 @@ TEST_F(WorkspaceManagerTest, MinimizeResetsVisibility) {
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
   EXPECT_EQ(SHELF_VISIBLE,
             shelf_layout_manager()->visibility_state());
-  EXPECT_FALSE(Launcher::ForPrimaryDisplay()->paints_background());
+  EXPECT_FALSE(shelf_widget()->paints_background());
 }
 
 // Verifies transients are moved when maximizing.
@@ -960,9 +966,10 @@ TEST_F(WorkspaceManagerTest, MoveOnSwitch) {
 
   // Increase the size of the shelf. This would make |w1| fall completely out of
   // the display work area.
-  gfx::Size size(shelf->status_area_widget()->GetWindowBoundsInScreen().size());
+  gfx::Size size(shelf_widget()->status_area_widget()->
+      GetWindowBoundsInScreen().size());
   size.Enlarge(0, 30);
-  shelf->status_area_widget()->SetSize(size);
+  shelf_widget()->status_area_widget()->SetSize(size);
 
   // Switch to w1. The window should have moved.
   wm::ActivateWindow(w1.get());
@@ -1405,7 +1412,8 @@ TEST_F(WorkspaceManagerTest, NormToMaxToNormRepositionsRemaining) {
 
 // Test that animations are triggered.
 TEST_F(WorkspaceManagerTest, AnimatedNormToMaxToNormRepositionsRemaining) {
-  ui::LayerAnimator::set_disable_animations_for_test(false);
+  ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   scoped_ptr<aura::Window> window1(CreateTestWindowInShellWithId(0));
   window1->Hide();
   window1->SetBounds(gfx::Rect(16, 32, 640, 320));

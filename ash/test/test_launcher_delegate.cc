@@ -34,7 +34,10 @@ void TestLauncherDelegate::AddLauncherItem(
     aura::Window* window,
     LauncherItemStatus status) {
   ash::LauncherItem item;
-  item.type = ash::TYPE_TABBED;
+  if (window->type() == aura::client::WINDOW_TYPE_PANEL)
+    item.type = ash::TYPE_APP_PANEL;
+  else
+    item.type = ash::TYPE_TABBED;
   DCHECK(window_to_id_.find(window) == window_to_id_.end());
   window_to_id_[window] = model_->next_id();
   item.status = status;
@@ -87,7 +90,8 @@ ui::MenuModel* TestLauncherDelegate::CreateContextMenu(
 }
 
 ash::LauncherMenuModel* TestLauncherDelegate::CreateApplicationMenu(
-    const ash::LauncherItem& item) {
+    const ash::LauncherItem& item,
+    int event_flags) {
   return NULL;
 }
 

@@ -16,6 +16,9 @@ const char kDbusStub[] = "dbus-stub";
 // Disables fake ethernet network in the stub implementations.
 const char kDisableStubEthernet[] = "disable-stub-ethernet";
 
+// Enable experimental Bluetooth features.
+const char kEnableExperimentalBluetooth[] = "enable-experimental-bluetooth";
+
 // Enables experiments in locally managed user creation ui.
 const char kEnableLocallyManagedUserUIExperiments[] =
     "enable-locally-managed-users-ui-experiments";
@@ -24,9 +27,10 @@ const char kEnableLocallyManagedUserUIExperiments[] =
 const char kEnableNewNetworkChangeNotifier[] =
     "enable-new-network-change-notifier";
 
-// Enables the new NetworkConfigurationHandler class.
-const char kEnableNewNetworkConfigurationHandlers[] =
-    "enable-new-network-configuration-handlers";
+// Enables usage of the new ManagedNetworkConfigurationHandler and
+// NetworkConfigurationHandler singletons.
+const char kUseNewNetworkConfigurationHandlers[] =
+    "use-new-network-configuration-handlers";
 
 // Enables screensaver extensions.
 const char kEnableScreensaverExtensions[] = "enable-screensaver-extensions";

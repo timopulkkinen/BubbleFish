@@ -13,6 +13,7 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_tooltip_manager.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
@@ -174,12 +175,13 @@ TEST_F(LauncherViewIconObserverTest, MAYBE_AddRemoveWithMultipleDisplays) {
 }
 
 TEST_F(LauncherViewIconObserverTest, BoundsChanged) {
+  ShelfWidget* shelf = Shell::GetPrimaryRootWindowController()->shelf();
   Launcher* launcher = Launcher::ForPrimaryDisplay();
-  gfx::Size launcher_size =
-      launcher->widget()->GetWindowBoundsInScreen().size();
-  int total_width = launcher_size.width() / 2;
-  ASSERT_GT(total_width, 0);
-  launcher->SetStatusSize(gfx::Size(total_width, launcher_size.height()));
+  gfx::Size shelf_size =
+      shelf->GetWindowBoundsInScreen().size();
+  shelf_size.set_width(shelf_size.width() / 2);
+  ASSERT_GT(shelf_size.width(), 0);
+  launcher->SetLauncherViewBounds(gfx::Rect(shelf_size));
   // No animation happens for LauncherView bounds change.
   EXPECT_TRUE(observer()->change_notified());
   observer()->Reset();
@@ -600,6 +602,17 @@ TEST_F(LauncherViewTest, ModelChangesWhileDragging) {
   dragged_button = SimulateDrag(internal::LauncherButtonHost::MOUSE, 0, 2);
   LauncherID new_id = AddAppShortcut();
   id_map.insert(id_map.begin() + kExpectedAppIndex + 4,
+                std::make_pair(new_id, GetButtonByID(new_id)));
+  ASSERT_NO_FATAL_FAILURE(CheckModelIDs(id_map));
+  button_host->PointerReleasedOnButton(dragged_button,
+                                       internal::LauncherButtonHost::MOUSE,
+                                       false);
+
+  // Adding a launcher item at the end (i.e. a panel)  canels drag and respects
+  // the order.
+  dragged_button = SimulateDrag(internal::LauncherButtonHost::MOUSE, 0, 2);
+  new_id = AddPanel();
+  id_map.insert(id_map.begin() + kExpectedAppIndex + 6,
                 std::make_pair(new_id, GetButtonByID(new_id)));
   ASSERT_NO_FATAL_FAILURE(CheckModelIDs(id_map));
   button_host->PointerReleasedOnButton(dragged_button,

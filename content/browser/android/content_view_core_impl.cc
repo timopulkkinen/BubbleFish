@@ -56,10 +56,6 @@ using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
-using base::android::GetClass;
-using base::android::HasField;
-using base::android::MethodID;
-using base::android::JavaByteArrayToByteVector;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 using WebKit::WebGestureEvent;
@@ -77,7 +73,6 @@ enum PopupItemType {
 namespace content {
 
 namespace {
-jfieldID g_native_content_view;
 
 const void* kContentViewUserDataKey = &kContentViewUserDataKey;
 
@@ -91,6 +86,16 @@ int GetRenderProcessIdFromRenderViewHost(RenderViewHost* host) {
     return 0;
 }
 
+ScopedJavaLocalRef<jobject> CreateJavaRect(
+    JNIEnv* env,
+    const gfx::Rect& rect) {
+  return ScopedJavaLocalRef<jobject>(
+      Java_ContentViewCore_createRect(env,
+                                      static_cast<int>(rect.x()),
+                                      static_cast<int>(rect.y()),
+                                      static_cast<int>(rect.right()),
+                                      static_cast<int>(rect.bottom())));
+};
 }  // namespace
 
 // Enables a callback when the underlying WebContents is destroyed, to enable
@@ -119,22 +124,6 @@ class ContentViewCoreImpl::ContentViewUserData
   DISALLOW_IMPLICIT_CONSTRUCTORS(ContentViewUserData);
 };
 
-struct ContentViewCoreImpl::JavaObject {
-  ScopedJavaGlobalRef<jclass> rect_clazz;
-  jmethodID rect_constructor;
-  ScopedJavaLocalRef<jobject> CreateJavaRect(
-      JNIEnv* env,
-      const gfx::Rect& rect) {
-    return ScopedJavaLocalRef<jobject>(
-        env, env->NewObject(rect_clazz.obj(),
-                            rect_constructor,
-                            static_cast<int>(rect.x()),
-                            static_cast<int>(rect.y()),
-                            static_cast<int>(rect.right()),
-                            static_cast<int>(rect.bottom())));
-  }
-};
-
 // static
 ContentViewCoreImpl* ContentViewCoreImpl::FromWebContents(
     content::WebContents* web_contents) {
@@ -150,10 +139,11 @@ ContentViewCore* ContentViewCore::FromWebContents(
   return ContentViewCoreImpl::FromWebContents(web_contents);
 }
 
+// static
 ContentViewCore* ContentViewCore::GetNativeContentViewCore(JNIEnv* env,
                                                            jobject obj) {
   return reinterpret_cast<ContentViewCore*>(
-      env->GetIntField(obj, g_native_content_view));
+      Java_ContentViewCore_getNativeContentViewCore(env, obj));
 }
 
 ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
@@ -163,7 +153,7 @@ ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
                                          ui::WindowAndroid* window_android)
     : java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
-      root_layer_(cc::Layer::create()),
+      root_layer_(cc::Layer::Create()),
       tab_crashed_(false),
       input_events_delivered_at_vsync_(input_events_delivered_at_vsync),
       renderer_frame_pending_(false),
@@ -179,8 +169,6 @@ ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
   tab_crashed_ = !(web_contents->GetRenderWidgetHostView());
 
   // TODO(leandrogracia): make use of the hardware_accelerated argument.
-
-  InitJNI(env, obj);
 
   const gfx::Display& display =
       gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
@@ -210,9 +198,6 @@ ContentViewCoreImpl::~ContentViewCoreImpl() {
   // Make sure nobody calls back into this object while we are tearing things
   // down.
   notification_registrar_.RemoveAll();
-
-  delete java_object_;
-  java_object_ = NULL;
 }
 
 void ContentViewCoreImpl::OnJavaContentViewCoreDestroyed(JNIEnv* env,
@@ -294,13 +279,6 @@ void ContentViewCoreImpl::Observe(int type,
   }
 }
 
-void ContentViewCoreImpl::InitJNI(JNIEnv* env, jobject obj) {
-  java_object_ = new JavaObject;
-  java_object_->rect_clazz.Reset(GetClass(env, "android/graphics/Rect"));
-  java_object_->rect_constructor = MethodID::Get<MethodID::TYPE_INSTANCE>(
-      env, java_object_->rect_clazz.obj(), "<init>", "(IIII)V");
-}
-
 RenderWidgetHostViewAndroid*
     ContentViewCoreImpl::GetRenderWidgetHostViewAndroid() {
   RenderWidgetHostView* rwhv = NULL;
@@ -378,9 +356,6 @@ void ContentViewCoreImpl::OnTabCrashed() {
   if (tab_crashed_)
     return;
   tab_crashed_ = true;
-  // This can happen as WebContents is destroyed after java_object_ is set to 0
-  if (!java_object_)
-    return;
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -392,36 +367,36 @@ void ContentViewCoreImpl::OnTabCrashed() {
 // Note that viewport_width/height is a best effort based.
 // ContentViewCore has the actual information about the physical viewport size.
 void ContentViewCoreImpl::UpdateFrameInfo(
-    float scroll_offset_x, float scroll_offset_y,
+    const gfx::Vector2dF& scroll_offset,
     float page_scale_factor,
-    float min_page_scale_factor, float max_page_scale_factor,
-    float content_width, float content_height,
-    float viewport_width, float viewport_height) {
+    const gfx::Vector2dF& page_scale_factor_limits,
+    const gfx::SizeF& content_size,
+    const gfx::SizeF& viewport_size,
+    const gfx::Vector2dF& controls_offset,
+    const gfx::Vector2dF& content_offset) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
+
   Java_ContentViewCore_updateFrameInfo(
       env, obj.obj(),
-      scroll_offset_x,
-      scroll_offset_y,
+      scroll_offset.x(),
+      scroll_offset.y(),
       page_scale_factor,
-      min_page_scale_factor, max_page_scale_factor,
-      content_width,
-      content_height,
-      viewport_width,
-      viewport_height);
-}
+      page_scale_factor_limits.x(),
+      page_scale_factor_limits.y(),
+      content_size.width(),
+      content_size.height(),
+      viewport_size.width(),
+      viewport_size.height(),
+      controls_offset.y(),
+      content_offset.y());
 
-void ContentViewCoreImpl::UpdateOffsetsForFullscreen(float controls_offset_y,
-                                                     float content_offset_y) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
-    return;
-  Java_ContentViewCore_updateOffsetsForFullscreen(env, obj.obj(),
-                                                  controls_offset_y,
-                                                  content_offset_y);
+  for (size_t i = 0; i < update_frame_info_callbacks_.size(); ++i) {
+    update_frame_info_callbacks_[i].Run(
+        content_size, scroll_offset, page_scale_factor);
+  }
 }
 
 void ContentViewCoreImpl::SetTitle(const string16& title) {
@@ -532,9 +507,9 @@ void ContentViewCoreImpl::OnSelectionBoundsChanged(
   if (obj.is_null())
     return;
   ScopedJavaLocalRef<jobject> anchor_rect_dip(
-      java_object_->CreateJavaRect(env, params.anchor_rect));
+      CreateJavaRect(env, params.anchor_rect));
   ScopedJavaLocalRef<jobject> focus_rect_dip(
-      java_object_->CreateJavaRect(env, params.focus_rect));
+      CreateJavaRect(env, params.focus_rect));
   Java_ContentViewCore_onSelectionBoundsChanged(env, obj.obj(),
                                                 anchor_rect_dip.obj(),
                                                 params.anchor_dir,
@@ -563,6 +538,22 @@ unsigned int ContentViewCoreImpl::GetScaledContentTexture(
   return view->GetScaledContentTexture(scale, out_size);
 }
 
+void ContentViewCoreImpl::AddFrameInfoCallback(
+    const UpdateFrameInfoCallback& callback) {
+  update_frame_info_callbacks_.push_back(callback);
+}
+
+void ContentViewCoreImpl::RemoveFrameInfoCallback(
+    const UpdateFrameInfoCallback& callback) {
+  for (size_t i = 0; i < update_frame_info_callbacks_.size(); ++i) {
+    if (update_frame_info_callbacks_[i].Equals(callback)) {
+      update_frame_info_callbacks_.erase(
+          update_frame_info_callbacks_.begin() + i);
+      return;
+    }
+  }
+}
+
 void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
@@ -584,14 +575,7 @@ void ContentViewCoreImpl::ShowDisambiguationPopup(
   if (obj.is_null())
     return;
 
-  ScopedJavaLocalRef<jobject> rect_object(env,
-      env->NewObject(java_object_->rect_clazz.obj(),
-                     java_object_->rect_constructor,
-                     target_rect.x(),
-                     target_rect.y(),
-                     target_rect.right(),
-                     target_rect.bottom()));
-  DCHECK(!rect_object.is_null());
+  ScopedJavaLocalRef<jobject> rect_object(CreateJavaRect(env, target_rect));
 
   ScopedJavaLocalRef<jobject> java_bitmap =
       gfx::ConvertToJavaBitmap(&zoomed_bitmap);
@@ -628,11 +612,11 @@ gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
 }
 
 void ContentViewCoreImpl::AttachLayer(scoped_refptr<cc::Layer> layer) {
-  root_layer_->addChild(layer);
+  root_layer_->AddChild(layer);
 }
 
 void ContentViewCoreImpl::RemoveLayer(scoped_refptr<cc::Layer> layer) {
-  layer->removeFromParent();
+  layer->RemoveFromParent();
 }
 
 void ContentViewCoreImpl::DidProduceRendererFrame() {
@@ -703,7 +687,7 @@ void ContentViewCoreImpl::LoadUrl(
 
   if (post_data) {
     std::vector<uint8> http_body_vector;
-    JavaByteArrayToByteVector(env, post_data, &http_body_vector);
+    base::android::JavaByteArrayToByteVector(env, post_data, &http_body_vector);
     params.browser_initiated_post_data =
         base::RefCountedBytes::TakeVector(&http_body_vector);
   }
@@ -1410,18 +1394,7 @@ jint Init(JNIEnv* env, jobject obj,
 }
 
 bool RegisterContentViewCore(JNIEnv* env) {
-  if (!base::android::HasClass(env, kContentViewCoreClassPath)) {
-    DLOG(ERROR) << "Unable to find class ContentViewCore!";
-    return false;
-  }
-  ScopedJavaLocalRef<jclass> clazz = GetClass(env, kContentViewCoreClassPath);
-  if (!HasField(env, clazz, "mNativeContentViewCore", "I")) {
-    DLOG(ERROR) << "Unable to find ContentView.mNativeContentViewCore!";
-    return false;
-  }
-  g_native_content_view = GetFieldID(env, clazz, "mNativeContentViewCore", "I");
-
-  return RegisterNativesImpl(env) >= 0;
+  return RegisterNativesImpl(env);
 }
 
 }  // namespace content

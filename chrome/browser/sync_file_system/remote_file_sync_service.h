@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/sync_file_system/conflict_resolution_policy.h"
 #include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/syncable/sync_callbacks.h"
 
@@ -99,12 +100,21 @@ class RemoteFileSyncService {
       const GURL& origin,
       const SyncStatusCallback& callback) = 0;
 
+  // Deletes the |origin| directory from the remote backing service.
+  virtual void DeleteOriginDirectory(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
+
   // Called by the sync engine to process one remote change.
   // After a change is processed |callback| will be called (to return
   // the control to the sync engine).
-  virtual void ProcessRemoteChange(
-      RemoteChangeProcessor* processor,
-      const SyncFileCallback& callback) = 0;
+  // It is invalid to call this before calling SetRemoteChangeProcessor().
+  virtual void ProcessRemoteChange(const SyncFileCallback& callback) = 0;
+
+  // Sets a remote change processor.  This must be called before any
+  // ProcessRemoteChange().
+  virtual void SetRemoteChangeProcessor(
+      RemoteChangeProcessor* processor) = 0;
 
   // Returns a LocalChangeProcessor that applies a local change to the remote
   // storage backed by this service.
@@ -132,6 +142,15 @@ class RemoteFileSyncService {
   // (for example if Chrome is offline the service state will become
   // REMOTE_SERVICE_TEMPORARY_UNAVAILABLE).
   virtual void SetSyncEnabled(bool enabled) = 0;
+
+  // Sets the conflict resolution policy. Returns SYNC_STATUS_OK on success,
+  // or returns an error code if the given policy is not supported or had
+  // an error.
+  virtual SyncStatusCode SetConflictResolutionPolicy(
+      ConflictResolutionPolicy policy) = 0;
+
+  // Gets the conflict resolution policy.
+  virtual ConflictResolutionPolicy GetConflictResolutionPolicy() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteFileSyncService);

@@ -34,18 +34,17 @@ namespace remoting {
 
 class AudioEncoder;
 class AudioScheduler;
-struct ClientSessionTraits;
 class DesktopEnvironment;
 class DesktopEnvironmentFactory;
 class EventExecutor;
+class SessionController;
 class VideoEncoder;
 class VideoScheduler;
 
 // A ClientSession keeps a reference to a connection to a client, and maintains
 // per-client state.
 class ClientSession
-    : public base::RefCountedThreadSafe<ClientSession, ClientSessionTraits>,
-      public protocol::HostStub,
+    : public protocol::HostStub,
       public protocol::ConnectionToClient::EventHandler,
       public base::NonThreadSafe {
  public:
@@ -78,18 +77,11 @@ class ClientSession
         const std::string& channel_name,
         const protocol::TransportRoute& route) = 0;
 
-    // Called when the initial client resolution is received, and when it
-    // changes.
-    virtual void OnClientResolutionChanged(ClientSession* client,
-                                           const SkISize& size,
-                                           const SkIPoint& dpi) = 0;
-
    protected:
     virtual ~EventHandler() {}
   };
 
-  // |event_handler| must outlive |this|. |desktop_environment_factory| is only
-  // used by the constructor to create an instance of DesktopEnvironment.
+  // |event_handler| and |desktop_environment_factory| must outlive |this|.
   ClientSession(
       EventHandler* event_handler,
       scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
@@ -101,6 +93,7 @@ class ClientSession
       scoped_ptr<protocol::ConnectionToClient> connection,
       DesktopEnvironmentFactory* desktop_environment_factory,
       const base::TimeDelta& max_duration);
+  virtual ~ClientSession();
 
   // protocol::HostStub interface.
   virtual void NotifyClientResolution(
@@ -129,10 +122,6 @@ class ClientSession
   // method returns.
   void Disconnect();
 
-  // Stops the ClientSession. The caller can safely release its reference to
-  // the client session once Stop() returns.
-  void Stop();
-
   protocol::ConnectionToClient* connection() const {
     return connection_.get();
   }
@@ -151,10 +140,6 @@ class ClientSession
   void SetDisableInputs(bool disable_inputs);
 
  private:
-  friend class base::DeleteHelper<ClientSession>;
-  friend struct ClientSessionTraits;
-  virtual ~ClientSession();
-
   // Creates a proxy for sending clipboard events to the client.
   scoped_ptr<protocol::ClipboardStub> CreateClipboardProxy();
 
@@ -176,8 +161,8 @@ class ClientSession
 
   std::string client_jid_;
 
-  // The desktop environment used by this session.
-  scoped_ptr<DesktopEnvironment> desktop_environment_;
+  // Used to create a DesktopEnvironment instance for this session.
+  DesktopEnvironmentFactory* desktop_environment_factory_;
 
   // Filter used as the final element in the input pipeline.
   protocol::InputFilter host_input_filter_;
@@ -230,12 +215,9 @@ class ClientSession
 
   scoped_ptr<EventExecutor> event_executor_;
 
-  DISALLOW_COPY_AND_ASSIGN(ClientSession);
-};
+  scoped_ptr<SessionController> session_controller_;
 
-// Destroys |ClienSession| instances on the network thread.
-struct ClientSessionTraits {
-  static void Destruct(const ClientSession* client);
+  DISALLOW_COPY_AND_ASSIGN(ClientSession);
 };
 
 }  // namespace remoting

@@ -34,7 +34,7 @@ cr.define('login', function() {
 
     /**
      * Screen controls.
-     * @type {array} Array of Buttons.
+     * @type {!Array} Array of Buttons.
      */
     get buttons() {
       var buttons = [];
@@ -47,6 +47,14 @@ cr.define('login', function() {
       finishButton.hidden = true;
       buttons.push(finishButton);
 
+      var retryButton = this.ownerDocument.createElement('button');
+      retryButton.id = 'managed-user-creation-flow-retry-button';
+
+      retryButton.textContent = loadTimeData.
+          getString('managedUserCreationFlowRetryButtonTitle');
+      retryButton.hidden = true;
+      buttons.push(retryButton);
+
       var cancelButton = this.ownerDocument.createElement('button');
       cancelButton.id = 'managed-user-creation-flow-cancel-button';
 
@@ -58,6 +66,10 @@ cr.define('login', function() {
       var creationFlowScreen = this;
       finishButton.addEventListener('click', function(e) {
         creationFlowScreen.finishFlow_();
+        e.stopPropagation();
+      });
+      retryButton.addEventListener('click', function(e) {
+        creationFlowScreen.retryFlow_();
         e.stopPropagation();
       });
       cancelButton.addEventListener('click', function(e) {
@@ -78,16 +90,22 @@ cr.define('login', function() {
 
     /**
      * Show error message.
-     * @param {String} errorText Text to be displayed.
-     * @param {bool} recoverable Indicates if error was transiend and process
+     * @param {string} errorText Text to be displayed.
+     * @param {boolean} recoverable Indicates if error was transiend and process
      *     can be retried.
      */
     showErrorMessage: function(errorText, recoverable) {
       $('managed-user-creation-flow-error-value').innerHTML = errorText;
       this.setVisiblePage_('error');
-      this.setVisibleButtons_(['cancel']);
+      this.setVisibleButtons_(recoverable ? ['retry', 'cancel'] : ['cancel']);
     },
 
+    /**
+     * Enables one particular subpage and hides the rest.
+     * @param {string} visiblePage - name of subpage (one of 'progress',
+     * 'error', 'success')
+     * @private
+     */
     setVisiblePage_: function(visiblePage) {
       var screenNames = ['progress', 'error', 'success'];
       for (i in screenNames) {
@@ -97,8 +115,14 @@ cr.define('login', function() {
       }
     },
 
+    /**
+     * Enables specific control buttons.
+     * @param {List of strings} buttonsList - list of buttons to display (values
+     * can be 'retry', 'finish', 'cancel')
+     * @private
+     */
     setVisibleButtons_: function(buttonsList) {
-      var buttonNames = ['finish', 'cancel'];
+      var buttonNames = ['retry', 'finish', 'cancel'];
       for (i in buttonNames) {
         var buttonName = buttonNames[i];
         var button = $('managed-user-creation-flow-' + buttonName + '-button');
@@ -109,6 +133,11 @@ cr.define('login', function() {
 
     finishFlow_: function() {
       chrome.send('finishLocalManagedUserCreation');
+    },
+
+    retryFlow_: function() {
+      this.setVisiblePage_('progress');
+      chrome.send('retryLocalManagedUserCreation');
     },
 
     abortFlow_: function() {

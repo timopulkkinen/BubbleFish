@@ -10,8 +10,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_country.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/browser/autofill_country.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -35,6 +35,27 @@ void SuggestionsMenuModel::AddKeyedItem(
     const std::string& key, const string16& item) {
   items_.push_back(std::make_pair(key, item));
   AddCheckItem(items_.size() - 1, item);
+}
+
+void SuggestionsMenuModel::AddKeyedItemWithIcon(
+    const std::string& key, const string16& item, const gfx::Image& icon) {
+  AddKeyedItem(key, item);
+  SetIcon(items_.size() - 1, icon);
+}
+
+void SuggestionsMenuModel::AddKeyedItemWithSublabel(
+    const std::string& key,
+    const string16& display_label, const string16& display_sublabel) {
+  AddKeyedItem(key, display_label);
+  SetSublabel(items_.size() - 1, display_sublabel);
+}
+
+void SuggestionsMenuModel::AddKeyedItemWithSublabelAndIcon(
+    const std::string& key,
+    const string16& display_label, const string16& display_sublabel,
+    const gfx::Image& icon) {
+  AddKeyedItemWithIcon(key, display_label, icon);
+  SetSublabel(items_.size() - 1, display_sublabel);
 }
 
 void SuggestionsMenuModel::Reset() {
@@ -70,7 +91,7 @@ bool SuggestionsMenuModel::GetAcceleratorForCommandId(
   return false;
 }
 
-void SuggestionsMenuModel::ExecuteCommand(int command_id) {
+void SuggestionsMenuModel::ExecuteCommand(int command_id, int event_flags) {
   checked_item_ = command_id;
   delegate_->SuggestionItemSelected(*this);
 }
@@ -125,7 +146,7 @@ bool AccountChooserModel::GetAcceleratorForCommandId(
   return false;
 }
 
-void AccountChooserModel::ExecuteCommand(int command_id) {
+void AccountChooserModel::ExecuteCommand(int command_id, int event_flags) {
   if (checked_item_ == command_id)
     return;
 
@@ -140,7 +161,7 @@ void AccountChooserModel::SetHadWalletError() {
 }
 
 bool AccountChooserModel::WalletIsSelected() const {
-  return checked_item_ == 0;
+  return checked_item_ == kWalletItemId;
 }
 
 void AccountChooserModel::PrefChanged(const std::string& pref) {
@@ -167,11 +188,13 @@ int MonthComboboxModel::GetItemCount() const {
   return 13;
 }
 
-string16 MonthComboboxModel::GetItemAt(int index) {
-  if (index == 0)
-    return string16();
-
+// static
+string16 MonthComboboxModel::FormatMonth(int index) {
   return ASCIIToUTF16(StringPrintf("%2d", index));
+}
+
+string16 MonthComboboxModel::GetItemAt(int index) {
+  return index == 0 ? string16() : FormatMonth(index);
 }
 
 // YearComboboxModel -----------------------------------------------------------

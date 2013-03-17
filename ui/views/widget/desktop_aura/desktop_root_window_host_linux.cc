@@ -11,7 +11,6 @@
 #include "base/message_pump_aurax11.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/focus_manager.h"
@@ -20,6 +19,7 @@
 #include "ui/base/events/event_utils.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/insets.h"
 #include "ui/linux_ui/linux_ui.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/corewm/compound_event_filter.h"
@@ -28,6 +28,7 @@
 #include "ui/views/corewm/focus_controller.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/widget/desktop_aura/desktop_activation_client.h"
+#include "ui/views/widget/desktop_aura/desktop_capture_client.h"
 #include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
 #include "ui/views/widget/desktop_aura/desktop_focus_rules.h"
 #include "ui/views/widget/desktop_aura/desktop_layout_manager.h"
@@ -220,7 +221,7 @@ aura::RootWindow* DesktopRootWindowHostLinux::InitRootWindow(
 
   native_widget_delegate_->OnNativeWidgetCreated();
 
-  capture_client_.reset(new aura::client::DefaultCaptureClient(root_window_));
+  capture_client_.reset(new views::DesktopCaptureClient(root_window_));
   aura::client::SetCaptureClient(root_window_, capture_client_.get());
 
   // Ensure that the X11DesktopHandler exists so that it dispatches activation
@@ -615,23 +616,6 @@ void DesktopRootWindowHostLinux::SetWindowIcons(
   NOTIMPLEMENTED();
 }
 
-void DesktopRootWindowHostLinux::SetAccessibleName(const string16& name) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
-void DesktopRootWindowHostLinux::SetAccessibleRole(
-    ui::AccessibilityTypes::Role role) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
-void DesktopRootWindowHostLinux::SetAccessibleState(
-    ui::AccessibilityTypes::State state) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
 void DesktopRootWindowHostLinux::InitModalType(ui::ModalType modal_type) {
   // TODO(erg):
   NOTIMPLEMENTED();
@@ -739,6 +723,13 @@ void DesktopRootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
     root_window_host_delegate_->OnHostResized(bounds.size());
   else
     root_window_host_delegate_->OnHostPaint();
+}
+
+gfx::Insets DesktopRootWindowHostLinux::GetInsets() const {
+  return gfx::Insets();
+}
+
+void DesktopRootWindowHostLinux::SetInsets(const gfx::Insets& insets) {
 }
 
 gfx::Point DesktopRootWindowHostLinux::GetLocationOnNativeScreen() const {
@@ -1116,7 +1107,16 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
         // Now that we have different window properties, we may need to
         // relayout the window. (The windows code doesn't need this because
         // their window change is synchronous.)
-        native_widget_delegate_->AsWidget()->GetRootView()->Layout();
+        //
+        // TODO(erg): While this does work, there's a quick flash showing the
+        // tabstrip/toolbar/etc. when going into fullscreen mode before hiding
+        // those parts of the UI because we receive the sizing event from the
+        // window manager before we receive the event that changes the
+        // fullscreen state. Unsure what to do about that.
+        Widget* widget = native_widget_delegate_->AsWidget();
+        widget->client_view()->InvalidateLayout();
+        widget->non_client_view()->InvalidateLayout();
+        widget->GetRootView()->Layout();
       }
     }
   }

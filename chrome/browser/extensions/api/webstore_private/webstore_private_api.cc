@@ -377,7 +377,6 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
           profile(), id_, parsed_manifest_.Pass()));
   approval->use_app_installed_bubble = use_app_installed_bubble_;
   approval->enable_launcher = enable_launcher_;
-  approval->record_oauth2_grant = install_prompt_->record_oauth2_grant();
   approval->installing_icon = gfx::ImageSkia::CreateFrom1xBitmap(icon_);
   g_pending_approvals.Get().PushApproval(approval.Pass());
 
@@ -418,8 +417,7 @@ void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
   Release();
 }
 
-CompleteInstallFunction::CompleteInstallFunction()
-    : is_app_(false) {}
+CompleteInstallFunction::CompleteInstallFunction() {}
 
 CompleteInstallFunction::~CompleteInstallFunction() {}
 
@@ -437,8 +435,6 @@ bool CompleteInstallFunction::RunImpl() {
         kNoPreviousBeginInstallWithManifestError, id);
     return false;
   }
-  is_app_ = approval_->parsed_manifest->Get(
-      extension_manifest_keys::kPlatformAppBackground, NULL);
 
   // Balanced in OnExtensionInstallSuccess() or OnExtensionInstallFailure().
   AddRef();
@@ -478,17 +474,19 @@ void CompleteInstallFunction::OnGetAppLauncherEnabled(
     bool app_launcher_enabled) {
   if (app_launcher_enabled) {
     std::string name;
-    if (!approval_->parsed_manifest->GetString(extension_manifest_keys::kName,
+    if (!approval_->manifest->value()->GetString(extension_manifest_keys::kName,
                                                &name)) {
       NOTREACHED();
     }
     // Show the app list so it receives install progress notifications.
-    AppListService::Get()->ShowAppList(profile());
-    // Tell the app list about the install that we just started.
+    if (approval_->manifest->is_app())
+      AppListService::Get()->ShowAppList(profile());
+
     extensions::InstallTracker* tracker =
         extensions::InstallTrackerFactory::GetForProfile(profile());
     tracker->OnBeginExtensionInstall(
-        id, name, approval_->installing_icon, is_app_);
+        id, name, approval_->installing_icon, approval_->manifest->is_app(),
+        approval_->manifest->is_platform_app());
   }
 
   // The extension will install through the normal extension install flow, but

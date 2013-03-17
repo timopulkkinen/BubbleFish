@@ -8,18 +8,23 @@
 #include <list>
 #include <map>
 
-#include "base/timer.h"
+#include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
-#include "ui/message_center/notification_list.h"
-#include "ui/message_center/views/message_bubble_base.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace views {
 class Widget;
 }
 
+namespace ash {
+FORWARD_DECLARE_TEST(WebNotificationTrayTest, ManyPopupNotifications);
+}
+
 namespace message_center {
 
+class MessageCenter;
 class ToastContentsView;
 
 // Container for popup toasts. Because each toast is a frameless window rather
@@ -33,7 +38,7 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   // |context| specifies the context to create toast windows. It can be NULL
   // for non-aura environment. See comments in ui/views/widget/widget.h.
   MessagePopupCollection(gfx::NativeView context,
-                         NotificationList::Delegate* list_delegate);
+                         MessageCenter* message_center);
   virtual ~MessagePopupCollection();
 
   void UpdatePopups();
@@ -42,15 +47,17 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   void OnMouseExited();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ash::WebNotificationTrayTest,
+                           ManyPopupNotifications);
   typedef std::map<std::string, ToastContentsView*> ToastContainer;
 
   void CloseAllWidgets();
 
-  // views::WidgetObserver overrides:
+  // Overridden from views::WidgetObserver:
   virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   gfx::NativeView context_;
-  NotificationList::Delegate* list_delegate_;
+  MessageCenter* message_center_;
   ToastContainer toasts_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePopupCollection);

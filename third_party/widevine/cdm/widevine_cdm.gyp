@@ -65,15 +65,9 @@
               'type': 'loadable_module',
               # Allow the plugin wrapper to find the CDM in the same directory.
               'ldflags': ['-Wl,-rpath=\$$ORIGIN'],
-              'conditions': [
-                # We have binaries for Linux ia32 & x64 and Chrome OS ARM. The
-                # build fails if we add the dependency for Chrome OS ia32 & x64.
-                [ 'chromeos == 0 or target_arch == "arm"', {
-                  'libraries': [
-                    # Copied by widevine_cdm_binaries.
-                    '<(PRODUCT_DIR)/libwidevinecdm.so',
-                  ],
-                }],
+              'libraries': [
+                # Copied by widevine_cdm_binaries.
+                '<(PRODUCT_DIR)/libwidevinecdm.so',
               ],
             }],
             [ 'OS == "win" and 0', {
@@ -83,6 +77,10 @@
               'type': 'loadable_module',
               'mac_bundle': 1,
               'product_extension': 'plugin',
+              'libraries': [
+                # Copied by widevine_cdm_binaries.
+                '<(PRODUCT_DIR)/libwidevinecdm.dylib',
+              ],
               'xcode_settings': {
                 'OTHER_LDFLAGS': [
                   # Not to strip important symbols by -Wl,-dead_strip.
@@ -90,6 +88,15 @@
                   '-Wl,-exported_symbol,_PPP_InitializeModule',
                   '-Wl,-exported_symbol,_PPP_ShutdownModule'
                 ]},
+              'copies': [
+                {
+                  'destination':
+                      '<(PRODUCT_DIR)/widevinecdmadapter.plugin/Contents/MacOS/',
+                  'files': [
+                    '<(PRODUCT_DIR)/libwidevinecdm.dylib',
+                  ]
+                }
+              ]
             }],
           ],
         }],

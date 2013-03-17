@@ -10,13 +10,16 @@
 #include "ash/launcher/launcher.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/property_util.h"
-#include "ash/wm/shelf_layout_manager.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/workspace/colored_window_controller.h"
 #include "ash/wm/workspace/workspace.h"
 #include "ash/wm/workspace/workspace_cycler_configuration.h"
 #include "base/values.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event_utils.h"
 #include "ui/compositor/layer_animator.h"
@@ -388,6 +391,11 @@ void WorkspaceCyclerAnimator::Init(const std::vector<Workspace*>& workspaces,
 }
 
 void WorkspaceCyclerAnimator::AnimateStartingCycler() {
+  // Set kCyclingThroughWorkspaces so that the window frame is painted with the
+  // correct style.
+  workspaces_[0]->window()->GetRootWindow()->SetProperty(
+      ash::internal::kCyclingThroughWorkspacesKey, true);
+
   // Ensure that the workspaces are stacked with respect to their order
   // in |workspaces_|.
   aura::Window* parent = workspaces_[0]->window()->parent();
@@ -592,6 +600,10 @@ void WorkspaceCyclerAnimator::AnimateToUpdatedState(int animation_duration) {
 }
 
 void WorkspaceCyclerAnimator::CyclerStopped(size_t visible_workspace_index) {
+  aura::Window* root_window = workspaces_[0]->window()->GetRootWindow();
+  root_window->SetProperty(ash::internal::kCyclingThroughWorkspacesKey,
+                           false);
+
   for(size_t i = 0; i < workspaces_.size(); ++i) {
     aura::Window* window = workspaces_[i]->window();
     ui::Layer* layer = window->layer();
@@ -660,16 +672,15 @@ void WorkspaceCyclerAnimator::CreateLauncherBackground() {
   if (screen_bounds_ == maximized_bounds_)
     return;
 
-  aura::Window* random_workspace_window = workspaces_[0]->window();
-  ash::Launcher* launcher = ash::Launcher::ForWindow(random_workspace_window);
-  aura::Window* launcher_window = launcher->widget()->GetNativeWindow();
-
   // TODO(pkotwicz): Figure out what to do when the launcher visible state is
   // SHELF_AUTO_HIDE.
   ShelfLayoutManager* shelf_layout_manager =
-      ShelfLayoutManager::ForLauncher(launcher_window);
+      ShelfLayoutManager::ForLauncher(workspaces_[0]->window());
   if (!shelf_layout_manager->IsVisible())
     return;
+
+  aura::Window* launcher_window = shelf_layout_manager->shelf_widget()->
+      GetNativeWindow();
 
   gfx::Rect shelf_bounds = shelf_layout_manager->GetIdealBounds();
 

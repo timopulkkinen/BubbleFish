@@ -31,7 +31,7 @@
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
-#include "ash/wm/panel_frame_view.h"
+#include "ash/wm/panels/panel_frame_view.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "ui/aura/root_window.h"
 #endif
@@ -181,6 +181,7 @@ void NativeAppWindowViews::InitializePanelWindow(
   // could plumb context through to here in some cases.
   params.top_level = true;
   window_->Init(params);
+  window_->set_focus_on_creation(false);
 
 #if !defined(USE_ASH)
   // TODO(oshima|stevenjb): Ideally, we should be able to just pre-determine

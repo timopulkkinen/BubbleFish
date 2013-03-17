@@ -8,9 +8,9 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -240,7 +241,7 @@ void GetURLAndTitleToBookmark(content::WebContents* web_contents,
 }
 
 void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
-  PrefService* prefs = PrefServiceFromBrowserContext(browser_context);
+  PrefService* prefs = components::UserPrefs::Get(browser_context);
   const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
 
   // The user changed when the bookmark bar is shown, update the preferences.

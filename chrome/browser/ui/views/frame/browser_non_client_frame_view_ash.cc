@@ -4,16 +4,14 @@
 
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view_ash.h"
 
-#include "ash/ash_switches.h"
 #include "ash/wm/frame_painter.h"
 #include "ash/wm/workspace/frame_maximize_button.h"
-#include "base/command_line.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/immersive_mode_controller.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "content/public/browser/web_contents.h"
@@ -29,13 +27,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
-
-using ash::switches::kAshImmersiveMode;
 
 namespace {
 
@@ -190,7 +187,7 @@ void BrowserNonClientFrameViewAsh::GetWindowMask(const gfx::Size& size,
 }
 
 void BrowserNonClientFrameViewAsh::ResetWindowControls() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(kAshImmersiveMode)) {
+  if (ImmersiveModeController::UseImmersiveFullscreen()) {
     // Hide the caption buttons in immersive mode because it's confusing when
     // the user hovers or clicks in the top-right of the screen and hits one.
     // Only show them during a reveal.
@@ -296,8 +293,11 @@ void BrowserNonClientFrameViewAsh::ButtonPressed(views::Button* sender,
   // When shift-clicking slow down animations for visual debugging.
   // We used to do this via an event filter that looked for the shift key being
   // pressed but this interfered with several normal keyboard shortcuts.
-  if (event.IsShiftDown())
-    ui::LayerAnimator::set_slow_animation_mode(true);
+  scoped_ptr<ui::ScopedAnimationDurationScaleMode> slow_duration_mode;
+  if (event.IsShiftDown()) {
+    slow_duration_mode.reset(new ui::ScopedAnimationDurationScaleMode(
+        ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
+  }
 
   if (sender == size_button_) {
     // The maximize button may move out from under the cursor.
@@ -314,9 +314,6 @@ void BrowserNonClientFrameViewAsh::ButtonPressed(views::Button* sender,
   } else if (sender == close_button_) {
     frame()->Close();
   }
-
-  if (event.IsShiftDown())
-    ui::LayerAnimator::set_slow_animation_mode(false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

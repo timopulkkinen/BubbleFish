@@ -36,16 +36,15 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
@@ -54,11 +53,6 @@
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/drive_download_handler.h"
@@ -260,22 +254,6 @@ void ChromeDownloadManagerDelegate::ChooseDownloadPath(
 #endif
   file_picker->Init(download_manager_, item, suggested_path,
                     file_selected_callback);
-}
-
-WebContents* ChromeDownloadManagerDelegate::
-    GetAlternativeWebContentsToNotifyForDownload() {
-#if defined(OS_ANDROID)
-  // Android does not implement BrowserList or any other way to get an
-  // alternate web contents.
-  return NULL;
-#else
-  // Start the download in the last active browser. This is not ideal but better
-  // than fully hiding the download from the user.
-  Browser* last_active = chrome::FindLastActiveWithProfile(profile_,
-      chrome::GetActiveDesktop());
-  return last_active ? last_active->tab_strip_model()->GetActiveWebContents()
-                     : NULL;
-#endif
 }
 
 bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(

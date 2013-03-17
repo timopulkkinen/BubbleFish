@@ -96,6 +96,8 @@ class ContentViewGestureHandler implements LongPressDelegate {
     // tellNativeScrollingHasEnded() to set it to false.
     private boolean mNativeScrolling;
 
+    private boolean mSeenFirstScrollEvent;
+
     private boolean mPinchInProgress = false;
 
     // Tracks whether a touch cancel event has been sent as a result of switching
@@ -229,6 +231,7 @@ class ContentViewGestureHandler implements LongPressDelegate {
                         mShowPressIsCalled = false;
                         mIgnoreSingleTap = false;
                         mNativeScrolling = false;
+                        mSeenFirstScrollEvent = false;
                         mSnapScrollController.resetSnapScrollMode();
                         mLastRawX = e.getRawX();
                         mLastRawY = e.getRawY();
@@ -248,6 +251,12 @@ class ContentViewGestureHandler implements LongPressDelegate {
                             } else {
                                 distanceX = 0;
                             }
+                        }
+
+                        if (!mSeenFirstScrollEvent) {
+                            // Ignore the first scroll delta to avoid a visible jump.
+                            mSeenFirstScrollEvent = true;
+                            return true;
                         }
 
                         boolean didUIStealScroll = mMotionEventDelegate.didUIStealScroll(
@@ -293,9 +302,9 @@ class ContentViewGestureHandler implements LongPressDelegate {
                             float velocityX, float velocityY) {
                         if (mSnapScrollController.isSnappingScrolls()) {
                             if (mSnapScrollController.isSnapHorizontal()) {
-                                velocityX = 0;
-                            } else {
                                 velocityY = 0;
+                            } else {
+                                velocityX = 0;
                             }
                         }
 

@@ -448,8 +448,7 @@ Tab::Tab(TabController* controller)
       ALLOW_THIS_IN_INITIALIZER_LIST(hover_controller_(this)),
       showing_icon_(false),
       showing_close_button_(false),
-      close_button_color_(0),
-      icon_dominant_color_(SK_ColorWHITE) {
+      close_button_color_(0) {
   InitTabResources();
 
   // So we get don't get enter/exit on children and don't prematurely stop the
@@ -475,6 +474,8 @@ Tab::Tab(TabController* controller)
   AddChildView(close_button_);
 
   set_context_menu_controller(this);
+
+  tab_audio_indicator_.reset(new TabAudioIndicator(this));
 }
 
 Tab::~Tab() {
@@ -483,6 +484,7 @@ Tab::~Tab() {
 void Tab::set_animation_container(ui::AnimationContainer* container) {
   animation_container_ = container;
   hover_controller_.SetAnimationContainer(container);
+  tab_audio_indicator_->SetAnimationContainer(container);
 }
 
 bool Tab::IsActive() const {
@@ -521,20 +523,8 @@ void Tab::SetData(const TabRendererData& data) {
     }
   } else if (!data_.CaptureActive() && old.CaptureActive()) {
     StopIconAnimation();
-    if (data_.AudioActive())
-      StartAudioPlayingAnimation();
   } else if (data_.CaptureActive() && !old.CaptureActive()) {
-    // Capture indicator overrides the audio indicator if presently shown.
-    old.audio_state = TabRendererData::AUDIO_STATE_NONE;
-    data_.audio_state = TabRendererData::AUDIO_STATE_NONE;
     StartRecordingAnimation();
-  } else if (!data_.CaptureActive()) {
-    // Start or stop the audio indicator only if not capturing.
-    if (!data_.AudioActive() && old.AudioActive()) {
-      StopIconAnimation();
-    } else if (data_.AudioActive() && !old.AudioActive()) {
-      StartAudioPlayingAnimation();
-    }
   } else {
     if (IsPerformingCrashAnimation())
       StopIconAnimation();
@@ -548,12 +538,7 @@ void Tab::SetData(const TabRendererData& data) {
     }
   }
 
-  // If the favicon changed, re-compute its dominant color.
-  if (controller() &&
-      controller()->IsImmersiveStyle() &&
-      !data_.favicon.isNull() &&
-      !data_.favicon.BackedBySameObjectAs(old.favicon))
-    UpdateIconDominantColor();
+  tab_audio_indicator_->SetIsPlayingAudio(data_.AudioActive());
 
   DataChanged(old);
 
@@ -628,11 +613,6 @@ void Tab::StopMiniTabTitleAnimation() {
   tab_animation_.reset(NULL);
 }
 
-void Tab::UpdateIconDominantColor() {
-  icon_dominant_color_ =
-      color_utils::CalculateKMeanColorOfBitmap(*data_.favicon.bitmap());
-}
-
 // static
 gfx::Size Tab::GetBasicMinimumUnselectedSize() {
   InitTabResources();
@@ -678,6 +658,16 @@ int Tab::GetMiniWidth() {
 // static
 int Tab::GetImmersiveHeight() {
   return kImmersiveTabHeight;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Tab, TabAudioIndicator::Delegate overrides:
+
+void Tab::ScheduleAudioIndicatorPaint() {
+  // No need to schedule a paint if another animation is active. The other
+  // animation will do its own scheduling.
+  if (!icon_animation_)
+    ScheduleIconPaint();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1222,21 +1212,8 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   int tab_id;
   int frame_id;
   views::Widget* widget = GetWidget();
-  if (widget && widget->GetTopLevelWidget()->ShouldUseNativeFrame()) {
-    tab_id = IDR_THEME_TAB_BACKGROUND_V;
-    frame_id = 0;
-  } else if (data().incognito) {
-    tab_id = IDR_THEME_TAB_BACKGROUND_INCOGNITO;
-    frame_id = IDR_THEME_FRAME_INCOGNITO;
-#if defined(OS_WIN)
-  } else if (win8::IsSingleWindowMetroMode()) {
-    tab_id = IDR_THEME_TAB_BACKGROUND_V;
-    frame_id = 0;
-#endif
-  } else {
-    tab_id = IDR_THEME_TAB_BACKGROUND;
-    frame_id = IDR_THEME_FRAME;
-  }
+  GetTabIdAndFrameId(widget, &tab_id, &frame_id);
+
   // Explicitly map the id so we cache correctly.
   const chrome::HostDesktopType host_desktop_type = GetHostDesktopType(this);
   tab_id = chrome::MapThemeImage(host_desktop_type, tab_id);
@@ -1455,59 +1432,111 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
                        data().favicon.height(),
                        bounds, true, SkPaint());
 
-        if (data().audio_state == TabRendererData::AUDIO_STATE_PLAYING) {
-          // If audio is playing, we draw on top of the icon the
-          // current equalizer animiation frame.
-          ui::ThemeProvider* tp = GetThemeProvider();
-          gfx::ImageSkia equalizer(*tp->GetImageSkiaNamed(IDR_AUDIO_ANIMATION));
-          int icon_size = equalizer.height();
-          int number_of_frames = equalizer.width() / icon_size;
-          int frame = static_cast<int>(
-              icon_animation_->GetCurrentValue() * number_of_frames);
-          int image_offset = frame * icon_size;
-          DrawIconAtLocation(canvas, equalizer, image_offset,
-                             bounds.x(), bounds.y() + 1,
-                             icon_size, icon_size,
-                             false, SkPaint());
-        }
+        // Draw the audio indicator UI only if no other icon animation is
+        // active.
+        if (!icon_animation_ && tab_audio_indicator_->IsAnimating())
+          tab_audio_indicator_->Paint(canvas, bounds);
       }
     }
   }
   canvas->Restore();
 
   // Paint recording or projecting animation overlay.
-  if (data().capture_state != TabRendererData::CAPTURE_STATE_NONE) {
-    SkPaint paint;
-    paint.setAntiAlias(true);
-    U8CPU alpha = icon_animation_->GetCurrentValue() * 0xff;
-    paint.setAlpha(alpha);
-    ui::ThemeProvider* tp = GetThemeProvider();
+  if (data().capture_state != TabRendererData::CAPTURE_STATE_NONE)
+    PaintCaptureState(canvas, bounds);
+}
 
-    if (data().capture_state == TabRendererData::CAPTURE_STATE_PROJECTING) {
-      // If projecting, add projection glow animation.
-      gfx::Rect glow_bounds(bounds);
-      glow_bounds.set_x(glow_bounds.x() - (32 - 24));
-      glow_bounds.set_y(0);
-      glow_bounds.set_width(glow_bounds.width() *
-                            kProjectingGlowResizeScale);
-      glow_bounds.set_height(glow_bounds.height() *
-                              kProjectingGlowResizeScale);
+void Tab::PaintCaptureState(gfx::Canvas* canvas, gfx::Rect bounds) {
+  SkPaint paint;
+  paint.setAntiAlias(true);
+  U8CPU alpha = icon_animation_->GetCurrentValue() * 0xff;
+  paint.setAlpha(alpha);
+  ui::ThemeProvider* tp = GetThemeProvider();
 
-      gfx::ImageSkia projection_glow(
-          *tp->GetImageSkiaNamed(IDR_TAB_CAPTURE_GLOW));
-      DrawIconCenter(canvas, projection_glow, 0,
-                      projection_glow.width(), projection_glow.height(),
-                      glow_bounds, false, paint);
-    } else if (data().capture_state ==
-                TabRendererData::CAPTURE_STATE_RECORDING) {
-      // If recording, fade the recording icon on top of the favicon.
-      gfx::ImageSkia recording_dot(*tp->GetImageSkiaNamed(IDR_TAB_RECORDING));
-      DrawIconBottomRight(canvas, recording_dot, 0,
-                          recording_dot.width(), recording_dot.height(),
-                          bounds, false, paint);
+  if (data().capture_state == TabRendererData::CAPTURE_STATE_PROJECTING) {
+    // If projecting, add projection glow animation.
+    gfx::Rect glow_bounds(bounds);
+    glow_bounds.set_x(glow_bounds.x() - (32 - 24));
+    glow_bounds.set_y(0);
+    glow_bounds.set_width(glow_bounds.width() * kProjectingGlowResizeScale);
+    glow_bounds.set_height(glow_bounds.height() * kProjectingGlowResizeScale);
+
+    gfx::ImageSkia projection_glow(
+        *tp->GetImageSkiaNamed(IDR_TAB_CAPTURE_GLOW));
+    DrawIconCenter(canvas, projection_glow, 0, projection_glow.width(),
+                   projection_glow.height(), glow_bounds, false, paint);
+  } else if (data().capture_state == TabRendererData::CAPTURE_STATE_RECORDING) {
+    // If recording, fade the recording icon on top of the favicon with a mask
+    // around/behind it.
+    gfx::ImageSkia recording_dot(*tp->GetImageSkiaNamed(IDR_TAB_RECORDING));
+    gfx::ImageSkia recording_dot_mask(
+        *tp->GetImageSkiaNamed(IDR_TAB_RECORDING_MASK));
+    gfx::ImageSkia tab_background;
+    if (IsActive()) {
+      tab_background = *tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
     } else {
-      NOTREACHED();
+      int tab_id;
+      int frame_id_dummy;
+      views::Widget* widget = GetWidget();
+      GetTabIdAndFrameId(widget, &tab_id, &frame_id_dummy);
+      tab_background = *tp->GetImageSkiaNamed(tab_id);
     }
+
+    // This is the offset from the favicon bottom right corner for the mask,
+    // given that the recording dot is drawn in the bottom right corner.
+    int mask_offset_from_right = recording_dot.width() +
+        (recording_dot_mask.width() - recording_dot.width()) / 2;
+    int mask_offset_from_bottom = recording_dot.height() +
+        (recording_dot_mask.height() - recording_dot.height()) / 2;
+
+    int mask_dst_x = bounds.x() + bounds.width() - mask_offset_from_right;
+    int mask_dst_y = bounds.y() + bounds.height() - mask_offset_from_bottom;
+
+    // Crop the background image at the correct position and create a mask
+    // from the background.
+    int offset_x = GetMirroredX() + background_offset_.x() + mask_dst_x;
+    int offset_y = mask_dst_y;
+    gfx::ImageSkia tab_background_cropped =
+        gfx::ImageSkiaOperations::CreateTiledImage(
+            tab_background, offset_x, offset_y,
+            recording_dot_mask.width(), recording_dot_mask.height());
+    gfx::ImageSkia recording_dot_mask_with_bg =
+        gfx::ImageSkiaOperations::CreateMaskedImage(tab_background_cropped,
+                                                    recording_dot_mask);
+
+    // Draw the mask.
+    DrawIconAtLocation(canvas, recording_dot_mask_with_bg, 0,
+                       mask_dst_x, mask_dst_y,
+                       recording_dot_mask.width(),
+                       recording_dot_mask.height(),
+                       false, SkPaint());
+
+    // Potentially draw an alpha of the active bg image.
+    double throb_value = GetThrobValue();
+    if (!IsActive() && throb_value > 0) {
+      tab_background = *tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
+      tab_background_cropped = gfx::ImageSkiaOperations::CreateTiledImage(
+          tab_background, offset_x, offset_y,
+          recording_dot_mask.width(), recording_dot_mask.height());
+      recording_dot_mask_with_bg = gfx::ImageSkiaOperations::CreateMaskedImage(
+          tab_background_cropped, recording_dot_mask);
+
+      canvas->SaveLayerAlpha(static_cast<int>(throb_value * 0xff),
+                             GetLocalBounds());
+      DrawIconAtLocation(canvas, recording_dot_mask_with_bg, 0,
+                         mask_dst_x, mask_dst_y,
+                         recording_dot_mask.width(),
+                         recording_dot_mask.height(),
+                         false, SkPaint());
+      canvas->Restore();
+    }
+
+    // Draw the recording icon.
+    DrawIconBottomRight(canvas, recording_dot, 0,
+                        recording_dot.width(), recording_dot.height(),
+                        bounds, false, paint);
+  } else {
+    NOTREACHED();
   }
 }
 
@@ -1662,14 +1691,6 @@ void Tab::StartRecordingAnimation() {
   icon_animation_.reset(animation);
 }
 
-void Tab::StartAudioPlayingAnimation() {
-  ui::ThrobAnimation* animation = new ui::ThrobAnimation(this);
-  animation->SetTweenType(ui::Tween::LINEAR);
-  animation->SetThrobDuration(2000);
-  animation->StartThrobbing(-1);
-  icon_animation_.reset(animation);
-}
-
 bool Tab::IsPerformingCrashAnimation() const {
   return icon_animation_.get() && data_.IsCrashed();
 }
@@ -1696,6 +1717,26 @@ gfx::Rect Tab::GetImmersiveBarRect() const {
   int main_bar_right = width() - tab_active_.r_width + kBarPadding;
   return gfx::Rect(
       main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
+}
+
+void Tab::GetTabIdAndFrameId(views::Widget* widget,
+                             int* tab_id,
+                             int* frame_id) const {
+  if (widget && widget->GetTopLevelWidget()->ShouldUseNativeFrame()) {
+    *tab_id = IDR_THEME_TAB_BACKGROUND_V;
+    *frame_id = 0;
+  } else if (data().incognito) {
+    *tab_id = IDR_THEME_TAB_BACKGROUND_INCOGNITO;
+    *frame_id = IDR_THEME_FRAME_INCOGNITO;
+#if defined(OS_WIN)
+  } else if (win8::IsSingleWindowMetroMode()) {
+    *tab_id = IDR_THEME_TAB_BACKGROUND_V;
+    *frame_id = 0;
+#endif
+  } else {
+    *tab_id = IDR_THEME_TAB_BACKGROUND;
+    *frame_id = IDR_THEME_FRAME;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

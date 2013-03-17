@@ -6,12 +6,12 @@
 
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
 #include "ash/wm/drag_window_controller.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "base/stringprintf.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
@@ -98,7 +98,7 @@ class DragWindowResizerTest : public test::AshTestBase {
   }
 
   internal::ShelfLayoutManager* shelf_layout_manager() {
-    return Shell::GetPrimaryRootWindowController()->shelf();
+    return Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
   }
 
   static DragWindowResizer* CreateDragWindowResizer(
@@ -360,14 +360,14 @@ TEST_F(DragWindowResizerTest, CursorDeviceScaleFactor) {
     // Grab (0, 0) of the window.
     scoped_ptr<DragWindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTCAPTION));
-    EXPECT_EQ(1.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
     event_filter->WarpMouseCursorIfNecessary(root_windows[0],
                                              gfx::Point(399, 200));
-    EXPECT_EQ(2.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(2.0f, cursor_test_api.GetDisplay().device_scale_factor());
     resizer->CompleteDrag(0);
-    EXPECT_EQ(2.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(2.0f, cursor_test_api.GetDisplay().device_scale_factor());
   }
 
   // Move window from the root window with 2.0 device scale factor to the root
@@ -380,14 +380,14 @@ TEST_F(DragWindowResizerTest, CursorDeviceScaleFactor) {
     // Grab (0, 0) of the window.
     scoped_ptr<DragWindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTCAPTION));
-    EXPECT_EQ(2.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(2.0f, cursor_test_api.GetDisplay().device_scale_factor());
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, -200, 200), 0);
     event_filter->WarpMouseCursorIfNecessary(root_windows[1],
                                              gfx::Point(400, 200));
-    EXPECT_EQ(1.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
     resizer->CompleteDrag(0);
-    EXPECT_EQ(1.0f, cursor_test_api.GetDeviceScaleFactor());
+    EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
   }
 }
 

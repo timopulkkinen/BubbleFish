@@ -124,7 +124,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, BrowserAction) {
   [wc destroyBrowser];
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, RunInspectPopup) {
+IN_PROC_BROWSER_TEST_F(
+    ExtensionActionContextMenuTest, DISABLED_RunInspectPopup) {
   SetupPageAction();
   scoped_nsobject<ExtensionActionContextMenu> menu;
   menu.reset([[ExtensionActionContextMenu alloc] initWithExtension:extension_
@@ -148,10 +149,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, RunInspectPopup) {
                  to:[inspectItem target]
                from:inspectItem];
   devtools_attached_observer.Wait();
-
-  // Hide the popup to prevent racy crashes at test cleanup.
-  BrowserActionTestUtil test_util(browser());
-  test_util.HidePopup();
 
   service->SetBoolean(prefs::kExtensionsUIDeveloperMode, original);
 }

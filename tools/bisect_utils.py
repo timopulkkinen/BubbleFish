@@ -22,11 +22,13 @@ solutions = [
                               "chrome/data/page_cycler/.git",
       "src/tools/perf/data": "https://chrome-internal.googlesource.com/" +
                              "chrome/tools/perf/data/.git",
+      "src/v8_bleeding_edge": "git://github.com/v8/v8.git",
     },
     "safesync_url": "",
   },
 ]
 """
+GCLIENT_SPEC = ''.join([l for l in GCLIENT_SPEC.splitlines()])
 
 
 def OutputAnnotationStepStart(name):
@@ -75,8 +77,15 @@ def RunGClient(params):
   Returns:
     The return code of the call.
   """
+  if os.name == 'nt':
+    # "HOME" isn't normally defined on windows, but is needed
+    # for git to find the user's .netrc file.
+    if not os.getenv('HOME'):
+      os.environ['HOME'] = os.environ['USERPROFILE']
+
+  shell = os.name == 'nt'
   cmd = ['gclient'] + params
-  return subprocess.call(cmd)
+  return subprocess.call(cmd, shell=shell)
 
 
 def RunGClientAndCreateConfig():

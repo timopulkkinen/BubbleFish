@@ -10,6 +10,7 @@ AudioLayoutTest.*
 WebGLConformanceTest.*
 MessagePortTest.Tests
 EncryptedMediaTest.InvalidKeySystem
+IndexedDBBrowserTest.DoesntHangTest
 IndexedDBBrowserTest.NullKeyPathPersistence
 IndexedDBBrowserTest.VersionChangeCrashResilience
 IndexedDBBrowserTest.ValueSizeTest
@@ -17,10 +18,8 @@ IndexedDBBrowserTest.ConnectionsClosedOnTabClose
 CrossPlatformAccessibilityBrowserTest.*
 GpuCrashTest.MANUAL_WebkitLoseContext
 DatabaseTest.*
-BrowserPluginHostTest.*
 
 # Failures
-WebrtcBrowserTest.*
 WorkerLayoutTest.*
 MediaLayoutTest.*
 IndexedDBLayoutTest.*
@@ -35,14 +34,34 @@ FileSystemBrowserTestWithLowQuota.QuotaTest
 BlobLayoutTest.*
 ChildProcessSecurityPolicyInProcessBrowserTest.NoLeak
 
+# Failure, see crbug/189186
+GpuPixelTestBrowserPlugin.MANUAL_BrowserPluginBlueBox
+
 # Crashes
-RenderViewImplTest.*
-BrowserPluginTest.*
-PluginTest.*
 WorkerXHRHttpLayoutTest.Tests
-SecurityExploitBrowserTest.SetWebUIProperty
-RendererAccessibilityTest.EditableTextModeFocusNotifications
-RenderWidgetTest.OnMsgPaintAtSize
 GpuCrashTest.MANUAL_Kill
 DownloadContentTest.ResumeInterruptedDownload
+
+# Needs to start the test server before
+# BrowserTestBase::SetUpCommandLine is called, but on Android
+# the test server needs to be started in SetUpOnMainThread().
+SecurityExploitBrowserTest.SetWebUIProperty
+
+# Plugins are not supported.
+BrowserPluginHostTest.*
+BrowserPluginTest.*
+PluginTest.*
+
+# http://crbug.com/181069
+WebrtcBrowserTest.*
+
+# http://crbug.com/187500
+RenderViewImplTest.*
+RendererAccessibilityTest.EditableTextModeFocusNotifications
+RendererAccessibilityTest.SendFullAccessibilityTreeOnReload
+RendererAccessibilityTest.HideAccessibilityObject
+RendererAccessibilityTest.ShowAccessibilityObject
+RenderWidgetTest.OnMsgPaintAtSize
+
+# Multiple test servers support: http://crbug/187570
 RenderViewHostManagerTest.*

@@ -35,7 +35,8 @@ QuicCongestionManager::QuicCongestionManager(
     : clock_(clock),
       receive_algorithm_(ReceiveAlgorithmInterface::Create(clock, type)),
       send_algorithm_(SendAlgorithmInterface::Create(clock, type)),
-      largest_missing_(0) {
+      largest_missing_(0),
+      current_rtt_(QuicTime::Delta::Infinite()) {
 }
 
 QuicCongestionManager::~QuicCongestionManager() {
@@ -56,6 +57,16 @@ void QuicCongestionManager::SentPacket(QuicPacketSequenceNumber sequence_number,
   CleanupPacketHistory();
 }
 
+// Called when a packet is timed out.
+void QuicCongestionManager::AbandoningPacket(
+    QuicPacketSequenceNumber sequence_number) {
+  PendingPacketsMap::iterator it = pending_packets_.find(sequence_number);
+  if (it != pending_packets_.end()) {
+    send_algorithm_->AbandoningPacket(sequence_number, it->second);
+    pending_packets_.erase(it);
+  }
+}
+
 void QuicCongestionManager::OnIncomingQuicCongestionFeedbackFrame(
     const QuicCongestionFeedbackFrame& frame, QuicTime feedback_receive_time) {
   QuicBandwidth sent_bandwidth = SentBandwidth(feedback_receive_time);
@@ -67,12 +78,17 @@ void QuicCongestionManager::OnIncomingAckFrame(const QuicAckFrame& frame,
                                                QuicTime ack_receive_time) {
   // We calculate the RTT based on the highest ACKed sequence number, the lower
   // sequence numbers will include the ACK aggregation delay.
-  QuicTime::Delta rtt = QuicTime::Delta::Zero();
   SendAlgorithmInterface::SentPacketsMap::iterator history_it =
       packet_history_map_.find(frame.received_info.largest_observed);
-  if (history_it != packet_history_map_.end()) {
-    // TODO(pwestin): we need to add the delta to the feedback message.
-    rtt = ack_receive_time.Subtract(history_it->second->SendTimestamp());
+  // TODO(satyamshekhar): largest_observed might be missing.
+  if (history_it != packet_history_map_.end() &&
+      !frame.received_info.delta_time_largest_observed.IsInfinite()) {
+    QuicTime::Delta send_delta = ack_receive_time.Subtract(
+        history_it->second->SendTimestamp());
+    if (send_delta > frame.received_info.delta_time_largest_observed) {
+      current_rtt_ = send_delta.Subtract(
+          frame.received_info.delta_time_largest_observed);
+    }
   }
   // We want to.
   // * Get all packets lower(including) than largest_observed
@@ -88,9 +104,7 @@ void QuicCongestionManager::OnIncomingAckFrame(const QuicAckFrame& frame,
     QuicPacketSequenceNumber sequence_number = it->first;
     if (!IsAwaitingPacket(frame.received_info, sequence_number)) {
       // Not missing, hence implicitly acked.
-      send_algorithm_->OnIncomingAck(sequence_number,
-                                     it->second,
-                                     rtt);
+      send_algorithm_->OnIncomingAck(sequence_number, it->second, current_rtt_);
       pending_packets_.erase(it++);  // Must be incremented post to work.
     } else {
       if (sequence_number > largest_missing_) {
@@ -106,9 +120,12 @@ void QuicCongestionManager::OnIncomingAckFrame(const QuicAckFrame& frame,
   }
 }
 
-QuicTime::Delta QuicCongestionManager::TimeUntilSend(QuicTime now,
-                                                     bool is_retransmission) {
-  return send_algorithm_->TimeUntilSend(now, is_retransmission);
+QuicTime::Delta QuicCongestionManager::TimeUntilSend(
+    QuicTime now,
+    bool is_retransmission,
+    bool has_retransmittable_data) {
+  return send_algorithm_->TimeUntilSend(now, is_retransmission,
+                                        has_retransmittable_data);
 }
 
 bool QuicCongestionManager::GenerateCongestionFeedback(
@@ -125,15 +142,19 @@ void QuicCongestionManager::RecordIncomingPacket(
                                            revived);
 }
 
-// static
+const QuicTime::Delta QuicCongestionManager::rtt() {
+  return current_rtt_;
+}
+
 const QuicTime::Delta QuicCongestionManager::DefaultRetransmissionTime() {
   return QuicTime::Delta::FromMilliseconds(kDefaultRetransmissionTimeMs);
 }
 
-// static
 const QuicTime::Delta QuicCongestionManager::GetRetransmissionDelay(
     size_t unacked_packets_count,
     size_t number_retransmissions) {
+  // TODO(pwestin): This should take the RTT into account instead of a hard
+  // coded kDefaultRetransmissionTimeMs. Ideally the variance of the RTT too.
   if (unacked_packets_count <= kTailDropWindowSize) {
     return QuicTime::Delta::FromMilliseconds(kDefaultRetransmissionTimeMs);
   }
@@ -141,6 +162,10 @@ const QuicTime::Delta QuicCongestionManager::GetRetransmissionDelay(
   return QuicTime::Delta::FromMilliseconds(
       kDefaultRetransmissionTimeMs *
       (1 << min<size_t>(number_retransmissions, kMaxRetransmissions)));
+}
+
+const QuicTime::Delta QuicCongestionManager::SmoothedRtt() {
+  return send_algorithm_->SmoothedRtt();
 }
 
 QuicBandwidth QuicCongestionManager::SentBandwidth(

@@ -23,4 +23,8 @@ const char kUIEnablePerTilePainting[] = "ui-enable-per-tile-painting";
 
 const char kUIEnableThreadedCompositing[] = "ui-enable-threaded-compositing";
 
+const char kUIEnableSoftwareCompositing[] = "ui-enable-software-compositing";
+
+const char kUIMaxFramesPending[] = "ui-max-frames-pending";
+
 }  // namespace switches

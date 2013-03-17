@@ -9,54 +9,47 @@
 
 namespace cc {
 
-scoped_refptr<PictureImageLayer> PictureImageLayer::create()
-{
+scoped_refptr<PictureImageLayer> PictureImageLayer::Create() {
   return make_scoped_refptr(new PictureImageLayer());
 }
 
-PictureImageLayer::PictureImageLayer()
-    : PictureLayer(this)
-{
+PictureImageLayer::PictureImageLayer() : PictureLayer(this) {}
+
+PictureImageLayer::~PictureImageLayer() {
+  ClearClient();
 }
 
-PictureImageLayer::~PictureImageLayer()
-{
-  clearClient();
+scoped_ptr<LayerImpl> PictureImageLayer::CreateLayerImpl(
+    LayerTreeImpl* tree_impl) {
+  return PictureImageLayerImpl::Create(tree_impl, id()).PassAs<LayerImpl>();
 }
 
-scoped_ptr<LayerImpl> PictureImageLayer::createLayerImpl(
-    LayerTreeImpl* treeImpl) {
-  return PictureImageLayerImpl::create(treeImpl, id()).PassAs<LayerImpl>();
+bool PictureImageLayer::DrawsContent() const {
+  return !bitmap_.isNull() && PictureLayer::DrawsContent();
 }
 
-bool PictureImageLayer::drawsContent() const {
-  return !bitmap_.isNull() && PictureLayer::drawsContent();
-}
-
-void PictureImageLayer::setBitmap(const SkBitmap& bitmap)
-{
-  // setBitmap() currently gets called whenever there is any
+void PictureImageLayer::SetBitmap(const SkBitmap& bitmap) {
+  // SetBitmap() currently gets called whenever there is any
   // style change that affects the layer even if that change doesn't
   // affect the actual contents of the image (e.g. a CSS animation).
   // With this check in place we avoid unecessary texture uploads.
   if (bitmap.pixelRef() && bitmap.pixelRef() == bitmap_.pixelRef())
-      return;
+    return;
 
   bitmap_ = bitmap;
-  setNeedsDisplay();
+  SetNeedsDisplay();
 }
 
-void PictureImageLayer::paintContents(
-    SkCanvas* canvas,
-    const gfx::Rect& clip,
-    gfx::RectF& opaque) {
+void PictureImageLayer::PaintContents(SkCanvas* canvas,
+                                      gfx::Rect clip,
+                                      gfx::RectF* opaque) {
   if (!bitmap_.width() || !bitmap_.height())
     return;
 
-  SkScalar content_to_layer_scale_x = SkFloatToScalar(
-      static_cast<float>(bounds().width()) / bitmap_.width());
-  SkScalar content_to_layer_scale_y = SkFloatToScalar(
-      static_cast<float>(bounds().height()) / bitmap_.height());
+  SkScalar content_to_layer_scale_x =
+      SkFloatToScalar(static_cast<float>(bounds().width()) / bitmap_.width());
+  SkScalar content_to_layer_scale_y =
+      SkFloatToScalar(static_cast<float>(bounds().height()) / bitmap_.height());
   canvas->scale(content_to_layer_scale_x, content_to_layer_scale_y);
 
   canvas->drawBitmap(bitmap_, 0, 0);

@@ -10,6 +10,8 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "cc/layer.h"
 #include "cc/texture_layer.h"
 #include "content/browser/android/content_view_core_impl.h"
@@ -35,6 +37,38 @@
 
 namespace content {
 
+namespace {
+
+void InsertSyncPointAndAckForGpu(
+    int gpu_host_id, int route_id, const std::string& return_mailbox) {
+  uint32 sync_point =
+      ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
+  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
+  ack_params.mailbox_name = return_mailbox;
+  ack_params.sync_point = sync_point;
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(
+      route_id, gpu_host_id, ack_params);
+}
+
+void InsertSyncPointAndAckForCompositor(
+    int renderer_host_id,
+    int route_id,
+    const gpu::Mailbox& return_mailbox,
+    const gfx::Size return_size) {
+  cc::CompositorFrameAck ack;
+  ack.gl_frame_data.reset(new cc::GLFrameData());
+  if (!return_mailbox.IsZero()) {
+    ack.gl_frame_data->mailbox = return_mailbox;
+    ack.gl_frame_data->size = return_size;
+    ack.gl_frame_data->sync_point =
+        ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
+  }
+  RenderWidgetHostImpl::SendSwapCompositorFrameAck(
+      route_id, renderer_host_id, ack);
+}
+
+}  // anonymous namespace
+
 RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     RenderWidgetHostImpl* widget_host,
     ContentViewCoreImpl* content_view_core)
@@ -48,12 +82,12 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     surface_texture_transport_.reset(new SurfaceTextureTransportClient());
     layer_ = surface_texture_transport_->Initialize();
   } else {
-    texture_layer_ = cc::TextureLayer::create(0);
+    texture_layer_ = cc::TextureLayer::Create(NULL);
     layer_ = texture_layer_;
   }
 
-  layer_->setContentsOpaque(true);
-  layer_->setIsDrawable(true);
+  layer_->SetContentsOpaque(true);
+  layer_->SetIsDrawable(true);
 
   host_->SetView(this);
   SetContentViewCore(content_view_core);
@@ -274,6 +308,12 @@ gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() const {
   if (!content_view_core_)
     return gfx::Rect();
 
+  // If the backing hasn't been initialized yet, report empty view bounds
+  // as well. Otherwise, we may end up stuck in a white-screen state because
+  // the resize ack is sent after swapbuffers.
+  if (GetPhysicalBackingSize().IsEmpty())
+    return gfx::Rect();
+
   return gfx::Rect(content_view_core_->GetViewportSizeDip());
 }
 
@@ -442,14 +482,56 @@ void RenderWidgetHostViewAndroid::ShowDisambiguationPopup(
 void RenderWidgetHostViewAndroid::OnAcceleratedCompositingStateChange() {
 }
 
+void RenderWidgetHostViewAndroid::OnSwapCompositorFrame(
+    scoped_ptr<cc::CompositorFrame> frame) {
+  if (!frame->gl_frame_data || frame->gl_frame_data->mailbox.IsZero())
+    return;
+
+  base::Closure callback = base::Bind(&InsertSyncPointAndAckForCompositor,
+                                      host_->GetProcess()->GetID(),
+                                      host_->GetRoutingID(),
+                                      current_mailbox_,
+                                      texture_size_in_layer_);
+  ImageTransportFactoryAndroid::GetInstance()->WaitSyncPoint(
+      frame->gl_frame_data->sync_point);
+  BuffersSwapped(
+      frame->gl_frame_data->mailbox, frame->gl_frame_data->size, callback);
+
+}
+
 void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  ImageTransportFactoryAndroid* factory =
-      ImageTransportFactoryAndroid::GetInstance();
+  NOTREACHED() << "Deprecated. Use --composite-to-mailbox.";
 
   if (params.mailbox_name.empty())
     return;
+
+  std::string return_mailbox;
+  if (!current_mailbox_.IsZero()) {
+    return_mailbox.assign(
+        reinterpret_cast<const char*>(current_mailbox_.name),
+        sizeof(current_mailbox_.name));
+  }
+
+  base::Closure callback = base::Bind(&InsertSyncPointAndAckForGpu,
+                                      gpu_host_id, params.route_id,
+                                      return_mailbox);
+
+  gpu::Mailbox mailbox;
+  std::copy(params.mailbox_name.data(),
+            params.mailbox_name.data() + params.mailbox_name.length(),
+            reinterpret_cast<char*>(mailbox.name));
+
+  BuffersSwapped(mailbox, params.size, callback);
+}
+
+void RenderWidgetHostViewAndroid::BuffersSwapped(
+    const gpu::Mailbox& mailbox,
+    const gfx::Size size,
+    const base::Closure& ack_callback) {
+  ImageTransportFactoryAndroid* factory =
+      ImageTransportFactoryAndroid::GetInstance();
 
   // TODO(sievers): When running the impl thread in the browser we
   // need to delay the ACK until after commit and use more than a single
@@ -457,20 +539,16 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
   DCHECK(!CompositorImpl::IsThreadingEnabled());
 
   if (texture_id_in_layer_) {
-    DCHECK(!current_mailbox_name_.empty());
+    DCHECK(!current_mailbox_.IsZero());
     ImageTransportFactoryAndroid::GetInstance()->ReleaseTexture(
-        texture_id_in_layer_,
-        reinterpret_cast<const signed char*>(
-            current_mailbox_name_.data()));
+        texture_id_in_layer_, current_mailbox_.name);
   } else {
     texture_id_in_layer_ = factory->CreateTexture();
-    texture_layer_->setTextureId(texture_id_in_layer_);
+    texture_layer_->SetTextureId(texture_id_in_layer_);
   }
 
   ImageTransportFactoryAndroid::GetInstance()->AcquireTexture(
-      texture_id_in_layer_,
-      reinterpret_cast<const signed char*>(
-          params.mailbox_name.data()));
+      texture_id_in_layer_, mailbox.name);
 
   // We need to tell ContentViewCore about the new frame before calling
   // setNeedsDisplay() below so that it has the needed information schedule the
@@ -478,19 +556,11 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
   if (content_view_core_)
     content_view_core_->DidProduceRendererFrame();
 
-  texture_layer_->setNeedsDisplay();
-  texture_layer_->setBounds(params.size);
-  texture_size_in_layer_ = params.size;
-
-  uint32 sync_point =
-      ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
-
-  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-  ack_params.mailbox_name = current_mailbox_name_;
-  ack_params.sync_point = sync_point;
-   RenderWidgetHostImpl::AcknowledgeBufferPresent(
-      params.route_id, gpu_host_id, ack_params);
-  current_mailbox_name_ = params.mailbox_name;
+  texture_layer_->SetNeedsDisplay();
+  texture_layer_->SetBounds(size);
+  texture_size_in_layer_ = size;
+  current_mailbox_ = mailbox;
+  ack_callback.Run();
 }
 
 void RenderWidgetHostViewAndroid::AcceleratedSurfacePostSubBuffer(
@@ -506,11 +576,11 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceSuspend() {
 void RenderWidgetHostViewAndroid::AcceleratedSurfaceRelease() {
   // This tells us we should free the frontbuffer.
   if (texture_id_in_layer_) {
-    texture_layer_->setTextureId(0);
+    texture_layer_->SetTextureId(0);
     ImageTransportFactoryAndroid::GetInstance()->DeleteTexture(
         texture_id_in_layer_);
     texture_id_in_layer_ = 0;
-    current_mailbox_name_.clear();
+    current_mailbox_ = gpu::Mailbox();
   }
 }
 
@@ -633,13 +703,8 @@ void RenderWidgetHostViewAndroid::UpdateFrameInfo(
   if (content_view_core_) {
     // All offsets and sizes are in CSS pixels.
     content_view_core_->UpdateFrameInfo(
-        scroll_offset.x(), scroll_offset.y(),
-        page_scale_factor,
-        page_scale_factor_limits.x(), page_scale_factor_limits.y(),
-        content_size.width(), content_size.height(),
-        viewport_size.width(), viewport_size.height());
-    content_view_core_->UpdateOffsetsForFullscreen(controls_offset.y(),
-                                                   content_offset.y());
+        scroll_offset, page_scale_factor, page_scale_factor_limits,
+        content_size, viewport_size, controls_offset, content_offset);
   }
 }
 

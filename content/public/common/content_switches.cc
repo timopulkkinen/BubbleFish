@@ -36,10 +36,6 @@ const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 // as a dependent process of the Chrome Frame plugin.
 const char kChromeFrame[]                   = "chrome-frame";
 
-// Cause a GPU hang to cause a crash dump, allowing for easier debugging of
-// them.
-const char kCrashOnGpuHang[]                = "crash-on-gpu-hang";
-
 // Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
 // This is controlled by policy and is kept separate from the other
 // enable/disable switches to avoid accidentally regressing the policy
@@ -219,8 +215,8 @@ const char kSpeechRecognitionWebserviceKey[] = "speech-service-key";
 // Enable web audio API.
 const char kEnableWebAudio[]                = "enable-webaudio";
 
-// WebRTC is disabled by default on Android.
-const char kEnableWebRTC[]                  = "enable-webrtc";
+// WebRTC is enabled by default on Android.
+const char kDisableWebRTC[]                 = "disable-webrtc";
 #else
 // Disable web audio API.
 const char kDisableWebAudio[]               = "disable-webaudio";
@@ -260,15 +256,12 @@ const char kEnableAcceleratedFilters[]      = "enable-accelerated-filters";
 const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
 
 // Enables browser plugin compositing experiment.
-const char kEnableBrowserPluginCompositing[] =
-    "enable-browser-plugin-compositing";
+const char kDisableBrowserPluginCompositing[] =
+    "disable-browser-plugin-compositing";
 
 // Enables browser plugin for all types of pages.
 const char kEnableBrowserPluginForAllViewTypes[] =
     "enable-browser-plugin-for-all-view-types";
-
-const char kEnableBrowserPluginPointerLock[] =
-    "enable-browser-plugin-pointer-lock";
 
 // Enable/Disable the creation of compositing layers for fixed position
 // elements. Three options are needed to support four possible scenarios:
@@ -323,6 +316,7 @@ const char kEnableTextServicesFramework[] = "enable-text-services-framework";
 
 // Enable Gesture Tap Highlight
 const char kEnableGestureTapHighlight[]    = "enable-gesture-tap-highlight";
+const char kDisableGestureTapHighlight[]   = "disable-gesture-tap-highlight";
 
 // Enables the GPU benchmarking extension
 const char kEnableGpuBenchmarking[]         = "enable-gpu-benchmarking";
@@ -603,9 +597,6 @@ const char kRendererProcessLimit[]          = "renderer-process-limit";
 // Causes the renderer process to display a dialog on launch.
 const char kRendererStartupDialog[]         = "renderer-startup-dialog";
 
-// Causes the process to run as a service process.
-const char kServiceProcess[]                = "service";
-
 // Renders a border around composited Render Layers to help debug and study
 // layer compositing.
 const char kShowCompositedLayerBorders[]    = "show-composited-layer-borders";
@@ -752,9 +743,6 @@ const char kDisableMediaHistoryLogging[]    = "disable-media-history";
 // Disable user gesture requirement for media playback.
 const char kDisableGestureRequirementForMediaPlayback[] =
     "disable-gesture-requirement-for-media-playback";
-
-// Whether to run media elements in the renderer process.
-const char kMediaPlayerInRenderProcess[]    = "media-player-in-render-process";
 
 // The telephony region (ISO country code) to use in phone number detection.
 const char kNetworkCountryIso[] = "network-country-iso";

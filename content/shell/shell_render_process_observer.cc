@@ -13,16 +13,12 @@
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_switches.h"
 #include "content/shell/webkit_test_runner.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebTestingSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestInterfaces.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/support/gc_extension.h"
 
 using WebKit::WebFrame;
-using WebKit::WebRuntimeFeatures;
-using WebKit::WebTestingSupport;
 using WebTestRunner::WebTestDelegate;
 using WebTestRunner::WebTestInterfaces;
 
@@ -38,23 +34,18 @@ ShellRenderProcessObserver* ShellRenderProcessObserver::GetInstance() {
 }
 
 ShellRenderProcessObserver::ShellRenderProcessObserver()
-    : main_render_view_(NULL),
-      main_test_runner_(NULL),
+    : main_test_runner_(NULL),
       test_delegate_(NULL) {
   CHECK(!g_instance);
   g_instance = this;
   RenderThread::Get()->AddObserver(this);
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  WebRuntimeFeatures::enableInputTypeDateTime(true);
-  WebRuntimeFeatures::enableInputTypeDateTimeLocal(true);
-  WebRuntimeFeatures::enableInputTypeMonth(true);
-  WebRuntimeFeatures::enableInputTypeTime(true);
-  WebRuntimeFeatures::enableInputTypeWeek(true);
-  WebRuntimeFeatures::enableCanvasPath(true);
   DisableAppCacheLogging();
   EnableDevToolsFrontendTesting();
-  DoNotRequireUserGestureForFocusChanges();
+  EnableShortCircuitSizeUpdates();
+  DoNotSendFocusEvents();
+  DisableNavigationErrorPages();
 }
 
 ShellRenderProcessObserver::~ShellRenderProcessObserver() {
@@ -70,13 +61,7 @@ void ShellRenderProcessObserver::SetTestDelegate(WebTestDelegate* delegate) {
 void ShellRenderProcessObserver::SetMainWindow(RenderView* view) {
   WebKitTestRunner* test_runner = WebKitTestRunner::Get(view);
   test_interfaces_->setWebView(view->GetWebView(), test_runner->proxy());
-  main_render_view_ = view;
   main_test_runner_ = test_runner;
-}
-
-void ShellRenderProcessObserver::BindTestRunnersToWindow(WebFrame* frame) {
-  WebTestingSupport::injectInternalsObject(frame);
-  test_interfaces_->bindTo(frame);
 }
 
 void ShellRenderProcessObserver::WebKitInitialized() {
@@ -107,11 +92,8 @@ bool ShellRenderProcessObserver::OnControlMessageReceived(
 
 void ShellRenderProcessObserver::OnResetAll() {
   test_interfaces_->resetAll();
-  if (main_render_view_) {
+  if (main_test_runner_)
     main_test_runner_->Reset();
-    WebTestingSupport::resetInternalsObject(
-        main_render_view_->GetWebView()->mainFrame());
-  }
 }
 
 void ShellRenderProcessObserver::OnSetWebKitSourceDir(

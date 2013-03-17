@@ -167,7 +167,6 @@ const char kChromeUIInstantHost[] = "instant";
 const char kChromeUIIPCHost[] = "ipc";
 const char kChromeUIKeyboardHost[] = "keyboard";
 const char kChromeUIKillHost[] = "kill";
-const char kChromeUILocalOmniboxPopupHost[] = "local-omnibox-popup";
 const char kChromeUIManagedUserPassphrasePageHost[] = "managed-user-passphrase";
 const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryInternalsHost[] = "memory-internals";
@@ -374,13 +373,6 @@ const char kAboutGoogleTranslateURL[] =
     "https://support.google.com/chrome/?p=ib_translation_bar";
 #endif
 
-const char kAutofillHelpURL[] =
-#if defined(OS_CHROMEOS)
-    "https://support.google.com/chromeos/?p=settings_autofill";
-#else
-    "https://support.google.com/chrome/?p=settings_autofill";
-#endif
-
 const char kOmniboxLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
     "https://support.google.com/chromeos/?p=settings_omnibox";
@@ -518,6 +510,10 @@ const int kNumberOfChromeDebugURLs =
 const char kExtensionResourceScheme[] = "chrome-extension-resource";
 
 const char kChromeSearchScheme[] = "chrome-search";
+
+const char kChromeSearchLocalOmniboxPopupHost[] = "local-omnibox-popup";
+const char kChromeSearchLocalOmniboxPopupURL[]
+    = "chrome-search://local-omnibox-popup/local-omnibox-popup.html";
 
 // Google SafeSearch query parameters.
 const char kSafeSearchSafeParameter[] = "safe=active";

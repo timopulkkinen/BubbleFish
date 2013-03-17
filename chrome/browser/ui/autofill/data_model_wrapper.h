@@ -7,10 +7,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "chrome/browser/autofill/field_types.h"
-#include "chrome/browser/autofill/wallet/wallet_items.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "components/autofill/browser/field_types.h"
+#include "components/autofill/browser/wallet/wallet_items.h"
 
+class AutofillProfile;
 class CreditCard;
 class FormGroup;
 class FormStructure;
@@ -19,11 +20,12 @@ namespace gfx {
 class Image;
 }
 
+namespace autofill {
+
 namespace wallet {
 class Address;
+class FullWallet;
 }
-
-namespace autofill {
 
 // A glue class that allows uniform interactions with autocomplete data sources,
 // regardless of their type. Implementations are intended to be lightweight and
@@ -36,11 +38,11 @@ class DataModelWrapper {
   virtual string16 GetInfo(AutofillFieldType type) = 0;
 
   // Returns the icon, if any, that represents this model.
-  virtual gfx::Image GetIcon() = 0;
+  virtual gfx::Image GetIcon();
 
   // Fills in |inputs| with the data that this model contains (|inputs| is an
   // out-param).
-  virtual void FillInputs(DetailInputs* inputs) = 0;
+  virtual void FillInputs(DetailInputs* inputs);
 
   // Returns text to display to the user to summarize this data source. The
   // default implementation assumes this is an address.
@@ -56,33 +58,46 @@ class DataModelWrapper {
 
  protected:
   // Fills in |field| with data from the model.
-  virtual void FillFormField(AutofillField* field) = 0;
+  virtual void FillFormField(AutofillField* field);
 };
 
 // A DataModelWrapper for Autofill data.
-class AutofillDataModelWrapper : public DataModelWrapper {
+class AutofillFormGroupWrapper : public DataModelWrapper {
  public:
-  AutofillDataModelWrapper(const FormGroup* form_group, size_t variant);
-  virtual ~AutofillDataModelWrapper();
+  AutofillFormGroupWrapper(const FormGroup* form_group, size_t variant);
+  virtual ~AutofillFormGroupWrapper();
 
   virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
-  virtual gfx::Image GetIcon() OVERRIDE;
-  virtual void FillInputs(DetailInputs* inputs) OVERRIDE;
 
  protected:
   virtual void FillFormField(AutofillField* field) OVERRIDE;
+
+  size_t variant() const { return variant_; }
 
  private:
   const FormGroup* form_group_;
   const size_t variant_;
 };
 
+// A DataModelWrapper for Autofill profiles.
+class AutofillProfileWrapper : public AutofillFormGroupWrapper {
+ public:
+  AutofillProfileWrapper(const AutofillProfile* profile, size_t variant);
+  virtual ~AutofillProfileWrapper();
+
+  virtual void FillInputs(DetailInputs* inputs) OVERRIDE;
+
+ private:
+  const AutofillProfile* profile_;
+};
+
 // A DataModelWrapper specifically for Autofill CreditCard data.
-class AutofillCreditCardWrapper : public AutofillDataModelWrapper {
+class AutofillCreditCardWrapper : public AutofillFormGroupWrapper {
  public:
   explicit AutofillCreditCardWrapper(const CreditCard* card);
   virtual ~AutofillCreditCardWrapper();
 
+  virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
   virtual gfx::Image GetIcon() OVERRIDE;
   virtual string16 GetDisplayText() OVERRIDE;
 
@@ -100,11 +115,6 @@ class WalletAddressWrapper : public DataModelWrapper {
   virtual ~WalletAddressWrapper();
 
   virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
-  virtual gfx::Image GetIcon() OVERRIDE;
-  virtual void FillInputs(DetailInputs* inputs) OVERRIDE;
-
- protected:
-  virtual void FillFormField(AutofillField* field) OVERRIDE;
 
  private:
   const wallet::Address* address_;
@@ -119,16 +129,36 @@ class WalletInstrumentWrapper : public DataModelWrapper {
 
   virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
   virtual gfx::Image GetIcon() OVERRIDE;
-  virtual void FillInputs(DetailInputs* inputs) OVERRIDE;
   virtual string16 GetDisplayText() OVERRIDE;
-
- protected:
-  virtual void FillFormField(AutofillField* field) OVERRIDE;
 
  private:
   const wallet::WalletItems::MaskedInstrument* instrument_;
 };
 
-}
+// A DataModelWrapper for FullWallets billing data.
+class FullWalletBillingWrapper : public DataModelWrapper {
+ public:
+  explicit FullWalletBillingWrapper(wallet::FullWallet* full_wallet);
+  virtual ~FullWalletBillingWrapper();
+
+  virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
+
+ private:
+  wallet::FullWallet* full_wallet_;
+};
+
+// A DataModelWrapper for FullWallets shipping data.
+class FullWalletShippingWrapper : public DataModelWrapper {
+ public:
+  explicit FullWalletShippingWrapper(wallet::FullWallet* full_wallet);
+  virtual ~FullWalletShippingWrapper();
+
+  virtual string16 GetInfo(AutofillFieldType type) OVERRIDE;
+
+ private:
+  wallet::FullWallet* full_wallet_;
+};
+
+}  // namespace autofill
 
 #endif  // CHROME_BROWSER_UI_AUTOFILL_DATA_MODEL_WRAPPER_H_

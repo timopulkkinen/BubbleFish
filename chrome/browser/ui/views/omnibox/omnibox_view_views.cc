@@ -13,10 +13,11 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/instant/search.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
@@ -100,10 +101,10 @@ int GetEditFontPixelSize(bool popup_window_mode) {
 }
 
 // This will write |url| and |text| to the clipboard as a well-formed URL.
-void DoCopyURL(const GURL& url, const string16& text) {
+void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
   BookmarkNodeData data;
   data.ReadFromTuple(url, text);
-  data.WriteToClipboard(NULL);
+  data.WriteToClipboard(profile);
 }
 
 }  // namespace
@@ -243,6 +244,11 @@ void OmniboxViewViews::OnMouseReleased(const ui::MouseEvent& event) {
 }
 
 bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
+  // Skip processing of [Alt]+<num-pad digit> Unicode alt key codes.
+  // Otherwise, if num-lock is off, the events are handled as [Up], [Down], etc.
+  if (event.IsUnicodeKeyCode())
+    return views::Textfield::OnKeyPressed(event);
+
   switch (event.key_code()) {
     case ui::VKEY_RETURN:
       model()->AcceptInput(event.IsAltDown() ? NEW_FOREGROUND_TAB : CURRENT_TAB,
@@ -653,10 +659,13 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   model()->AdjustTextForCopy(GetSelectedRange().GetMin(), IsSelectAll(),
                              &selected_text, &url, &write_url);
   if (write_url) {
-    DoCopyURL(url, selected_text);
+    DoCopyURL(url, selected_text, model()->profile());
   } else {
     ui::ScopedClipboardWriter scoped_clipboard_writer(
-        ui::Clipboard::GetForCurrentThread(), ui::Clipboard::BUFFER_STANDARD);
+        ui::Clipboard::GetForCurrentThread(),
+        ui::Clipboard::BUFFER_STANDARD,
+        content::BrowserContext::GetMarkerForOffTheRecordContext(
+            model()->profile()));
     scoped_clipboard_writer.WriteText(selected_text);
   }
 }
@@ -700,7 +709,7 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
   menu_contents->AddItemWithStringId(IDC_EDIT_SEARCH_ENGINES,
       IDS_EDIT_SEARCH_ENGINES);
 
-  if (chrome::search::IsQueryExtractionEnabled(location_bar_view_->profile())) {
+  if (chrome::search::IsQueryExtractionEnabled()) {
     int copy_position = menu_contents->GetIndexOfCommandId(IDS_APP_COPY);
     DCHECK(copy_position >= 0);
     menu_contents->InsertItemWithStringIdAt(
@@ -742,7 +751,7 @@ bool OmniboxViewViews::HandlesCommand(int command_id) const {
   return command_id == IDS_APP_PASTE;
 }
 
-void OmniboxViewViews::ExecuteCommand(int command_id) {
+void OmniboxViewViews::ExecuteCommand(int command_id, int event_flags) {
   switch (command_id) {
     case IDS_APP_PASTE:
       OnPaste();
@@ -829,7 +838,9 @@ string16 OmniboxViewViews::GetSelectedText() const {
 }
 
 void OmniboxViewViews::CopyURL() {
-  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
+  DoCopyURL(toolbar_model()->GetURL(),
+            toolbar_model()->GetText(false),
+            model()->profile());
 }
 
 void OmniboxViewViews::OnPaste() {

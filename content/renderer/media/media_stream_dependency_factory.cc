@@ -26,7 +26,9 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 
-#if !defined(USE_OPENSSL)
+#if defined(USE_OPENSSL)
+#include "third_party/libjingle/source/talk/base/ssladapter.h"
+#else
 #include "net/socket/nss_ssl_util.h"
 #endif
 
@@ -314,6 +316,7 @@ void MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
   WebKit::WebVector<WebKit::WebMediaStreamTrack> audio_tracks;
   description->audioSources(audio_tracks);
 
+  bool start_stream = false;
   for (size_t i = 0; i < audio_tracks.size(); ++i) {
     WebKit::WebMediaStreamSource source = audio_tracks[i].source();
 
@@ -345,6 +348,12 @@ void MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
                               source_data->local_audio_source()));
     native_stream->AddTrack(audio_track);
     audio_track->set_enabled(audio_tracks[i].isEnabled());
+    start_stream = true;
+  }
+
+  if (start_stream && GetWebRtcAudioDevice()) {
+    WebRtcAudioCapturer* capturer = GetWebRtcAudioDevice()->capturer();
+    capturer->Start();
   }
 
   // Add video tracks.
@@ -612,8 +621,14 @@ bool MediaStreamDependencyFactory::EnsurePeerConnectionFactory() {
         new IpcPacketSocketFactory(p2p_socket_dispatcher_));
   }
 
-#if !defined(USE_OPENSSL)
-  // Init NSS, which will be needed by PeerConnection.
+  // Init SSL, which will be needed by PeerConnection.
+#if defined(USE_OPENSSL)
+  if (!talk_base::InitializeSSL()) {
+    LOG(ERROR) << "Failed on InitializeSSL.";
+    return false;
+  }
+#else
+  // TODO(ronghuawu): Replace this call with InitializeSSL.
   net::EnsureNSSSSLInit();
 #endif
 

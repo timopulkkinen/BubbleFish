@@ -13,12 +13,12 @@
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -130,10 +130,6 @@ NSImage* DragImageForBookmark(NSImage* favicon, const string16& title) {
   return drag_image;
 }
 
-}  // namespace chrome
-
-namespace bookmark_utils {
-
 void DragBookmarks(Profile* profile,
                    const std::vector<const BookmarkNode*>& nodes,
                    gfx::NativeView view) {
@@ -152,7 +148,8 @@ void DragBookmarks(Profile* profile,
   bookmark_pasteboard_helper_mac::WriteToPasteboard(
       bookmark_pasteboard_helper_mac::kDragPasteboard,
       elements,
-      profile->GetPath());
+      profile->GetPath(),
+      ui::Clipboard::SourceTag());
 
   // Synthesize an event for dragging, since we can't be sure that
   // [NSApp currentEvent] will return a valid dragging event.
@@ -186,4 +183,4 @@ void DragBookmarks(Profile* profile,
   MessageLoop::current()->SetNestableTasksAllowed(was_nested);
 }
 
-}  // namespace bookmark_utils
+}  // namespace chrome

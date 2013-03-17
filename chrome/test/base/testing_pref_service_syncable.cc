@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/prefs/pref_notifier_impl.h"
 #include "base/prefs/pref_value_store.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 template<>
@@ -45,6 +45,20 @@ TestingPrefServiceSyncable::TestingPrefServiceSyncable()
         new TestingPrefStore(),
         new PrefRegistrySyncable(),
         new PrefNotifierImpl()) {
+}
+
+TestingPrefServiceSyncable::TestingPrefServiceSyncable(
+    TestingPrefStore* managed_prefs,
+    TestingPrefStore* user_prefs,
+    TestingPrefStore* recommended_prefs,
+    PrefRegistrySyncable* pref_registry,
+    PrefNotifierImpl* pref_notifier)
+    : TestingPrefServiceBase<PrefServiceSyncable, PrefRegistrySyncable>(
+        managed_prefs,
+        user_prefs,
+        recommended_prefs,
+        pref_registry,
+        pref_notifier) {
 }
 
 TestingPrefServiceSyncable::~TestingPrefServiceSyncable() {

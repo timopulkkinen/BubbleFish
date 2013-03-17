@@ -21,9 +21,9 @@ scoped_ptr<OutputSurface> FakeLayerImplTreeHostClient::createOutputSurface()
 {
     if (m_useSoftwareRendering) {
         if (m_useDelegatingRenderer)
-            return FakeOutputSurface::CreateDelegatingSoftware(make_scoped_ptr(new FakeSoftwareOutputDevice).PassAs<SoftwareOutputDevice>()).PassAs<OutputSurface>();
+            return FakeOutputSurface::CreateDelegatingSoftware(make_scoped_ptr(new SoftwareOutputDevice)).PassAs<OutputSurface>();
 
-        return FakeOutputSurface::CreateSoftware(make_scoped_ptr(new FakeSoftwareOutputDevice).PassAs<SoftwareOutputDevice>()).PassAs<OutputSurface>();
+        return FakeOutputSurface::CreateSoftware(make_scoped_ptr(new SoftwareOutputDevice)).PassAs<OutputSurface>();
     }
 
     WebKit::WebGraphicsContext3D::Attributes attrs;
@@ -39,14 +39,17 @@ scoped_ptr<InputHandler> FakeLayerImplTreeHostClient::createInputHandler()
 }
 
 scoped_refptr<cc::ContextProvider> FakeLayerImplTreeHostClient::OffscreenContextProviderForMainThread() {
-    if (!m_mainThreadContexts || m_mainThreadContexts->DestroyedOnMainThread())
-        m_mainThreadContexts = new FakeContextProvider;
+    if (!m_mainThreadContexts || m_mainThreadContexts->DestroyedOnMainThread()) {
+        m_mainThreadContexts = FakeContextProvider::Create();
+        if (!m_mainThreadContexts->BindToCurrentThread())
+            m_mainThreadContexts = NULL;
+    }
     return m_mainThreadContexts;
 }
 
 scoped_refptr<cc::ContextProvider> FakeLayerImplTreeHostClient::OffscreenContextProviderForCompositorThread() {
     if (!m_compositorThreadContexts || m_compositorThreadContexts->DestroyedOnMainThread())
-        m_compositorThreadContexts = new FakeContextProvider;
+        m_compositorThreadContexts = FakeContextProvider::Create();
     return m_compositorThreadContexts;
 }
 

@@ -16,6 +16,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -153,7 +153,7 @@ bool EncodingMenuModel::GetAcceleratorForCommandId(
   return false;
 }
 
-void EncodingMenuModel::ExecuteCommand(int command_id) {
+void EncodingMenuModel::ExecuteCommand(int command_id, int event_flags) {
   chrome::ExecuteCommand(browser_, command_id);
 }
 
@@ -345,7 +345,7 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
   return false;
 }
 
-void WrenchMenuModel::ExecuteCommand(int command_id) {
+void WrenchMenuModel::ExecuteCommand(int command_id, int event_flags) {
   GlobalError* error = GlobalErrorServiceFactory::GetForProfile(
       browser_->profile())->GetGlobalErrorByMenuItemCommandID(command_id);
   if (error) {
@@ -506,7 +506,7 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
 
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
+  if (chrome::search::IsInstantExtendedAPIEnabled()) {
     recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
                                                                  browser_,
                                                                  NULL));
@@ -623,7 +623,12 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
                            tools_menu_model_.get());
   }
 
-  if (browser_defaults::kShowExitMenuItem) {
+  bool show_exit_menu = browser_defaults::kShowExitMenuItem;
+#if defined(OS_WIN) && defined(USE_AURA)
+  if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+    show_exit_menu = false;
+#endif
+  if (show_exit_menu) {
     AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
@@ -725,6 +730,7 @@ void WrenchMenuModel::UpdateZoomControls() {
       IDS_ZOOM_PERCENT, base::IntToString16(zoom_percent));
 }
 
-void WrenchMenuModel::OnZoomLevelChanged(const std::string& host) {
+void WrenchMenuModel::OnZoomLevelChanged(
+    const content::HostZoomMap::ZoomLevelChange& change) {
   UpdateZoomControls();
 }

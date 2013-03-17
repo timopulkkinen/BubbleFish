@@ -15,20 +15,20 @@ namespace cc {
 
 class CC_EXPORT PictureImageLayer : public PictureLayer, ContentLayerClient {
  public:
-  static scoped_refptr<PictureImageLayer> create();
+  static scoped_refptr<PictureImageLayer> Create();
 
-  void setBitmap(const SkBitmap& image);
+  void SetBitmap(const SkBitmap& image);
 
   // Layer implementation.
-  virtual scoped_ptr<LayerImpl> createLayerImpl(
-      LayerTreeImpl* treeImpl) OVERRIDE;
-  virtual bool drawsContent() const OVERRIDE;
+  virtual scoped_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) OVERRIDE;
+  virtual bool DrawsContent() const OVERRIDE;
 
   // ContentLayerClient implementation.
-  virtual void paintContents(
+  virtual void PaintContents(
       SkCanvas* canvas,
-      const gfx::Rect& clip,
-      gfx::RectF& opaque) OVERRIDE;
+      gfx::Rect clip,
+      gfx::RectF* opaque) OVERRIDE;
 
  private:
   PictureImageLayer();

@@ -7,6 +7,7 @@
 #include "cc/picture_pile_impl.h"
 #include "cc/region.h"
 #include "cc/rendering_stats.h"
+#include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSize.h"
 #include "ui/gfx/rect_conversions.h"
@@ -15,12 +16,45 @@
 
 namespace cc {
 
+PicturePileImpl::ClonesForDrawing::ClonesForDrawing(
+    const PicturePileImpl* pile, int num_threads) {
+  for (int i = 0; i < num_threads; i++) {
+    scoped_refptr<PicturePileImpl> clone =
+        PicturePileImpl::CreateCloneForDrawing(pile, i);
+    clones_.push_back(clone);
+  }
+}
+
+PicturePileImpl::ClonesForDrawing::~ClonesForDrawing() {
+}
+
 scoped_refptr<PicturePileImpl> PicturePileImpl::Create() {
   return make_scoped_refptr(new PicturePileImpl());
 }
 
+scoped_refptr<PicturePileImpl> PicturePileImpl::CreateFromOther(
+    const PicturePileBase* other) {
+  return make_scoped_refptr(new PicturePileImpl(other));
+}
+
+scoped_refptr<PicturePileImpl> PicturePileImpl::CreateCloneForDrawing(
+    const PicturePileImpl* other, unsigned thread_index) {
+  return make_scoped_refptr(new PicturePileImpl(other, thread_index));
+}
+
 PicturePileImpl::PicturePileImpl()
-    : slow_down_raster_scale_factor_for_debug_(0) {
+    : clones_for_drawing_(ClonesForDrawing(this, 0)) {
+}
+
+PicturePileImpl::PicturePileImpl(const PicturePileBase* other)
+    : PicturePileBase(other),
+      clones_for_drawing_(ClonesForDrawing(this, num_raster_threads())) {
+}
+
+PicturePileImpl::PicturePileImpl(
+    const PicturePileImpl* other, unsigned thread_index)
+    : PicturePileBase(other, thread_index),
+      clones_for_drawing_(ClonesForDrawing(this, 0)) {
 }
 
 PicturePileImpl::~PicturePileImpl() {
@@ -28,30 +62,8 @@ PicturePileImpl::~PicturePileImpl() {
 
 PicturePileImpl* PicturePileImpl::GetCloneForDrawingOnThread(
     unsigned thread_index) const {
-  CHECK_GT(clones_.size(), thread_index);
-  return clones_[thread_index];
-}
-
-void PicturePileImpl::CloneForDrawing(int num_threads) {
-  clones_.clear();
-  for (int i = 0; i < num_threads; i++) {
-    scoped_refptr<PicturePileImpl> clone = Create();
-    clone->tiling_ = tiling_;
-    for (PictureListMap::const_iterator map_iter = picture_list_map_.begin();
-         map_iter != picture_list_map_.end(); ++map_iter) {
-      const PictureList& this_pic_list = map_iter->second;
-      PictureList& clone_pic_list = clone->picture_list_map_[map_iter->first];
-      for (PictureList::const_iterator pic_iter = this_pic_list.begin();
-           pic_iter != this_pic_list.end(); ++pic_iter) {
-        clone_pic_list.push_back((*pic_iter)->GetCloneForDrawingOnThread(i));
-      }
-    }
-    clone->min_contents_scale_ = min_contents_scale_;
-    clone->set_slow_down_raster_scale_factor(
-        slow_down_raster_scale_factor_for_debug_);
-
-    clones_.push_back(clone);
-  }
+  CHECK_GT(clones_for_drawing_.clones_.size(), thread_index);
+  return clones_for_drawing_.clones_[thread_index];
 }
 
 void PicturePileImpl::Raster(
@@ -141,7 +153,7 @@ void PicturePileImpl::Raster(
           SkRegion::kDifference_Op);
       unclipped.Subtract(content_clip);
 
-      total_pixels_rasterized +=
+      *total_pixels_rasterized +=
           content_clip.width() * content_clip.height();
     }
   }
@@ -187,11 +199,6 @@ void PicturePileImpl::GatherPixelRefs(
   }
 }
 
-void PicturePileImpl::PushPropertiesTo(PicturePileImpl* other) {
-  PicturePileBase::PushPropertiesTo(other);
-  other->clones_ = clones_;
-}
-
 skia::RefPtr<SkPicture> PicturePileImpl::GetFlattenedPicture() {
   TRACE_EVENT0("cc", "PicturePileImpl::GetFlattenedPicture");
 
@@ -212,28 +219,33 @@ skia::RefPtr<SkPicture> PicturePileImpl::GetFlattenedPicture() {
   return picture;
 }
 
-bool PicturePileImpl::IsCheapInRect(
-    gfx::Rect content_rect, float contents_scale) const {
+void PicturePileImpl::AnalyzeInRect(const gfx::Rect& content_rect,
+                                    float contents_scale,
+                                    PicturePileImpl::Analysis* analysis) {
+  DCHECK(analysis);
+  TRACE_EVENT0("cc", "PicturePileImpl::AnalyzeInRect");
+
   gfx::Rect layer_rect = gfx::ToEnclosingRect(
       gfx::ScaleRect(content_rect, 1.f / contents_scale));
 
-  for (TilingData::Iterator tile_iter(&tiling_, layer_rect);
-       tile_iter; ++tile_iter) {
-    PictureListMap::const_iterator map_iter =
-        picture_list_map_.find(tile_iter.index());
-    if (map_iter == picture_list_map_.end())
-      continue;
+  SkBitmap emptyBitmap;
+  emptyBitmap.setConfig(SkBitmap::kNo_Config, content_rect.width(),
+                        content_rect.height());
+  skia::AnalysisDevice device(emptyBitmap);
+  skia::AnalysisCanvas canvas(&device);
 
-    const PictureList& pic_list = map_iter->second;
-    for (PictureList::const_iterator i = pic_list.begin();
-         i != pic_list.end(); ++i) {
-      if (!(*i)->LayerRect().Intersects(layer_rect) || !(*i)->HasRecording())
-        continue;
-      if (!(*i)->IsCheapInRect(layer_rect))
-        return false;
-    }
-  }
-  return true;
+  int64 total_pixels_rasterized = 0;
+  Raster(&canvas, content_rect, contents_scale, &total_pixels_rasterized);
+
+  analysis->is_transparent = canvas.isTransparent();
+  analysis->is_solid_color = canvas.getColorIfSolid(&analysis->solid_color);
+  analysis->is_cheap_to_raster = canvas.isCheap();
+}
+
+PicturePileImpl::Analysis::Analysis() :
+    is_solid_color(false),
+    is_transparent(false),
+    is_cheap_to_raster(false) {
 }
 
 }  // namespace cc

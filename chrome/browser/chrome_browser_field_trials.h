@@ -51,9 +51,6 @@ class ChromeBrowserFieldTrials {
   // bucketing and reporting systems.
   void SetupUniformityFieldTrials(const base::Time& install_date);
 
-  // Disables the new tab field trial if not running in desktop mode.
-  void DisableNewTabFieldTrialIfNecesssary();
-
   // Sets up the InfiniteCache field trial.
   void SetUpInfiniteCacheFieldTrial();
 
@@ -67,6 +64,9 @@ class ChromeBrowserFieldTrials {
   // A field trial to determine the impact of using non-blocking reads for
   // TCP sockets on Windows instead of overlapped I/O.
   void WindowsOverlappedTCPReadsFieldTrial();
+
+  // A field trial to check the simple cache performance.
+  void SetUpSimpleCacheFieldTrial();
 
   // Instantiates dynamic trials by querying their state, to ensure they get
   // reported as used.

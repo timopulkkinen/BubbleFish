@@ -5,8 +5,6 @@
 {
   'variables': {
     'chromium_code': 1,
-    # Override to dynamically link the PulseAudio library.
-    'use_pulseaudio%': 0,
     # Override to dynamically link the cras (ChromeOS audio) library.
     'use_cras%': 0,
     'conditions': [
@@ -19,8 +17,8 @@
         'media_use_ffmpeg%': 1,
         'media_use_libvpx%': 1,
       }],
-      # Screen capturer works only on Windows, OSX and Linux.
-      ['OS=="win" or OS=="mac" or OS=="linux"', {
+      # Screen capturer works only on Windows, OSX and Linux (with X11).
+      ['OS=="win" or OS=="mac" or (OS=="linux" and use_x11==1)', {
         'screen_capture_supported%': 1,
       }, {
         'screen_capture_supported%': 0,
@@ -107,6 +105,8 @@
         'audio/cross_process_notification.h',
         'audio/cross_process_notification_posix.cc',
         'audio/cross_process_notification_win.cc',
+        'audio/fake_audio_consumer.cc',
+        'audio/fake_audio_consumer.h',
         'audio/fake_audio_input_stream.cc',
         'audio/fake_audio_input_stream.h',
         'audio/fake_audio_output_stream.cc',
@@ -135,8 +135,6 @@
         'audio/mac/audio_low_latency_output_mac.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
-        'audio/mac/audio_output_mac.cc',
-        'audio/mac/audio_output_mac.h',
         'audio/mac/audio_synchronized_mac.cc',
         'audio/mac/audio_synchronized_mac.h',
         'audio/mac/audio_unified_mac.cc',
@@ -326,6 +324,8 @@
         'filters/skcanvas_video_renderer.h',
         'filters/source_buffer_stream.cc',
         'filters/source_buffer_stream.h',
+        'filters/stream_parser_factory.cc',
+        'filters/stream_parser_factory.h',
         'filters/video_decoder_selector.cc',
         'filters/video_decoder_selector.h',
         'filters/video_renderer_base.cc',
@@ -346,8 +346,8 @@
         'video/capture/screen/differ.h',
         'video/capture/screen/differ_block.cc',
         'video/capture/screen/differ_block.h',
-        'video/capture/screen/linux/x_server_pixel_buffer.cc',
-        'video/capture/screen/linux/x_server_pixel_buffer.h',
+        'video/capture/screen/x11/x_server_pixel_buffer.cc',
+        'video/capture/screen/x11/x_server_pixel_buffer.h',
         'video/capture/screen/mac/desktop_configuration.mm',
         'video/capture/screen/mac/desktop_configuration.h',
         'video/capture/screen/mac/scoped_pixel_buffer_object.cc',
@@ -367,8 +367,9 @@
         'video/capture/screen/screen_capturer_fake.h',
         'video/capture/screen/screen_capturer_helper.cc',
         'video/capture/screen/screen_capturer_helper.h',
-        'video/capture/screen/screen_capturer_linux.cc',
+        'video/capture/screen/screen_capturer_x11.cc',
         'video/capture/screen/screen_capturer_mac.mm',
+        'video/capture/screen/screen_capturer_null.cc',
         'video/capture/screen/screen_capturer_win.cc',
         'video/capture/screen/shared_buffer.cc',
         'video/capture/screen/shared_buffer.h',
@@ -409,6 +410,8 @@
         'webm/webm_content_encodings.h',
         'webm/webm_content_encodings_client.cc',
         'webm/webm_content_encodings_client.h',
+        'webm/webm_crypto_helpers.cc',
+        'webm/webm_crypto_helpers.h',
         'webm/webm_info_parser.cc',
         'webm/webm_info_parser.h',
         'webm/webm_parser.cc',
@@ -428,6 +431,11 @@
           'defines': [
             'USE_NEON'
           ],
+        }],
+        ['OS != "linux" or use_x11 == 1', {
+          'sources!': [
+            'video/capture/screen/screen_capturer_null.cc',
+          ]
         }],
         ['OS != "ios"', {
           'dependencies': [
@@ -520,6 +528,7 @@
             ['include', '^audio/audio_manager\\.'],
             ['include', '^audio/audio_manager_base\\.'],
             ['include', '^audio/audio_parameters\\.'],
+            ['include', '^audio/fake_audio_consumer\\.'],
             ['include', '^audio/fake_audio_input_stream\\.'],
             ['include', '^audio/fake_audio_output_stream\\.'],
             ['include', '^base/audio_bus\\.'],
@@ -589,15 +598,17 @@
               }],
             ],
           },
-          'link_settings': {
-            'libraries': [
-              '-lX11',
-              '-lXdamage',
-              '-lXext',
-              '-lXfixes',
-            ],
-          },
           'conditions': [
+            ['use_x11 == 1', {
+              'link_settings': {
+                'libraries': [
+                  '-lX11',
+                  '-lXdamage',
+                  '-lXext',
+                  '-lXfixes',
+                ],
+              },
+            }],
             ['use_cras == 1', {
               'cflags': [
                 '<!@(<(pkg-config) --cflags libcras)',
@@ -632,80 +643,75 @@
             'audio/cras/cras_output.h',
           ],
         }],
-        ['os_posix == 1', {
-          'conditions': [
-            ['use_pulseaudio == 1', {
-              'cflags': [
-                '<!@(pkg-config --cflags libpulse)',
-              ],
-              'defines': [
-                'USE_PULSEAUDIO',
-              ],
-              'variables': {
-                'generate_stubs_script': '../tools/generate_stubs/generate_stubs.py',
-                'extra_header': 'audio/pulse/pulse_stub_header.fragment',
-                'sig_files': ['audio/pulse/pulse.sigs'],
-                'outfile_type': 'posix_stubs',
-                'stubs_filename_root': 'pulse_stubs',
-                'project_path': 'media/audio/pulse',
-                'intermediate_dir': '<(INTERMEDIATE_DIR)',
-                'output_root': '<(SHARED_INTERMEDIATE_DIR)/pulse',
-              },
-              'sources': [
+        ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android" and chromeos != 1', {
+          'defines': [
+            'USE_PULSEAUDIO',
+          ],
+          'variables': {
+            'generate_stubs_script': '../tools/generate_stubs/generate_stubs.py',
+            'extra_header': 'audio/pulse/pulse_stub_header.fragment',
+            'sig_files': ['audio/pulse/pulse.sigs'],
+            'outfile_type': 'posix_stubs',
+            'stubs_filename_root': 'pulse_stubs',
+            'project_path': 'media/audio/pulse',
+            'intermediate_dir': '<(INTERMEDIATE_DIR)',
+            'output_root': '<(SHARED_INTERMEDIATE_DIR)/pulse',
+          },
+          'sources': [
+            '<(extra_header)',
+          ],
+          'include_dirs': [
+            '<(output_root)',
+          ],
+          'actions': [
+            {
+              'action_name': 'generate_stubs',
+              'inputs': [
+                '<(generate_stubs_script)',
                 '<(extra_header)',
+                '<@(sig_files)',
               ],
-              'include_dirs': [
-                '<(output_root)',
-               ],
-              'actions': [
-                {
-                  'action_name': 'generate_stubs',
-                  'inputs': [
-                    '<(generate_stubs_script)',
-                    '<(extra_header)',
-                    '<@(sig_files)',
-                  ],
-                  'outputs': [
-                    '<(intermediate_dir)/<(stubs_filename_root).cc',
-                    '<(output_root)/<(project_path)/<(stubs_filename_root).h',
-                  ],
-                  'action': ['python',
-                             '<(generate_stubs_script)',
-                             '-i', '<(intermediate_dir)',
-                             '-o', '<(output_root)/<(project_path)',
-                             '-t', '<(outfile_type)',
-                             '-e', '<(extra_header)',
-                             '-s', '<(stubs_filename_root)',
-                             '-p', '<(project_path)',
-                             '<@(_inputs)',
-                  ],
-                  'process_outputs_as_sources': 1,
-                  'message': 'Generating Pulse stubs for dynamic loading.',
-                },
+              'outputs': [
+                '<(intermediate_dir)/<(stubs_filename_root).cc',
+                '<(output_root)/<(project_path)/<(stubs_filename_root).h',
               ],
-              'conditions': [ 
-                # Linux/Solaris need libdl for dlopen() and friends.
-                ['OS == "linux" or OS == "solaris"', {
-                  'link_settings': {
-                    'libraries': [
-                      '-ldl',
-                    ],
-                  },
-                }],
+              'action': ['python',
+                         '<(generate_stubs_script)',
+                         '-i', '<(intermediate_dir)',
+                         '-o', '<(output_root)/<(project_path)',
+                         '-t', '<(outfile_type)',
+                         '-e', '<(extra_header)',
+                         '-s', '<(stubs_filename_root)',
+                         '-p', '<(project_path)',
+                         '<@(_inputs)',
               ],
-            }, {  # else: use_pulseaudio == 0
-              'sources!': [
-                'audio/pulse/audio_manager_pulse.cc',
-                'audio/pulse/audio_manager_pulse.h',
-                'audio/pulse/pulse_input.cc',
-                'audio/pulse/pulse_input.h',
-                'audio/pulse/pulse_output.cc',
-                'audio/pulse/pulse_output.h',
-                'audio/pulse/pulse_util.cc',
-                'audio/pulse/pulse_util.h',
-              ],
+              'process_outputs_as_sources': 1,
+              'message': 'Generating Pulse stubs for dynamic loading.',
+            },
+          ],
+          'conditions': [
+            # Linux/Solaris need libdl for dlopen() and friends.
+            ['OS == "linux" or OS == "solaris"', {
+              'link_settings': {
+                'libraries': [
+                  '-ldl',
+                ],
+              },
             }],
           ],
+        }, {  # else: OS=="win or OS == "mac" or OS == "ios" or OS == "android" or chromeos == 1
+          'sources!': [
+            'audio/pulse/audio_manager_pulse.cc',
+            'audio/pulse/audio_manager_pulse.h',
+            'audio/pulse/pulse_input.cc',
+            'audio/pulse/pulse_input.h',
+            'audio/pulse/pulse_output.cc',
+            'audio/pulse/pulse_output.h',
+            'audio/pulse/pulse_util.cc',
+            'audio/pulse/pulse_util.h',
+          ],
+        }],
+        ['os_posix == 1', {
           'sources!': [
             'video/capture/video_capture_device_dummy.cc',
             'video/capture/video_capture_device_dummy.h',
@@ -725,14 +731,6 @@
         }],
         ['OS=="win"', {
           'sources!': [
-            'audio/pulse/audio_manager_pulse.cc',
-            'audio/pulse/audio_manager_pulse.h',
-            'audio/pulse/pulse_input.cc',
-            'audio/pulse/pulse_input.h',
-            'audio/pulse/pulse_output.cc',
-            'audio/pulse/pulse_output.h',
-            'audio/pulse/pulse_util.cc',
-            'audio/pulse/pulse_util.h',
             'video/capture/video_capture_device_dummy.cc',
             'video/capture/video_capture_device_dummy.h',
           ],
@@ -811,6 +809,12 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
+        # ios check is necessary due to http://crbug.com/172682.
+        ['OS != "ios" and (target_arch == "ia32" or target_arch == "x64")', {
+          'dependencies': [
+            'media_sse',
+          ],
+        }],
       ],
       'target_conditions': [
         ['OS == "ios"', {
@@ -849,12 +853,11 @@
         'audio/audio_parameters_unittest.cc',
         'audio/audio_util_unittest.cc',
         'audio/cross_process_notification_unittest.cc',
-        'audio/fake_audio_output_stream_unittest.cc',
+        'audio/fake_audio_consumer_unittest.cc',
         'audio/ios/audio_manager_ios_unittest.cc',
         'audio/linux/alsa_output_unittest.cc',
         'audio/mac/audio_device_listener_mac_unittest.cc',
         'audio/mac/audio_low_latency_input_mac_unittest.cc',
-        'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
         'audio/virtual_audio_input_stream_unittest.cc',
         'audio/virtual_audio_output_stream_unittest.cc',
@@ -1018,12 +1021,15 @@
             'audio/audio_low_latency_input_output_unittest.cc',
           ],
         }],
-        [ 'target_arch=="ia32" or target_arch=="x64"', {
+        ['OS != "ios" and (target_arch=="ia32" or target_arch=="x64")', {
           'sources': [
             'base/simd/convert_rgb_to_yuv_unittest.cc',
           ],
+          'dependencies': [
+            'media_sse',
+          ],
         }],
-        [ 'screen_capture_supported == 0', {
+        ['screen_capture_supported == 0', {
           'sources/': [
             ['exclude', '^video/capture/screen/'],
           ],
@@ -1087,53 +1093,8 @@
     },
   ],
   'conditions': [
-    ['OS != "ios"', {
+    ['OS != "ios" and target_arch != "arm"', {
       'targets': [
-        {
-          # Minimal target for NaCl and other renderer side media clients which
-          # only need to send audio data across the shared memory to the browser
-          # process.
-          'target_name': 'shared_memory_support',
-          'type': '<(component)',
-          'dependencies': [
-            '../base/base.gyp:base',
-          ],
-          'defines': [
-            'MEDIA_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'includes': [
-            'shared_memory_support.gypi',
-          ],
-          'sources': [
-            '<@(shared_memory_support_sources)',
-          ],
-        },
-        {
-          'target_name': 'yuv_convert',
-          'type': 'static_library',
-          'include_dirs': [
-            '..',
-          ],
-          'conditions': [
-            [ 'target_arch == "ia32" or target_arch == "x64"', {
-              'dependencies': [
-                'yuv_convert_simd_x86',
-              ],
-            }],
-            [ 'target_arch == "arm" or target_arch == "mipsel"', {
-              'dependencies': [
-                'yuv_convert_simd_c',
-              ],
-            }],
-          ],
-          'sources': [
-            'base/yuv_convert.cc',
-            'base/yuv_convert.h',
-          ],
-        },
         {
           'target_name': 'yuv_convert_simd_x86',
           'type': 'static_library',
@@ -1238,6 +1199,55 @@
             '../third_party/yasm/yasm_compile.gypi',
           ],
         },
+      ], # targets
+    }],
+    ['OS != "ios"', {
+      'targets': [
+        {
+          # Minimal target for NaCl and other renderer side media clients which
+          # only need to send audio data across the shared memory to the browser
+          # process.
+          'target_name': 'shared_memory_support',
+          'type': '<(component)',
+          'dependencies': [
+            '../base/base.gyp:base',
+          ],
+          'defines': [
+            'MEDIA_IMPLEMENTATION',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'includes': [
+            'shared_memory_support.gypi',
+          ],
+          'sources': [
+            '<@(shared_memory_support_sources)',
+          ],
+        },
+        {
+          'target_name': 'yuv_convert',
+          'type': 'static_library',
+          'include_dirs': [
+            '..',
+          ],
+          'conditions': [
+            [ 'target_arch == "ia32" or target_arch == "x64"', {
+              'dependencies': [
+                'yuv_convert_simd_x86',
+              ],
+            }],
+            [ 'target_arch == "arm" or target_arch == "mipsel"', {
+              'dependencies': [
+                'yuv_convert_simd_c',
+              ],
+            }],
+          ],
+          'sources': [
+            'base/yuv_convert.cc',
+            'base/yuv_convert.h',
+          ],
+        },
         {
           'target_name': 'yuv_convert_simd_c',
           'type': 'static_library',
@@ -1330,7 +1340,7 @@
         },
       ],
     }],
-    ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
+    ['use_x11 == 1', {
       'targets': [
         {
           'target_name': 'player_x11',
@@ -1387,7 +1397,7 @@
           'target_name': 'media_player_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'media',
+            'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaPlayer.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },
@@ -1404,31 +1414,18 @@
             'base/android/java/src/org/chromium/media/MediaPlayerListener.java',
           ],
           'variables': {
-            'jni_gen_dir': 'media',
+            'jni_gen_package': 'media',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
         {
-          'target_name': 'camera_jni_headers',
-          'type': 'none',
-          'variables': {
-            'jni_gen_dir': 'media',
-            'input_java_class': 'android/hardware/Camera.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
-          },
-          'includes': [ '../build/jar_file_jni_generator.gypi' ],
-        },
-        {
           'target_name': 'video_capture_android_jni_headers',
           'type': 'none',
-          'dependencies': [
-            'camera_jni_headers',
-          ],
           'sources': [
             'base/android/java/src/org/chromium/media/VideoCapture.java',
           ],
           'variables': {
-            'jni_gen_dir': 'media',
+            'jni_gen_package': 'media',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
@@ -1436,7 +1433,7 @@
           'target_name': 'media_codec_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'media',
+            'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaCodec.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },
@@ -1446,7 +1443,7 @@
           'target_name': 'media_format_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'media',
+            'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaFormat.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },
@@ -1608,6 +1605,28 @@
             'video/capture/screen/differ_block_sse2.h',
           ],
         }, # end of target differ_block_sse2
+      ],
+    }],
+    # ios check is necessary due to http://crbug.com/172682.
+    ['OS != "ios" and (target_arch=="ia32" or target_arch=="x64")', {
+      'targets': [
+        {
+          'target_name': 'media_sse',
+          'type': 'static_library',
+          'cflags': [
+            '-msse',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'defines': [
+            'MEDIA_IMPLEMENTATION',
+          ],
+          'sources': [
+            'base/simd/sinc_resampler_sse.cc',
+            'base/simd/vector_math_sse.cc',
+          ],
+        }, # end of target media_sse
       ],
     }],
   ],

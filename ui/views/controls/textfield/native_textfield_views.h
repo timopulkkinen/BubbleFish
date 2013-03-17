@@ -80,6 +80,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public View,
   // ui::TouchEditable overrides:
   virtual void SelectRect(const gfx::Point& start,
                           const gfx::Point& end) OVERRIDE;
+  virtual void MoveCaretTo(const gfx::Point& point) OVERRIDE;
   virtual void GetSelectionEndPoints(gfx::Rect* p1, gfx::Rect* p2) OVERRIDE;
   virtual gfx::Rect GetBounds() OVERRIDE;
   virtual gfx::NativeView GetNativeView() OVERRIDE;
@@ -157,7 +158,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public View,
       ui::Accelerator* accelerator) OVERRIDE;
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
   virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
   // class name of internal
   static const char kViewClassName[];

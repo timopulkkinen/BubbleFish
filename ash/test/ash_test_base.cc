@@ -27,8 +27,13 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/base/ime/text_input_test_support.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
+
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/message_center/message_center.h"
+#endif
 
 #if defined(OS_WIN)
 #include "ash/test/test_metro_viewer_process_host.h"
@@ -51,7 +56,7 @@ class AshEventGeneratorDelegate : public aura::test::EventGeneratorDelegate {
   // aura::test::EventGeneratorDelegate overrides:
   virtual aura::RootWindow* GetRootWindowAt(
       const gfx::Point& point_in_screen) const OVERRIDE {
-    gfx::Screen* screen = Shell::GetInstance()->screen();
+    gfx::Screen* screen = Shell::GetScreen();
     gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
     return Shell::GetInstance()->display_controller()->
         GetRootWindowForDisplayId(display.id());
@@ -91,18 +96,29 @@ void AshTestBase::SetUp() {
   aura::test::SetUsePopupAsRootWindowForTest(true);
 #endif
   // Disable animations during tests.
-  ui::LayerAnimator::set_disable_animations_for_test(true);
+  zero_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
+      ui::ScopedAnimationDurationScaleMode::ZERO_DURATION));
   ui::TextInputTestSupport::Initialize();
 
   // Creates Shell and hook with Desktop.
   test_shell_delegate_ = new TestShellDelegate;
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  // Creates MessageCenter since g_browser_process is not created in AshTestBase
+  // tests.
+  message_center::MessageCenter::Initialize();
+#endif
   ash::Shell::CreateInstance(test_shell_delegate_);
+  Shell* shell = Shell::GetInstance();
+  test::DisplayManagerTestApi(shell->display_manager()).
+      DisableChangeDisplayUponHostResize();
+
   Shell::GetPrimaryRootWindow()->Show();
   Shell::GetPrimaryRootWindow()->ShowRootWindow();
   // Move the mouse cursor to far away so that native events doesn't
   // interfere test expectations.
   Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
-  Shell::GetInstance()->cursor_manager()->EnableMouseEvents();
+  shell->cursor_manager()->EnableMouseEvents();
 
 #if defined(OS_WIN)
   if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
@@ -130,6 +146,12 @@ void AshTestBase::TearDown() {
 
   // Tear down the shell.
   Shell::DeleteInstance();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  // Remove global message center state.
+  message_center::MessageCenter::Shutdown();
+#endif
+
   aura::Env::DeleteInstance();
   ui::TextInputTestSupport::Shutdown();
 

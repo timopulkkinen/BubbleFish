@@ -31,7 +31,6 @@
 #include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "chromeos/dbus/ibus/ibus_panel_service.h"
 #include "chromeos/dbus/ibus/ibus_property.h"
-#include "content/public/browser/browser_thread.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/ime/input_method_ibus.h"
@@ -85,7 +84,7 @@ bool PropertyKeyIsBlacklisted(const std::string& key) {
 bool ConvertProperty(const IBusProperty& ibus_prop,
                      InputMethodPropertyList* out_prop_list) {
   DCHECK(out_prop_list);
-  DCHECK(ibus_prop.key().empty());
+  DCHECK(!ibus_prop.key().empty());
   IBusProperty::IBusPropertyType type = ibus_prop.type();
 
   // Sanity checks.

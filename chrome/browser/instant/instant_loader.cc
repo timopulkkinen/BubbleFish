@@ -11,6 +11,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "content/public/browser/navigation_entry.h"
@@ -81,6 +82,10 @@ void InstantLoader::SetContents(scoped_ptr<content::WebContents> new_contents) {
   TabSpecificContentSettings::FromWebContents(contents())->
       SetPopupsBlocked(true);
 
+  // Bookmarks (Users can bookmark the Instant NTP. This ensures the bookmarked
+  // state is correctly set when the contents are swapped into a tab.)
+  BookmarkTabHelper::CreateForWebContents(contents());
+
   // A tab helper to catch prerender content swapping shenanigans.
   CoreTabHelper::CreateForWebContents(contents());
   CoreTabHelper::FromWebContents(contents())->set_delegate(this);
@@ -108,6 +113,11 @@ void InstantLoader::SetContents(scoped_ptr<content::WebContents> new_contents) {
                  content::Source<content::NavigationController>(
                      &contents_->GetController()));
 #endif
+
+  // When the WebContents finishes loading it should be checked to ensure that
+  // it is in the instant process.
+  registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+                 content::Source<content::WebContents>(contents_.get()));
 }
 
 scoped_ptr<content::WebContents> InstantLoader::ReleaseContents() {
@@ -130,13 +140,23 @@ scoped_ptr<content::WebContents> InstantLoader::ReleaseContents() {
                     content::Source<content::NavigationController>(
                         &contents_->GetController()));
 #endif
+  registrar_.Remove(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+                    content::Source<content::WebContents>(contents_.get()));
 
   return contents_.Pass();
 }
 
 void InstantLoader::Observe(int type,
-                            const content::NotificationSource& /* source */,
-                            const content::NotificationDetails& /* details */) {
+                            const content::NotificationSource& source,
+                            const content::NotificationDetails& details) {
+  if (type == content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME) {
+    const content::WebContents* web_contents =
+        content::Source<content::WebContents>(source).ptr();
+    DCHECK_EQ(contents_.get(), web_contents);
+    delegate_->LoadCompletedMainFrame();
+    return;
+  }
+
 #if defined(OS_MACOSX)
   if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
     if (content::RenderWidgetHostView* rwhv =
@@ -144,8 +164,8 @@ void InstantLoader::Observe(int type,
       rwhv->SetTakesFocusOnlyOnMouseDown(true);
     return;
   }
-  NOTREACHED();
 #endif
+  NOTREACHED();
 }
 
 void InstantLoader::SwapTabContents(content::WebContents* old_contents,

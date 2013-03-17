@@ -11,15 +11,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/stub_chrome.h"
+#include "chrome/test/chromedriver/chrome/stub_web_view.h"
+#include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/command_executor_impl.h"
 #include "chrome/test/chromedriver/commands.h"
 #include "chrome/test/chromedriver/element_commands.h"
 #include "chrome/test/chromedriver/fake_session_accessor.h"
 #include "chrome/test/chromedriver/session_commands.h"
-#include "chrome/test/chromedriver/status.h"
-#include "chrome/test/chromedriver/stub_chrome.h"
-#include "chrome/test/chromedriver/stub_web_view.h"
-#include "chrome/test/chromedriver/web_view.h"
 #include "chrome/test/chromedriver/window_commands.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webdriver/atoms.h"
@@ -231,7 +231,7 @@ TEST(CommandsTest, SuccessfulFindElement) {
   FindElementWebView web_view(true, kElementExistsQueryTwice);
   Session session("id");
   session.implicit_wait = 1000;
-  session.frame = "frame_id1";
+  session.SwitchToSubFrame("frame_id1", "");
   base::DictionaryValue params;
   params.SetString("using", "id");
   params.SetString("value", "a");
@@ -260,7 +260,7 @@ TEST(CommandsTest, SuccessfulFindElements) {
   FindElementWebView web_view(false, kElementExistsQueryTwice);
   Session session("id");
   session.implicit_wait = 1000;
-  session.frame = "frame_id2";
+  session.SwitchToSubFrame("frame_id2", "");
   base::DictionaryValue params;
   params.SetString("using", "name");
   params.SetString("value", "b");
@@ -294,7 +294,7 @@ TEST(CommandsTest, SuccessfulFindChildElement) {
   FindElementWebView web_view(true, kElementExistsQueryTwice);
   Session session("id");
   session.implicit_wait = 1000;
-  session.frame = "frame_id3";
+  session.SwitchToSubFrame("frame_id3", "");
   base::DictionaryValue params;
   params.SetString("using", "tag name");
   params.SetString("value", "div");
@@ -332,7 +332,7 @@ TEST(CommandsTest, SuccessfulFindChildElements) {
   FindElementWebView web_view(false, kElementExistsQueryTwice);
   Session session("id");
   session.implicit_wait = 1000;
-  session.frame = "frame_id4";
+  session.SwitchToSubFrame("frame_id4", "");
   base::DictionaryValue params;
   params.SetString("using", "class name");
   params.SetString("value", "c");

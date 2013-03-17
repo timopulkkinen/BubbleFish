@@ -75,6 +75,17 @@ FileTransferController.prototype = {
 
   /**
    * @this {FileTransferController}
+   * @param {DirectoryTree} tree Its sub items will could be drop target.
+   */
+  attachTreeDropTarget: function(tree) {
+    tree.addEventListener('dragover', this.onDragOver_.bind(this, true, tree));
+    tree.addEventListener('dragenter', this.onDragEnterTree_.bind(this, tree));
+    tree.addEventListener('dragleave', this.onDragLeave_.bind(this, tree));
+    tree.addEventListener('drop', this.onDrop_.bind(this, true));
+  },
+
+  /**
+   * @this {FileTransferController}
    * @param {HTMLElement} breadcrumbsContainer Element which contains target
    *     breadcrumbs.
    */
@@ -156,8 +167,9 @@ FileTransferController.prototype = {
 
     // For drive search, sourceDir will be set to null, so we should double
     // check that we are not on drive.
+    // TODO(haruki): Investigate if this still is the case.
     if (dataTransfer.getData('fs/isOnDrive') == 'true')
-      return '/' + DirectoryModel.DRIVE_DIRECTORY;
+      return RootDirectory.DRIVE;
 
     // |dataTransfer| in protected mode.
     if (window[DRAG_AND_DROP_GLOBAL_DATA])
@@ -226,7 +238,8 @@ FileTransferController.prototype = {
   preloadThumbnailImage_: function(entry) {
     var imageUrl = entry.toURL();
     var metadataTypes = 'thumbnail|filesystem';
-    this.preloadedThumbnailImageNode_ = this.document_.createElement('div');
+    var thumbnailContainer = this.document_.createElement('div');
+    this.preloadedThumbnailImageNode_ = thumbnailContainer;
     this.preloadedThumbnailImageNode_.className = 'img-container';
     this.directoryModel_.getMetadataCache().get(
         imageUrl,
@@ -235,7 +248,7 @@ FileTransferController.prototype = {
           new ThumbnailLoader(imageUrl,
                               ThumbnailLoader.LoaderType.IMAGE,
                               metadata).
-              load(this.preloadedThumbnailImageNode_,
+              load(thumbnailContainer,
                    ThumbnailLoader.FillMode.FILL);
         }.bind(this));
   },
@@ -301,8 +314,6 @@ FileTransferController.prototype = {
     }
 
     var dt = event.dataTransfer;
-    var dragThumbnail = this.renderThumbnail_();
-    dt.setDragImage(dragThumbnail, 1000, 1000);
 
     if (this.canCopyOrDrag_(dt)) {
       if (this.canCutOrDrag_(dt))
@@ -311,7 +322,11 @@ FileTransferController.prototype = {
         this.cutOrCopy_(dt, 'copy');
     } else {
       event.preventDefault();
+      return;
     }
+
+    var dragThumbnail = this.renderThumbnail_();
+    dt.setDragImage(dragThumbnail, 1000, 1000);
 
     window[DRAG_AND_DROP_GLOBAL_DATA] = {
       sourceRoot: this.directoryModel_.getCurrentRootPath()
@@ -326,7 +341,7 @@ FileTransferController.prototype = {
   onDragEnd_: function(list, event) {
     var container = this.document_.querySelector('#drag-container');
     container.textContent = '';
-    this.setDropTarget_(null);
+    this.clearDropTarget_();
     delete window[DRAG_AND_DROP_GLOBAL_DATA];
   },
 
@@ -363,7 +378,32 @@ FileTransferController.prototype = {
       this.setDropTarget_(item, entry.isDirectory, event.dataTransfer,
           entry.fullPath);
     } else {
-      this.setDropTarget_(null);
+      this.clearDropTarget_();
+    }
+  },
+
+  /**
+   * @this {FileTransferController}
+   * @param {DirectoryTree} tree Drop target tree.
+   * @param {Event} event A dragenter event of DOM.
+   */
+  onDragEnterTree_: function(tree, event) {
+    event.preventDefault();  // Required to prevent the cursor flicker.
+    this.lastEnteredTarget_ = event.target;
+    var item = event.target;
+    while (item && !(item instanceof DirectoryItem)) {
+      item = item.parentNode;
+    }
+
+    if (item == this.dropTarget_)
+      return;
+
+    var entry = item && item.entry;
+    if (entry) {
+      this.setDropTarget_(item, entry.isDirectory, event.dataTransfer,
+          entry.fullPath);
+    } else {
+      this.clearDropTarget_();
     }
   },
 
@@ -396,7 +436,7 @@ FileTransferController.prototype = {
     // drop target. So event.target == this.lastEnteredTarget_
     // could only be if mouse goes out of listened element.
     if (event.target == this.lastEnteredTarget_) {
-      this.setDropTarget_(null);
+      this.clearDropTarget_();
       this.lastEnteredTarget_ = null;
     }
   },
@@ -417,43 +457,58 @@ FileTransferController.prototype = {
     event.preventDefault();
     this.paste(event.dataTransfer, destinationPath,
                this.selectDropEffect_(event, destinationPath));
-    this.setDropTarget_(null);
+    this.clearDropTarget_();
   },
 
   /**
+   * Sets the drop target.
    * @this {FileTransferController}
+   * @param {Element} domElement Target of the drop.
+   * @param {boolean} isDirectory If the target is a directory.
+   * @param {DataTransfer} dataTransfer Data transfer object.
+   * @param {string} destinationPath Destination path.
    */
-  setDropTarget_: function(domElement, isDirectory, opt_dataTransfer,
-                           opt_destinationPath) {
+  setDropTarget_: function(domElement, isDirectory, dataTransfer,
+                           destinationPath) {
     if (this.dropTarget_ == domElement)
       return;
 
     /** @type {string?} */
     this.destinationPath_ = null;
-    if (domElement) {
-      if (isDirectory &&
-          this.canPasteOrDrop_(opt_dataTransfer, opt_destinationPath)) {
-        domElement.classList.add('accepts');
-        this.destinationPath_ = opt_destinationPath;
-      }
+
+    // Add accept class if the domElement can accept the drag.
+    if (isDirectory &&
+        this.canPasteOrDrop_(dataTransfer, destinationPath)) {
+      domElement.classList.add('accepts');
+      this.destinationPath_ = destinationPath;
     }
-    if (this.dropTarget_ && this.dropTarget_.classList.contains('accepts')) {
-      var oldDropTarget = this.dropTarget_;
-      var self = this;
-      setTimeout(function() {
-        if (oldDropTarget != self.dropTarget_)
-          oldDropTarget.classList.remove('accepts');
-      }, 0);
-    }
+
+    // Remove the old drag target.
+    this.clearDropTarget_();
+
+    // Set the new drop target.
     this.dropTarget_ = domElement;
+
+    // Start timer changing the directory.
+    if (domElement && isDirectory && destinationPath &&
+        this.canPasteOrDrop_(dataTransfer, destinationPath)) {
+      this.navigateTimer_ = setTimeout(function() {
+        this.directoryModel_.changeDirectory(destinationPath);
+      }.bind(this), 2000);
+    }
+  },
+
+  /**
+   * Clears the drop target.
+   * @this {FileTransferController}
+   */
+  clearDropTarget_: function() {
+    if (this.dropTarget_ && this.dropTarget_.classList.contains('accepts'))
+      this.dropTarget_.classList.remove('accepts');
+    this.dropTarget_ = null;
     if (this.navigateTimer_ !== undefined) {
       clearTimeout(this.navigateTimer_);
       this.navigateTimer_ = undefined;
-    }
-    if (domElement && isDirectory && opt_destinationPath) {
-      this.navigateTimer_ = setTimeout(function() {
-        this.directoryModel_.changeDirectory(opt_destinationPath);
-      }.bind(this), 2000);
     }
   },
 
@@ -529,7 +584,7 @@ FileTransferController.prototype = {
 
   /**
    * @this {FileTransferController}
-   * @return {boolean}  Returns true if some files are selected and all the file
+   * @return {boolean} Returns true if some files are selected and all the file
    *     on drive is available to be cut. Otherwise, returns false.
    */
   canCutOrDrag_: function() {
@@ -570,8 +625,10 @@ FileTransferController.prototype = {
 
   /**
    * @this {FileTransferController}
-   * @return {boolean}  Returns true if {@code opt_destinationPath} is
-   *     available to be pasted to. Otherwise, returns false.
+   * @param {DataTransfer} dataTransfer Data transfer object.
+   * @param {string=} opt_destinationPath Destination path.
+   * @return {boolean}  Returns true if items stored in {@code dataTransfer} can
+   *     be pasted to {@code opt_destinationPath}. Otherwise, returns false.
    */
   canPasteOrDrop_: function(dataTransfer, opt_destinationPath) {
     var destinationPath = opt_destinationPath ||

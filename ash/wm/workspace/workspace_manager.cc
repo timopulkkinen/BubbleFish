@@ -8,12 +8,12 @@
 #include <functional>
 
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/frame_painter.h"
 #include "ash/wm/property_util.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
@@ -35,6 +35,7 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/views/widget/widget.h"
 
@@ -509,7 +510,8 @@ void WorkspaceManager::SetUnminimizingWorkspace(Workspace* workspace) {
 void WorkspaceManager::FadeDesktop(aura::Window* window,
                                    base::TimeDelta duration) {
   if (views::corewm::WindowAnimationsDisabled(NULL) ||
-      ui::LayerAnimator::disable_animations_for_test())
+      ui::ScopedAnimationDurationScaleMode::duration_scale_mode() ==
+      ui::ScopedAnimationDurationScaleMode::ZERO_DURATION)
     return;
 
   base::AutoReset<bool> reseter(&creating_fade_, true);

@@ -10,12 +10,15 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -98,25 +101,34 @@ bool ManagedUserService::ProfileIsManaged() const {
 }
 
 bool ManagedUserService::IsElevated() const {
-  PrefService* pref_service = profile_->GetPrefs();
-  // If there is no passphrase set, the profile is considered to be elevated.
-  if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty())
-    return true;
   return is_elevated_;
 }
 
 void ManagedUserService::RequestAuthorization(
     content::WebContents* web_contents,
     const PassphraseCheckedCallback& callback) {
-  PrefService* pref_service = profile_->GetPrefs();
 
-  // If there is no passphrase set, we do not need to ask for authentication.
-  if (pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty()) {
+  // If the profile is already elevated or there is no passphrase set, no
+  // authentication is needed.
+  PrefService* pref_service = profile_->GetPrefs();
+  if (IsElevated() ||
+      pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty()) {
     callback.Run(true);
     return;
   }
+
   // Is deleted automatically when the dialog is closed.
   new ManagedUserPassphraseDialog(web_contents, callback);
+}
+
+void ManagedUserService::RequestAuthorization(
+    const PassphraseCheckedCallback& callback) {
+  Browser* browser = chrome::FindBrowserWithProfile(
+      profile_,
+      chrome::GetActiveDesktop());
+  RequestAuthorization(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      callback);
 }
 
 // static
@@ -177,7 +189,9 @@ std::string ManagedUserService::GetDebugPolicyProviderName() const {
 bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
                                      string16* error) const {
   string16 tmp_error;
-  if (ExtensionManagementPolicyImpl(&tmp_error))
+  // |extension| can be NULL in unit tests.
+  if (ExtensionManagementPolicyImpl(extension ? extension->id() : "",
+                                    &tmp_error))
     return true;
 
   // If the extension is already loaded, we allow it, otherwise we'd unload
@@ -216,7 +230,8 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
 bool ManagedUserService::UserMayModifySettings(
     const extensions::Extension* extension,
     string16* error) const {
-  return ExtensionManagementPolicyImpl(error);
+  // |extension| can be NULL in unit tests.
+  return ExtensionManagementPolicyImpl(extension ? extension->id() : "", error);
 }
 
 void ManagedUserService::Observe(int type,
@@ -244,11 +259,16 @@ void ManagedUserService::Observe(int type,
   }
 }
 
-bool ManagedUserService::ExtensionManagementPolicyImpl(string16* error) const {
+bool ManagedUserService::ExtensionManagementPolicyImpl(
+    const std::string& extension_id,
+    string16* error) const {
   if (!ProfileIsManaged())
     return true;
 
   if (is_elevated_)
+    return true;
+
+  if (elevated_for_extensions_.count(extension_id))
     return true;
 
   if (error)
@@ -357,6 +377,16 @@ void ManagedUserService::SetElevated(bool is_elevated) {
   is_elevated_ = is_elevated;
 }
 
+void ManagedUserService::AddElevationForExtension(
+    const std::string& extension_id) {
+  elevated_for_extensions_.insert(extension_id);
+}
+
+void ManagedUserService::RemoveElevationForExtension(
+    const std::string& extension_id) {
+  elevated_for_extensions_.erase(extension_id);
+}
+
 void ManagedUserService::Init() {
   if (!ProfileIsManaged())
     return;
@@ -378,6 +408,12 @@ void ManagedUserService::Init() {
       base::Bind(
           &ManagedUserService::OnDefaultFilteringBehaviorChanged,
           base::Unretained(this)));
+
+  // TODO(bauerb): Setting the default value here does not currently trigger
+  // the proper notification. Once that is fixed use SetDefaultPrefValue
+  // instead.
+  if (!profile_->GetPrefs()->HasPrefPath(prefs::kForceSafeSearch))
+    profile_->GetPrefs()->SetBoolean(prefs::kForceSafeSearch, true);
 
   // Initialize the filter.
   OnDefaultFilteringBehaviorChanged();

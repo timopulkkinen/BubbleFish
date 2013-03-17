@@ -6,21 +6,21 @@
 #define UI_MESSAGE_CENTER_VIEWS_MESSAGE_CENTER_BUBBLE_H_
 
 #include "ui/message_center/message_center_export.h"
-#include "ui/message_center/notification_list.h"
+#include "ui/message_center/notification_change_observer.h"
 #include "ui/message_center/views/message_bubble_base.h"
 
 namespace message_center {
 
-class MessageCenterContentsView;
+class MessageCenterView;
 
 // Bubble for message center.
 class MESSAGE_CENTER_EXPORT MessageCenterBubble : public MessageBubbleBase {
  public:
-  explicit MessageCenterBubble(NotificationList::Delegate* delegate);
+  explicit MessageCenterBubble(MessageCenter* message_center);
 
   virtual ~MessageCenterBubble();
 
-  // Overridden from MessageBubbleBase.
+  // Overridden from MessageBubbleBase:
   virtual views::TrayBubbleView::InitParams GetInitParams(
       views::TrayBubbleView::AnchorAlignment anchor_alignment) OVERRIDE;
   virtual void InitializeContents(views::TrayBubbleView* bubble_view) OVERRIDE;
@@ -32,7 +32,7 @@ class MESSAGE_CENTER_EXPORT MessageCenterBubble : public MessageBubbleBase {
   size_t NumMessageViewsForTest() const;
 
  private:
-  MessageCenterContentsView* contents_view_;
+  MessageCenterView* contents_view_;
 
   // The maximum height
   int max_height_;

@@ -16,13 +16,35 @@ class Platform(object):
     """Platforms may be able to collect GL surface stats."""
     return self._platform_backend.IsRawDisplayFrameRateSupported()
 
-  def StartRawDisplayFrameRateMeasurement(self, trace_tag):
+  def StartRawDisplayFrameRateMeasurement(self):
     """Start measuring GL surface stats."""
-    return self._platform_backend.StartRawDisplayFrameRateMeasurement(trace_tag)
+    return self._platform_backend.StartRawDisplayFrameRateMeasurement()
 
   def StopRawDisplayFrameRateMeasurement(self):
-    """Stop measuring GL surface stats and print results."""
+    """Stop measuring GL surface stats."""
     return self._platform_backend.StopRawDisplayFrameRateMeasurement()
+
+  class RawDisplayFrameRateMeasurement(object):
+    def __init__(self, name, value, unit):
+      self._name = name
+      self._value = value
+      self._unit = unit
+
+    @property
+    def name(self):
+      return self._name
+
+    @property
+    def value(self):
+      return self._value
+
+    @property
+    def unit(self):
+      return self._unit
+
+  def GetRawDisplayFrameRateMeasurements(self):
+    """Returns a list of RawDisplayFrameRateMeasurement."""
+    return self._platform_backend.GetRawDisplayFrameRateMeasurements()
 
   def SetFullPerformanceModeEnabled(self, enabled):
     """Platforms may tweak their CPU governor, system status, etc.
@@ -50,29 +72,3 @@ class Platform(object):
   def HasBeenThermallyThrottled(self):
     """Returns True if the device has been thermally throttled."""
     return self._platform_backend.HasBeenThermallyThrottled()
-
-
-def EmptyPlatform():
-  class EmptyPlatformBackend(object):
-    def IsRawDisplayFrameRateSupported(self):
-      return False
-
-    def StartRawDisplayFrameRateMeasurement(self, _):
-      return NotImplementedError()
-
-    def StopRawDisplayFrameRateMeasurement(self):
-      return NotImplementedError()
-
-    def SetFullPerformanceModeEnabled(self, enabled):
-      pass
-
-    def CanMonitorThermalThrottling(self):
-      return False
-
-    def IsThermallyThrottled(self):
-      return NotImplementedError()
-
-    def HasBeenThermallyThrottled(self):
-      return NotImplementedError()
-
-  return Platform(EmptyPlatformBackend())

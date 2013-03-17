@@ -8,26 +8,32 @@
 #include <vector>
 
 #include "cc/animation.h"
+#include "ui/gfx/transform.h"
 
 namespace cc {
 
 struct AnimationEvent {
-    enum Type { Started, Finished };
+  enum Type { Started, Finished, PropertyUpdate };
 
-    AnimationEvent(Type type, int layerId, int groupId, Animation::TargetProperty targetProperty, double monotonicTime)
-        : type(type)
-        , layerId(layerId)
-        , groupId(groupId)
-        , targetProperty(targetProperty)
-        , monotonicTime(monotonicTime)
-    {
-    }
+  AnimationEvent(Type type,
+                 int layer_id,
+                 int group_id,
+                 Animation::TargetProperty target_property,
+                 double monotonic_time)
+      : type(type),
+        layer_id(layer_id),
+        group_id(group_id),
+        target_property(target_property),
+        monotonic_time(monotonic_time),
+        opacity(0.f) {}
 
-    Type type;
-    int layerId;
-    int groupId;
-    Animation::TargetProperty targetProperty;
-    double monotonicTime;
+  Type type;
+  int layer_id;
+  int group_id;
+  Animation::TargetProperty target_property;
+  double monotonic_time;
+  float opacity;
+  gfx::Transform transform;
 };
 
 typedef std::vector<AnimationEvent> AnimationEventsVector;

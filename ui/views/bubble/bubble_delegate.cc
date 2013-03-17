@@ -35,6 +35,7 @@ Widget* CreateBubbleWidget(BubbleDelegateView* bubble) {
     bubble_params.parent = bubble->anchor_widget()->GetNativeView();
   bubble_params.can_activate = bubble->CanActivate();
 #if defined(OS_WIN) && !defined(USE_AURA)
+  bubble_params.type = Widget::InitParams::TYPE_WINDOW_FRAMELESS;
   bubble_params.transparent = false;
 #endif
   bubble_widget->Init(bubble_params);
@@ -66,7 +67,7 @@ class BubbleBorderDelegate : public WidgetDelegate,
   virtual const Widget* GetWidget() const OVERRIDE { return widget_; }
   virtual NonClientFrameView* CreateNonClientFrameView(
       Widget* widget) OVERRIDE {
-    return bubble_->CreateBubbleFrameView();
+    return bubble_->CreateNonClientFrameView(widget);
   }
 
   // WidgetObserver overrides:
@@ -186,13 +187,11 @@ View* BubbleDelegateView::GetContentsView() {
 
 NonClientFrameView* BubbleDelegateView::CreateNonClientFrameView(
     Widget* widget) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // On non-aura windows the bubble frame is owned by the border widget. The
-  // main widget uses the default non client view, so return NULL here.
-  return NULL;
-#else
-  return CreateBubbleFrameView();
-#endif
+  BubbleFrameView* frame = new BubbleFrameView(margins());
+  BubbleBorder::ArrowLocation arrow = base::i18n::IsRTL() ?
+      BubbleBorder::horizontal_mirror(arrow_location()) : arrow_location();
+  frame->SetBubbleBorder(new BubbleBorder(arrow, shadow(), color()));
+  return frame;
 }
 
 void BubbleDelegateView::OnWidgetDestroying(Widget* widget) {
@@ -232,15 +231,10 @@ void BubbleDelegateView::OnWidgetBoundsChanged(Widget* widget,
 }
 
 gfx::Rect BubbleDelegateView::GetAnchorRect() {
-  if (!anchor_view())
-    return gfx::Rect(anchor_point_, gfx::Size());
-  gfx::Rect anchor_bounds = anchor_view()->GetBoundsInScreen();
+  gfx::Rect anchor_bounds = anchor_view() ? anchor_view()->GetBoundsInScreen() :
+      gfx::Rect(anchor_point_, gfx::Size());
   anchor_bounds.Inset(anchor_insets_);
   return anchor_bounds;
-}
-
-void BubbleDelegateView::Show() {
-  GetWidget()->Show();
 }
 
 void BubbleDelegateView::StartFade(bool fade_in) {
@@ -252,7 +246,7 @@ void BubbleDelegateView::StartFade(bool fade_in) {
     if (border_widget_)
       border_widget_->SetOpacity(original_opacity_);
     GetWidget()->SetOpacity(original_opacity_);
-    Show();
+    GetWidget()->Show();
     fade_animation_->Show();
   } else {
     original_opacity_ = 255;
@@ -270,14 +264,6 @@ void BubbleDelegateView::ResetFade() {
 void BubbleDelegateView::SetAlignment(BubbleBorder::BubbleAlignment alignment) {
   GetBubbleFrameView()->bubble_border()->set_alignment(alignment);
   SizeToContents();
-}
-
-BubbleFrameView* BubbleDelegateView::CreateBubbleFrameView() {
-  BubbleFrameView* frame = new BubbleFrameView(margins());
-  BubbleBorder::ArrowLocation arrow = base::i18n::IsRTL() ?
-      BubbleBorder::horizontal_mirror(arrow_location()) : arrow_location();
-  frame->SetBubbleBorder(new BubbleBorder(arrow, shadow(), color()));
-  return frame;
 }
 
 bool BubbleDelegateView::AcceleratorPressed(

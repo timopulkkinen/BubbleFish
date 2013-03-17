@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "base/auto_reset.h"
 #include "base/callback.h"
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
@@ -20,7 +21,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
-#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
@@ -30,15 +30,15 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/in_memory_database.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/metrics/variations/variations_http_header_provider.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
@@ -176,7 +176,7 @@ void SearchProvider::FinalizeInstantQuery(const string16& input_text,
     }
   }
 
-  // Add the new instant suggest result.
+  // Add the new Instant suggest result.
   if (suggestion.type == INSTANT_SUGGESTION_SEARCH) {
     // Instant has a query suggestion. Rank it higher than SEARCH_WHAT_YOU_TYPED
     // so that it gets autocompleted.
@@ -259,10 +259,23 @@ void SearchProvider::Start(const AutocompleteInput& input,
       keyword_provider->keyword() : string16());
   if (!minimal_changes ||
       !providers_.equal(default_provider_keyword, keyword_provider_keyword)) {
-    if (done_)
+    // If Instant has not come back with a suggestion, adjust the previous
+    // suggestion if possible. If |instant_finalized| is true, we are looking
+    // for synchronous matches only, so the suggestion is cleared.
+    if (instant_finalized_)
       default_provider_suggestion_ = InstantSuggestion();
     else
+      AdjustDefaultProviderSuggestion(input_.text(), input.text());
+
+    // Cancel any in-flight suggest requests.
+    if (!done_) {
+      // The Stop(false) call below clears |default_provider_suggestion_|, but
+      // in this instance we do not want to clear cached results, so we
+      // restore it.
+      base::AutoReset<InstantSuggestion> reset(&default_provider_suggestion_,
+                                               InstantSuggestion());
       Stop(false);
+    }
   }
 
   providers_.set(default_provider_keyword, keyword_provider_keyword);
@@ -285,13 +298,13 @@ void SearchProvider::Start(const AutocompleteInput& input,
 
   input_ = input;
 
-  // Don't run the normal provider flow when the Instant Extended API is
-  // enabled.  (When the Extended API is enabled, the embedded page will handle
-  // all search suggestions itself.)
-  // TODO(dcblack): once we are done refactoring the omnibox so we don't need to
+  // When Instant is enabled in the extended mode, the embedded page will handle
+  // all search suggestions itself, so don't run the normal provider flow.
+  // TODO(dcblack): Once we are done refactoring the omnibox so we don't need to
   // use FinalizeInstantQuery anymore, we can take out this check and remove
   // this provider from kInstantExtendedOmniboxProviders.
-  if (!chrome::search::IsInstantExtendedAPIEnabled(profile_)) {
+  if (!chrome::search::IsInstantExtendedAPIEnabled() ||
+      !chrome::search::IsInstantEnabled(profile_)) {
     DoHistoryQuery(minimal_changes);
     StartOrStopSuggestQuery(minimal_changes);
   }
@@ -363,8 +376,7 @@ void SearchProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
   new_entry.set_provider(AsOmniboxEventProviderType());
   new_entry.set_provider_done(done_);
   uint32 field_trial_hash = 0;
-  if (AutocompleteFieldTrial::GetActiveSuggestFieldTrialHash(
-      &field_trial_hash)) {
+  if (OmniboxFieldTrial::GetActiveSuggestFieldTrialHash(&field_trial_hash)) {
     if (field_trial_triggered_)
       new_entry.mutable_field_trial_triggered()->Add(field_trial_hash);
     if (field_trial_triggered_in_session_) {
@@ -628,6 +640,47 @@ void SearchProvider::RemoveStaleNavigationResults(NavigationResults* list,
   }
 }
 
+void SearchProvider::AdjustDefaultProviderSuggestion(
+    const string16& previous_input,
+    const string16& current_input) {
+  if (default_provider_suggestion_.type == INSTANT_SUGGESTION_URL) {
+    // Build a list of NavigationResults with only one NavigationResult in it,
+    // initialized with the URL in the navigation suggestion. This allows the
+    // use of RemoveStaleNavigationResults(), which has non-trivial logic to
+    // determine staleness.
+    NavigationResults list;
+    // Description and relevance do not matter in the check for staleness.
+    NavigationResult result(GURL(default_provider_suggestion_.text),
+                                 string16(),
+                                 100);
+    list.push_back(result);
+    RemoveStaleNavigationResults(&list, current_input);
+    // If navigation suggestion is stale, clear |default_provider_suggestion_|.
+    if (list.empty())
+      default_provider_suggestion_ = InstantSuggestion();
+  } else {
+    DCHECK(default_provider_suggestion_.type == INSTANT_SUGGESTION_SEARCH);
+    // InstantSuggestion of type SEARCH contain only the suggested text, and not
+    // the full text of the query. This looks at the current and previous input
+    // to determine if the user is typing forward, and if the new input is
+    // contained in |default_provider_suggestion_|. If so, the suggestion is
+    // adjusted and can be kept. Otherwise, it is reset.
+    if (!previous_input.empty() &&
+        StartsWith(current_input, previous_input, false)) {
+      // User is typing forward; verify if new input is part of the suggestion.
+      const string16 new_text = string16(current_input, previous_input.size());
+      if (StartsWith(default_provider_suggestion_.text, new_text, false)) {
+        // New input is a prefix to the previous suggestion, adjust the
+        // suggestion to strip the prefix.
+        default_provider_suggestion_.text.erase(0, new_text.size());
+        return;
+      }
+    }
+    // If we are here, the search suggestion is stale; reset it.
+    default_provider_suggestion_ = InstantSuggestion();
+  }
+}
+
 void SearchProvider::ApplyCalculatedRelevance() {
   ApplyCalculatedSuggestRelevance(&keyword_suggest_results_, true);
   ApplyCalculatedSuggestRelevance(&default_suggest_results_, false);
@@ -721,7 +774,7 @@ bool SearchProvider::ParseSuggestResults(Value* root_val, bool is_keyword) {
     extras->GetList("google:suggesttype", &types);
 
     // Only accept relevance suggestions if Instant is disabled.
-    if (!chrome::BrowserInstantController::IsInstantEnabled(profile_)) {
+    if (!chrome::search::IsInstantEnabled(profile_)) {
       // Discard this list if its size does not match that of the suggestions.
       if (extras->GetList("google:suggestrelevance", &relevances) &&
           relevances->GetSize() != results->GetSize())
@@ -1395,9 +1448,7 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
 
 void SearchProvider::UpdateDone() {
   // We're done when the timer isn't running, there are no suggest queries
-  // pending, and we're not waiting on instant.
+  // pending, and we're not waiting on Instant.
   done_ = (!timer_.IsRunning() && (suggest_results_pending_ == 0) &&
-           (instant_finalized_ ||
-            (!chrome::BrowserInstantController::IsInstantEnabled(profile_) &&
-             !chrome::search::IsInstantExtendedAPIEnabled(profile_))));
+           (instant_finalized_ || !chrome::search::IsInstantEnabled(profile_)));
 }

@@ -712,6 +712,9 @@ void GLES2AsyncTexImage2DCHROMIUM(
       target, level, internalformat, width, height, border, format, type,
       pixels);
 }
+void GLES2WaitAsyncTexImage2DCHROMIUM(GLenum target) {
+  gles2::GetGLContext()->WaitAsyncTexImage2DCHROMIUM(target);
+}
 void GLES2DiscardFramebufferEXT(
     GLenum target, GLsizei count, const GLenum* attachments) {
   gles2::GetGLContext()->DiscardFramebufferEXT(target, count, attachments);
@@ -719,8 +722,14 @@ void GLES2DiscardFramebufferEXT(
 void GLES2LoseContextCHROMIUM(GLenum current, GLenum other) {
   gles2::GetGLContext()->LoseContextCHROMIUM(current, other);
 }
+GLuint GLES2InsertSyncPointCHROMIUM() {
+  return gles2::GetGLContext()->InsertSyncPointCHROMIUM();
+}
 void GLES2WaitSyncPointCHROMIUM(GLuint sync_point) {
   gles2::GetGLContext()->WaitSyncPointCHROMIUM(sync_point);
+}
+void GLES2DrawBuffersEXT(GLsizei count, const GLenum* bufs) {
+  gles2::GetGLContext()->DrawBuffersEXT(count, bufs);
 }
 
 namespace gles2 {
@@ -1053,12 +1062,18 @@ NameToFunc g_gles2_function_table[] = {
       glAsyncTexSubImage2DCHROMIUM), },
   { "glAsyncTexImage2DCHROMIUM", reinterpret_cast<GLES2FunctionPointer>(
       glAsyncTexImage2DCHROMIUM), },
+  { "glWaitAsyncTexImage2DCHROMIUM", reinterpret_cast<GLES2FunctionPointer>(
+      glWaitAsyncTexImage2DCHROMIUM), },
   { "glDiscardFramebufferEXT", reinterpret_cast<GLES2FunctionPointer>(
       glDiscardFramebufferEXT), },
   { "glLoseContextCHROMIUM", reinterpret_cast<GLES2FunctionPointer>(
       glLoseContextCHROMIUM), },
+  { "glInsertSyncPointCHROMIUM", reinterpret_cast<GLES2FunctionPointer>(
+      glInsertSyncPointCHROMIUM), },
   { "glWaitSyncPointCHROMIUM", reinterpret_cast<GLES2FunctionPointer>(
       glWaitSyncPointCHROMIUM), },
+  { "glDrawBuffersEXT", reinterpret_cast<GLES2FunctionPointer>(
+      glDrawBuffersEXT), },
   { NULL, NULL, },
 };
 

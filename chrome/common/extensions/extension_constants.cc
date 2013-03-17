@@ -130,6 +130,8 @@ const char kHTermDevAppId[] = "okddffdblfhhnmhodogpojmfkjmhinfp";
 const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
 const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 const char kQuickOfficeDevExtensionId[] = "ionpfmkccalenbmnddpbmocokhaknphg";
+const char kStreamsPrivateTestExtensionId[] =
+    "oickdpebdnfbgkcaoklfcdhjniefkcji";
 const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
 const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
@@ -153,10 +155,6 @@ const char kAppStateCannotRun[] = "cannot_run";
 const char kAppStateReadyToRun[] = "ready_to_run";
 
 const char kMediaFileSystemPathPart[] = "_";
-
-const char kAppNotificationsIncognitoError[] =
-    "This API is not accessible by 'split' mode "
-    "extensions in incognito windows.";
 
 const int kExtensionIconSizes[] = {
   EXTENSION_ICON_GIGANTOR,  // 512

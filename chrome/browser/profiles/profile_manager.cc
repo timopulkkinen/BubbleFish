@@ -127,6 +127,10 @@ void ProfileSizeTask(const base::FilePath& path, int extension_count) {
   size_MB = static_cast<int>(size  / (1024 * 1024));
   UMA_HISTOGRAM_COUNTS_10000("Profile.ExtensionSize", size_MB);
 
+  size = file_util::ComputeFilesSize(path, FILE_PATH_LITERAL("Policy"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.PolicySize", size_MB);
+
   // Count number of extensions in this profile, if we know.
   if (extension_count != -1)
     UMA_HISTOGRAM_COUNTS_10000("Profile.AppCount", extension_count);
@@ -144,6 +148,12 @@ void OnOpenWindowForNewProfile(
     const ProfileManager::CreateCallback& callback,
     Profile* profile,
     Profile::CreateStatus status) {
+  // Invoke the callback before we open a window for this new profile, so the
+  // callback has a chance to update the profile state first (to do things like
+  // sign in the profile).
+  if (!callback.is_null())
+    callback.Run(profile, status);
+
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
 
     ProfileManager::FindOrCreateNewWindowForProfile(
@@ -153,8 +163,6 @@ void OnOpenWindowForNewProfile(
         desktop_type,
         false);
   }
-  if (!callback.is_null())
-    callback.Run(profile, status);
 }
 
 #if defined(OS_CHROMEOS)
@@ -987,9 +995,14 @@ void ProfileManager::ScheduleProfileForDeletion(
 
   // If we're deleting the last profile, then create a new profile in its
   // place.
+  PrefService* local_state = g_browser_process->local_state();
   ProfileInfoCache& cache = GetProfileInfoCache();
   if (cache.GetNumberOfProfiles() == 1) {
     base::FilePath new_path = GenerateNextProfileDirectoryPath();
+    // Make sure the last used profile path is pointing at it. This way the
+    // correct last used profile is set for any notification observers.
+    local_state->SetString(
+        prefs::kProfileLastUsed, new_path.BaseName().MaybeAsASCII());
 
     // TODO(robertshield): This desktop type needs to come from the invoker,
     // currently that involves plumbing this through web UI.
@@ -1001,19 +1014,18 @@ void ProfileManager::ScheduleProfileForDeletion(
                        string16(),
                        string16(),
                        false);
-  }
-
-  // Update the last used profile pref before closing browser windows. This way
-  // the correct last used profile is set for any notification observers.
-  PrefService* local_state = g_browser_process->local_state();
-  std::string last_profile = local_state->GetString(prefs::kProfileLastUsed);
-  if (profile_dir.BaseName().MaybeAsASCII() == last_profile) {
-    for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-      base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
-      if (cur_path != profile_dir) {
-        local_state->SetString(
-            prefs::kProfileLastUsed, cur_path.BaseName().MaybeAsASCII());
-        break;
+  } else {
+    // Update the last used profile pref before closing browser windows. This
+    // way the correct last used profile is set for any notification observers.
+    std::string last_profile = local_state->GetString(prefs::kProfileLastUsed);
+    if (profile_dir.BaseName().MaybeAsASCII() == last_profile) {
+      for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+        base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
+        if (cur_path != profile_dir) {
+          local_state->SetString(
+              prefs::kProfileLastUsed, cur_path.BaseName().MaybeAsASCII());
+          break;
+        }
       }
     }
   }

@@ -60,16 +60,11 @@ void ContentViewRenderView::SetCurrentContentView(
 void ContentViewRenderView::SurfaceCreated(
     JNIEnv* env, jobject obj, jobject jsurface) {
   InitCompositor();
-  ANativeWindow* native_window = ANativeWindow_fromSurface(env, jsurface);
-  if (!native_window)
-    return;
-
-  compositor_->SetWindowSurface(native_window);
-  ANativeWindow_release(native_window);
+  compositor_->SetSurface(jsurface);
 }
 
 void ContentViewRenderView::SurfaceDestroyed(JNIEnv* env, jobject obj) {
-  compositor_->SetWindowSurface(NULL);
+  compositor_->SetSurface(NULL);
 }
 
 void ContentViewRenderView::SurfaceSetSize(

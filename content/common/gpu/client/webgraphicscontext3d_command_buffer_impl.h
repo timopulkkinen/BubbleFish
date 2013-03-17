@@ -629,6 +629,12 @@ class WebGraphicsContext3DCommandBufferImpl
       WGC3Denum format,
       WGC3Denum type,
       const void* pixels);
+  virtual void waitAsyncTexImage2DCHROMIUM(WGC3Denum target);
+
+  // GL_EXT_draw_buffers
+  virtual void drawBuffersEXT(
+      WGC3Dsizei n,
+      const WGC3Denum* bufs);
 
  protected:
   virtual GrGLInterface* onCreateGrGLInterface();

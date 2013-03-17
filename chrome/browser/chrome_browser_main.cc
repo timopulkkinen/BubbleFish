@@ -146,6 +146,10 @@
 #include "base/android/build_info.h"
 #endif
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/active_tab_tracker.h"
+#endif
+
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "chrome/browser/first_run/upgrade_util_linux.h"
 #endif
@@ -837,11 +841,10 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
       !ProfileManager::IsImportProcess(parsed_command_line());
 #endif
 
-  base::FilePath local_state_path;
-  CHECK(PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path));
   scoped_refptr<base::SequencedTaskRunner> local_state_task_runner =
-      JsonPrefStore::GetTaskRunnerForFile(local_state_path,
-                                          BrowserThread::GetBlockingPool());
+      JsonPrefStore::GetTaskRunnerForFile(
+          base::FilePath(chrome::kLocalStorePoolName),
+          BrowserThread::GetBlockingPool());
   browser_process_.reset(new BrowserProcessImpl(local_state_task_runner,
                                                 parsed_command_line()));
 
@@ -1049,9 +1052,6 @@ void ChromeBrowserMainParts::PostProfileInit() {
 void ChromeBrowserMainParts::PreBrowserStart() {
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PreBrowserStart();
-#if !defined(OS_ANDROID)
-  gpu_util::InstallBrowserMonitor();
-#endif
 
   three_d_observer_.reset(new ThreeDAPIObserver());
 }
@@ -1060,14 +1060,6 @@ void ChromeBrowserMainParts::PostBrowserStart() {
 #if !defined(OS_ANDROID)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kVisitURLs))
     RunPageCycler();
-#endif
-
-  // Create the instance of the Google Now service.
-#if defined(ENABLE_GOOGLE_NOW)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGoogleNowIntegration)) {
-    GoogleNowServiceFactory::GetForProfile(profile_);
-  }
 #endif
 
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
@@ -1105,6 +1097,16 @@ void ChromeBrowserMainParts::SetupPlatformFieldTrials() {
 }
 
 int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
+#if !defined(OS_ANDROID)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kTrackActiveVisitTime)) {
+    active_tab_tracker_.reset(new ActiveTabTracker());
+    // TODO(sky): nuke this when all ports support ActiveTabTracker.
+    if (!active_tab_tracker_->is_valid())
+      active_tab_tracker_.reset();
+  }
+#endif
+
   // Android updates the metrics service dynamically depending on whether the
   // application is in the foreground or not. Do not start here.
 #if !defined(OS_ANDROID)
@@ -1329,6 +1331,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // blacklist decisions.
   if (g_browser_process->gl_string_manager())
     g_browser_process->gl_string_manager()->Initialize();
+
+  // Create an instance of GpuModeManager to watch gpu mode pref change.
+  g_browser_process->gpu_mode_manager();
 
 #if !defined(OS_ANDROID)
   // Show the First Run UI if this is the first time Chrome has been run on
@@ -1688,10 +1693,6 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
 
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopRun();
-
-#if !defined(OS_ANDROID)
-  gpu_util::UninstallBrowserMonitor();
-#endif
 
 #if defined(OS_WIN)
   // Log the search engine chosen on first run. Do this at shutdown, after any

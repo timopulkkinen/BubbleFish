@@ -1803,11 +1803,6 @@ enum {
   // do this.
   if ([findBarCocoaController_ isFindBarVisible])
     [self layoutSubviews];
-
-  if ([self placeBookmarkBarBelowInfoBar] &&
-      [bookmarkBarController_ shouldShowAtBottomWhenDetached]) {
-    [self layoutBottomBookmarkBarInContentFrame:[[self tabContentArea] frame]];
-  }
 }
 
 // Handle the openLearnMoreAboutCrashLink: action from SadTabController when
@@ -1868,7 +1863,10 @@ enum {
 - (id)windowWillReturnFieldEditor:(NSWindow*)sender toObject:(id)obj {
   // Ask the toolbar controller if it wants to return a custom field editor
   // for the specific object.
-  return [toolbarController_ customFieldEditorForObject:obj];
+  id fieldEditor = [toolbarController_ customFieldEditorForObject:obj];
+  if (!fieldEditor && findBarCocoaController_)
+    fieldEditor = [findBarCocoaController_ customFieldEditorForObject:obj];
+  return fieldEditor;
 }
 
 // (Needed for |BookmarkBarControllerDelegate| protocol.)

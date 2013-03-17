@@ -11,9 +11,9 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -105,6 +105,24 @@ string16 ToolbarModelImpl::GetText(
   return AutocompleteInput::FormattedStringWithEquivalentMeaning(
       url, net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
                           net::UnescapeRule::NORMAL, NULL, NULL, NULL));
+}
+
+string16 ToolbarModelImpl::GetCorpusNameForMobile() const {
+  if (!WouldReplaceSearchURLWithSearchTerms())
+    return string16();
+  GURL url(GetURL());
+  const std::string& query_str(url.query());
+  url_parse::Component query(0, query_str.length()), key, value;
+  const char kChipKey[] = "sboxchip";
+  while (url_parse::ExtractQueryKeyValue(query_str.c_str(), &query, &key,
+                                         &value)) {
+    if (key.is_nonempty() && query_str.substr(key.begin, key.len) == kChipKey) {
+      return net::UnescapeAndDecodeUTF8URLComponent(
+          query_str.substr(value.begin, value.len),
+          net::UnescapeRule::NORMAL, NULL);
+    }
+  }
+  return string16();
 }
 
 GURL ToolbarModelImpl::GetURL() const {

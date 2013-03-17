@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list_threadsafe.h"
+#include "base/process_util.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -69,8 +70,6 @@ class CONTENT_EXPORT GpuDataManagerImpl
   virtual void RegisterSwiftShaderPath(const base::FilePath& path) OVERRIDE;
   virtual void AddObserver(GpuDataManagerObserver* observer) OVERRIDE;
   virtual void RemoveObserver(GpuDataManagerObserver* observer) OVERRIDE;
-  virtual void SetWindowCount(uint32 count) OVERRIDE;
-  virtual uint32 GetWindowCount() const OVERRIDE;
   virtual void UnblockDomainFrom3DAPIs(const GURL& url) OVERRIDE;
   virtual void DisableGpuWatchdog() OVERRIDE;
   virtual void SetGLStrings(const std::string& gl_vendor,
@@ -79,6 +78,7 @@ class CONTENT_EXPORT GpuDataManagerImpl
   virtual void GetGLStrings(std::string* gl_vendor,
                             std::string* gl_renderer,
                             std::string* gl_version) OVERRIDE;
+  virtual void DisableHardwareAcceleration() OVERRIDE;
 
   // This collects preliminary GPU info, load GpuBlacklist, and compute the
   // preliminary blacklisted features; it should only be called at browser
@@ -106,10 +106,6 @@ class CONTENT_EXPORT GpuDataManagerImpl
 
   GpuSwitchingOption GetGpuSwitchingOption() const;
 
-  // Force the current card to be blacklisted (usually due to GPU process
-  // crashes).
-  void BlacklistCard();
-
   std::string GetBlacklistVersion() const;
 
   // Returns the reasons for the latest run of blacklisting decisions.
@@ -121,6 +117,8 @@ class CONTENT_EXPORT GpuDataManagerImpl
   void AddLogMessage(int level,
                      const std::string& header,
                      const std::string& message);
+
+  void ProcessCrashed(base::TerminationStatus exit_code);
 
   // Returns a new copy of the ListValue.  Caller is responsible to release
   // the returned value.
@@ -170,7 +168,8 @@ class CONTENT_EXPORT GpuDataManagerImpl
 
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, GpuSideBlacklisting);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, GpuSideExceptions);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, BlacklistCard);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest,
+                           DisableHardwareAcceleration);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, SoftwareRendering);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, SoftwareRendering2);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplTest, GpuInfoUpdate);

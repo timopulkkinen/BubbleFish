@@ -8,10 +8,10 @@
 // content scripts only.
 
   require('json_schema');
-  require('event_bindings');
   var json = require('json');
   var lastError = require('lastError');
   var miscNatives = requireNative('miscellaneous_bindings');
+  var chrome = requireNative('chrome').GetChrome();
   var CloseChannel = miscNatives.CloseChannel;
   var PortAddRef = miscNatives.PortAddRef;
   var PortRelease = miscNatives.PortRelease;
@@ -121,7 +121,7 @@
     if (sourceExtensionId != targetExtensionId)
       errorMsg += " for extension " + targetExtensionId;
     errorMsg += ").";
-    lastError.set(errorMsg);
+    lastError.set(errorMsg, chrome);
     console.error("Could not send response: " + errorMsg);
   }
 
@@ -225,22 +225,20 @@
 
   // Called by native code when a channel has been closed.
   chromeHidden.Port.dispatchOnDisconnect = function(
-      portId, connectionInvalid) {
+      portId, errorMessage) {
     var port = ports[portId];
     if (port) {
       // Update the renderer's port bookkeeping, without notifying the browser.
       CloseChannel(portId, false);
-      if (connectionInvalid) {
-        var errorMsg =
-            "Could not establish connection. Receiving end does not exist.";
-        lastError.set(errorMsg);
-        console.error("Port error: " + errorMsg);
+      if (errorMessage) {
+        lastError.set(errorMessage, chrome);
+        console.error("Port error: " + errorMessage);
       }
       try {
         port.onDisconnect.dispatch(port);
       } finally {
         port.destroy_();
-        lastError.clear();
+        lastError.clear(chrome);
       }
     }
   };

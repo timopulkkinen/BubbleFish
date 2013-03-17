@@ -23,9 +23,9 @@
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/cert_test_util.h"
@@ -39,7 +39,6 @@
 #include "net/base/net_log_unittest.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
-#include "net/base/ssl_connection_status_flags.h"
 #include "net/base/test_data_directory.h"
 #include "net/base/test_root_certs.h"
 #include "net/base/upload_bytes_element_reader.h"
@@ -57,6 +56,7 @@
 #include "net/ocsp/nss_ocsp.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/test_server.h"
 #include "net/url_request/ftp_protocol_handler.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -1361,8 +1361,8 @@ TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
 TEST_F(URLRequestTest, Identifiers) {
   TestDelegate d;
   TestURLRequestContext context;
-  TestURLRequest req(GURL("http://example.com"), &d, &context);
-  TestURLRequest other_req(GURL("http://example.com"), &d, &context);
+  TestURLRequest req(GURL("http://example.com"), &d, &context, NULL);
+  TestURLRequest other_req(GURL("http://example.com"), &d, &context, NULL);
 
   ASSERT_NE(req.identifier(), other_req.identifier());
 }
@@ -3881,7 +3881,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost302RedirectGet) {
   req.SetExtraRequestHeaders(headers);
 
   URLRequestRedirectJob* job = new URLRequestRedirectJob(
-      &req, default_context_.network_delegate(), test_server_.GetURL("echo"),
+      &req, &default_network_delegate_, test_server_.GetURL("echo"),
       URLRequestRedirectJob::REDIRECT_302_FOUND);
   AddTestInterceptor()->set_main_intercept_job(job);
 
@@ -3905,7 +3905,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
   req.SetExtraRequestHeaders(headers);
 
   URLRequestRedirectJob* job = new URLRequestRedirectJob(
-      &req, default_context_.network_delegate(), test_server_.GetURL("echo"),
+      &req, &default_network_delegate_, test_server_.GetURL("echo"),
       URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT);
   AddTestInterceptor()->set_main_intercept_job(job);
 
@@ -3919,7 +3919,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
 TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
   ASSERT_TRUE(test_server_.Start());
 
-  StaticHttpUserAgentSettings settings("en", EmptyString(), EmptyString());
+  StaticHttpUserAgentSettings settings("en", EmptyString());
   TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
   TestURLRequestContext context(true);
   context.set_network_delegate(&network_delegate);
@@ -3938,8 +3938,7 @@ TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
 TEST_F(URLRequestTestHTTP, EmptyAcceptLanguage) {
   ASSERT_TRUE(test_server_.Start());
 
-  StaticHttpUserAgentSettings settings(
-      EmptyString(), EmptyString(), EmptyString());
+  StaticHttpUserAgentSettings settings(EmptyString(), EmptyString());
   TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
   TestURLRequestContext context(true);
   context.set_network_delegate(&network_delegate);
@@ -4006,52 +4005,8 @@ TEST_F(URLRequestTestHTTP, OverrideAcceptEncoding) {
   EXPECT_TRUE(ContainsString(d.data_received(), "identity"));
 }
 
-// Check that default A-C header is sent.
-TEST_F(URLRequestTestHTTP, DefaultAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  StaticHttpUserAgentSettings settings(EmptyString(), "en", EmptyString());
-  TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_http_user_agent_settings(&settings);
-  context.Init();
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("en", d.data_received());
-}
-
-// Check that an empty A-C header is not sent. http://crbug.com/77365.
-TEST_F(URLRequestTestHTTP, EmptyAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  StaticHttpUserAgentSettings settings(
-      EmptyString(), EmptyString(), EmptyString());
-  TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.Init();
-  // We override the accepted charset after initialization because empty
-  // entries get overridden otherwise.
-  context.set_http_user_agent_settings(&settings);
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("None", d.data_received());
-}
-
-// Check that if request overrides the A-C header, the default is not appended.
-// See http://crbug.com/20894
-TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
+// Check that setting the A-C header sends the proper header.
+TEST_F(URLRequestTestHTTP, SetAcceptCharset) {
   ASSERT_TRUE(test_server_.Start());
 
   TestDelegate d;
@@ -4612,7 +4567,7 @@ TEST_F(HTTPSRequestTest, SSLSessionCacheShardTest) {
   params.ssl_config_service = default_context_.ssl_config_service();
   params.http_auth_handler_factory =
       default_context_.http_auth_handler_factory();
-  params.network_delegate = default_context_.network_delegate();
+  params.network_delegate = &default_network_delegate_;
   params.http_server_properties = default_context_.http_server_properties();
   params.ssl_session_cache_shard = "alternate";
 

@@ -1812,7 +1812,16 @@
   "DeviceLocalAccounts": {
   },
 
+  "DeviceLocalAccountAutoLoginId": {
+  },
+
+  "DeviceLocalAccountAutoLoginDelay": {
+  },
+
   "DeviceAllowRedeemChromeOsRegistrationOffers": {
+  },
+
+  "DeviceStartUpFlags": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

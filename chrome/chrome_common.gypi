@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -88,10 +88,6 @@
         'common/attrition_experiments.h',
         'common/auto_start_linux.cc',
         'common/auto_start_linux.h',
-        'common/autofill/autocheckout_status.h',
-        'common/autofill/web_element_descriptor.cc',
-        'common/autofill/web_element_descriptor.h',
-        'common/autofill_messages.h',
         'common/automation_constants.cc',
         'common/automation_constants.h',
         'common/automation_events.cc',
@@ -180,6 +176,8 @@
         'common/extensions/api/omnibox/omnibox_handler.h',
         'common/extensions/api/page_launcher/page_launcher_handler.cc',
         'common/extensions/api/page_launcher/page_launcher_handler.h',
+        'common/extensions/api/plugins/plugins_handler.cc',
+        'common/extensions/api/plugins/plugins_handler.h',
         'common/extensions/api/speech/tts_engine_manifest_handler.cc',
         'common/extensions/api/speech/tts_engine_manifest_handler.h',
         'common/extensions/api/themes/theme_handler.cc',
@@ -239,6 +237,8 @@
         'common/extensions/manifest_url_handler.h',
         'common/extensions/message_bundle.cc',
         'common/extensions/message_bundle.h',
+        'common/extensions/mime_types_handler.cc',
+        'common/extensions/mime_types_handler.h',
         'common/extensions/permissions/api_permission.cc',
         'common/extensions/permissions/api_permission.h',
         'common/extensions/permissions/api_permission_set.cc',
@@ -280,14 +280,6 @@
         'common/extensions/web_accessible_resources_handler.h',
         'common/external_ipc_fuzzer.h',
         'common/external_ipc_fuzzer.cc',
-        'common/form_data.cc',
-        'common/form_data.h',
-        'common/form_data_predictions.cc',
-        'common/form_data_predictions.h',
-        'common/form_field_data.cc',
-        'common/form_field_data.h',
-        'common/form_field_data_predictions.cc',
-        'common/form_field_data_predictions.h',
         'common/icon_with_badge_image_source.cc',
         'common/icon_with_badge_image_source.h',
         'common/instant_types.cc',
@@ -336,11 +328,9 @@
         'common/nacl_messages.h',
         'common/nacl_types.cc',
         'common/nacl_types.h',
+        'common/omaha_query_params.cc',
+        'common/omaha_query_params.h',
         'common/one_click_signin_messages.h',
-        'common/password_form_fill_data.cc',
-        'common/password_form_fill_data.h',
-        'common/password_generation_util.cc',
-        'common/password_generation_util.h',
         'common/pepper_flash.cc',
         'common/pepper_flash.h',
         'common/pref_names_util.cc',
@@ -397,10 +387,40 @@
         'common/zip_reader.h',
       ],
       'conditions': [
+        ['enable_extensions==1', {
+          'sources!': [
+            'common/extensions/api/extension_api_stub.cc',
+          ],
+          'dependencies': [
+            '../device/device.gyp:device_usb',
+          ],
+        }, {  # enable_extensions == 0
+          'sources/': [
+            ['exclude', '^common/extensions/api/'],
+            ['include', 'common/extensions/api/extension_api_stub.cc'],
+            ['include', 'common/extensions/api/extension_action/action_info.cc'],
+            ['include', 'common/extensions/api/extension_action/action_info.h'],
+            ['include', 'common/extensions/api/extension_action/browser_action_handler.cc'],
+            ['include', 'common/extensions/api/extension_action/browser_action_handler.h'],
+            ['include', 'common/extensions/api/extension_action/page_action_handler.cc'],
+            ['include', 'common/extensions/api/extension_action/page_action_handler.h'],
+            ['include', 'common/extensions/api/icons/icons_handler.cc'],
+            ['include', 'common/extensions/api/icons/icons_handler.h'],
+            ['include', 'common/extensions/api/i18n/default_locale_handler.cc'],
+            ['include', 'common/extensions/api/i18n/default_locale_handler.h'],
+            ['include', 'common/extensions/api/identity/oauth2_manifest_handler.cc'],
+            ['include', 'common/extensions/api/identity/oauth2_manifest_handler.h'],
+            ['include', 'common/extensions/api/plugins/plugins_handler.cc'],
+            ['include', 'common/extensions/api/plugins/plugins_handler.h'],
+            ['include', 'common/extensions/api/themes/theme_handler.cc'],
+            ['include', 'common/extensions/api/themes/theme_handler.h'],
+          ],
+        }],
         ['OS != "ios"', {
           'dependencies': [
             '<(DEPTH)/chrome/app/policy/cloud_policy_codegen.gyp:policy',
             '<(DEPTH)/chrome/common/extensions/api/api.gyp:api',
+            '<(DEPTH)/components/components.gyp:autofill_common',
             '<(DEPTH)/ipc/ipc.gyp:ipc',
             '<(DEPTH)/printing/printing.gyp:printing',
             '<(DEPTH)/third_party/adobe/flash/flash_player.gyp:flapper_version_h',
@@ -448,7 +468,11 @@
         ['OS=="win"', {
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
-          ]
+          ],
+          'sources!': [
+            'common/crash_keys.cc',
+            'common/crash_keys.h',
+          ],
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -488,33 +512,6 @@
             'common/chrome_version_info_posix.cc',
           ],
         }],
-        ['enable_extensions==1', {
-          'sources!': [
-            'common/extensions/api/extension_api_stub.cc',
-          ],
-          'dependencies': [
-            '../device/device.gyp:device_usb',
-          ],
-        }, {  # enable_extensions == 0
-          'sources/': [
-            ['exclude', '^common/extensions/api/'],
-            ['include', 'common/extensions/api/extension_api_stub.cc'],
-            ['include', 'common/extensions/api/extension_action/action_info.cc'],
-            ['include', 'common/extensions/api/extension_action/action_info.h'],
-            ['include', 'common/extensions/api/extension_action/browser_action_handler.cc'],
-            ['include', 'common/extensions/api/extension_action/browser_action_handler.h'],
-            ['include', 'common/extensions/api/extension_action/page_action_handler.cc'],
-            ['include', 'common/extensions/api/extension_action/page_action_handler.h'],
-            ['include', 'common/extensions/api/icons/icons_handler.cc'],
-            ['include', 'common/extensions/api/icons/icons_handler.h'],
-            ['include', 'common/extensions/api/i18n/default_locale_handler.cc'],
-            ['include', 'common/extensions/api/i18n/default_locale_handler.h'],
-            ['include', 'common/extensions/api/identity/oauth2_manifest_handler.cc'],
-            ['include', 'common/extensions/api/identity/oauth2_manifest_handler.h'],
-            ['include', 'common/extensions/api/themes/theme_handler.cc'],
-            ['include', 'common/extensions/api/themes/theme_handler.h'],
-          ],
-        }],
         ['remoting==1', {
           'dependencies': [
             '../remoting/remoting.gyp:remoting_client_plugin',
@@ -523,7 +520,7 @@
         ['enable_automation==0', {
           'sources/': [
             ['exclude', '^common/automation_']
-	  ]
+          ]
         }],
         ['use_system_nspr==1', {
           'dependencies': [

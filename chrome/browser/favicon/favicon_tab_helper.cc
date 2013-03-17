@@ -9,8 +9,8 @@
 #include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/favicon_status.h"
@@ -137,11 +137,11 @@ int FaviconTabHelper::StartDownload(const GURL& url, int image_size) {
                  base::Unretained(this)));
 }
 
-void FaviconTabHelper::NotifyFaviconUpdated() {
+void FaviconTabHelper::NotifyFaviconUpdated(bool icon_url_changed) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FAVICON_UPDATED,
       content::Source<WebContents>(web_contents()),
-      content::NotificationService::NoDetails());
+      content::Details<bool>(&icon_url_changed));
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
 }
 

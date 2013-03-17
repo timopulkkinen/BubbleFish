@@ -160,7 +160,6 @@ extern const char kChromeUIInstantHost[];
 extern const char kChromeUIIPCHost[];
 extern const char kChromeUIKeyboardHost[];
 extern const char kChromeUIKillHost[];
-extern const char kChromeUILocalOmniboxPopupHost[];
 extern const char kChromeUIManagedUserPassphrasePageHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryInternalsHost[];
@@ -318,9 +317,6 @@ extern const char kSettingsSearchHelpURL[];
 // "About" URL for the translate bar's options menu.
 extern const char kAboutGoogleTranslateURL[];
 
-// Help URL for the Autofill dialog.
-extern const char kAutofillHelpURL[];
-
 // Help URL for the Omnibox setting.
 extern const char kOmniboxLearnMoreURL[];
 
@@ -411,7 +407,16 @@ extern const int kNumberOfChromeDebugURLs;
 // Canonical schemes you can use as input to GURL.SchemeIs().
 extern const char kExtensionResourceScheme[];
 
+// The chrome-search: scheme is served by the same backend as chrome:.  However,
+// only specific URLDataSources are enabled to serve requests via the
+// chrome-search: scheme.  See |InstantIOContext::ShouldServiceRequest| and its
+// callers for details.  Note that WebUIBindings should never be granted to
+// chrome-search: pages.
 extern const char kChromeSearchScheme[];
+
+// The local omnibox host and pages under chrome-search.
+extern const char kChromeSearchLocalOmniboxPopupHost[];
+extern const char kChromeSearchLocalOmniboxPopupURL[];
 
 #if defined(OS_CHROMEOS)
 extern const char kCrosScheme[];

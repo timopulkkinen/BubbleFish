@@ -4,15 +4,19 @@
 
 #include "ash/display/display_controller.h"
 
+#include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/launcher/launcher.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/window_tracker.h"
+#include "ui/base/events/event_handler.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
@@ -76,10 +80,40 @@ class DisplayControllerShutdownTest : public test::AshTestBase {
   virtual void TearDown() OVERRIDE {
     test::AshTestBase::TearDown();
     // Make sure that primary display is accessible after shutdown.
-    gfx::Display primary = gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+    gfx::Display primary = Shell::GetScreen()->GetPrimaryDisplay();
     EXPECT_EQ("0,0 444x333", primary.bounds().ToString());
-    EXPECT_EQ(2, gfx::Screen::GetNativeScreen()->GetNumDisplays());
+    EXPECT_EQ(2, Shell::GetScreen()->GetNumDisplays());
   }
+};
+
+class TestEventHandler : public ui::EventHandler {
+ public:
+  TestEventHandler() : target_root_(NULL) {}
+  virtual ~TestEventHandler() {}
+
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+    aura::Window* target = static_cast<aura::Window*>(event->target());
+    // Only record when the target is the background which covers
+    // entire root window.
+    if (target->name() != "DesktopBackgroundView")
+      return;
+    mouse_location_ = event->location();
+    target_root_ = target->GetRootWindow();
+    event->StopPropagation();
+  }
+
+  std::string GetLocationAndReset() {
+    std::string result = mouse_location_.ToString();
+    mouse_location_.SetPoint(0, 0);
+    target_root_ = NULL;
+    return result;
+  }
+
+ private:
+  gfx::Point mouse_location_;
+  aura::RootWindow* target_root_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestEventHandler);
 };
 
 }  // namespace
@@ -249,7 +283,7 @@ TEST_F(DisplayControllerTest, SwapPrimary) {
       display_controller->GetRootWindowForDisplayId(secondary_display.id());
   EXPECT_NE(primary_root, secondary_root);
   aura::Window* launcher_window =
-      Launcher::ForPrimaryDisplay()->widget()->GetNativeView();
+      Launcher::ForPrimaryDisplay()->shelf_widget()->GetNativeView();
   EXPECT_TRUE(primary_root->Contains(launcher_window));
   EXPECT_FALSE(secondary_root->Contains(launcher_window));
   EXPECT_EQ(primary_display.id(),
@@ -340,7 +374,7 @@ TEST_F(DisplayControllerTest, SwapPrimaryById) {
   aura::RootWindow* secondary_root =
       display_controller->GetRootWindowForDisplayId(secondary_display.id());
   aura::Window* launcher_window =
-      Launcher::ForPrimaryDisplay()->widget()->GetNativeView();
+      Launcher::ForPrimaryDisplay()->shelf_widget()->GetNativeView();
   EXPECT_TRUE(primary_root->Contains(launcher_window));
   EXPECT_FALSE(secondary_root->Contains(launcher_window));
   EXPECT_NE(primary_root, secondary_root);
@@ -462,11 +496,11 @@ TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
   EXPECT_EQ(1.0f,
             primary_root->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
   primary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(1.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
   EXPECT_EQ(2.0f,
             secondary_root->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
   secondary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(2.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(2.0f, test_api.GetDisplay().device_scale_factor());
 
   // Switch primary and secondary
   display_controller->SetPrimaryDisplay(secondary_display);
@@ -476,23 +510,23 @@ TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
   EXPECT_EQ(1.0f,
             secondary_root->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
   secondary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(1.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
   primary_root->MoveCursorTo(gfx::Point(50, 50));
   EXPECT_EQ(2.0f,
             primary_root->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
-  EXPECT_EQ(2.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(2.0f, test_api.GetDisplay().device_scale_factor());
 
   // Deleting 2nd display.
   UpdateDisplay("200x200");
   RunAllPendingInMessageLoop();  // RootWindow is deleted in a posted task.
 
   // Cursor's device scale factor should be updated even without moving cursor.
-  EXPECT_EQ(1.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
 
   primary_root->MoveCursorTo(gfx::Point(50, 50));
   EXPECT_EQ(1.0f,
             primary_root->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
-  EXPECT_EQ(1.0f, test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
 }
 
 #if defined(OS_WIN)
@@ -534,6 +568,141 @@ TEST_F(DisplayControllerTest, MAYBE_UpdateDisplayWithHostOrigin) {
   EXPECT_EQ("100x200", root_windows[0]->GetHostSize().ToString());
   EXPECT_EQ("300,500", root_windows[1]->GetHostOrigin().ToString());
   EXPECT_EQ("200x300", root_windows[1]->GetHostSize().ToString());
+}
+
+#if defined(OS_WIN)
+// TODO(oshima): Windows does not supoprts insets.
+#define MAYBE_OverscanInsets DISABLED_OverscanInsets
+#else
+#define MAYBE_OverscanInsets OverscanInsets
+#endif
+
+TEST_F(DisplayControllerTest, MAYBE_OverscanInsets) {
+  DisplayController* display_controller =
+      Shell::GetInstance()->display_controller();
+  TestEventHandler event_handler;
+  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+
+  UpdateDisplay("120x200,300x400*2");
+  gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  display_controller->SetOverscanInsets(display1.id(),
+                                        gfx::Insets(10, 15, 20, 25));
+  EXPECT_EQ("0,0 80x170", root_windows[0]->bounds().ToString());
+  EXPECT_EQ("150x200", root_windows[1]->bounds().size().ToString());
+  EXPECT_EQ("80,0 150x200",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+
+  aura::test::EventGenerator generator(root_windows[0]);
+  generator.MoveMouseTo(20, 25);
+  EXPECT_EQ("5,15", event_handler.GetLocationAndReset());
+
+  display_controller->ClearCustomOverscanInsets(display1.id());
+  EXPECT_EQ("0,0 120x200", root_windows[0]->bounds().ToString());
+  EXPECT_EQ("120,0 150x200",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+
+  generator.MoveMouseTo(30, 20);
+  EXPECT_EQ("30,20", event_handler.GetLocationAndReset());
+
+  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+}
+
+#if defined(OS_WIN)
+// On Win8 bots, the host window can't be resized and
+// SetTransform updates the window using the orignal host window
+// size.
+#define MAYBE_Rotate DISABLED_Rotate
+#else
+#define MAYBE_Rotate Rotate
+#endif
+
+TEST_F(DisplayControllerTest, MAYBE_Rotate) {
+  DisplayController* display_controller =
+      Shell::GetInstance()->display_controller();
+  internal::DisplayManager* display_manager =
+      Shell::GetInstance()->display_manager();
+  TestEventHandler event_handler;
+  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+
+  UpdateDisplay("120x200,300x400*2");
+  gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
+  int64 display2_id = ScreenAsh::GetSecondaryDisplay().id();
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::test::EventGenerator generator1(root_windows[0]);
+
+  EXPECT_EQ("120x200", root_windows[0]->bounds().size().ToString());
+  EXPECT_EQ("150x200", root_windows[1]->bounds().size().ToString());
+  EXPECT_EQ("120,0 150x200",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+  generator1.MoveMouseTo(50, 40);
+  EXPECT_EQ("50,40", event_handler.GetLocationAndReset());
+
+  display_manager->SetDisplayRotation(display1.id(),
+                                      gfx::Display::ROTATE_90);
+  EXPECT_EQ("200x120", root_windows[0]->bounds().size().ToString());
+  EXPECT_EQ("150x200", root_windows[1]->bounds().size().ToString());
+  EXPECT_EQ("200,0 150x200",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+  generator1.MoveMouseTo(50, 40);
+  EXPECT_EQ("40,69", event_handler.GetLocationAndReset());
+
+  DisplayLayout display_layout(DisplayLayout::BOTTOM, 50);
+  display_controller->SetLayoutForCurrentDisplays(display_layout);
+  EXPECT_EQ("50,120 150x200",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+
+  display_manager->SetDisplayRotation(display2_id,
+                                      gfx::Display::ROTATE_270);
+  EXPECT_EQ("200x120", root_windows[0]->bounds().size().ToString());
+  EXPECT_EQ("200x150", root_windows[1]->bounds().size().ToString());
+  EXPECT_EQ("50,120 200x150",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+
+  aura::test::EventGenerator generator2(root_windows[1]);
+  generator2.MoveMouseTo(50, 40);
+  EXPECT_EQ("179,25", event_handler.GetLocationAndReset());
+  display_manager->SetDisplayRotation(display1.id(),
+                                      gfx::Display::ROTATE_180);
+
+  EXPECT_EQ("120x200", root_windows[0]->bounds().size().ToString());
+  EXPECT_EQ("200x150", root_windows[1]->bounds().size().ToString());
+  // Dislay must share at least 100, so the x's offset becomes 20.
+  EXPECT_EQ("20,200 200x150",
+            ScreenAsh::GetSecondaryDisplay().bounds().ToString());
+
+  generator1.MoveMouseTo(50, 40);
+  EXPECT_EQ("69,159", event_handler.GetLocationAndReset());
+
+  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+}
+
+#if defined(OS_WIN)
+// On Win8 bots, the host window can't be resized and
+// SetTransform updates the window using the orignal host window
+// size.
+#define MAYBE_ScaleRootWindow DISABLED_ScaleRootWindow
+#else
+#define MAYBE_ScaleRootWindow ScaleRootWindow
+#endif
+
+TEST_F(DisplayControllerTest, MAYBE_ScaleRootWindow) {
+  TestEventHandler event_handler;
+  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+
+  UpdateDisplay("600x400*2@1.5");
+
+  gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  EXPECT_EQ("0,0 450x300", display1.bounds().ToString());
+  EXPECT_EQ("0,0 450x300", root_windows[0]->bounds().ToString());
+
+  aura::test::EventGenerator generator(root_windows[0]);
+  generator.MoveMouseTo(599, 200);
+  EXPECT_EQ("449,150", event_handler.GetLocationAndReset());
+
+  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
 }  // namespace test

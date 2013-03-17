@@ -41,7 +41,7 @@ class ActionBoxMenuModelTest : public BrowserWithTestWindowTest,
     return false;
   }
 
-  virtual void ExecuteCommand(int command_id) OVERRIDE {}
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {}
 
     // Don't handle accelerators.
   virtual bool GetAcceleratorForCommandId(
@@ -80,7 +80,7 @@ class ActionBoxMenuModelTest : public BrowserWithTestWindowTest,
   }
 
   void NavigateToLocalPage() {
-    AddTab(browser(), GURL("chrome://flags"));
+    AddTab(browser(), GURL("chrome://blank"));
   }
 
  private:

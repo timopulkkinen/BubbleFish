@@ -391,7 +391,7 @@ MaximizeBubbleController::Bubble::Bubble(
   // cover it upon animation.
   aura::Window* parent = Shell::GetContainer(
       Shell::GetActiveRootWindow(),
-      internal::kShellWindowId_LauncherContainer);
+      internal::kShellWindowId_ShelfContainer);
   set_parent_window(parent);
 
   set_notify_enter_exit_on_child(true);
@@ -425,7 +425,7 @@ MaximizeBubbleController::Bubble::Bubble(
   SizeToContents();
 
   if (!appearance_delay_ms_)
-    Show();
+    GetWidget()->Show();
   else
     StartFade(true);
 

@@ -10,10 +10,7 @@
     # standard Chrome.
     'content_shell_version': '19.77.34.5',
     'conditions': [
-      # TODO(glider): enable the custom freetype under ASan once we figure out
-      # how to use it with non-instrumented Python.
-      # See http://crbug.com/179814.
-      ['OS=="linux" and asan==0', {
+      ['OS=="linux"', {
        'use_custom_freetype%': 1,
       }, {
        'use_custom_freetype%': 0,
@@ -125,6 +122,8 @@
         'shell/shell_resource_dispatcher_host_delegate.h',
         'shell/shell_switches.cc',
         'shell/shell_switches.h',
+        'shell/shell_test_configuration.cc',
+        'shell/shell_test_configuration.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
         'shell/shell_web_contents_view_delegate_android.cc',
@@ -588,7 +587,7 @@
             ],
           },
           'variables': {
-            'jni_gen_dir': 'content/shell',
+            'jni_gen_package': 'content/shell',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
@@ -609,7 +608,7 @@
             'shell/android/shell_library_loader.h',
           ],
           'conditions': [
-            ['android_build_type==1', {
+            ['android_webview_build==1', {
               'ldflags': [
                 '-lgabi++',  # For rtti
               ],

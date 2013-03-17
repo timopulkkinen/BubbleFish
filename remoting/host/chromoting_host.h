@@ -5,8 +5,8 @@
 #ifndef REMOTING_HOST_CHROMOTING_HOST_H_
 #define REMOTING_HOST_CHROMOTING_HOST_H_
 
+#include <list>
 #include <string>
-#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -15,7 +15,6 @@
 #include "base/threading/thread.h"
 #include "net/base/backoff_entry.h"
 #include "remoting/host/client_session.h"
-#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_monitor.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/mouse_move_observer.h"
@@ -127,9 +126,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
       ClientSession* session,
       const std::string& channel_name,
       const protocol::TransportRoute& route) OVERRIDE;
-  virtual void OnClientResolutionChanged(ClientSession* session,
-                                         const SkISize& size,
-                                         const SkIPoint& dpi) OVERRIDE;
 
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerReady() OVERRIDE;
@@ -161,7 +157,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
 
-  typedef std::vector<scoped_refptr<ClientSession> > ClientList;
+  typedef std::list<ClientSession*> ClientList;
 
   enum State {
     kInitial,

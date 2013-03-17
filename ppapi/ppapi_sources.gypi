@@ -75,6 +75,7 @@
       'c/dev/ppb_scrollbar_dev.h',
       'c/dev/ppb_testing_dev.h',
       'c/dev/ppb_text_input_dev.h',
+      'c/dev/ppb_truetype_font_dev.h',
       'c/dev/ppb_url_util_dev.h',
       'c/dev/ppb_video_decoder_dev.h',
       'c/dev/ppb_widget_dev.h',
@@ -131,6 +132,10 @@
       'c/trusted/ppb_image_data_trusted.h',
       'c/trusted/ppb_url_loader_trusted.h',
       'c/trusted/ppp_broker.h',
+
+      # Extensions dev interfaces.
+      'c/extensions/dev/ppb_alarms_dev.h',
+      'c/extensions/dev/ppb_events_dev.h',
     ],
     'cpp_source_files': [
       'cpp/array_output.cc',
@@ -234,6 +239,8 @@
       'cpp/dev/selection_dev.h',
       'cpp/dev/text_input_dev.cc',
       'cpp/dev/text_input_dev.h',
+      'cpp/dev/truetype_font_dev.cc',
+      'cpp/dev/truetype_font_dev.h',
       'cpp/dev/url_util_dev.cc',
       'cpp/dev/url_util_dev.h',
       'cpp/dev/video_capture_client_dev.cc',
@@ -304,6 +311,21 @@
       'cpp/trusted/file_chooser_trusted.h',
       'cpp/trusted/file_io_trusted.cc',
       'cpp/trusted/file_io_trusted.h',
+
+      # Extensions interfaces.
+      'cpp/extensions/dict_field.h',
+      'cpp/extensions/event_base.cc',
+      'cpp/extensions/event_base.h',
+      'cpp/extensions/ext_output_traits.h',
+      'cpp/extensions/from_var_converter.h',
+      'cpp/extensions/optional.h',
+      'cpp/extensions/to_var_converter.h',
+
+      # Extensions dev interfaces.
+      'cpp/extensions/dev/alarms_dev.cc',
+      'cpp/extensions/dev/alarms_dev.h',
+      'cpp/extensions/dev/events_dev.cc',
+      'cpp/extensions/dev/events_dev.h',
 
       # Utility sources.
       'utility/completion_callback_factory.h',

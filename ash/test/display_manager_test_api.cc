@@ -9,7 +9,7 @@
 #include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "ui/aura/root_window.h"
 #include "ui/gfx/display.h"
 
@@ -87,6 +87,10 @@ int64 DisplayManagerTestApi::SetFirstDisplayAsInternalDisplay() {
   display_manager_->internal_display_info_.reset(new DisplayInfo(
       display_manager_->GetDisplayInfo(internal)));
   return gfx::Display::InternalDisplayId();
+}
+
+void DisplayManagerTestApi::DisableChangeDisplayUponHostResize() {
+  display_manager_->set_change_display_upon_host_resize(false);
 }
 
 }  // namespace test

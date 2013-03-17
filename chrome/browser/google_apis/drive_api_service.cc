@@ -88,12 +88,14 @@ void ParseResourceListOnBlockingPoolAndRun(
                  callback, base::Owned(error)));
 }
 
-// Parses the FileResource value to ResourceEntry and runs |callback|.
+// Parses the FileResource value to ResourceEntry and runs |callback| on the
+// UI thread.
 void ParseResourceEntryAndRun(
     const GetResourceEntryCallback& callback,
     GDataErrorCode error,
     scoped_ptr<FileResource> value) {
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
 
   if (!value) {
     callback.Run(error, scoped_ptr<ResourceEntry>());
@@ -161,7 +163,7 @@ void ParseResourceEntryForUploadRangeAndRun(
     const UploadRangeCallback& callback,
     const UploadRangeResponse& response,
     scoped_ptr<FileResource> value) {
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
   if (!value) {
@@ -423,8 +425,14 @@ void DriveAPIService::CopyHostedDocument(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  // TODO(kochi): Implement this.
-  NOTREACHED();
+  runner_->StartOperationWithRetry(
+      new drive::CopyResourceOperation(
+          operation_registry(),
+          url_request_context_getter_,
+          url_generator_,
+          resource_id,
+          new_name,
+          base::Bind(&ParseResourceEntryAndRun, callback)));
 }
 
 void DriveAPIService::RenameResource(

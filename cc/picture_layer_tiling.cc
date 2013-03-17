@@ -189,8 +189,8 @@ PictureLayerTiling::Iterator::Iterator(const PictureLayerTiling* tiling,
                                        LayerDeviceAlignment layerDeviceAlignment)
     : tiling_(tiling),
       dest_rect_(dest_rect),
-      current_tile_(NULL),
       dest_to_content_scale_(0),
+      current_tile_(NULL),
       tile_i_(0),
       tile_j_(0),
       left_(0),
@@ -328,8 +328,6 @@ void PictureLayerTiling::UpdateTilePriorities(
     const gfx::RectF& viewport_in_layer_space,
     gfx::Size last_layer_bounds,
     gfx::Size current_layer_bounds,
-    gfx::Size last_layer_content_bounds,
-    gfx::Size current_layer_content_bounds,
     float last_layer_contents_scale,
     float current_layer_contents_scale,
     const gfx::Transform& last_screen_transform,
@@ -357,12 +355,8 @@ void PictureLayerTiling::UpdateTilePriorities(
     return;
 
   double time_delta = 0;
-  if (last_impl_frame_time_ != 0 &&
-      last_layer_bounds == current_layer_bounds &&
-      last_layer_content_bounds == current_layer_content_bounds &&
-      last_layer_contents_scale == current_layer_contents_scale) {
+  if (last_impl_frame_time_ != 0 && last_layer_bounds == current_layer_bounds)
     time_delta = current_frame_time - last_impl_frame_time_;
-  }
 
   gfx::Rect viewport_in_content_space =
       gfx::ToEnclosingRect(gfx::ScaleRect(viewport_in_layer_space,
@@ -393,7 +387,7 @@ void PictureLayerTiling::UpdateTilePriorities(
     TilePriority priority;
     DCHECK(!priority.is_live);
     Tile* tile = find->second.get();
-    tile->set_priority(tree, priority);
+    tile->SetPriority(tree, priority);
   }
   last_prioritized_rect_ = prioritized_rect;
 
@@ -442,7 +436,7 @@ void PictureLayerTiling::UpdateTilePriorities(
           distance_to_visible_in_pixels);
       if (store_screen_space_quads_on_tiles)
         priority.set_current_screen_quad(gfx::QuadF(current_screen_rect));
-      tile->set_priority(tree, priority);
+      tile->SetPriority(tree, priority);
     }
   } else {
     for (TilingData::Iterator iter(&tiling_data_, prioritized_rect);
@@ -485,7 +479,7 @@ void PictureLayerTiling::UpdateTilePriorities(
                               gfx::QuadF(current_layer_content_rect),
                               clipped));
       }
-      tile->set_priority(tree, priority);
+      tile->SetPriority(tree, priority);
     }
   }
 
@@ -495,8 +489,8 @@ void PictureLayerTiling::UpdateTilePriorities(
 
 void PictureLayerTiling::DidBecomeActive() {
   for (TileMap::const_iterator it = tiles_.begin(); it != tiles_.end(); ++it) {
-    it->second->set_priority(ACTIVE_TREE, it->second->priority(PENDING_TREE));
-    it->second->set_priority(PENDING_TREE, TilePriority());
+    it->second->SetPriority(ACTIVE_TREE, it->second->priority(PENDING_TREE));
+    it->second->SetPriority(PENDING_TREE, TilePriority());
 
     // Tile holds a ref onto a picture pile. If the tile never gets invalidated
     // and recreated, then that picture pile ref could exist indefinitely.  To

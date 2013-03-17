@@ -33,6 +33,7 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/instant/instant_service.h"
 #include "chrome/browser/instant/instant_service_factory.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -56,7 +57,6 @@
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -235,7 +235,7 @@ void CheckURLIsBlocked(Browser* browser, const char* spec) {
   content::WebContents* contents =
       browser->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(url, contents->GetURL());
-  string16 title = UTF8ToUTF16(url.spec() + " is not available");
+  string16 title = UTF8ToUTF16(url.spec() + " was blocked");
   EXPECT_EQ(title, contents->GetTitle());
 
   // Verify that the expected error page is being displayed.
@@ -246,7 +246,7 @@ void CheckURLIsBlocked(Browser* browser, const char* spec) {
       "var hasError = false;"
       "var error = document.getElementById('errorDetails');"
       "if (error)"
-      "  hasError = error.textContent.indexOf('Error 138') == 0;"
+      "  hasError = error.textContent.indexOf('Error 22') == 0;"
       "domAutomationController.send(hasError);",
       &result));
   EXPECT_TRUE(result);
@@ -806,7 +806,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   MakeRequestFail make_request_fail("search.example");
 
-  chrome::search::EnableQueryExtractionForTesting();
+  chrome::search::EnableInstantExtendedAPIForTesting();
 
   // Verifies that a default search is made using the provider configured via
   // policy. Also checks that default search can be completely disabled.

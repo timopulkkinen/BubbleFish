@@ -6,11 +6,15 @@
 
 #include <android/bitmap.h>
 #include <android/native_window_jni.h>
+#include <map>
 
+#include "base/android/jni_android.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/synchronization/lock.h"
 #include "cc/context_provider.h"
 #include "cc/input_handler.h"
 #include "cc/layer.h"
@@ -38,6 +42,17 @@ class JavaBitmap;
 
 namespace {
 
+// Used for drawing directly to the screen. Bypasses resizing and swaps.
+class DirectOutputSurface : public cc::OutputSurface {
+ public:
+  DirectOutputSurface(scoped_ptr<WebKit::WebGraphicsContext3D> context3d)
+      : cc::OutputSurface(context3d.Pass()) {}
+
+  virtual void Reshape(gfx::Size size) OVERRIDE {}
+  virtual void PostSubBuffer(gfx::Rect rect) OVERRIDE {}
+  virtual void SwapBuffers() OVERRIDE {}
+};
+
 static bool g_initialized = false;
 static webkit_glue::WebThreadImpl* g_impl_thread = NULL;
 static bool g_use_direct_gl = false;
@@ -45,6 +60,12 @@ static bool g_use_direct_gl = false;
 } // anonymous namespace
 
 namespace content {
+
+typedef std::map<int, base::android::ScopedJavaGlobalRef<jobject> >
+    SurfaceMap;
+static base::LazyInstance<SurfaceMap>
+    g_surface_map = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<base::Lock> g_surface_map_lock;
 
 // static
 Compositor* Compositor::Create(Client* client) {
@@ -82,8 +103,19 @@ bool CompositorImpl::UsesDirectGL() {
   return g_use_direct_gl;
 }
 
+// static
+jobject CompositorImpl::GetSurface(int surface_id) {
+  base::AutoLock lock(g_surface_map_lock.Get());
+  SurfaceMap* surfaces = g_surface_map.Pointer();
+  SurfaceMap::iterator it = surfaces->find(surface_id);
+  jobject jsurface = it == surfaces->end() ? NULL : it->second.obj();
+
+  LOG_IF(WARNING, !jsurface) << "No surface for surface id " << surface_id;
+  return jsurface;
+}
+
 CompositorImpl::CompositorImpl(Compositor::Client* client)
-    : root_layer_(cc::Layer::create()),
+    : root_layer_(cc::Layer::Create()),
       has_transparent_background_(false),
       window_(NULL),
       surface_id_(0),
@@ -97,12 +129,12 @@ CompositorImpl::~CompositorImpl() {
 
 void CompositorImpl::Composite() {
   if (host_.get())
-    host_->composite();
+    host_->Composite(base::TimeTicks::Now());
 }
 
 void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
-  root_layer_->removeAllChildren();
-  root_layer_->addChild(root_layer);
+  root_layer_->RemoveAllChildren();
+  root_layer_->AddChild(root_layer);
 }
 
 void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
@@ -127,6 +159,26 @@ void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
   }
 }
 
+void CompositorImpl::SetSurface(jobject surface) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
+  if (surface) {
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    SetWindowSurface(window);
+    ANativeWindow_release(window);
+    {
+      base::AutoLock lock(g_surface_map_lock.Get());
+      g_surface_map.Get().insert(std::make_pair(surface_id_, j_surface));
+    }
+  } else {
+    {
+      base::AutoLock lock(g_surface_map_lock.Get());
+      g_surface_map.Get().erase(surface_id_);
+    }
+    SetWindowSurface(NULL);
+  }
+}
+
 void CompositorImpl::SetVisible(bool visible) {
   if (!visible) {
     host_.reset();
@@ -148,18 +200,19 @@ void CompositorImpl::SetVisible(bool visible) {
       impl_thread = cc::ThreadImpl::createForDifferentThread(
           g_impl_thread->message_loop()->message_loop_proxy());
 
-    host_ = cc::LayerTreeHost::create(this, settings, impl_thread.Pass());
-    host_->setRootLayer(root_layer_);
+    host_ = cc::LayerTreeHost::Create(this, settings, impl_thread.Pass());
+    host_->SetRootLayer(root_layer_);
 
-    host_->setVisible(true);
-    host_->setSurfaceReady();
-    host_->setViewportSize(size_, size_);
-    host_->setHasTransparentBackground(has_transparent_background_);
+    host_->SetVisible(true);
+    host_->SetSurfaceReady();
+    host_->SetViewportSize(size_, size_);
+    host_->set_has_transparent_background(has_transparent_background_);
   }
 }
 
 void CompositorImpl::setDeviceScaleFactor(float factor) {
-  host_->setDeviceScaleFactor(factor);
+  if (host_)
+    host_->SetDeviceScaleFactor(factor);
 }
 
 void CompositorImpl::SetWindowBounds(const gfx::Size& size) {
@@ -168,19 +221,19 @@ void CompositorImpl::SetWindowBounds(const gfx::Size& size) {
 
   size_ = size;
   if (host_)
-    host_->setViewportSize(size, size);
-  root_layer_->setBounds(size);
+    host_->SetViewportSize(size, size);
+  root_layer_->SetBounds(size);
 }
 
 void CompositorImpl::SetHasTransparentBackground(bool flag) {
   has_transparent_background_ = flag;
   if (host_.get())
-    host_->setHasTransparentBackground(flag);
+    host_->set_has_transparent_background(flag);
 }
 
 bool CompositorImpl::CompositeAndReadback(void *pixels, const gfx::Rect& rect) {
   if (host_.get())
-    return host_->compositeAndReadback(pixels, rect);
+    return host_->CompositeAndReadback(pixels, rect);
   else
     return false;
 }
@@ -275,13 +328,18 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
     WebKit::WebGraphicsContext3D::Attributes attrs;
     attrs.shareResources = false;
     attrs.noAutomaticFlushes = true;
-    scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessImpl> context(
+    scoped_ptr<WebKit::WebGraphicsContext3D> context(
         webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWindow(
             attrs,
             window_,
             NULL));
-    return make_scoped_ptr(new cc::OutputSurface(
-        context.PassAs<WebKit::WebGraphicsContext3D>()));
+
+    if (!window_) {
+      return scoped_ptr<cc::OutputSurface>(
+          new DirectOutputSurface(context.Pass()));
+    }
+
+    return make_scoped_ptr(new cc::OutputSurface(context.Pass()));
   } else {
     DCHECK(window_ && surface_id_);
     WebKit::WebGraphicsContext3D::Attributes attrs;
@@ -327,25 +385,13 @@ void CompositorImpl::scheduleComposite() {
   client_->ScheduleComposite();
 }
 
-class NullContextProvider : public cc::ContextProvider {
-  virtual bool InitializeOnMainThread() { return false; }
-  virtual bool BindToCurrentThread() { return false; }
-  virtual WebKit::WebGraphicsContext3D* Context3d() { return NULL; }
-  virtual class GrContext* GrContext() { return NULL; }
-  virtual void VerifyContexts() {}
- protected:
-  virtual ~NullContextProvider() {}
-};
-
 scoped_refptr<cc::ContextProvider>
 CompositorImpl::OffscreenContextProviderForMainThread() {
   // There is no support for offscreen contexts, or compositor filters that
   // would require them in this compositor instance. If they are needed,
   // then implement a context provider that provides contexts from
   // ImageTransportSurfaceAndroid.
-  if (!null_offscreen_context_provider_)
-    null_offscreen_context_provider_ = new NullContextProvider();
-  return null_offscreen_context_provider_;
+  return NULL;
 }
 
 scoped_refptr<cc::ContextProvider>
@@ -354,9 +400,7 @@ CompositorImpl::OffscreenContextProviderForCompositorThread() {
   // would require them in this compositor instance. If they are needed,
   // then implement a context provider that provides contexts from
   // ImageTransportSurfaceAndroid.
-  if (!null_offscreen_context_provider_)
-    null_offscreen_context_provider_ = new NullContextProvider();
-  return null_offscreen_context_provider_;
+  return NULL;
 }
 
 void CompositorImpl::OnViewContextSwapBuffersPosted() {

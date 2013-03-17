@@ -27,6 +27,7 @@
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
@@ -46,7 +47,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -86,7 +86,6 @@ enum UserTextClearedType {
 };
 
 }  // namespace
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // OmniboxEditModel::State
@@ -130,7 +129,7 @@ OmniboxEditModel::OmniboxEditModel(OmniboxView* view,
   // Use a restricted subset of the autocomplete providers if we're using the
   // Instant Extended API, as it doesn't support them all.
   autocomplete_controller_.reset(new AutocompleteController(profile, this,
-      chrome::search::IsInstantExtendedAPIEnabled(profile) ?
+      chrome::search::IsInstantExtendedAPIEnabled() ?
           AutocompleteClassifier::kInstantExtendedOmniboxProviders :
           AutocompleteClassifier::kDefaultOmniboxProviders));
   delegate_.reset(new OmniboxCurrentPageDelegateImpl(controller, profile));
@@ -263,14 +262,10 @@ bool OmniboxEditModel::CommitSuggestedText(bool skip_inline_autocomplete) {
   FinalizeInstantQuery(view_->GetText(),
                        InstantSuggestion(suggestion,
                                          INSTANT_COMPLETE_NOW,
-                                         INSTANT_SUGGESTION_SEARCH),
+                                         INSTANT_SUGGESTION_SEARCH,
+                                         string16()),
                        skip_inline_autocomplete);
   return true;
-}
-
-bool OmniboxEditModel::AcceptCurrentInstantPreview() {
-  return controller_->GetInstant() &&
-      controller_->GetInstant()->CommitIfPossible(INSTANT_COMMIT_PRESSED_ENTER);
 }
 
 void OmniboxEditModel::OnChanged() {
@@ -638,7 +633,7 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
           match.fill_into_edit.length() - match.inline_autocomplete_offset;
     }
 
-    if (disposition == CURRENT_TAB) {
+    if ((disposition == CURRENT_TAB) && delegate_->CurrentPageExists()) {
       // If we know the destination is being opened in the current tab,
       // we can easily get the tab ID.  (If it's being opened in a new
       // tab, we don't know the tab ID yet.)
@@ -1233,6 +1228,7 @@ void OmniboxEditModel::RevertTemporaryText(bool revert_popup) {
         false, false);
     AutocompleteResult::const_iterator match(result().default_match());
     instant->OnCancel(match != result().end() ? *match : AutocompleteMatch(),
+                      user_text_,
                       user_text_ + inline_autocomplete_text_);
   }
   if (revert_popup)

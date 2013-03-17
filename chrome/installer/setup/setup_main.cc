@@ -60,6 +60,7 @@
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
+#include "chrome/installer/util/user_experiment.h"
 #include "chrome/installer/util/util_constants.h"
 
 #include "installer_util_strings.h"  // NOLINT
@@ -924,8 +925,8 @@ installer::InstallStatus InstallProductsHelper(
       for (Products::const_iterator it = products.begin(); it < products.end();
            ++it) {
         const Product& product = **it;
-        product.distribution()->LaunchUserExperiment(setup_path,
-            install_status, *installer_version, product, system_install);
+        product.LaunchUserExperiment(setup_path, install_status,
+                                     system_install);
       }
     }
   }
@@ -1429,8 +1430,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       for (Products::const_iterator it = products.begin(); it < products.end();
            ++it) {
         const Product& product = **it;
-        BrowserDistribution* browser_dist = product.distribution();
-        browser_dist->InactiveUserToastExperiment(
+        installer::InactiveUserToastExperiment(
             flavor, ASCIIToUTF16(experiment_group), product,
             installer_state->target_path());
       }
@@ -1450,9 +1450,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
                    << browser_dist->GetAppShortCutName()
                    << " found for system-level toast.";
       } else {
-        browser_dist->LaunchUserExperiment(cmd_line.GetProgram(),
-                                           installer::REENTRY_SYS_UPDATE,
-                                           installed_version, product, true);
+        product.LaunchUserExperiment(
+            cmd_line.GetProgram(), installer::REENTRY_SYS_UPDATE, true);
       }
     }
   } else if (cmd_line.HasSwitch(
@@ -1581,24 +1580,6 @@ google_breakpad::ExceptionHandler* InitializeCrashReporting(
   return breakpad;
 }
 
-// We renamed "Google Chrome App Host" to "Google Chrome App Launcher",
-// and need to do the same in the Windows\CurrentVersion\Uninstall registry key.
-// The addition / removal of the new key is handled elsewhere.
-// It remains to remove the old key where appropriate.
-// TODO(huangs): Remove this in early March.
-void RemoveDeprecatedAppHostUninstallEntry(
-    const InstallerState& installer_state) {
-  const Product* app_host =
-      installer_state.FindProduct(BrowserDistribution::CHROME_APP_HOST);
-  if (app_host) {
-    const string16 kDeprecatedUninstallRegPath(L"Software\\Microsoft\\Windows\\"
-        L"CurrentVersion\\Uninstall\\Google Chrome App Host");
-    InstallUtil::DeleteRegistryKey(installer_state.root_key(),
-                                   kDeprecatedUninstallRegPath);
-  }
-}
-
-
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
@@ -1701,11 +1682,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
     install_status =
         InstallProducts(original_state, cmd_line, prefs, &installer_state);
   }
-
-  // TODO(huangs): Remove this in early March.
-  if (!InstallUtil::GetInstallReturnCode(install_status))
-    RemoveDeprecatedAppHostUninstallEntry(installer_state);
-
 
   // Validate that the machine is now in a good state following the operation.
   // TODO(grt): change this to log at DFATAL once we're convinced that the

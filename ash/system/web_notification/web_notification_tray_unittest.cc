@@ -7,16 +7,19 @@
 #include <vector>
 
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "ui/message_center/message_center_tray.h"
+#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notification_list.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/message_center_bubble.h"
 #include "ui/message_center/views/message_popup_bubble.h"
+#include "ui/message_center/views/message_popup_collection.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
@@ -31,8 +34,8 @@ namespace ash {
 namespace {
 
 WebNotificationTray* GetWebNotificationTray() {
-  return Shell::GetPrimaryRootWindowController()->status_area_widget()->
-      web_notification_tray();
+  return Shell::GetPrimaryRootWindowController()->shelf()->
+      status_area_widget()->web_notification_tray();
 }
 
 message_center::MessageCenter* get_message_center() {
@@ -70,6 +73,10 @@ class TestDelegate : public message_center::MessageCenter::Delegate {
   }
 
   virtual void OnClicked(const std::string& notifcation_id) OVERRIDE {
+  }
+
+  virtual void OnButtonClicked(const std::string& id,
+                               int button_index) OVERRIDE {
   }
 
   void AddNotification(WebNotificationTray* tray, const std::string& id) {
@@ -219,8 +226,14 @@ TEST_F(WebNotificationTrayTest, ManyPopupNotifications) {
   EXPECT_TRUE(tray->IsPopupVisible());
   EXPECT_EQ(notifications_to_add,
             get_message_center()->NotificationCount());
-  EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications,
-            tray->GetPopupBubbleForTest()->NumMessageViewsForTest());
+  if (message_center::IsRichNotificationEnabled()) {
+    NotificationList::PopupNotifications popups =
+        get_message_center()->notification_list()->GetPopupNotifications();
+    EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications, popups.size());
+  } else {
+    EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications,
+              tray->GetPopupBubbleForTest()->NumMessageViewsForTest());
+  }
   get_message_center()->SetDelegate(NULL);
   get_message_center()->notification_list()->RemoveAllNotifications();
 }

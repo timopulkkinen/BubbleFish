@@ -123,33 +123,9 @@ class UnifiedSourceCallback : public AudioOutputStream::AudioSourceCallback {
 // Convenience method which ensures that we fulfill all required conditions
 // to run unified audio tests on Windows.
 static bool CanRunUnifiedAudioTests(AudioManager* audio_man) {
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  if (!cmd_line->HasSwitch(switches::kEnableWebAudioInput)) {
-    DVLOG(1) << "--enable-webaudio-input must be defined to run this test.";
-    return false;
-  }
-
-  if (!CoreAudioUtil::IsSupported()) {
-    LOG(WARNING) << "This tests requires Windows Vista or higher.";
-    return false;
-  }
-
-  if (!audio_man->HasAudioOutputDevices()) {
-    LOG(WARNING) << "No output devices detected.";
-    return false;
-  }
-
-  if (!audio_man->HasAudioInputDevices()) {
-    LOG(WARNING) << "No input devices detected.";
-    return false;
-  }
-
-  if (!WASAPIUnifiedStream::HasUnifiedDefaultIO()) {
-    LOG(WARNING) << "Audio IO is not supported.";
-    return false;
-  }
-
-  return true;
+  // TODO(crogers, henrika): figure out why enabling this test causes
+  // other tests to hang.
+  return false;
 }
 
 // Convenience class which simplifies creation of a unified AudioOutputStream

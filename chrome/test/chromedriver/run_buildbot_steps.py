@@ -66,8 +66,7 @@ def Download():
   if util.RunCommand(cmd):
     print '@@@STEP_FAILURE@@@'
 
-  build_dir = chrome_paths.GetBuildDir([
-      os.path.join('apks', 'ChromiumTestShell.apk')])
+  build_dir = chrome_paths.GetBuildDir(['host_forwarder'])
   print 'Unzipping prebuilts %s to %s' % (zip_path, build_dir)
   f = zipfile.ZipFile(zip_path, 'r')
   f.extractall(build_dir)
@@ -76,15 +75,14 @@ def Download():
 
 def MaybeRelease(revision):
   # Version is embedded as: const char kChromeDriverVersion[] = "0.1";
-  with open(os.path.join(_THIS_DIR, 'version.cc'), 'r') as f:
+  with open(os.path.join(_THIS_DIR, 'chrome', 'version.cc'), 'r') as f:
     version_line = filter(lambda x: 'kChromeDriverVersion' in x, f.readlines())
   version = version_line[0].split('"')[1]
 
-  # This assumes the bitness of python is the same as the built ChromeDriver.
   bitness = '32'
-  if sys.maxint > 2**32:
+  if util.IsLinux():
     bitness = '64'
-  zip_name = 'experimental_chromedriver2_%s%s_%s.zip' % (
+  zip_name = 'chromedriver2_%s%s_%s.zip' % (
       util.GetPlatformName(), bitness, version)
 
   site = 'https://code.google.com/p/chromedriver/downloads/list'

@@ -58,8 +58,10 @@ GeneralConfig.prototype = {
       input.id = field.key;
       input.min = field.min || 0;
 
-      if (field.max) input.max = field.max;
-      if (field.step) input.step = field.step;
+      if (field.max)
+        input.max = field.max;
+
+      input.step = field.step || 'any';
 
       if (field.units)
         units.innerHTML = field.units;
@@ -254,22 +256,26 @@ function GestureConfig() {
     {
       key: 'fling_acceleration_curve_coefficient_0',
       label: 'Touchscreen Fling Acceleration',
-      units: 'x<sup>3</sup>'
+      units: 'x<sup>3</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_1',
       label: '+',
-      units: 'x<sup>2</sup>'
+      units: 'x<sup>2</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_2',
       label: '+',
-      units: 'x<sup>1</sup>'
+      units: 'x<sup>1</sup>',
+      min: '-1'
     },
     {
       key: 'fling_acceleration_curve_coefficient_3',
       label: '+',
-      units: 'x<sup>0</sup>'
+      units: 'x<sup>0</sup>',
+      min: '-1'
     },
     {
       key: 'fling_velocity_cap',
@@ -356,7 +362,8 @@ function WorkspaceCyclerConfig() {
     {
       key: 'min_brightness',
       label: 'Minimum workspace brightness (deepest & shallowest workspace)',
-      units: '%'
+      units: '%',
+      min: '-1'
     },
     {
       key: 'background_opacity',
@@ -366,7 +373,8 @@ function WorkspaceCyclerConfig() {
     {
       key: 'desktop_workspace_brightness',
       label: 'Desktop workspace brightness when cycling through workspaces',
-      units: '%'
+      units: '%',
+      min: '-1'
     },
     {
       key: 'distance_to_initiate_cycling',
@@ -410,49 +418,53 @@ function FlingConfig() {
     {
       key: 'touchscreen_alpha',
       label: 'Touchscreen fling deacceleration coefficients',
-      units: 'alpha'
+      units: 'alpha',
+      min: '-inf'
     },
     {
       key: 'touchscreen_beta',
       label: '',
-      units: 'beta'
+      units: 'beta',
+      min: '-inf'
     },
     {
       key: 'touchscreen_gamma',
       label: '',
-      units: 'gamma'
+      units: 'gamma',
+      min: '-inf'
     },
     {
       key: 'touchpad_alpha',
       label: 'Touchpad fling deacceleration coefficients',
-      units: 'alpha'
+      units: 'alpha',
+      min: '-inf'
     },
     {
       key: 'touchpad_beta',
       label: '',
-      units: 'beta'
+      units: 'beta',
+      min: '-inf'
     },
     {
       key: 'touchpad_gamma',
       label: '',
-      units: 'gamma'
+      units: 'gamma',
+      min: '-inf'
     },
   ];
 
   return new GeneralConfig(FLING_TITLE, FLING_PREFIX, FLING_FIELDS);
 }
 
-
 /**
  * WebUI instance for configuring gesture.* and overscroll.* preference values
  * used by Chrome's gesture recognition system.
  */
-var gesture_config = (function() {
-
+window.gesture_config = {
   /**
    * Build and initialize the gesture configuration form.
    */
-  function initialize() {
+  initialize: function() {
     var g = GestureConfig();
     g.buildAll();
 
@@ -471,22 +483,17 @@ var gesture_config = (function() {
       f.onReset();
       c.onReset();
     };
-  }
+  },
 
   /**
    * Handle callback from call to getPreferenceValue.
    * @param {string} prefName The name of the requested preference value.
    * @param {value} value The current value associated with prefName.
    */
-  function getPreferenceValueResult(prefName, value) {
+  getPreferenceValueResult: function(prefName, value) {
     prefName = prefName.substring(prefName.indexOf('.') + 1);
     $(prefName).value = value;
-  }
-
-  return {
-    initialize: initialize,
-    getPreferenceValueResult: getPreferenceValueResult
-  };
-})();
+  },
+};
 
 document.addEventListener('DOMContentLoaded', gesture_config.initialize);

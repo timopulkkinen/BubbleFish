@@ -16,94 +16,127 @@ class PrioritizedResource;
 class UpdatableTile;
 
 class CC_EXPORT TiledLayer : public ContentsScalingLayer {
-public:
-    enum TilingOption { AlwaysTile, NeverTile, AutoTile };
+ public:
+  enum TilingOption {
+    ALWAYS_TILE,
+    NEVER_TILE,
+    AUTO_TILE,
+  };
 
-    virtual void setIsMask(bool) OVERRIDE;
+  // Layer implementation.
+  virtual void SetIsMask(bool is_mask) OVERRIDE;
+  virtual void PushPropertiesTo(LayerImpl* layer) OVERRIDE;
+  virtual bool BlocksPendingCommit() const OVERRIDE;
+  virtual bool DrawsContent() const OVERRIDE;
+  virtual void SetNeedsDisplayRect(const gfx::RectF& dirty_rect) OVERRIDE;
+  virtual void SetLayerTreeHost(LayerTreeHost* layer_tree_host) OVERRIDE;
+  virtual void SetTexturePriorities(const PriorityCalculator& priority_calc)
+      OVERRIDE;
+  virtual Region VisibleContentOpaqueRegion() const OVERRIDE;
+  virtual void Update(ResourceUpdateQueue* queue,
+                      const OcclusionTracker* occlusion,
+                      RenderingStats* stats) OVERRIDE;
 
-    virtual void pushPropertiesTo(LayerImpl*) OVERRIDE;
+ protected:
+  TiledLayer();
+  virtual ~TiledLayer();
 
-    virtual bool blocksPendingCommit() const OVERRIDE;
+  void UpdateTileSizeAndTilingOption();
+  void UpdateBounds();
 
-    virtual bool drawsContent() const OVERRIDE;
+  // Exposed to subclasses for testing.
+  void SetTileSize(gfx::Size size);
+  void SetTextureFormat(unsigned texture_format) {
+    texture_format_ = texture_format;
+  }
+  void SetBorderTexelOption(LayerTilingData::BorderTexelOption option);
+  size_t NumPaintedTiles() { return tiler_->tiles().size(); }
 
-    virtual void setNeedsDisplayRect(const gfx::RectF&) OVERRIDE;
+  virtual LayerUpdater* Updater() const = 0;
+  virtual void CreateUpdaterIfNeeded() = 0;
 
-    virtual void setLayerTreeHost(LayerTreeHost*) OVERRIDE;
+  // Set invalidations to be potentially repainted during Update().
+  void InvalidateContentRect(gfx::Rect content_rect);
 
-    virtual void setTexturePriorities(const PriorityCalculator&) OVERRIDE;
+  // Reset state on tiles that will be used for updating the layer.
+  void ResetUpdateState();
 
-    virtual Region visibleContentOpaqueRegion() const OVERRIDE;
+  // After preparing an update, returns true if more painting is needed.
+  bool NeedsIdlePaint();
+  gfx::Rect IdlePaintRect();
 
-    virtual void update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*) OVERRIDE;
+  bool SkipsDraw() const { return skips_draw_; }
 
-protected:
-    TiledLayer();
-    virtual ~TiledLayer();
+  // Virtual for testing
+  virtual PrioritizedResourceManager* ResourceManager() const;
+  const LayerTilingData* TilerForTesting() const { return tiler_.get(); }
+  const PrioritizedResource* ResourceAtForTesting(int i, int j) const;
 
-    void updateTileSizeAndTilingOption();
-    void updateBounds();
+ private:
+  virtual scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl)
+      OVERRIDE;
 
-    // Exposed to subclasses for testing.
-    void setTileSize(const gfx::Size&);
-    void setTextureFormat(unsigned textureFormat) { m_textureFormat = textureFormat; }
-    void setBorderTexelOption(LayerTilingData::BorderTexelOption);
-    size_t numPaintedTiles() { return m_tiler->tiles().size(); }
+  void CreateTilerIfNeeded();
+  void set_tiling_option(TilingOption tiling_option) {
+    tiling_option_ = tiling_option;
+  }
 
-    virtual LayerUpdater* updater() const = 0;
-    virtual void createUpdaterIfNeeded() = 0;
+  bool TileOnlyNeedsPartialUpdate(UpdatableTile* tile);
+  bool TileNeedsBufferedUpdate(UpdatableTile* tile);
 
-    // Set invalidations to be potentially repainted during update().
-    void invalidateContentRect(const gfx::Rect& contentRect);
+  void MarkOcclusionsAndRequestTextures(int left,
+                                        int top,
+                                        int right,
+                                        int bottom,
+                                        const OcclusionTracker* occlusion);
 
-    // Reset state on tiles that will be used for updating the layer.
-    void resetUpdateState();
+  bool UpdateTiles(int left,
+                   int top,
+                   int right,
+                   int bottom,
+                   ResourceUpdateQueue* queue,
+                   const OcclusionTracker* occlusion,
+                   RenderingStats* stats,
+                   bool* did_paint);
+  bool HaveTexturesForTiles(int left,
+                            int top,
+                            int right,
+                            int bottom,
+                            bool ignore_occlusions);
+  gfx::Rect MarkTilesForUpdate(int left,
+                               int top,
+                               int right,
+                               int bottom,
+                               bool ignore_occlusions);
+  void UpdateTileTextures(gfx::Rect paint_rect,
+                          int left,
+                          int top,
+                          int right,
+                          int bottom,
+                          ResourceUpdateQueue* queue,
+                          const OcclusionTracker* occlusion,
+                          RenderingStats* stats);
+  void UpdateScrollPrediction();
 
-    // After preparing an update, returns true if more painting is needed.
-    bool needsIdlePaint();
-    gfx::Rect idlePaintRect();
+  UpdatableTile* TileAt(int i, int j) const;
+  UpdatableTile* CreateTile(int i, int j);
 
-    bool skipsDraw() const { return m_skipsDraw; }
+  bool IsSmallAnimatedLayer() const;
 
-    // Virtual for testing
-    virtual PrioritizedResourceManager* resourceManager() const;
-    const LayerTilingData* tilerForTesting() const { return m_tiler.get(); }
-    const PrioritizedResource* resourceAtForTesting(int, int) const;
+  unsigned texture_format_;
+  bool skips_draw_;
+  bool failed_update_;
 
-private:
-    virtual scoped_ptr<LayerImpl> createLayerImpl(LayerTreeImpl* treeImpl) OVERRIDE;
+  // Used for predictive painting.
+  gfx::Vector2d predicted_scroll_;
+  gfx::Rect predicted_visible_rect_;
+  gfx::Rect previous_visible_rect_;
+  gfx::Size previous_content_bounds_;
 
-    void createTilerIfNeeded();
-    void setTilingOption(TilingOption);
+  TilingOption tiling_option_;
+  scoped_ptr<LayerTilingData> tiler_;
 
-    bool tileOnlyNeedsPartialUpdate(UpdatableTile*);
-    bool tileNeedsBufferedUpdate(UpdatableTile*);
-
-    void markOcclusionsAndRequestTextures(int left, int top, int right, int bottom, const OcclusionTracker*);
-
-    bool updateTiles(int left, int top, int right, int bottom, ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*, bool& didPaint);
-    bool haveTexturesForTiles(int left, int top, int right, int bottom, bool ignoreOcclusions);
-    gfx::Rect markTilesForUpdate(int left, int top, int right, int bottom, bool ignoreOcclusions);
-    void updateTileTextures(const gfx::Rect& paintRect, int left, int top, int right, int bottom, ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*);
-    void updateScrollPrediction();
-
-    UpdatableTile* tileAt(int, int) const;
-    UpdatableTile* createTile(int, int);
-
-    bool isSmallAnimatedLayer() const;
-
-    unsigned m_textureFormat;
-    bool m_skipsDraw;
-    bool m_failedUpdate;
-
-    // Used for predictive painting.
-    gfx::Vector2d m_predictedScroll;
-    gfx::Rect m_predictedVisibleRect;
-    gfx::Rect m_previousVisibleRect;
-    gfx::Size m_previousContentBounds;
-
-    TilingOption m_tilingOption;
-    scoped_ptr<LayerTilingData> m_tiler;
+  DISALLOW_COPY_AND_ASSIGN(TiledLayer);
 };
 
 }

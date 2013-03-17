@@ -6,13 +6,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_external_delegate.h"
-#include "chrome/browser/autofill/autofill_manager.h"
-#include "chrome/browser/autofill/test_autofill_external_delegate.h"
-#include "chrome/browser/autofill/test_autofill_manager_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/autofill/browser/autofill_external_delegate.h"
+#include "components/autofill/browser/autofill_manager.h"
+#include "components/autofill/browser/test_autofill_external_delegate.h"
+#include "components/autofill/browser/test_autofill_manager_delegate.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
@@ -46,7 +46,7 @@ class MockAutofillManagerDelegate
   MockAutofillManagerDelegate() {}
   virtual ~MockAutofillManagerDelegate() {}
 
-  virtual PrefService* GetPrefs() { return &prefs_; }
+  virtual PrefService* GetPrefs() OVERRIDE { return &prefs_; }
 
  private:
   TestingPrefServiceSimple prefs_;
@@ -323,7 +323,8 @@ TEST_F(AutofillPopupControllerUnitTest, GetOrCreate) {
       static_cast<AutofillPopupController*>(controller3)->element_bounds());
   controller3->Hide();
 
-  delete test_controller;
+  // Hide the test_controller to delete it.
+  test_controller->DoHide();
 }
 
 #if !defined(OS_ANDROID)
@@ -412,8 +413,9 @@ TEST_F(AutofillPopupControllerUnitTest, GrowPopupInSpace) {
   // the screen.
   element_bounds.push_back(
       gfx::RectF(desired_width * 1.5, desired_height * 1.5, 0, 0));
-  expected_popup_bounds.push_back(gfx::Rect(
-          desired_width / 2, desired_height /2, desired_width, desired_height));
+  expected_popup_bounds.push_back(
+      gfx::Rect((desired_width + 1) / 2, (desired_height + 1) / 2,
+                desired_width, desired_height));
 
   for (size_t i = 0; i < element_bounds.size(); ++i) {
     NiceMock<MockAutofillExternalDelegate> external_delegate(

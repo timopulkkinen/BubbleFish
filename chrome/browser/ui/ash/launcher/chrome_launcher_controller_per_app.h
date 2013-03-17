@@ -12,7 +12,7 @@
 
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -255,7 +255,8 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
   virtual ash::LauncherMenuModel* CreateApplicationMenu(
-      const ash::LauncherItem& item) OVERRIDE;
+      const ash::LauncherItem& item,
+      int event_flags) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
 
@@ -290,7 +291,10 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
                            const gfx::ImageSkia& image) OVERRIDE;
 
   // Get the list of all running incarnations of this item.
-  ChromeLauncherAppMenuItems GetApplicationList(const ash::LauncherItem& item);
+  // |event_flags| specifies the flags which were set by the event which
+  // triggered this menu generation. It can be used to generate different lists.
+  ChromeLauncherAppMenuItems GetApplicationList(const ash::LauncherItem& item,
+                                                int event_flags);
 
   // Get the list of all tabs which belong to a certain application type.
   std::vector<content::WebContents*> GetV1ApplicationsFromAppId(
@@ -304,9 +308,13 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   bool IsWebContentHandledByApplication(content::WebContents* web_contents,
                                         const std::string& app_id);
 
-  // Get the favicon for the application list by giving the |web_content|.
+  // Get the favicon for the application list by giving the |web_contents|.
   // Note that for incognito windows the incognito icon will be returned.
   gfx::Image GetAppListIcon(content::WebContents* web_contents) const;
+
+  // Get the favicon for the browser list by giving the |web_contents|.
+  // Note that for incognito windows the incognito icon will be returned.
+  gfx::Image GetBrowserListIcon(content::WebContents* web_contents) const;
 
   // Overridden from chrome::BrowserListObserver.
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
@@ -395,13 +403,18 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
       LauncherItemController* controller);
 
   // Returns the list of all browsers runing.
+  // |event_flags| specifies the flags which were set by the event which
+  // triggered this menu generation. It can be used to generate different lists.
   // TODO(skuhne): Move to wherever the BrowserLauncherItemController
   // functionality moves to.
-  ChromeLauncherAppMenuItems GetBrowserApplicationList();
+  ChromeLauncherAppMenuItems GetBrowserApplicationList(int event_flags);
 
   // Returns true when the given |browser| is listed in the browser application
   // list.
   bool IsBrowserRepresentedInBrowserList(Browser* browser);
+
+  // Check if the given |web_contents| is in incognito mode.
+  bool IsIncognito(content::WebContents* web_contents) const;
 
   ash::LauncherModel* model_;
 

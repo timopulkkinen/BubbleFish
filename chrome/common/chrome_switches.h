@@ -10,14 +10,15 @@
 #include "build/build_config.h"
 
 #include "base/base_switches.h"
+#include "components/autofill/common/autofill_switches.h"
 #include "content/public/common/content_switches.h"
 
 namespace switches {
 
 // -----------------------------------------------------------------------------
 // Can't find the switch you are looking for? Try looking in
-// ui/gl/gl_switches.cc or base/base_switches.cc or
-// content/public/common/content_switches.cc or media/base/media_switches.cc
+// media/base/media_switches.cc or ui/gl/gl_switches.cc or one of the
+// .cc files corresponding to the *_switches.h files included above
 // instead.
 // -----------------------------------------------------------------------------
 
@@ -37,7 +38,6 @@ extern const char kAppId[];
 extern const char kApp[];
 extern const char kAppsDevtool[];
 extern const char kAppWindowSize[];
-extern const char kAppNotifyChannelServerURL[];
 extern const char kAppsCheckoutURL[];
 extern const char kAppsGalleryDownloadURL[];
 extern const char kAppsGalleryInstallAutoConfirmForTests[];
@@ -50,7 +50,6 @@ extern const char kAuthNegotiateDelegateWhitelist[];
 extern const char kAuthSchemes[];
 extern const char kAuthServerWhitelist[];
 extern const char kAutoLaunchAtStartup[];
-extern const char kAutofillServiceUrl[];
 extern const char kAutomationClientChannelID[];
 extern const char kAutomationReinitializeOnChannelError[];
 extern const char kCheckForUpdateIntervalSec[];
@@ -64,7 +63,6 @@ extern const char kCloudPrintFile[];
 extern const char kCloudPrintJobTitle[];
 extern const char kCloudPrintFileType[];
 extern const char kCloudPrintPrintTicket[];
-extern const char kCloudPrintProxyId[];
 extern const char kCloudPrintServiceURL[];
 extern const char kComponentUpdaterDebug[];
 extern const char kConflictingModulesCheck[];
@@ -108,7 +106,6 @@ extern const char kDisableScriptedPrintThrottling[];
 extern const char kDisableSync[];
 extern const char kDisableSyncAppSettings[];
 extern const char kDisableSyncApps[];
-extern const char kDisableSyncAppNotifications[];
 extern const char kDisableSyncAutofill[];
 extern const char kDisableSyncAutofillProfile[];
 extern const char kDisableSyncBookmarks[];
@@ -137,12 +134,11 @@ extern const char kEnableAuthNegotiatePort[];
 extern const char kEnableAutologin[];
 extern const char kEnableBenchmarking[];
 extern const char kEnableCloudPrintProxy[];
+extern const char kEnableComponentCloudPolicy[];
 extern const char kEnableContacts[];
-extern const char kEnableCrxlessWebApps[];
 extern const char kEnableDesktopGuestMode[];
 extern const char kEnableDevToolsExperiments[];
 extern const char kEnableExperimentalExtensionApis[];
-extern const char kEnableExperimentalFormFilling[];
 extern const char kEnableExtensionActivityLogging[];
 extern const char kEnableExtensionActivityUI[];
 extern const char kEnableFileCookies[];
@@ -160,26 +156,25 @@ extern const char kEnableMetricsReportingForTesting[];
 extern const char kEnableNaCl[];
 extern const char kEnableNaClDebug[];
 extern const char kEnableNaClExceptionHandling[];
-extern const char kEnableNativeMessaging[];
+extern const char kEnableNativeAutofillUi[];
 extern const char kEnableNetBenchmarking[];
-extern const char kEnableNewAutofillUi[];
 extern const char kEnableNpn[];
 extern const char kEnableNpnHttpOnly[];
 extern const char kEnablePanels[];
-extern const char kEnablePanelStacking[];
 extern const char kEnablePasswordGeneration[];
 extern const char kEnablePnacl[];
 extern const char kEnableProfiling[];
 extern const char kEnableQuic[];
-extern const char kEnableQueryExtraction[];
 extern const char kEnableResourceContentSettings[];
 extern const char kEnableSdch[];
 extern const char kEnableSpdy3[];
+extern const char kEnableSpdy31[];
 extern const char kEnableSpdyCredentialFrames[];
 extern const char kEnableSpellingAutoCorrect[];
 extern const char kEnableStackedTabStrip[];
 extern const char kEnableSuggestionsTabPage[];
 extern const char kEnableSyncSyncedNotifications[];
+extern const char kEnableSyncFavicons[];
 extern const char kEnableTabGroupsContextMenu[];
 extern const char kEnableUserAlternateProtocolPorts[];
 extern const char kEnableWatchdog[];
@@ -197,6 +192,7 @@ extern const char kFeedbackServer[];
 extern const char kFileDescriptorLimit[];
 extern const char kForceAppMode[];
 extern const char kForceFirstRun[];
+extern const char kForceFullscreenApp[];
 extern const char kForceLoadCloudPolicy[];
 extern const char kGaiaProfileInfo[];
 extern const char kGoogleSearchDomainCheckURL[];
@@ -204,6 +200,7 @@ extern const char kGSSAPILibraryName[];
 extern const char kHelp[];
 extern const char kHelpShort[];
 extern const char kHideIcons[];
+extern const char kHideLauncherAlignmentMenu[];
 extern const char kHistoryDisableFullHistorySync[];
 extern const char kHistoryEnableFullHistorySync[];
 extern const char kHistoryEnableGroupByDomain[];
@@ -318,14 +315,14 @@ extern const char kSbDisableExtensionBlacklist[];
 extern const char kScriptBadges[];
 extern const char kScriptBubble[];
 extern const char kSearchInOmniboxHint[];
+extern const char kServiceProcess[];
 extern const char kSideloadWipeout[];
 extern const char kSilentLaunch[];
 extern const char kSetToken[];
 extern const char kShowAppList[];
-extern const char kShowAutofillTypePredictions[];
 extern const char kShowComponentExtensionOptions[];
 extern const char kShowIcons[];
-extern const char kShowLauncherAlignmentMenu[];
+extern const char kSigninProcess[];
 extern const char kSilentDumpOnDCHECK[];
 extern const char kSimulateUpgrade[];
 extern const char kSimulateCriticalUpdate[];
@@ -352,6 +349,7 @@ extern const char kSyncServiceURL[];
 extern const char kSyncTabFavicons[];
 extern const char kSyncThrowUnrecoverableError[];
 extern const char kSyncTrySsltcpFirstForXmpp[];
+extern const char kSyncEnableDeferredStartup[];
 extern const char kTabBrowserDragging[];
 extern const char kTabCapture[];
 extern const char kTestNaClSandbox[];
@@ -362,6 +360,7 @@ extern const char kTrackActiveVisitTime[];
 extern const char kTrustedSpdyProxy[];
 extern const char kTryChromeAgain[];
 extern const char kUninstall[];
+extern const char kUseSimpleCacheBackend[];
 extern const char kUseSpdy[];
 extern const char kUseSpellingSuggestions[];
 extern const char kMaxSpdySessionsPerDomain[];
@@ -372,8 +371,6 @@ extern const char kVariationsServerURL[];
 extern const char kVersion[];
 extern const char kViewerConnection[];
 extern const char kVisitURLs[];
-extern const char kWalletSecureServiceUrl[];
-extern const char kWalletServiceUrl[];
 extern const char kWebIntentsNativeServicesEnabled[];
 extern const char kWhitelistedExtensionID[];
 extern const char kWindowPosition[];
@@ -384,8 +381,11 @@ extern const char kWinHttpProxyResolver[];
 extern const char kPluginsMetadataServerURL[];
 #endif
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 extern const char kEnableSpdyProxyAuth[];
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+
+#if defined(OS_ANDROID)
 extern const char kEnableTranslate[];
 extern const char kTabletUI[];
 #endif
@@ -458,7 +458,6 @@ extern const char kUseMockKeychain[];
 #endif
 
 #if defined(OS_WIN)
-extern const char kEnableMediaTransferProtocolDeviceOperations[];
 extern const char kForceImmersive[];
 extern const char kForceDesktop[];
 extern const char kOverlappedRead[];

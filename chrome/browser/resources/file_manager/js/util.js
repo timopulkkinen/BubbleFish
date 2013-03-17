@@ -756,7 +756,7 @@ util.updateAppState = function(replace, path, opt_param) {
 
   var hash;
   if (path)
-    hash = '#' + encodeURI(path);
+    hash = '#' + encodeURIComponent(path);
   else
     hash = location.hash;
 
@@ -1261,4 +1261,19 @@ util.disableBrowserShortcutKeys = function(element) {
         e.preventDefault();
     }
   });
+};
+
+/**
+ * Makes a redirect to the specified Files.app's window from another window.
+ * @param {number} id Window id.
+ * @param {string} url Target url.
+ * @return {boolean} True if the window has been found. False otherwise.
+ */
+util.redirectMainWindow = function(id, url) {
+  var windowViews = chrome.extension.getViews({ windowId: parseInt(id) });
+  if (!windowViews || windowViews.length === 0)
+    return false;
+
+  windowViews[0].location.href = url;
+  return true;
 };

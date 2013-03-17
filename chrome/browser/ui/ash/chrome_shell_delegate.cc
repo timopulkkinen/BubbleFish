@@ -8,6 +8,7 @@
 #include "ash/host/root_window_host_factory.h"
 #include "ash/launcher/launcher_types.h"
 #include "ash/magnifier/magnifier_constants.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
@@ -58,6 +59,21 @@ ChromeShellDelegate::~ChromeShellDelegate() {
     instance_ = NULL;
 }
 
+// static
+bool ChromeShellDelegate::UseImmersiveFullscreen() {
+#if defined(OS_CHROMEOS)
+  // Kiosk mode needs the whole screen.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  return !command_line->HasSwitch(switches::kKioskMode) &&
+      !command_line->HasSwitch(ash::switches::kAshDisableImmersiveMode);
+#endif
+  return false;
+}
+
+bool ChromeShellDelegate::IsRunningInForcedAppMode() const {
+  return chrome::IsRunningInForcedAppMode();
+}
+
 void ChromeShellDelegate::UnlockScreen() {
   // This is used only for testing thus far.
   NOTIMPLEMENTED();
@@ -92,8 +108,7 @@ void ChromeShellDelegate::ToggleMaximized() {
 
   // TODO(jamescook): If immersive mode replaces fullscreen, rename this
   // function and the interface to ToggleFullscreen.
-  if (CommandLine::ForCurrentProcess()->
-        HasSwitch(ash::switches::kAshImmersiveMode)) {
+  if (UseImmersiveFullscreen()) {
     chrome::ToggleFullscreenMode(GetTargetBrowser());
     return;
   }
@@ -200,6 +215,18 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       content::RecordAction(
           content::UserMetricsAction("Accel_KeyboardBrightnessUp_F7"));
       break;
+    case ash::UMA_ACCEL_LOCK_SCREEN_L:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_LockScreen_L"));
+      break;
+    case ash::UMA_ACCEL_LOCK_SCREEN_LOCK_BUTTON:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_LockScreen_LockButton"));
+      break;
+    case ash::UMA_ACCEL_LOCK_SCREEN_POWER_BUTTON:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_LockScreen_PowerButton"));
+      break;
     case ash::UMA_ACCEL_MAXIMIZE_RESTORE_F4:
       content::RecordAction(
           content::UserMetricsAction("Accel_Maximize_Restore_F4"));
@@ -221,6 +248,10 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       break;
     case ash::UMA_ACCEL_SEARCH_LWIN:
       content::RecordAction(content::UserMetricsAction("Accel_Search_LWin"));
+      break;
+    case ash::UMA_ACCEL_SHUT_DOWN_POWER_BUTTON:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_ShutDown_PowerButton"));
       break;
     case ash::UMA_MAXIMIZE_BUTTON_MAXIMIZE:
       content::RecordAction(content::UserMetricsAction("MaxButton_Maximize"));
@@ -260,6 +291,15 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       break;
     case ash::UMA_TOUCHSCREEN_TAP_DOWN:
       content::RecordAction(content::UserMetricsAction("Touchscreen_Down"));
+      break;
+    case ash::UMA_TRAY_HELP:
+      content::RecordAction(content::UserMetricsAction("Tray_Help"));
+      break;
+    case ash::UMA_TRAY_LOCK_SCREEN:
+      content::RecordAction(content::UserMetricsAction("Tray_LockScreen"));
+      break;
+    case ash::UMA_TRAY_SHUT_DOWN:
+      content::RecordAction(content::UserMetricsAction("Tray_ShutDown"));
       break;
   }
 }

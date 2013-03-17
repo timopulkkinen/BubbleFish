@@ -13,18 +13,8 @@
 namespace google_apis {
 namespace {
 
-// URL requesting resource list that belong to the authenticated user only
-// (handled with '/-/mine' part).
-const char kGetResourceListURLForAllDocuments[] =
-    "/feeds/default/private/full/-/mine";
-
-// URL requesting resource list in a particular directory specified by "%s"
-// that belong to the authenticated user only (handled with '/-/mine' part).
-const char kGetResourceListURLForDirectoryFormat[] =
-    "/feeds/default/private/full/%s/contents/-/mine";
-
-// Content URL for modification in a particular directory specified by "%s"
-// which will be replaced with its resource id.
+// Content URL for modification or resource list retrieval in a particular
+// directory specified by "%s" which will be replaced with its resource id.
 const char kContentURLFormat[] = "/feeds/default/private/full/%s/contents";
 
 // Content URL for removing a resource specified by the latter "%s" from the
@@ -51,16 +41,12 @@ const char kInitiateUploadNewFileURLFormat[] =
 const char kInitiateUploadExistingFileURLPrefix[] =
     "/feeds/upload/create-session/default/private/full/";
 
-#ifndef NDEBUG
-// Use smaller 'page' size while debugging to ensure we hit feed reload
-// almost always. Be careful not to use something too small on account that
-// have many items because server side 503 error might kick in.
+// Maximum number of resource entries to include in a feed.
+// Be careful not to use something too small because it might overload the
+// server. Be careful not to use something too large because it makes the
+// "fetched N items" UI less responsive.
 const int kMaxDocumentsPerFeed = 500;
 const int kMaxDocumentsPerSearchFeed = 50;
-#else
-const int kMaxDocumentsPerFeed = 500;
-const int kMaxDocumentsPerSearchFeed = 50;
-#endif
 
 // URL requesting documents list that shared to the authenticated user only
 const char kGetResourceListURLForSharedWithMe[] =
@@ -78,6 +64,7 @@ const char GDataWapiUrlGenerator::kBaseUrlForProduction[] =
 GURL GDataWapiUrlGenerator::AddStandardUrlParams(const GURL& url) {
   GURL result = net::AppendOrReplaceQueryParameter(url, "v", "3");
   result = net::AppendOrReplaceQueryParameter(result, "alt", "json");
+  result = net::AppendOrReplaceQueryParameter(result, "showroot", "true");
   return result;
 }
 
@@ -95,6 +82,7 @@ GURL GDataWapiUrlGenerator::AddFeedUrlParams(
     const std::string& search_string) {
   GURL result = AddStandardUrlParams(url);
   result = net::AppendOrReplaceQueryParameter(result, "showfolders", "true");
+  result = net::AppendOrReplaceQueryParameter(result, "include-shared", "true");
   result = net::AppendOrReplaceQueryParameter(
       result,
       "max-results",
@@ -146,11 +134,11 @@ GURL GDataWapiUrlGenerator::GenerateResourceListUrl(
     url = base_url_.Resolve(kGetChangesListURL);
   } else if (!directory_resource_id.empty()) {
     url = base_url_.Resolve(
-        base::StringPrintf(kGetResourceListURLForDirectoryFormat,
+        base::StringPrintf(kContentURLFormat,
                            net::EscapePath(
                                directory_resource_id).c_str()));
   } else {
-    url = base_url_.Resolve(kGetResourceListURLForAllDocuments);
+    url = base_url_.Resolve(kResourceListRootURL);
   }
   return AddFeedUrlParams(url, max_docs, start_changestamp, search_string);
 }

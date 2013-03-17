@@ -10,54 +10,55 @@
 
 namespace cc {
 
-scoped_refptr<HeadsUpDisplayLayer> HeadsUpDisplayLayer::create()
-{
-    return make_scoped_refptr(new HeadsUpDisplayLayer());
+scoped_refptr<HeadsUpDisplayLayer> HeadsUpDisplayLayer::Create() {
+  return make_scoped_refptr(new HeadsUpDisplayLayer());
 }
 
-HeadsUpDisplayLayer::HeadsUpDisplayLayer()
-    : Layer()
-{
-    setBounds(gfx::Size(256, 256));
+HeadsUpDisplayLayer::HeadsUpDisplayLayer() : Layer() {
+  SetBounds(gfx::Size(256, 256));
 }
 
-HeadsUpDisplayLayer::~HeadsUpDisplayLayer()
-{
+HeadsUpDisplayLayer::~HeadsUpDisplayLayer() {}
+
+void HeadsUpDisplayLayer::Update(ResourceUpdateQueue*,
+                                 const OcclusionTracker*,
+                                 RenderingStats*) {
+  const LayerTreeDebugState& debug_state = layer_tree_host()->debug_state();
+  int max_texture_size =
+      layer_tree_host()->GetRendererCapabilities().max_texture_size;
+
+  int device_viewport_in_layout_pixels_width =
+      layer_tree_host()->device_viewport_size().width() /
+      layer_tree_host()->device_scale_factor();
+  int device_viewport_in_layout_pixels_height =
+      layer_tree_host()->device_viewport_size().height() /
+      layer_tree_host()->device_scale_factor();
+
+  gfx::Size bounds;
+  gfx::Transform matrix;
+  matrix.MakeIdentity();
+
+  if (debug_state.showPlatformLayerTree || debug_state.showHudRects()) {
+    int width =
+        std::min(max_texture_size, device_viewport_in_layout_pixels_width);
+    int height =
+        std::min(max_texture_size, device_viewport_in_layout_pixels_height);
+    bounds = gfx::Size(width, height);
+  } else {
+    bounds = gfx::Size(256, 256);
+    matrix.Translate(device_viewport_in_layout_pixels_width - 256.0, 0.0);
+  }
+
+  SetBounds(bounds);
+  SetTransform(matrix);
 }
 
-void HeadsUpDisplayLayer::update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*)
-{
-    const LayerTreeDebugState& debugState = layerTreeHost()->debugState();
-    int maxTextureSize = layerTreeHost()->rendererCapabilities().maxTextureSize;
+bool HeadsUpDisplayLayer::DrawsContent() const { return true; }
 
-    int deviceViewportInLayoutPixelsWidth = layerTreeHost()->deviceViewportSize().width() / layerTreeHost()->deviceScaleFactor();
-    int deviceViewportInLayoutPixelsHeight = layerTreeHost()->deviceViewportSize().height() / layerTreeHost()->deviceScaleFactor();
-
-    gfx::Size bounds;
-    gfx::Transform matrix;
-    matrix.MakeIdentity();
-
-    if (debugState.showPlatformLayerTree || debugState.showHudRects()) {
-        int width = std::min(maxTextureSize, deviceViewportInLayoutPixelsWidth);
-        int height = std::min(maxTextureSize, deviceViewportInLayoutPixelsHeight);
-        bounds = gfx::Size(width, height);
-    } else {
-        bounds = gfx::Size(256, 256);
-        matrix.Translate(deviceViewportInLayoutPixelsWidth - 256, 0);
-    }
-
-    setBounds(bounds);
-    setTransform(matrix);
-}
-
-bool HeadsUpDisplayLayer::drawsContent() const
-{
-    return true;
-}
-
-scoped_ptr<LayerImpl> HeadsUpDisplayLayer::createLayerImpl(LayerTreeImpl* treeImpl)
-{
-    return HeadsUpDisplayLayerImpl::create(treeImpl, m_layerId).PassAs<LayerImpl>();
+scoped_ptr<LayerImpl> HeadsUpDisplayLayer::CreateLayerImpl(
+    LayerTreeImpl* treeImpl) {
+  return HeadsUpDisplayLayerImpl::Create(treeImpl, layer_id_).
+      PassAs<LayerImpl>();
 }
 
 }  // namespace cc

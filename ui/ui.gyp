@@ -75,6 +75,7 @@
         'base/clipboard/clipboard.cc',
         'base/clipboard/clipboard.h',
         'base/clipboard/clipboard_android.cc',
+        'base/clipboard/clipboard_android_initialization.h',
         'base/clipboard/clipboard_aurax11.cc',
         'base/clipboard/clipboard_chromeos.cc',
         'base/clipboard/clipboard_gtk.cc',
@@ -99,6 +100,8 @@
         'base/cocoa/fullscreen_window_manager.mm',
         'base/cocoa/nib_loading.h',
         'base/cocoa/nib_loading.mm',
+        'base/cocoa/tracking_area.h',
+        'base/cocoa/tracking_area.mm',
         'base/cocoa/underlay_opengl_hosting_window.h',
         'base/cocoa/underlay_opengl_hosting_window.mm',
         'base/cocoa/window_size_constants.h',
@@ -309,6 +312,8 @@
         'base/win/shell.h',
         'base/win/singleton_hwnd.cc',
         'base/win/singleton_hwnd.h',
+        'base/win/touch_input.cc',
+        'base/win/touch_input.h',
         'base/win/window_impl.cc',
         'base/win/window_impl.h',
         'base/window_open_disposition.cc',
@@ -615,17 +620,7 @@
             '../build/linux/system.gyp:fontconfig',
             '../build/linux/system.gyp:glib',
             '../build/linux/system.gyp:pangocairo',
-            '../build/linux/system.gyp:x11',
-            '../build/linux/system.gyp:xext',
-            '../build/linux/system.gyp:xfixes',
           ],
-          'link_settings': {
-            'libraries': [
-              '-lXcursor',  # For XCursor* function calls in x11_util.cc.
-              '-lXrender',  # For XRender* function calls in x11_util.cc.
-              '-lXrandr',   # For XRR* function calls in x11_util.cc.
-            ],
-          },
           'conditions': [
             ['toolkit_views==0', {
               # Note: because of gyp predence rules this has to be defined as
@@ -769,9 +764,23 @@
                 '-lX11',
                 '-lXcursor',
                 '-lXrandr',  # For XRR* function calls in x11_util.cc.
+                '-lXrender',  # For XRender* function calls in x11_util.cc.
               ],
             },
           },
+          'link_settings': {
+            'libraries': [
+              '-lX11',
+              '-lXcursor',
+              '-lXrandr',  # For XRR* function calls in x11_util.cc.
+              '-lXrender',  # For XRender* function calls in x11_util.cc.
+            ],
+          },
+          'dependencies': [
+            '../build/linux/system.gyp:x11',
+            '../build/linux/system.gyp:xext',
+            '../build/linux/system.gyp:xfixes',
+          ],
         }, {  # use_x11==0
           'sources/': [
             ['exclude', 'base/keycodes/keyboard_code_conversion_x.*'],
@@ -815,7 +824,7 @@
             ],
           },
         }],
-        ['OS=="android" and android_build_type==0', {
+        ['OS=="android" and android_webview_build==0', {
           'dependencies': [
             'ui_java',
           ],
@@ -855,9 +864,10 @@
              'android/java/src/org/chromium/ui/gfx/DeviceDisplayInfo.java',
              'android/java/src/org/chromium/ui/gfx/NativeWindow.java',
              'android/java/src/org/chromium/ui/SelectFileDialog.java',
+             'android/java/src/org/chromium/ui/Clipboard.java',
            ],
            'variables': {
-             'jni_gen_dir': 'ui',
+             'jni_gen_package': 'ui',
            },
            'includes': [ '../build/jni_generator.gypi' ],
          },

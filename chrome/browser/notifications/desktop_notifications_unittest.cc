@@ -11,7 +11,14 @@
 #include "chrome/browser/notifications/fake_balloon_view.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/common/show_desktop_notification_params.h"
+
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/message_center/message_center.h"
+#endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
@@ -97,6 +104,11 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 void DesktopNotificationsTest::SetUp() {
 #if defined(USE_ASH)
   WebKit::initialize(webkit_platform_support_.Get());
+#if defined(ENABLE_MESSAGE_CENTER)
+  // The message center is notmally initialized on |g_browser_process| which
+  // is not created for these tests.
+  message_center::MessageCenter::Initialize();
+#endif
   // MockBalloonCollection retrieves information about the screen on creation.
   // So it is necessary to make sure the desktop gets created first.
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate);
@@ -119,6 +131,11 @@ void DesktopNotificationsTest::TearDown() {
 #if defined(USE_ASH)
   active_desktop_monitor_.reset();
   ash::Shell::DeleteInstance();
+#if defined(ENABLE_MESSAGE_CENTER)
+  // The message center is notmally shutdown on |g_browser_process| which
+  // is not created for these tests.
+  message_center::MessageCenter::Shutdown();
+#endif
   aura::Env::DeleteInstance();
   WebKit::shutdown();
 #endif
@@ -277,6 +294,86 @@ TEST_F(DesktopNotificationsTest, TestVariableSize) {
   EXPECT_EQ(expected_log, log_output_);
 }
 #endif
+
+TEST_F(DesktopNotificationsTest, TestCancelByProfile) {
+  int process_id = 0;
+  int route_id = 0;
+
+  TestingBrowserProcess* browser_process =
+      TestingBrowserProcess::GetGlobal();
+  TestingProfileManager profile_manager(browser_process);
+  ASSERT_TRUE(profile_manager.SetUp());
+
+  TestingProfile* second_profile =
+      profile_manager.CreateTestingProfile("SecondTestingProfile");
+
+  scoped_ptr<DesktopNotificationService> second_service(
+      new DesktopNotificationService(second_profile, ui_manager_.get()));
+
+  // Request lots of identical notifications.
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
+  params.notification_id = 1;
+  // Notice that the first one is the only one that doesn't use
+  // the second profile.
+  EXPECT_TRUE(service_->ShowDesktopNotification(
+      params, process_id, route_id,
+      DesktopNotificationService::PageNotification));
+
+  // |kLotsOfToasts| must be large enough to trigger a resize of the underlying
+  // std::deque while we're clearing it.
+  const int kLotsOfToasts = 20;
+  for (int id = 2; id <= kLotsOfToasts; ++id) {
+    params.notification_id = id;
+    EXPECT_TRUE(second_service->ShowDesktopNotification(
+        params, process_id, route_id,
+        DesktopNotificationService::PageNotification));
+  }
+  MessageLoopForUI::current()->RunUntilIdle();
+
+  ui_manager_->CancelAllByProfile(second_profile);
+
+  // Verify that the balloon collection only contains the single
+  // notification from the first profile.
+  EXPECT_EQ(1, balloon_collection_->count());
+}
+
+TEST_F(DesktopNotificationsTest, TestCancelBySourceOrigin) {
+  int process_id = 0;
+  int route_id = 0;
+
+  // Request lots of identical notifications.
+  content::ShowDesktopNotificationHostMsgParams params =
+      StandardTestNotification();
+
+  // After the first, all the notifications are from attacker.com.
+  content::ShowDesktopNotificationHostMsgParams odd_params =
+      StandardTestNotification();
+  odd_params.origin = GURL("attacker.com");
+
+  // Show the only non-attacker.com notification.
+  params.notification_id = 1;
+  EXPECT_TRUE(service_->ShowDesktopNotification(
+      params, process_id, route_id,
+      DesktopNotificationService::PageNotification));
+
+  // |kLotsOfToasts| must be large enough to trigger a resize of the underlying
+  // std::deque while we're clearing it.
+  const int kLotsOfToasts = 20;
+  for (int id = 2; id <= kLotsOfToasts; ++id) {
+    odd_params.notification_id = id;
+    EXPECT_TRUE(service_->ShowDesktopNotification(
+        odd_params, process_id, route_id,
+        DesktopNotificationService::PageNotification));
+  }
+  MessageLoopForUI::current()->RunUntilIdle();
+
+  ui_manager_->CancelAllBySourceOrigin(odd_params.origin);
+
+  // Verify that the balloon collection only contains the single
+  // notification which is not from the canceled origin.
+  EXPECT_EQ(1, balloon_collection_->count());
+}
 
 TEST_F(DesktopNotificationsTest, TestQueueing) {
   int process_id = 0;

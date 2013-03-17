@@ -207,7 +207,8 @@ PictureLayerTilingSet::Iterator& PictureLayerTilingSet::Iterator::operator++() {
 
   // Loop until we find a valid place to stop.
   while (true) {
-    while (tiling_iter_ && (!*tiling_iter_ || !tiling_iter_->GetResourceId())) {
+    while (tiling_iter_ &&
+           (!*tiling_iter_ || !tiling_iter_->drawing_info().IsReadyToDraw())) {
       missing_region_.Union(tiling_iter_.geometry_rect());
       ++tiling_iter_;
     }
@@ -266,8 +267,6 @@ void PictureLayerTilingSet::UpdateTilePriorities(
     gfx::Rect viewport_in_content_space,
     gfx::Size last_layer_bounds,
     gfx::Size current_layer_bounds,
-    gfx::Size last_layer_content_bounds,
-    gfx::Size current_layer_content_bounds,
     float last_layer_contents_scale,
     float current_layer_contents_scale,
     const gfx::Transform& last_screen_transform,
@@ -287,8 +286,6 @@ void PictureLayerTilingSet::UpdateTilePriorities(
         viewport_in_layer_space,
         last_layer_bounds,
         current_layer_bounds,
-        last_layer_content_bounds,
-        current_layer_content_bounds,
         last_layer_contents_scale,
         current_layer_contents_scale,
         last_screen_transform,

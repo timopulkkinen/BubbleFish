@@ -6,7 +6,7 @@
   'dependencies': [
     '../base/base.gyp:base',
     '../build/temp_gyp/googleurl.gyp:googleurl',
-    '../components/components_tracing.gyp:tracing',
+    '../components/tracing.gyp:tracing',
     '../media/media.gyp:media',
     '../net/net.gyp:net',
     '../skia/skia.gyp:skia',
@@ -78,6 +78,7 @@
     'public/common/resource_dispatcher_delegate.h',
     'public/common/resource_response.h',
     'public/common/result_codes.h',
+    'public/common/result_codes_list.h',
     'public/common/sandbox_init.cc',
     'public/common/sandbox_init.h',
     'public/common/sandbox_linux.h',
@@ -113,8 +114,8 @@
     'common/android/device_telephony_info.h',
     'common/android/hash_set.cc',
     'common/android/hash_set.h',
-    'common/android/surface_callback.cc',
-    'common/android/surface_callback.h',
+    'common/android/scoped_java_surface.cc',
+    'common/android/scoped_java_surface.h',
     'common/android/surface_texture_bridge.cc',
     'common/android/surface_texture_bridge.h',
     'common/android/surface_texture_listener.cc',
@@ -195,9 +196,9 @@
     'common/font_config_ipc_linux.h',
     'common/font_list.h',
     'common/font_list_android.cc',
+    'common/font_list_linux.cc',
     'common/font_list_mac.mm',
     'common/font_list_win.cc',
-    'common/font_list_x11.cc',
     'common/gamepad_hardware_buffer.h',
     'common/gamepad_messages.h',
     'common/gamepad_seqlock.cc',
@@ -499,7 +500,7 @@
         'common/gpu/media/android_video_decode_accelerator.h',
       ],
     }],
-    ['target_arch=="arm" and chromeos == 1', {
+    ['target_arch=="arm" and chromeos == 1 and use_x11 == 1', {
       'dependencies': [
         '../media/media.gyp:media',
       ],
@@ -522,7 +523,7 @@
         ],
       },
     }],
-    ['target_arch != "arm" and chromeos == 1', {
+    ['target_arch != "arm" and chromeos == 1 and use_x11 == 1', {
       'sources': [
         'common/gpu/media/h264_dpb.cc',
         'common/gpu/media/h264_dpb.h',

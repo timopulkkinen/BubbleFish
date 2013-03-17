@@ -6,8 +6,8 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 const char TranslatePrefs::kPrefTranslateLanguageBlacklist[] =
     "translate_language_blacklist";
@@ -103,6 +103,14 @@ bool TranslatePrefs::HasBlacklistedSites() {
 
 void TranslatePrefs::ClearBlacklistedSites() {
   prefs_->ClearPref(kPrefTranslateSiteBlacklist);
+}
+
+bool TranslatePrefs::HasWhitelistedLanguagePairs() const {
+  return !IsDictionaryEmpty(kPrefTranslateWhitelists);
+}
+
+void TranslatePrefs::ClearWhitelistedLanguagePairs() {
+  prefs_->ClearPref(kPrefTranslateWhitelists);
 }
 
 int TranslatePrefs::GetTranslationDeniedCount(
@@ -274,4 +282,9 @@ bool TranslatePrefs::IsLanguageWhitelisted(
 bool TranslatePrefs::IsListEmpty(const char* pref_id) const {
   const ListValue* blacklist = prefs_->GetList(pref_id);
   return (blacklist == NULL || blacklist->empty());
+}
+
+bool TranslatePrefs::IsDictionaryEmpty(const char* pref_id) const {
+  const DictionaryValue* dict = prefs_->GetDictionary(pref_id);
+  return (dict == NULL || dict->empty());
 }

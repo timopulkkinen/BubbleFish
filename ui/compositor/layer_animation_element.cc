@@ -9,13 +9,22 @@
 #include "cc/animation_id_provider.h"
 #include "ui/base/animation/tween.h"
 #include "ui/compositor/float_animation_curve_adapter.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_delegate.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/compositor/transform_animation_curve_adapter.h"
 #include "ui/gfx/interpolated_transform.h"
 
 namespace ui {
 
 namespace {
+
+// The factor by which duration is scaled up or down when
+// ScopedAnimationDurationScaleMode::duration_scale_mode() is SLOW_DURATION or
+// FAST_DURATION.
+const int kSlowDurationScaleFactor = 4;
+const int kFastDurationScaleFactor = 4;
 
 // Pause -----------------------------------------------------------------------
 class Pause : public LayerAnimationElement {
@@ -413,7 +422,7 @@ class ThreadedLayerAnimationElement : public LayerAnimationElement {
     }
     set_effective_start_time(base::TimeTicks());
     scoped_ptr<cc::Animation> animation = CreateCCAnimation();
-    animation->setNeedsSynchronizedStartTime(true);
+    animation->set_needs_synchronized_start_time(true);
     delegate->AddThreadedAnimation(animation.Pass());
   }
 
@@ -462,7 +471,7 @@ class ThreadedOpacityTransition : public ThreadedLayerAnimationElement {
                                        target_,
                                        duration()));
     scoped_ptr<cc::Animation> animation(
-        cc::Animation::create(animation_curve.Pass(),
+        cc::Animation::Create(animation_curve.Pass(),
                               animation_id(),
                               animation_group_id(),
                               cc::Animation::Opacity));
@@ -484,6 +493,77 @@ class ThreadedOpacityTransition : public ThreadedLayerAnimationElement {
   const float target_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadedOpacityTransition);
+};
+
+// ThreadedTransformTransition -------------------------------------------------
+
+class ThreadedTransformTransition : public ThreadedLayerAnimationElement {
+ public:
+  ThreadedTransformTransition(const gfx::Transform& target,
+                              base::TimeDelta duration)
+      : ThreadedLayerAnimationElement(GetProperties(), duration),
+        target_(target) {
+  }
+  virtual ~ThreadedTransformTransition() {}
+
+ protected:
+  virtual void OnStart(LayerAnimationDelegate* delegate) OVERRIDE {
+    gfx::Transform start_ = delegate->GetTransformForAnimation();
+    gfx::Rect bounds = delegate->GetBoundsForAnimation();
+    float device_scale_factor = delegate->GetDeviceScaleFactor();
+    cc_start_ = Layer::ConvertTransformToCCTransform(start_,
+                                                     bounds,
+                                                     device_scale_factor);
+    cc_target_ = Layer::ConvertTransformToCCTransform(target_,
+                                                      bounds,
+                                                      device_scale_factor);
+  }
+
+  virtual void OnAbort(LayerAnimationDelegate* delegate) OVERRIDE {
+    if (delegate && animation_id()) {
+      ThreadedLayerAnimationElement::OnAbort(delegate);
+      delegate->SetTransformFromAnimation(Tween::ValueBetween(
+          Tween::CalculateValue(tween_type(), last_progressed_fraction()),
+          start_,
+          target_));
+    }
+  }
+
+  virtual void OnEnd(LayerAnimationDelegate* delegate) OVERRIDE {
+    delegate->SetTransformFromAnimation(target_);
+  }
+
+  virtual scoped_ptr<cc::Animation> CreateCCAnimation() OVERRIDE {
+    scoped_ptr<cc::AnimationCurve> animation_curve(
+        new TransformAnimationCurveAdapter(tween_type(),
+                                           cc_start_,
+                                           cc_target_,
+                                           duration()));
+    scoped_ptr<cc::Animation> animation(
+        cc::Animation::Create(animation_curve.Pass(),
+                              animation_id(),
+                              animation_group_id(),
+                              cc::Animation::Transform));
+    return animation.Pass();
+  }
+
+  virtual void OnGetTarget(TargetValue* target) const OVERRIDE {
+    target->transform = target_;
+  }
+
+ private:
+  static AnimatableProperties GetProperties() {
+    AnimatableProperties properties;
+    properties.insert(LayerAnimationElement::TRANSFORM);
+    return properties;
+  }
+
+  gfx::Transform start_;
+  gfx::Transform cc_start_;
+  const gfx::Transform target_;
+  gfx::Transform cc_target_;
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadedTransformTransition);
 };
 
 }  // namespace
@@ -628,20 +708,26 @@ LayerAnimationElement::ToAnimatableProperty(
 // static
 base::TimeDelta LayerAnimationElement::GetEffectiveDuration(
     const base::TimeDelta& duration) {
-  if (LayerAnimator::disable_animations_for_test())
-    return base::TimeDelta();
-
-  if (LayerAnimator::slow_animation_mode())
-    return duration * LayerAnimator::slow_animation_scale_factor();
-
-  return duration;
+  switch (ScopedAnimationDurationScaleMode::duration_scale_mode()) {
+    case ScopedAnimationDurationScaleMode::NORMAL_DURATION:
+      return duration;
+    case ScopedAnimationDurationScaleMode::FAST_DURATION:
+      return duration / kFastDurationScaleFactor;
+    case ScopedAnimationDurationScaleMode::SLOW_DURATION:
+      return duration * kSlowDurationScaleFactor;
+    case ScopedAnimationDurationScaleMode::ZERO_DURATION:
+      return base::TimeDelta();
+    default:
+      NOTREACHED();
+      return base::TimeDelta();
+  }
 }
 
 // static
 LayerAnimationElement* LayerAnimationElement::CreateTransformElement(
     const gfx::Transform& transform,
     base::TimeDelta duration) {
-  return new TransformTransition(transform, duration);
+  return new ThreadedTransformTransition(transform, duration);
 }
 
 // static

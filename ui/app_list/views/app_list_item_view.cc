@@ -8,8 +8,10 @@
 
 #include "base/utf_string_conversions.h"
 #include "grit/ui_resources.h"
+#include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/views/apps_grid_view.h"
+#include "ui/app_list/views/cached_label.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -39,7 +41,6 @@ const int kProgressBarHeight = 4;
 const SkColor kTitleColor = SkColorSetRGB(0x5A, 0x5A, 0x5A);
 const SkColor kTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
 
-const SkColor kHoverAndPushedColor = SkColorSetARGB(0x19, 0, 0, 0);
 const SkColor kSelectedColor = SkColorSetARGB(0x0D, 0, 0, 0);
 const SkColor kHighlightedColor = kHoverAndPushedColor;
 const SkColor kDownloadProgressBackgroundColor =
@@ -65,7 +66,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
       model_(model),
       apps_grid_view_(apps_grid_view),
       icon_(new views::ImageView),
-      title_(new views::Label),
+      title_(new CachedLabel),
       ui_state_(UI_STATE_NORMAL),
       touch_dragging_(false) {
   icon_->set_interactive(false);
@@ -74,9 +75,10 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetBackgroundColor(0);
   title_->SetAutoColorReadabilityEnabled(false);
   title_->SetEnabledColor(kTitleColor);
-  title_->SetFont(rb.GetFont(ui::ResourceBundle::SmallBoldFont));
+  title_->SetFont(rb.GetFont(kItemTextFontStyle));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title_->SetVisible(!model_->is_installing());
+  title_->Invalidate();
 
   const gfx::ShadowValue kIconShadows[] = {
     gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x24, 0, 0, 0)),
@@ -176,6 +178,7 @@ void AppListItemView::ItemIconChanged() {
 
 void AppListItemView::ItemTitleChanged() {
   title_->SetText(UTF8ToUTF16(model_->title()));
+  title_->Invalidate();
 }
 
 void AppListItemView::ItemHighlightedChanged() {
@@ -225,7 +228,7 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Rect rect(GetContentsBounds());
 
-  if (model_->highlighted()) {
+  if (model_->highlighted() && !model_->is_installing()) {
     canvas->FillRect(rect, kHighlightedColor);
   } else if (hover_animation_->is_animating()) {
     int alpha = SkColorGetA(kHoverAndPushedColor) *
@@ -296,6 +299,7 @@ void AppListItemView::StateChanged() {
     model_->SetHighlighted(false);
     title_->SetEnabledColor(kTitleColor);
   }
+  title_->Invalidate();
 }
 
 bool AppListItemView::ShouldEnterPushedState(const ui::Event& event) {

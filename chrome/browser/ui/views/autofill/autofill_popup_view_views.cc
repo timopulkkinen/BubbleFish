@@ -34,13 +34,17 @@ AutofillPopupViewViews::AutofillPopupViewViews(
       observing_widget_(NULL) {}
 
 AutofillPopupViewViews::~AutofillPopupViewViews() {
-  if (observing_widget_)
-    observing_widget_->RemoveObserver(this);
-
-  controller_->ViewDestroyed();
 }
 
 void AutofillPopupViewViews::Hide() {
+  AutofillPopupView::Hide();
+
+  if (observing_widget_)
+    observing_widget_->RemoveObserver(this);
+
+  // The controller is no longer valid after it hides us.
+  controller_ = NULL;
+
   if (GetWidget()) {
     // This deletes |this|.
     GetWidget()->Close();
@@ -50,6 +54,13 @@ void AutofillPopupViewViews::Hide() {
 }
 
 void AutofillPopupViewViews::OnPaint(gfx::Canvas* canvas) {
+  // This can happen if we have a paint message in the queue when the popup
+  // is told to hide (so the controller is invalid at this point). Its ok to
+  // avoid drawing popup, sine we don't have access to the data anymore, and it
+  // should be hidden soon.
+  if (!controller_)
+    return;
+
   canvas->DrawColor(kPopupBackground);
   OnPaintBorder(canvas);
 
@@ -106,7 +117,7 @@ void AutofillPopupViewViews::OnMouseReleased(const ui::MouseEvent& event) {
 void AutofillPopupViewViews::OnWidgetBoundsChanged(
     views::Widget* widget,
     const gfx::Rect& new_bounds) {
-  Hide();
+  controller_->Hide();
 }
 
 void AutofillPopupViewViews::Show() {
@@ -173,23 +184,9 @@ void AutofillPopupViewViews::DrawAutofillEntry(gfx::Canvas* canvas,
   // Use this to figure out where all the other Autofill items should be placed.
   int x_align_left = is_rtl ? kEndPadding : entry_rect.width() - kEndPadding;
 
-  // Draw the delete icon, if one is needed.
+  // Draw the Autofill icon, if one exists
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   int row_height = controller_->GetRowBounds(index).height();
-  if (controller_->CanDelete(index)) {
-    x_align_left += is_rtl ? 0 : -kDeleteIconWidth;
-
-    // TODO(csharp): Create a custom resource for the delete icon.
-    // http://crbug.com/131801
-    canvas->DrawImageInt(
-        *rb.GetImageSkiaNamed(IDR_CLOSE_BAR),
-        x_align_left,
-        entry_rect.y() + (row_height - kDeleteIconHeight) / 2);
-
-    x_align_left += is_rtl ? kDeleteIconWidth + kIconPadding : -kIconPadding;
-  }
-
-  // Draw the Autofill icon, if one exists
   if (!controller_->icons()[index].empty()) {
     int icon = controller_->GetIconResourceID(controller_->icons()[index]);
     DCHECK_NE(-1, icon);

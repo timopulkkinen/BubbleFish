@@ -23,7 +23,7 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
-#include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/accessibility/browser_accessibility_manager_mac.h"
 #include "content/browser/plugin_process_host.h"
 #import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
@@ -486,13 +486,33 @@ void RenderWidgetHostViewMac::InitAsFullscreen(
   [cocoa_view_ setCanBeKeyView:YES];
   [cocoa_view_ setFrame:[[pepper_fullscreen_window_ contentView] bounds]];
   [cocoa_view_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+
+  // Note that this forms a reference cycle between the fullscreen window and
+  // the rwhvmac: The PepperFlashFullscreenWindow retains cocoa_view_,
+  // but cocoa_view_ keeps pepper_fullscreen_window_ in an instance variable.
+  // This cycle is normally broken when -keyEvent: receives an <esc> key, which
+  // explicitly calls Shutdown on the render_widget_host_, which calls
+  // Destroy() on RWHVMac, which drops the reference to
+  // pepper_fullscreen_window_.
   [[pepper_fullscreen_window_ contentView] addSubview:cocoa_view_];
 
+  // Note that this keeps another reference to pepper_fullscreen_window_.
   fullscreen_window_manager_.reset([[FullscreenWindowManager alloc]
       initWithWindow:pepper_fullscreen_window_.get()
        desiredScreen:screen]);
   [fullscreen_window_manager_ enterFullscreenMode];
   [pepper_fullscreen_window_ makeKeyAndOrderFront:nil];
+}
+
+void RenderWidgetHostViewMac::release_pepper_fullscreen_window_for_testing() {
+  // See comment in InitAsFullscreen(): There is a reference cycle between
+  // rwhvmac and fullscreen window, which is usually broken by hitting <esc>.
+  // Tests that test pepper fullscreen mode without sending an <esc> event
+  // need to call this method to break the reference cycle.
+  [fullscreen_window_manager_ exitFullscreenMode];
+  fullscreen_window_manager_.reset();
+  [pepper_fullscreen_window_ close];
+  pepper_fullscreen_window_.reset();
 }
 
 RenderWidgetHost* RenderWidgetHostViewMac::GetRenderWidgetHost() const {
@@ -1160,6 +1180,8 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
     if (pending_swap_buffers_acks_.front().first != 0) {
       AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
       ack_params.sync_point = 0;
+      if (compositing_iosurface_.get())
+        ack_params.renderer_id = compositing_iosurface_->GetRendererID();
       RenderWidgetHostImpl::AcknowledgeBufferPresent(
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
@@ -1618,9 +1640,9 @@ void RenderWidgetHostViewMac::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!GetBrowserAccessibilityManager()) {
     SetBrowserAccessibilityManager(
-        BrowserAccessibilityManager::CreateEmptyDocument(
+        new BrowserAccessibilityManagerMac(
             cocoa_view_,
-            static_cast<AccessibilityNodeData::State>(0),
+            BrowserAccessibilityManagerMac::GetEmptyDocument(),
             NULL));
   }
   GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);

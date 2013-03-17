@@ -16,16 +16,15 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
-import java.util.ArrayList;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
-import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.SandboxedProcessConnection;
 import org.chromium.content.common.ISandboxedProcessCallback;
 import org.chromium.content.common.ISandboxedProcessService;
+import org.chromium.content.browser.SandboxedProcessLauncher;
 import org.chromium.content.common.ProcessInitException;
-import org.chromium.content.common.SurfaceCallback;
+
+import java.util.ArrayList;
 
 /**
  * This is the base class for sandboxed services; the SandboxedProcessService0, 1.. etc
@@ -94,12 +93,6 @@ public class SandboxedProcessService extends Service {
             }
             return Process.myPid();
         }
-
-        @Override
-        public void setSurface(int type, Surface surface, int primaryID, int secondaryID) {
-            // This gives up ownership of the Surface.
-            SurfaceCallback.setSurface(type, surface, primaryID, secondaryID);
-        }
     };
 
     /* package */ static Context getContext() {
@@ -125,7 +118,12 @@ public class SandboxedProcessService extends Service {
                         }
                     }
                     LibraryLoader.setLibraryToLoad(mNativeLibraryName);
-                    LibraryLoader.loadNow();
+                    try {
+                        LibraryLoader.loadNow();
+                    } catch (ProcessInitException e) {
+                        Log.e(TAG, "Failed to load native library, exiting sandboxed process", e);
+                        return;
+                    }
                     synchronized (mSandboxMainThread) {
                         while (mCommandLineParams == null) {
                             mSandboxMainThread.wait();
@@ -210,7 +208,6 @@ public class SandboxedProcessService extends Service {
      * call to the correct process.
      *
      * @param pid Process handle of the sandboxed process to share the SurfaceTexture with.
-     * @param type The type of process that the SurfaceTexture is for.
      * @param surfaceObject The Surface or SurfaceTexture to share with the other sandboxed process.
      * @param primaryID Used to route the call to the correct client instance.
      * @param secondaryID Used to route the call to the correct client instance.
@@ -218,7 +215,7 @@ public class SandboxedProcessService extends Service {
     @SuppressWarnings("unused")
     @CalledByNative
     private void establishSurfaceTexturePeer(
-            int pid, int type, Object surfaceObject, int primaryID, int secondaryID) {
+            int pid, Object surfaceObject, int primaryID, int secondaryID) {
         if (mCallback == null) {
             Log.e(TAG, "No callback interface has been provided.");
             return;
@@ -236,7 +233,7 @@ public class SandboxedProcessService extends Service {
             return;
         }
         try {
-            mCallback.establishSurfacePeer(pid, type, surface, primaryID, secondaryID);
+            mCallback.establishSurfacePeer(pid, surface, primaryID, secondaryID);
         } catch (RemoteException e) {
             Log.e(TAG, "Unable to call establishSurfaceTexturePeer: " + e);
             return;
@@ -244,6 +241,22 @@ public class SandboxedProcessService extends Service {
             if (needRelease) {
                 surface.release();
             }
+        }
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private Surface getViewSurface(int surfaceId) {
+        if (mCallback == null) {
+            Log.e(TAG, "No callback interface has been provided.");
+            return null;
+        }
+
+        try {
+            return mCallback.getViewSurface(surfaceId);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to call establishSurfaceTexturePeer: " + e);
+            return null;
         }
     }
 

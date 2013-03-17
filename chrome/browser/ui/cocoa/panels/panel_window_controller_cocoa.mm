@@ -779,12 +779,6 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   return NSHeight([titlebar convertRect:[titlebar bounds] toView:nil]);
 }
 
-- (void)ensureFullyVisible {
-  // Shows the window without making it key, on top of its layer, even if
-  // Chromium is not an active app.
-  [[self window] orderFrontRegardless];
-}
-
 // TODO(dcheng): These two selectors are almost copy-and-paste from
 // BrowserWindowController. Figure out the appropriate way of code sharing,
 // whether it's refactoring more things into BrowserWindowUtils or making a
@@ -849,9 +843,14 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 - (void)fullScreenModeChanged:(bool)isFullScreen {
   [self updateWindowLevel];
 
-  // The full-screen window is in normal level and changing the panel window to
-  // same normal level will not move it below the full-screen window. Thus we
-  // need to reorder the panel window.
+  // If the panel is not always on top, its z-order should not be affected if
+  // some other window enters fullscreen mode.
+  if (!windowShim_->panel()->IsAlwaysOnTop())
+    return;
+
+  // The full-screen window is in normal level and changing the panel window
+  // to same normal level will not move it below the full-screen window. Thus
+  // we need to reorder the panel window.
   if (isFullScreen)
     [[self window] orderBack:nil];
   else

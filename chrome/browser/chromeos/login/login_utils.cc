@@ -26,12 +26,12 @@
 #include "base/threading/worker_pool.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
@@ -44,6 +44,8 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/net/connectivity_state_helper.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper_observer.h"
+#include "chrome/browser/chromeos/policy/network_configuration_updater.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -53,9 +55,8 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/cloud_policy_client.h"
-#include "chrome/browser/policy/cloud_policy_service.h"
-#include "chrome/browser/policy/network_configuration_updater.h"
+#include "chrome/browser/policy/cloud/cloud_policy_client.h"
+#include "chrome/browser/policy/cloud/cloud_policy_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
@@ -284,6 +285,10 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
   int return_code;
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
+
+  // TODO(pastarmovj): Restart the browser and apply any flags set by the user.
+  // See: http://crosbug.com/39249
+
   browser_creator.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                                 profile,
                                 base::FilePath(),
@@ -714,13 +719,12 @@ scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
 // We use a special class for this so that it can be safely leaked if we
 // never connect. At shutdown the order is not well defined, and it's possible
 // for the infrastructure needed to unregister might be unstable and crash.
-class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
+class WarmingObserver : public ConnectivityStateHelperObserver,
                         public content::NotificationObserver {
  public:
   WarmingObserver()
       : url_request_context_getter_(NULL) {
-    NetworkLibrary* netlib = CrosLibrary::Get()->GetNetworkLibrary();
-    netlib->AddNetworkManagerObserver(this);
+    ConnectivityStateHelper::Get()->AddNetworkManagerObserver(this);
     // During tests, the browser_process may not be initialized yet causing
     // this to fail.
     if (g_browser_process) {
@@ -734,15 +738,16 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
   virtual ~WarmingObserver() {}
 
   // If we're now connected, prewarm the auth url.
-  virtual void OnNetworkManagerChanged(NetworkLibrary* netlib) OVERRIDE {
-    if (netlib->Connected()) {
+  virtual void NetworkManagerChanged() OVERRIDE {
+    ConnectivityStateHelper* csh = ConnectivityStateHelper::Get();
+    if (csh->IsConnected()) {
       const int kConnectionsNeeded = 1;
       chrome_browser_net::PreconnectOnUIThread(
           GURL(GaiaUrls::GetInstance()->client_login_url()),
           chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
           kConnectionsNeeded,
           url_request_context_getter_);
-      netlib->RemoveNetworkManagerObserver(this);
+      csh->RemoveNetworkManagerObserver(this);
       delete this;
     }
   }

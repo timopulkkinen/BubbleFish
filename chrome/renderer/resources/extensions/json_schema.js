@@ -38,7 +38,9 @@
 //   additional properties will be validated.
 //==============================================================================
 
+// TODO(cduvall): Make this file not depend on chromeHidden.
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var loadRefDependency = require('utils').loadRefDependency;
 
 function isInstanceOfClass(instance, className) {
   if (!instance)
@@ -90,6 +92,8 @@ chromeHidden.JSONSchemaValidator.messages = {
   numberIntValue: "Value must fit in a 32-bit signed integer.",
   numberMaxDecimal: "Value must not have more than * decimal places.",
   invalidType: "Expected '*' but got '*'.",
+  invalidTypeIntegerNumber:
+      "Expected 'integer' but got 'number', consider using Math.round().",
   invalidChoice: "Value does not match any valid type choices.",
   invalidPropertyType: "Missing property type.",
   schemaRequired: "Schema value required.",
@@ -240,6 +244,7 @@ chromeHidden.JSONSchemaValidator.prototype.validate =
   // If the schema has a $ref property, the instance must validate against
   // that schema too. It must be present in this.types to be referenced.
   if (schema["$ref"]) {
+    loadRefDependency(schema["$ref"]);
     if (!this.types[schema["$ref"]])
       this.addError(path, "unknownSchemaReference", [ schema["$ref"] ]);
     else
@@ -480,13 +485,16 @@ chromeHidden.JSONSchemaValidator.prototype.validateNumber =
 chromeHidden.JSONSchemaValidator.prototype.validateType =
     function(instance, schema, path) {
   var actualType = chromeHidden.JSONSchemaValidator.getType(instance);
-  if (schema.type != actualType && !(schema.type == "number" &&
-      actualType == "integer")) {
+  if (schema.type == actualType ||
+      (schema.type == "number" && actualType == "integer")) {
+    return true;
+  } else if (schema.type == "integer" && actualType == "number") {
+    this.addError(path, "invalidTypeIntegerNumber");
+    return false;
+  } else {
     this.addError(path, "invalidType", [schema.type, actualType]);
     return false;
   }
-
-  return true;
 };
 
 /**

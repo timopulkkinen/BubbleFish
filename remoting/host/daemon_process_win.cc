@@ -7,6 +7,7 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -24,7 +25,6 @@
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_main.h"
 #include "remoting/host/ipc_constants.h"
-#include "remoting/host/win/host_service.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/unprivileged_process_delegate.h"
 #include "remoting/host/win/worker_process_launcher.h"
@@ -64,7 +64,11 @@ class DaemonProcessWin : public DaemonProcess {
 
   // DaemonProcess implementation.
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
-      int terminal_id) OVERRIDE;
+      int terminal_id,
+      const DesktopSessionParams& params,
+      bool virtual_terminal) OVERRIDE;
+  virtual void DoCrashNetworkProcess(
+      const tracked_objects::Location& location) OVERRIDE;
   virtual void LaunchNetworkProcess() OVERRIDE;
 
  private:
@@ -141,12 +145,25 @@ void DaemonProcessWin::DoStop() {
 }
 
 scoped_ptr<DesktopSession> DaemonProcessWin::DoCreateDesktopSession(
-    int terminal_id) {
+    int terminal_id,
+    const DesktopSessionParams& params,
+    bool virtual_terminal) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  return scoped_ptr<DesktopSession>(new DesktopSessionWin(
-      caller_task_runner(), io_task_runner(), this, terminal_id,
-      HostService::GetInstance()));
+  if (virtual_terminal) {
+    return DesktopSessionWin::CreateForVirtualTerminal(
+        caller_task_runner(), io_task_runner(), this, terminal_id, params);
+  } else {
+    return DesktopSessionWin::CreateForConsole(
+        caller_task_runner(), io_task_runner(), this, terminal_id, params);
+  }
+}
+
+void DaemonProcessWin::DoCrashNetworkProcess(
+    const tracked_objects::Location& location) {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  network_launcher_->Crash(location);
 }
 
 void DaemonProcessWin::LaunchNetworkProcess() {

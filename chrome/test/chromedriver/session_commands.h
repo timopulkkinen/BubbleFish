@@ -35,6 +35,13 @@ Status ExecuteSessionCommand(
     scoped_ptr<base::Value>* out_value,
     std::string* out_session_id);
 
+// Gets the capabilities of a particular session.
+Status ExecuteGetSessionCapabilities(
+    SessionMap* session_map,
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
 // Quits a particular session.
 Status ExecuteQuit(
     SessionMap* session_map,
@@ -74,6 +81,12 @@ Status ExecuteSetTimeout(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
 
+// Set the timeout for asynchronous scripts.
+Status ExecuteSetScriptTimeout(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
 // Returns whether an alert is open.
 Status ExecuteGetAlert(
     Session* session,
@@ -100,6 +113,11 @@ Status ExecuteAcceptAlert(
 
 // Dismisses the open alert.
 Status ExecuteDismissAlert(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsLoading(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);

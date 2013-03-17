@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 
-class ConstrainedWindowGtk;
 class TabModalConfirmDialogDelegate;
 
 namespace content {
@@ -25,16 +24,10 @@ class WebContents;
 // To display the dialog, allocate this object on the heap. It will open the
 // dialog from its constructor and then delete itself when the user dismisses
 // the dialog.
-class TabModalConfirmDialogGtk : public TabModalConfirmDialog,
-                                 public ConstrainedWindowGtkDelegate {
+class TabModalConfirmDialogGtk : public TabModalConfirmDialog {
  public:
   TabModalConfirmDialogGtk(TabModalConfirmDialogDelegate* delegate,
                            content::WebContents* web_contents);
-
-  // ConstrainedWindowGtkDelegate:
-  virtual GtkWidget* GetWidgetRoot() OVERRIDE;
-  virtual GtkWidget* GetFocusWidget() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   friend class TabModalConfirmDialogTest;
@@ -51,6 +44,7 @@ class TabModalConfirmDialogGtk : public TabModalConfirmDialog,
   // Callbacks:
   CHROMEGTK_CALLBACK_0(TabModalConfirmDialogGtk, void, OnAccept);
   CHROMEGTK_CALLBACK_0(TabModalConfirmDialogGtk, void, OnCancel);
+  CHROMEGTK_CALLBACK_0(TabModalConfirmDialogGtk, void, OnDestroy);
 
   scoped_ptr<TabModalConfirmDialogDelegate> delegate_;
 
@@ -58,7 +52,7 @@ class TabModalConfirmDialogGtk : public TabModalConfirmDialog,
   GtkWidget* ok_;
   GtkWidget* cancel_;
 
-  ConstrainedWindowGtk* window_;
+  GtkWidget* window_;
 
   DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogGtk);
 };

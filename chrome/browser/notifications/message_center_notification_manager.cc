@@ -91,7 +91,7 @@ bool MessageCenterNotificationManager::CancelAllByProfile(Profile* profile) {
   for (NotificationMap::iterator loopiter = profile_notifications_.begin();
        loopiter != profile_notifications_.end(); ) {
     NotificationMap::iterator curiter = loopiter++;
-    if ((*curiter).second->profile()->IsSameProfile(profile)) {
+    if ((*curiter).second->profile() == profile) {
       // This action occurs when profile is unloaded. Closing notifications is
       // not by user, so |false|.
       RemoveProfileNotification((*curiter).second, false);
@@ -141,7 +141,7 @@ bool MessageCenterNotificationManager::UpdateNotification(
         old_notification->profile()->IsSameProfile(profile)) {
       std::string old_id =
           old_notification->notification().notification_id();
-      DCHECK(message_center_->GetNotificationList()->HasNotification(old_id));
+      DCHECK(message_center_->notification_list()->HasNotification(old_id));
 
       // Add/remove notification in the local list but just update the same
       // one in MessageCenter.
@@ -279,12 +279,12 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloads(
 
 void MessageCenterNotificationManager::ImageDownloads::StartDownloadWithImage(
     const Notification& notification,
-    const gfx::ImageSkia* image,
+    const gfx::Image* image,
     const GURL& url,
     int size,
     const SetImageCallback& callback) {
   // Set the image directly if we have it.
-  if (image && !image->isNull()) {
+  if (image && !image->IsEmpty()) {
     callback.Run(*image);
     return;
   }
@@ -336,7 +336,7 @@ void MessageCenterNotificationManager::ImageDownloads::DownloadComplete(
     const std::vector<SkBitmap>& bitmaps) {
   if (bitmaps.empty())
     return;
-  gfx::ImageSkia image = gfx::ImageSkia::CreateFrom1xBitmap(bitmaps[0]);
+  gfx::Image image = gfx::Image::CreateFrom1xBitmap(bitmaps[0]);
   callback.Run(image);
 }
 

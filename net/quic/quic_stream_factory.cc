@@ -373,9 +373,9 @@ QuicClientSession* QuicStreamFactory::CreateSession(
       MessageLoop::current()->message_loop_proxy(),
       clock_.get(), random_generator_, socket);
 
-  QuicConnection* connection = new QuicConnection(guid, addr, helper);
-  QuicClientSession* session = new QuicClientSession(connection, helper, this,
-                                                     host, net_log.net_log());
+  QuicConnection* connection = new QuicConnection(guid, addr, helper, false);
+  QuicClientSession* session =
+      new QuicClientSession(connection, socket, this, host, net_log.net_log());
   all_sessions_.insert(session);  // owning pointer
   return session;
 }

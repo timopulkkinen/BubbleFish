@@ -61,13 +61,21 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
 #endif
 
   void FinishCopyFromBackingStore(bool expected_result,
-                                  const base::Callback<void ()> quit_closure,
+                                  const base::Closure& quit_closure,
                                   bool result,
                                   const SkBitmap& bitmap) {
     quit_closure.Run();
     ASSERT_EQ(expected_result, result);
     if (expected_result)
       ASSERT_FALSE(bitmap.empty());
+    finish_called_ = true;
+  }
+
+  void FinishCopyFromCompositingSurface(bool expected_result,
+                                        const base::Closure& quit_closure,
+                                        bool result) {
+    quit_closure.Run();
+    ASSERT_EQ(expected_result, result);
     finish_called_ = true;
   }
 
@@ -128,6 +136,40 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
   ASSERT_TRUE(finish_called_);
 }
 
+// Tests that the callback passed to CopyFromCompositingSurfaceToVideoFrame is
+// always called, even when the RenderWidgetHost is deleting in the middle of
+// an async copy.
+IN_PROC_BROWSER_TEST_F(
+    RenderWidgetHostViewBrowserTest,
+    MacAsyncCopyFromCompositingSurfaceToVideoFrameCallbackTest) {
+  if (!IOSurfaceSupport::Initialize())
+    return;
+
+  SetupCompositingSurface();
+
+  base::RunLoop run_loop;
+
+  RenderViewHost* const rwh =
+      shell()->web_contents()->GetRenderViewHost();
+  RenderWidgetHostViewPort* rwhvp =
+      static_cast<RenderWidgetHostViewPort*>(rwh->GetView());
+
+  scoped_refptr<media::VideoFrame> dest =
+      media::VideoFrame::CreateBlackFrame(size_);
+  rwhvp->CopyFromCompositingSurfaceToVideoFrame(
+      gfx::Rect(rwhvp->GetViewBounds().size()), dest, base::Bind(
+          &RenderWidgetHostViewBrowserTest::FinishCopyFromCompositingSurface,
+          base::Unretained(this), false, run_loop.QuitClosure()));
+
+  // Delete the surface before the callback is run. This is synchronous until
+  // we get to the copy_timer_, so we will always end up in the destructor
+  // before the timer fires.
+  rwhvp->AcceleratedSurfaceRelease();
+  run_loop.Run();
+
+  ASSERT_TRUE(finish_called_);
+}
+
 // TODO(justinlin): Enable this test for other platforms.
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
                        MacAsyncCopyFromBackingStoreTest) {
@@ -155,8 +197,9 @@ static void DeliverFrameFunc(base::Closure quit_closure,
   quit_closure.Run();
 }
 
+// This test is flaky: crbug.com/180190.
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
-                       MacFrameSubscriberTest) {
+                       DISABLED_MacFrameSubscriberTest) {
   if (!IOSurfaceSupport::Initialize())
     return;
 
@@ -175,8 +218,10 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
                                          run_loop.QuitClosure(),
                                          &frame_captured)));
 
-  // Do a resize of the window to trigger a repaint and present.
-  SetWindowBounds(shell()->window(), gfx::Rect(size_));
+  // To ensure there is always a repaint we resize the window to a weird
+  // size. This gurantees a repaint if the window is already in |size_|.
+  SetWindowBounds(shell()->window(),
+                  gfx::Rect(size_.width() / 2, size_.height() / 2));
   run_loop.Run();
   view->EndFrameSubscription();
 

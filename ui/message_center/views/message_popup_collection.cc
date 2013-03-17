@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/timer.h"
 #include "ui/gfx/screen.h"
+#include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_constants.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
@@ -18,13 +19,13 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace message_center {
 
 class ToastContentsView : public views::WidgetDelegateView {
  public:
   ToastContentsView(const Notification* notification,
-                    MessageView* view,
                     MessagePopupCollection* collection)
       : collection_(collection) {
     DCHECK(collection_);
@@ -35,7 +36,6 @@ class ToastContentsView : public views::WidgetDelegateView {
     // the whole toast seems to slide although the actual bound of the widget
     // remains. This is hacky but easier to keep the consistency.
     set_background(views::Background::CreateSolidBackground(0, 0, 0, 0));
-    AddChildView(view);
 
     int seconds = kAutocloseDefaultDelaySeconds;
     if (notification->priority() > DEFAULT_PRIORITY)
@@ -52,11 +52,25 @@ class ToastContentsView : public views::WidgetDelegateView {
     // The origin of the initial bounds are set to (0, 0). It'll then moved by
     // MessagePopupCollection.
     params.bounds = gfx::Rect(
-        gfx::Size(kWebNotificationWidth, GetPreferredSize().height()));
+        gfx::Size(kWebNotificationWidth,
+                  GetHeightForWidth(kWebNotificationWidth)));
     params.delegate = this;
     views::Widget* widget = new views::Widget();
+    widget->set_focus_on_creation(false);
     widget->Init(params);
     return widget;
+  }
+
+  void SetContents(MessageView* view) {
+    RemoveAllChildViews(true);
+    AddChildView(view);
+    views::Widget* widget = GetWidget();
+    if (widget) {
+      gfx::Rect bounds = widget->GetWindowBoundsInScreen();
+      bounds.set_height(view->GetHeightForWidth(kWebNotificationWidth));
+      widget->SetBounds(bounds);
+    }
+    Layout();
   }
 
   void SuspendTimer() {
@@ -81,7 +95,7 @@ class ToastContentsView : public views::WidgetDelegateView {
                             base::Unretained(GetWidget())));
   }
 
-  // views::WidgetDelegate overrides:
+  // Overridden from views::WidgetDelegate:
   virtual views::View* GetContentsView() OVERRIDE {
     return this;
   }
@@ -95,7 +109,7 @@ class ToastContentsView : public views::WidgetDelegateView {
     return false;
   }
 
-  // views::View overrides:
+  // Overridden from views::View:
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE {
     collection_->OnMouseEntered();
   }
@@ -113,12 +127,11 @@ class ToastContentsView : public views::WidgetDelegateView {
   DISALLOW_COPY_AND_ASSIGN(ToastContentsView);
 };
 
-MessagePopupCollection::MessagePopupCollection(
-    gfx::NativeView context,
-    NotificationList::Delegate* list_delegate)
+MessagePopupCollection::MessagePopupCollection(gfx::NativeView context,
+                                               MessageCenter* message_center)
     : context_(context),
-      list_delegate_(list_delegate) {
-  DCHECK(list_delegate_);
+      message_center_(message_center) {
+  DCHECK(message_center_);
 }
 
 MessagePopupCollection::~MessagePopupCollection() {
@@ -127,7 +140,7 @@ MessagePopupCollection::~MessagePopupCollection() {
 
 void MessagePopupCollection::UpdatePopups() {
   NotificationList::PopupNotifications popups =
-      list_delegate_->GetNotificationList()->GetPopupNotifications();
+      message_center_->notification_list()->GetPopupNotifications();
 
   if (popups.empty()) {
     CloseAllWidgets();
@@ -143,36 +156,51 @@ void MessagePopupCollection::UpdatePopups() {
     old_toast_ids.insert(iter->first);
   }
 
-  int total_height = 0;
-  std::vector<views::Widget*> widgets;
-  for (NotificationList::PopupNotifications::const_iterator iter =
-           popups.begin(); iter != popups.end(); ++iter) {
+  int bottom = work_area.bottom() - kMarginBetweenItems;
+  int left = work_area.right() - kWebNotificationWidth - kMarginBetweenItems;
+  // Iterate in the reverse order to keep the oldest toasts on screen. Newer
+  // items may be ignored if there are no room to place them.
+  for (NotificationList::PopupNotifications::const_reverse_iterator iter =
+           popups.rbegin(); iter != popups.rend(); ++iter) {
+    MessageView* view =
+        NotificationView::Create(*(*iter), message_center_, true);
+    int view_height = view->GetHeightForWidth(kWebNotificationWidth);
+    if (bottom - view_height - kMarginBetweenItems < 0) {
+      delete view;
+      break;
+    }
+
     ToastContainer::iterator toast_iter = toasts_.find((*iter)->id());
     views::Widget* widget = NULL;
     if (toast_iter != toasts_.end()) {
       widget = toast_iter->second->GetWidget();
       old_toast_ids.erase((*iter)->id());
+      // Need to replace the contents because |view| can be updated, like
+      // image loads.
+      toast_iter->second->SetContents(view);
     } else {
-      MessageView* view = NotificationView::Create(*(*iter), list_delegate_);
-      ToastContentsView* toast = new ToastContentsView(*iter, view, this);
+      ToastContentsView* toast = new ToastContentsView(*iter, this);
+      toast->SetContents(view);
       widget = toast->CreateWidget(context_);
       widget->AddObserver(this);
       toast->StartTimer();
       toasts_[(*iter)->id()] = toast;
     }
+
+    // Place/move the toast widgets. Currently it stacks the widgets from the
+    // right-bottom of the work area.
+    // TODO(mukai): allow to specify the placement policy from outside of this
+    // class. The policy should be specified from preference on Windows, or
+    // the launcher alignment on ChromeOS.
     if (widget) {
-      gfx::Rect bounds = widget->GetWindowBoundsInScreen();
-      int new_height = total_height + bounds.height() + kMarginBetweenItems;
-      if (new_height < work_area.height()) {
-        total_height = new_height;
-        widgets.push_back(widget);
-      } else {
-        if (toast_iter != toasts_.end())
-          toasts_.erase(toast_iter);
-        delete widget;
-        break;
-      }
+      gfx::Rect bounds(widget->GetWindowBoundsInScreen());
+      bounds.set_origin(gfx::Point(left, bottom - bounds.height()));
+      widget->SetBounds(bounds);
+      if (!widget->IsVisible())
+        widget->Show();
     }
+
+    bottom -= view_height + kMarginBetweenItems;
   }
 
   for (std::set<std::string>::const_iterator iter = old_toast_ids.begin();
@@ -183,22 +211,6 @@ void MessagePopupCollection::UpdatePopups() {
     widget->RemoveObserver(this);
     widget->Close();
     toasts_.erase(toast_iter);
-  }
-
-  // Place/move the toast widgets. Currently it stacks the widgets from the
-  // right-bottom of the work area.
-  // TODO(mukai): allow to specify the placement policy from outside of this
-  // class. The policy should be specified from preference on Windows, or
-  // the launcher alignment on ChromeOS.
-  int top = work_area.bottom() - total_height;
-  int left = work_area.right() - kWebNotificationWidth - kMarginBetweenItems;
-  for (size_t i = 0; i < widgets.size(); ++i) {
-    gfx::Rect widget_bounds = widgets[i]->GetWindowBoundsInScreen();
-    widgets[i]->SetBounds(gfx::Rect(
-        left, top, widget_bounds.width(), widget_bounds.height()));
-    if (!widgets[i]->IsVisible())
-      widgets[i]->Show();
-    top += widget_bounds.height() + kMarginBetweenItems;
   }
 }
 
@@ -232,7 +244,7 @@ void MessagePopupCollection::OnWidgetDestroying(views::Widget* widget) {
   for (ToastContainer::iterator iter = toasts_.begin();
        iter != toasts_.end(); ++iter) {
     if (iter->second->GetWidget() == widget) {
-      list_delegate_->GetNotificationList()->MarkSinglePopupAsShown(
+      message_center_->notification_list()->MarkSinglePopupAsShown(
           iter->first, false);
       toasts_.erase(iter);
       break;

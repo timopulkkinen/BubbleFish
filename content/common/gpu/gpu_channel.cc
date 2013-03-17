@@ -25,9 +25,10 @@
 #include "content/common/gpu/sync_point_manager.h"
 #include "content/public/common/content_switches.h"
 #include "crypto/hmac.h"
+#include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
-#include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ui/gl/gl_context.h"
@@ -106,7 +107,7 @@ class MailboxMessageFilter : public IPC::ChannelProxy::MessageFilter {
   }
 
   // Message handlers.
-  void OnGenerateMailboxNames(unsigned num, std::vector<std::string>* result) {
+  void OnGenerateMailboxNames(unsigned num, std::vector<gpu::Mailbox>* result) {
     TRACE_EVENT1("gpu", "OnGenerateMailboxNames", "num", num);
 
     result->resize(num);
@@ -121,12 +122,12 @@ class MailboxMessageFilter : public IPC::ChannelProxy::MessageFilter {
           sizeof(name) / 2);
       DCHECK(success);
 
-      (*result)[i].assign(name, sizeof(name));
+      (*result)[i].SetName(reinterpret_cast<int8*>(name));
     }
   }
 
   void OnGenerateMailboxNamesAsync(unsigned num) {
-    std::vector<std::string> names;
+    std::vector<gpu::Mailbox> names;
     OnGenerateMailboxNames(num, &names);
     Send(new GpuChannelMsg_GenerateMailboxNamesReply(names));
   }
@@ -792,11 +793,14 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
 
 void GpuChannel::HandleMessage() {
   handle_messages_scheduled_ = false;
+  if (deferred_messages_.empty())
+    return;
 
-  if (!deferred_messages_.empty()) {
-    IPC::Message* m = deferred_messages_.front();
-    GpuCommandBufferStub* stub = stubs_.Lookup(m->routing_id());
+  bool should_fast_track_ack = false;
+  IPC::Message* m = deferred_messages_.front();
+  GpuCommandBufferStub* stub = stubs_.Lookup(m->routing_id());
 
+  do {
     if (stub) {
       if (!stub->IsScheduled())
         return;
@@ -842,7 +846,18 @@ void GpuChannel::HandleMessage() {
     }
     if (message_processed)
       MessageProcessed();
-  }
+
+    // We want the EchoACK following the SwapBuffers to be sent as close as
+    // possible, avoiding scheduling other channels in the meantime.
+    should_fast_track_ack = false;
+    if (!deferred_messages_.empty()) {
+      m = deferred_messages_.front();
+      stub = stubs_.Lookup(m->routing_id());
+      should_fast_track_ack =
+          (m->type() == GpuCommandBufferMsg_Echo::ID) &&
+          stub && stub->IsScheduled();
+    }
+  } while (should_fast_track_ack);
 
   if (!deferred_messages_.empty()) {
     OnScheduled();
@@ -912,10 +927,9 @@ void GpuChannel::OnRegisterStreamTextureProxy(
 }
 
 void GpuChannel::OnEstablishStreamTexture(
-    int32 stream_id, SurfaceTexturePeer::SurfaceTextureTarget type,
-    int32 primary_id, int32 secondary_id) {
+    int32 stream_id, int32 primary_id, int32 secondary_id) {
   stream_texture_manager_->EstablishStreamTexture(
-      stream_id, type, primary_id, secondary_id);
+      stream_id, primary_id, secondary_id);
 }
 #endif
 
@@ -950,6 +964,12 @@ void GpuChannel::MessageProcessed() {
         base::Bind(&SyncPointMessageFilter::MessageProcessed,
                    filter_, messages_processed_));
   }
+}
+
+void GpuChannel::CacheShader(const std::string& key,
+                             const std::string& shader) {
+  gpu_channel_manager_->Send(
+      new GpuHostMsg_CacheShader(client_id_, key, shader));
 }
 
 }  // namespace content

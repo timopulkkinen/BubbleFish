@@ -114,14 +114,17 @@ cr.define('options', function() {
     enableControls: function(enable) {
       $('set-passphrase').disabled =
           !enable || !$('use-passphrase-checkbox').checked;
-      $('get-content-packs-button').disabled = !enable;
+      // TODO(sergiu): make $('get-content-packs-button') behave the same as
+      // the other controls once the button actually does something.
       $('contentpacks-allow').setDisabled('notManagedUserModifiable', !enable);
       $('contentpacks-warn').setDisabled('notManagedUserModifiable', !enable);
       $('contentpacks-block').setDisabled('notManagedUserModifiable', !enable);
-      $('safe-search-checkbox').setDisabled(
-          'notManagedUserModifiable', !enable);
-      // TODO(akuegel): Add disable-signin-checkbox and
-      // disable-history-deletion-checkbox once these features are implemented
+      $('safe-search-checkbox').setDisabled('notManagedUserModifiable',
+                                            !enable);
+      $('allow-signin-checkbox').setDisabled('notManagedUserModifiable',
+                                             !enable);
+      // TODO(akuegel): Add disable-history-deletion-checkbox once this feature
+      // is implemented.
       $('use-passphrase-checkbox').disabled = !enable;
       if (enable)
         $('managed-user-settings-page').classList.remove('locked');

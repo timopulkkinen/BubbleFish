@@ -6,12 +6,12 @@
 
 #include <algorithm>
 
+#include "base/compiler_specific.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_proxy_client_socket.h"
 #include "net/socket/client_socket_factory.h"
@@ -24,6 +24,7 @@
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_stream.h"
+#include "net/ssl/ssl_cert_request_info.h"
 
 namespace net {
 
@@ -85,13 +86,13 @@ HttpProxyConnectJob::HttpProxyConnectJob(
     NetLog* net_log)
     : ConnectJob(group_name, timeout_duration, delegate,
                  BoundNetLog::Make(net_log, NetLog::SOURCE_CONNECT_JOB)),
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       params_(params),
       transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
       resolver_(host_resolver),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          callback_(base::Bind(&HttpProxyConnectJob::OnIOComplete,
-                               base::Unretained(this)))),
+      callback_(base::Bind(&HttpProxyConnectJob::OnIOComplete,
+                           weak_ptr_factory_.GetWeakPtr())),
       using_spdy_(false),
       protocol_negotiated_(kProtoUnknown) {
 }
@@ -331,6 +332,7 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
   next_state_ = STATE_HTTP_PROXY_CONNECT_COMPLETE;
   scoped_refptr<SpdyStream> stream = spdy_stream_request_.ReleaseStream();
   DCHECK(stream);
+  // |transport_socket_| will set itself as |stream|'s delegate.
   transport_socket_.reset(
       new SpdyProxyClientSocket(stream,
                                 params_->user_agent(),

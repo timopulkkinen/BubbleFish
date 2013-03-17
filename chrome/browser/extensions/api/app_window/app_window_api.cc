@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/window_controller.h"
@@ -33,7 +34,6 @@ const char kInvalidWindowId[] =
     "The window id can not be more than 256 characters long.";
 }
 
-const char kPanelTypeOption[] = "panel";
 const char kNoneFrameOption[] = "none";
 const char kHtmlFrameOption[] = "experimental-html";
 
@@ -171,8 +171,7 @@ bool AppWindowCreateFunction::RunImpl() {
 
     if (CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kEnableExperimentalExtensionApis)) {
-      if (options->type.get()) {
-        if (*options->type == kPanelTypeOption)
+      if (options->type == extensions::api::app_window::WINDOW_TYPE_PANEL) {
           create_params.window_type = ShellWindow::WINDOW_TYPE_PANEL;
       }
     }
@@ -219,6 +218,9 @@ bool AppWindowCreateFunction::RunImpl() {
 
   ShellWindow* shell_window =
       ShellWindow::Create(profile(), GetExtension(), url, create_params);
+
+  if (chrome::ShouldForceFullscreenApp())
+    shell_window->GetBaseWindow()->SetFullscreen(true);
 
   content::RenderViewHost* created_view =
       shell_window->web_contents()->GetRenderViewHost();

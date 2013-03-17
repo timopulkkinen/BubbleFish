@@ -71,7 +71,7 @@ class DevToolsAgentHostRvhObserver : public RenderViewHostObserver {
 
 // static
 scoped_refptr<DevToolsAgentHost>
-DevToolsAgentHost::GetFor(RenderViewHost* rvh) {
+DevToolsAgentHost::GetOrCreateFor(RenderViewHost* rvh) {
   RenderViewDevToolsAgentHost* result = FindAgentHost(rvh);
   if (!result)
     result = new RenderViewDevToolsAgentHost(rvh);
@@ -104,32 +104,64 @@ bool DevToolsAgentHost::IsDebuggerAttached(WebContents* web_contents) {
 }
 
 // static
-int DevToolsAgentHost::DisconnectRenderViewHost(RenderViewHost* rvh) {
+std::string DevToolsAgentHost::DisconnectRenderViewHost(RenderViewHost* rvh) {
   RenderViewDevToolsAgentHost* agent_host = FindAgentHost(rvh);
   if (!agent_host)
-    return -1;
+    return std::string();
   agent_host->DisconnectRenderViewHost();
-  return agent_host->id();
+  return agent_host->GetId();
 }
 
 // static
-void DevToolsAgentHost::ConnectRenderViewHost(int cookie,
+void DevToolsAgentHost::ConnectRenderViewHost(const std::string& cookie,
                                               RenderViewHost* rvh) {
   for (Instances::iterator it = g_instances.Get().begin();
        it != g_instances.Get().end(); ++it) {
-    if (cookie == (*it)->id()) {
+    if (cookie == (*it)->GetId()) {
       (*it)->ConnectRenderViewHost(rvh, true);
       break;
     }
   }
 }
 
+//static
+std::vector<RenderViewHost*> DevToolsAgentHost::GetValidRenderViewHosts() {
+  std::vector<RenderViewHost*> result;
+  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
+       !it.IsAtEnd(); it.Advance()) {
+    RenderProcessHost* render_process_host = it.GetCurrentValue();
+    DCHECK(render_process_host);
+
+    // Ignore processes that don't have a connection, such as crashed contents.
+    if (!render_process_host->HasConnection())
+      continue;
+
+    RenderProcessHost::RenderWidgetHostsIterator rwit(
+        render_process_host->GetRenderWidgetHostsIterator());
+    for (; !rwit.IsAtEnd(); rwit.Advance()) {
+      const RenderWidgetHost* widget = rwit.GetCurrentValue();
+      DCHECK(widget);
+      if (!widget || !widget->IsRenderView())
+        continue;
+
+      RenderViewHost* rvh =
+          RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
+      // Don't report swapped out views.
+      if (static_cast<RenderViewHostImpl*>(rvh)->is_swapped_out())
+        continue;
+
+      result.push_back(rvh);
+    }
+  }
+  return result;
+}
+
 // static
 void RenderViewDevToolsAgentHost::OnCancelPendingNavigation(
     RenderViewHost* pending,
     RenderViewHost* current) {
-  int cookie = DevToolsAgentHost::DisconnectRenderViewHost(pending);
-  if (cookie != -1)
+  std::string cookie = DevToolsAgentHost::DisconnectRenderViewHost(pending);
+  if (cookie != std::string())
     DevToolsAgentHost::ConnectRenderViewHost(cookie, current);
 }
 
@@ -141,6 +173,7 @@ RenderViewDevToolsAgentHost::RenderViewDevToolsAgentHost(
   RenderViewHostDelegate* delegate = render_view_host_->GetDelegate();
   if (delegate && delegate->GetAsWebContents())
     Observe(delegate->GetAsWebContents());
+  AddRef();  // Balanced in RenderViewHostDestroyed.
 }
 
 RenderViewHost* RenderViewDevToolsAgentHost::GetRenderViewHost() {
@@ -166,6 +199,8 @@ void RenderViewDevToolsAgentHost::DispatchOnInspectorBackend(
 }
 
 void RenderViewDevToolsAgentHost::SendMessageToAgent(IPC::Message* msg) {
+  if (!render_view_host_)
+    return;
   msg->set_routing_id(render_view_host_->GetRoutingID());
   render_view_host_->Send(msg);
 }
@@ -256,6 +291,7 @@ void RenderViewDevToolsAgentHost::RenderViewHostDestroyed(
   scoped_refptr<RenderViewDevToolsAgentHost> protect(this);
   NotifyCloseListener();
   render_view_host_ = NULL;
+  Release();
 }
 
 bool RenderViewDevToolsAgentHost::OnRvhMessageReceived(

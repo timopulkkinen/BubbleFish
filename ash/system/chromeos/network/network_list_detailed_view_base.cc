@@ -6,6 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/system/tray/fixed_sized_scroll_view.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
@@ -403,8 +404,7 @@ void NetworkListDetailedViewBase::ToggleInfoBubble() {
 
   info_bubble_ = new NonActivatableSettingsBubble(
       info_icon_, CreateNetworkInfoView());
-  views::BubbleDelegateView::CreateBubble(info_bubble_);
-  info_bubble_->Show();
+  views::BubbleDelegateView::CreateBubble(info_bubble_)->Show();
 }
 
   // Returns whether an existing info-bubble was closed.

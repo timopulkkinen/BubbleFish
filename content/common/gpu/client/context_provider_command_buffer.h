@@ -22,32 +22,39 @@ namespace content {
 // WebGraphicsContext3DCommandBufferImpl context and a GrContext.
 class ContextProviderCommandBuffer : public cc::ContextProvider {
  public:
-  ContextProviderCommandBuffer();
-
-  virtual bool InitializeOnMainThread() OVERRIDE;
   virtual bool BindToCurrentThread() OVERRIDE;
   virtual WebGraphicsContext3DCommandBufferImpl* Context3d() OVERRIDE;
   virtual class GrContext* GrContext() OVERRIDE;
   virtual void VerifyContexts() OVERRIDE;
+  virtual bool DestroyedOnMainThread() OVERRIDE;
 
-  bool DestroyedOnMainThread();
+  void set_leak_on_destroy() {
+    base::AutoLock lock(main_thread_lock_);
+    leak_on_destroy_ = true;
+  }
 
  protected:
+  ContextProviderCommandBuffer();
   virtual ~ContextProviderCommandBuffer();
+
+  // This must be called immedately after creating this object, and it should
+  // be thrown away if this returns false.
+  bool InitializeOnMainThread();
 
   // Subclass must provide an implementation to create an offscreen context.
   virtual scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
       CreateOffscreenContext3d() = 0;
 
-  virtual void OnLostContext();
+  void OnLostContextInternal();
+  virtual void OnLostContext() {}
   virtual void OnMemoryAllocationChanged(bool nonzero_allocation);
 
  private:
-
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d_;
   scoped_ptr<webkit::gpu::GrContextForWebGraphicsContext3D> gr_context_;
 
-  base::Lock destroyed_lock_;
+  base::Lock main_thread_lock_;
+  bool leak_on_destroy_;
   bool destroyed_;
 
   class LostContextCallbackProxy;

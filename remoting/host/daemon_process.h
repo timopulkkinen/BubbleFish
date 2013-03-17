@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -25,10 +24,15 @@
 
 struct SerializedTransportRoute;
 
+namespace tracked_objects {
+class Location;
+}  // namespace tracked_objects
+
 namespace remoting {
 
 class AutoThreadTaskRunner;
 class DesktopSession;
+struct DesktopSessionParams;
 class HostEventLogger;
 class HostStatusObserver;
 
@@ -89,7 +93,9 @@ class DaemonProcess
                 const base::Closure& stopped_callback);
 
   // Creates a desktop session and assigns a unique ID to it.
-  void CreateDesktopSession(int terminal_id);
+  void CreateDesktopSession(int terminal_id,
+                            const DesktopSessionParams& params,
+                            bool virtual_terminal);
 
   // Requests the network process to crash.
   void CrashNetworkProcess(const tracked_objects::Location& location);
@@ -117,8 +123,15 @@ class DaemonProcess
   virtual void DoStop() OVERRIDE;
 
   // Creates a platform-specific desktop session and assigns a unique ID to it.
+  // An implementation should validate |params| as they are received via IPC.
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
-      int terminal_id) = 0;
+      int terminal_id,
+      const DesktopSessionParams& params,
+      bool virtual_terminal) = 0;
+
+  // Requests the network process to crash.
+  virtual void DoCrashNetworkProcess(
+      const tracked_objects::Location& location) = 0;
 
   // Launches the network process and establishes an IPC channel with it.
   virtual void LaunchNetworkProcess() = 0;

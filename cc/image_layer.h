@@ -15,35 +15,40 @@ class ImageLayerUpdater;
 
 // A Layer that contains only an Image element.
 class CC_EXPORT ImageLayer : public TiledLayer {
-public:
-    static scoped_refptr<ImageLayer> create();
+ public:
+  static scoped_refptr<ImageLayer> Create();
 
-    virtual bool drawsContent() const OVERRIDE;
-    virtual void setTexturePriorities(const PriorityCalculator&) OVERRIDE;
-    virtual void update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*) OVERRIDE;
-    virtual void calculateContentsScale(
-        float idealContentsScale,
-        bool animating_transform_to_screen,
-        float* contentsScaleX,
-        float* contentsScaleY,
-        gfx::Size* contentBounds) OVERRIDE;
+  // Layer implementation.
+  virtual bool DrawsContent() const OVERRIDE;
+  virtual void SetTexturePriorities(const PriorityCalculator& priority_calc)
+      OVERRIDE;
+  virtual void Update(ResourceUpdateQueue* queue,
+                      const OcclusionTracker* occlusion,
+                      RenderingStats* stats) OVERRIDE;
+  virtual void CalculateContentsScale(float ideal_contents_scale,
+                                      bool animating_transform_to_screen,
+                                      float* contents_scale_x,
+                                      float* contents_scale_y,
+                                      gfx::Size* content_bounds) OVERRIDE;
 
-    void setBitmap(const SkBitmap& image);
+  void SetBitmap(const SkBitmap& image);
 
-private:
-    ImageLayer();
-    virtual ~ImageLayer();
+ private:
+  ImageLayer();
+  virtual ~ImageLayer();
 
-    void setTilingOption(TilingOption);
+  // TiledLayer Implementation.
+  virtual LayerUpdater* Updater() const OVERRIDE;
+  virtual void CreateUpdaterIfNeeded() OVERRIDE;
 
-    virtual LayerUpdater* updater() const OVERRIDE;
-    virtual void createUpdaterIfNeeded() OVERRIDE;
-    float imageContentsScaleX() const;
-    float imageContentsScaleY() const;
+  float ImageContentsScaleX() const;
+  float ImageContentsScaleY() const;
 
-    SkBitmap m_bitmap;
+  SkBitmap bitmap_;
 
-    scoped_refptr<ImageLayerUpdater> m_updater;
+  scoped_refptr<ImageLayerUpdater> updater_;
+
+  DISALLOW_COPY_AND_ASSIGN(ImageLayer);
 };
 
 }  // namespace cc

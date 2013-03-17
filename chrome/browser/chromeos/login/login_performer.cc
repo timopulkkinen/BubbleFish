@@ -18,10 +18,10 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/device_local_account_policy_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -52,7 +52,7 @@ LoginPerformer* LoginPerformer::default_performer_ = NULL;
 
 LoginPerformer::LoginPerformer(Delegate* delegate)
     : ALLOW_THIS_IN_INITIALIZER_LIST(online_attempt_host_(this)),
-      last_login_failure_(LoginFailure::None()),
+      last_login_failure_(LoginFailure::LoginFailureNone()),
       delegate_(delegate),
       password_changed_(false),
       password_changed_callback_count_(0),

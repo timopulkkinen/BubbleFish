@@ -137,6 +137,9 @@ class GpuChannel : public IPC::Listener,
 
   gpu::PreemptionFlag* GetPreemptionFlag();
 
+  bool handle_messages_scheduled() const { return handle_messages_scheduled_; }
+  uint64 messages_processed() const { return messages_processed_; }
+
   // If |preemption_flag->IsSet()|, any stub on this channel
   // should stop issuing GL commands. Setting this to NULL stops deferral.
   void SetPreemptByFlag(
@@ -147,6 +150,8 @@ class GpuChannel : public IPC::Listener,
     return stream_texture_manager_.get();
   }
 #endif
+
+  void CacheShader(const std::string& key, const std::string& shader);
 
  protected:
   virtual ~GpuChannel();
@@ -177,8 +182,7 @@ class GpuChannel : public IPC::Listener,
   // Create a java surface texture object and send it to the renderer process
   // through binder thread.
   void OnEstablishStreamTexture(
-      int32 stream_id, SurfaceTexturePeer::SurfaceTextureTarget type,
-      int32 primary_id, int32 secondary_id);
+      int32 stream_id, int32 primary_id, int32 secondary_id);
 #endif
 
   // Collect rendering stats.

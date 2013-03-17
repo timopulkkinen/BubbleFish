@@ -18,13 +18,13 @@
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/request_priority.h"
-#include "net/base/server_bound_cert_service.h"
-#include "net/base/ssl_client_cert_type.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session.h"
+#include "net/ssl/server_bound_cert_service.h"
+#include "net/ssl/ssl_client_cert_type.h"
 
 namespace net {
 
@@ -83,7 +83,9 @@ class NET_EXPORT_PRIVATE SpdyStream
     // Called when data is sent.
     virtual void OnDataSent(int length) = 0;
 
-    // Called when SpdyStream is closed.
+    // Called when SpdyStream is closed. No other delegate functions
+    // will be called after this is called, and the delegate must not
+    // access the stream after this is called.
     virtual void OnClose(int status) = 0;
 
    protected:
@@ -260,13 +262,13 @@ class NET_EXPORT_PRIVATE SpdyStream
   // For non push stream, it will send SYN_STREAM frame.
   int SendRequest(bool has_upload_data);
 
-  // Sends a HEADERS frame. SpdyStream owns |headers| and will release it after
-  // the HEADERS frame is actually sent.
-  int WriteHeaders(SpdyHeaderBlock* headers);
+  // Queues a HEADERS frame to be sent.
+  void QueueHeaders(scoped_ptr<SpdyHeaderBlock> headers);
 
-  // Sends DATA frame.
-  int WriteStreamData(IOBuffer* data, int length,
-                      SpdyDataFlags flags);
+  // Queues a DATA frame to be sent. May not queue all the data that
+  // is given (or even any of it) depending on flow control.
+  void QueueStreamData(IOBuffer* data, int length,
+                       SpdyDataFlags flags);
 
   // Fills SSL info in |ssl_info| and returns true when SSL is in use.
   bool GetSSLInfo(SSLInfo* ssl_info,
@@ -351,7 +353,7 @@ class NET_EXPORT_PRIVATE SpdyStream
   // Returns a newly created SPDY frame owned by the called that contains
   // the next frame to be sent by this frame.  May return NULL if this
   // stream has become stalled on flow control.
-  SpdyFrame* ProduceNextFrame();
+  scoped_ptr<SpdyFrame> ProduceNextFrame();
 
   // If the stream is active and stream flow control is turned on,
   // called by OnDataReceived (which is in turn called by the session)

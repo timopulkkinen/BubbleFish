@@ -43,6 +43,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_service.h"
 #include "chrome/browser/instant/instant_service_factory.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
@@ -50,7 +51,6 @@
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugins/plugin_info_message_filter.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -64,6 +64,8 @@
 #include "chrome/browser/renderer_host/chrome_render_view_host_observer.h"
 #include "chrome/browser/renderer_host/pepper/chrome_browser_pepper_host_factory.h"
 #include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/speech/chrome_speech_recognition_manager_delegate.h"
 #include "chrome/browser/spellchecker/spellcheck_message_filter.h"
 #include "chrome/browser/ssl/ssl_add_certificate.h"
@@ -72,9 +74,9 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/toolkit_extra_parts.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
+#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/user_style_sheet_watcher_factory.h"
 #include "chrome/browser/view_type_utils.h"
@@ -91,6 +93,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
@@ -111,9 +114,9 @@
 #include "grit/ui_resources.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
-#include "net/base/ssl_cert_request_info.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
+#include "net/ssl/ssl_cert_request_info.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -439,6 +442,19 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
   return effective_url;
 }
 
+GURL GetEffectiveURLForSignin(const GURL& url) {
+  CHECK(SigninManager::IsWebBasedSigninFlowURL(url));
+
+  GURL effective_url(SigninManager::kChromeSigninEffectiveSite);
+  // Copy the path because the argument to SetPathStr must outlive
+  // the Replacements object.
+  const std::string path_copy(url.path());
+  GURL::Replacements replacements;
+  replacements.SetPathStr(path_copy);
+  effective_url = effective_url.ReplaceComponents(replacements);
+  return effective_url;
+}
+
 }  // namespace
 
 namespace chrome {
@@ -696,6 +712,13 @@ GURL ChromeContentBrowserClient::GetEffectiveURL(
   if (chrome::search::ShouldAssignURLToInstantRenderer(url, profile))
     return GetEffectiveURLForInstant(url, profile);
 
+  // If the input |url| should be assigned to the Signin renderer, make its
+  // effective URL distinct from other URLs on the signin service's domain.
+  // Note that the signin renderer will be allowed to sign the user in to
+  // Chrome.
+  if (SigninManager::IsWebBasedSigninFlowURL(url))
+    return GetEffectiveURLForSignin(url);
+
   // If the input |url| is part of an installed app, the effective URL is an
   // extension URL with the ID of that extension as the host. This has the
   // effect of grouping apps together in a common SiteInstance.
@@ -733,6 +756,9 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   if (chrome::search::ShouldAssignURLToInstantRenderer(effective_url, profile))
     return true;
 
+  if (SigninManager::IsWebBasedSigninFlowURL(effective_url))
+    return true;
+
   if (!effective_url.SchemeIs(extensions::kExtensionScheme))
     return false;
 
@@ -763,25 +789,20 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   return true;
 }
 
+// These are treated as WebUI schemes but do not get WebUI bindings.
+std::vector<std::string>
+ChromeContentBrowserClient::GetAdditionalWebUISchemes() {
+  std::vector<std::string> additional_schemes;
+  additional_schemes.push_back(chrome::kChromeSearchScheme);
+  return additional_schemes;
+}
+
 net::URLRequestContextGetter*
 ChromeContentBrowserClient::CreateRequestContext(
     content::BrowserContext* browser_context,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   Profile* profile = Profile::FromBrowserContext(browser_context);
-  return profile->CreateRequestContext(blob_protocol_handler.Pass(),
-                                       file_system_protocol_handler.Pass(),
-                                       developer_protocol_handler.Pass(),
-                                       chrome_protocol_handler.Pass(),
-                                       chrome_devtools_protocol_handler.Pass());
+  return profile->CreateRequestContext(protocol_handlers);
 }
 
 net::URLRequestContextGetter*
@@ -789,25 +810,10 @@ ChromeContentBrowserClient::CreateRequestContextForStoragePartition(
     content::BrowserContext* browser_context,
     const base::FilePath& partition_path,
     bool in_memory,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
+    content::ProtocolHandlerMap* protocol_handlers) {
   Profile* profile = Profile::FromBrowserContext(browser_context);
   return profile->CreateRequestContextForStoragePartition(
-      partition_path,
-      in_memory,
-      blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(),
-      developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(),
-      chrome_devtools_protocol_handler.Pass());
+      partition_path, in_memory, protocol_handlers);
 }
 
 bool ChromeContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -829,6 +835,10 @@ bool ChromeContentBrowserClient::IsSuitableHost(
   if (instant_service &&
       instant_service->IsInstantProcess(process_host->GetID()))
     return chrome::search::ShouldAssignURLToInstantRenderer(site_url, profile);
+
+  SigninManager* signin_manager = SigninManagerFactory::GetForProfile(profile);
+  if (signin_manager && signin_manager->IsSigninProcess(process_host->GetID()))
+    return SigninManager::IsWebBasedSigninFlowURL(site_url);
 
   ExtensionService* service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
@@ -924,6 +934,16 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
         InstantServiceFactory::GetForProfile(profile);
     if (instant_service)
       instant_service->AddInstantProcess(site_instance->GetProcess()->GetID());
+  }
+
+  // We only expect there to be one signin process as we use process-per-site
+  // for signin URLs. The signin process will be cleared from SigninManager
+  // when the renderer is destroyed.
+  if (SigninManager::IsWebBasedSigninFlowURL(site_instance->GetSiteURL())) {
+    SigninManager* signin_manager =
+        SigninManagerFactory::GetForProfile(profile);
+    if (signin_manager)
+      signin_manager->SetSigninProcess(site_instance->GetProcess()->GetID());
   }
 
   ExtensionService* service =
@@ -1112,6 +1132,11 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       if (instant_service &&
           instant_service->IsInstantProcess(process->GetID()))
         command_line->AppendSwitch(switches::kInstantProcess);
+
+      SigninManager* signin_manager =
+          SigninManagerFactory::GetForProfile(profile);
+      if (signin_manager && signin_manager->IsSigninProcess(process->GetID()))
+        command_line->AppendSwitch(switches::kSigninProcess);
     }
 
     if (content::IsThreadedCompositingEnabled())
@@ -1131,7 +1156,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kDisableScriptedPrintThrottling,
       switches::kDumpHistogramsOnExit,
       switches::kEnableBenchmarking,
-      switches::kEnableCrxlessWebApps,
       switches::kEnableExperimentalExtensionApis,
       switches::kEnableExperimentalFormFilling,
       switches::kEnableIPCFuzzing,
@@ -1764,6 +1788,9 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
       static_cast<float>(prefs->GetDouble(prefs::kWebKitFontScaleFactor));
   web_prefs->force_enable_zoom =
       prefs->GetBoolean(prefs::kWebKitForceEnableZoom);
+#if defined(GOOGLE_TV)
+  web_prefs->user_gesture_required_for_media_playback = false;
+#endif
 #endif
   web_prefs->password_echo_enabled = browser_defaults::kPasswordEchoEnabled;
 

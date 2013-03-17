@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,9 +54,7 @@
 #include "chrome/browser/extensions/test_management_policy.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
-#include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -65,6 +63,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
@@ -76,6 +75,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/indexed_db_context.h"
@@ -548,6 +548,7 @@ void ExtensionServiceTestBase::SetUp() {
   ExtensionErrorReporter::GetInstance()->ClearErrors();
   (new extensions::BackgroundManifestHandler)->Register();
   (new extensions::DefaultLocaleHandler)->Register();
+  (new extensions::PluginsHandler)->Register();
 }
 
 void ExtensionServiceTestBase::TearDown() {
@@ -1169,7 +1170,7 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   expected_path = extension->path().AppendASCII("script2.js");
   ASSERT_TRUE(file_util::AbsolutePath(&expected_path));
   EXPECT_TRUE(resource01.ComparePathWithDefault(expected_path));
-  EXPECT_TRUE(extension->plugins().empty());
+  EXPECT_TRUE(!extensions::PluginInfo::HasPlugins(extension));
   EXPECT_EQ(1u, scripts[1].url_patterns().patterns().size());
   EXPECT_EQ("http://*.news.com/*",
             scripts[1].url_patterns().begin()->GetAsString());
@@ -1193,17 +1194,22 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   EXPECT_EQ(loaded_[1]->GetResourceURL("background.html"),
             extensions::BackgroundInfo::GetBackgroundURL(loaded_[1]));
   EXPECT_EQ(0u, loaded_[1]->content_scripts().size());
+
   // We don't parse the plugins section on Chrome OS.
 #if defined(OS_CHROMEOS)
-  EXPECT_EQ(0u, loaded_[1]->plugins().size());
+  EXPECT_TRUE(!extensions::PluginInfo::HasPlugins(loaded_[1]));
 #else
-  ASSERT_EQ(2u, loaded_[1]->plugins().size());
+  ASSERT_TRUE(extensions::PluginInfo::HasPlugins(loaded_[1]));
+  const std::vector<extensions::PluginInfo>* plugins =
+      extensions::PluginInfo::GetPlugins(loaded_[1]);
+  ASSERT_TRUE(plugins);
+  ASSERT_EQ(2u, plugins->size());
   EXPECT_EQ(loaded_[1]->path().AppendASCII("content_plugin.dll").value(),
-            loaded_[1]->plugins()[0].path.value());
-  EXPECT_TRUE(loaded_[1]->plugins()[0].is_public);
+            plugins->at(0).path.value());
+  EXPECT_TRUE(plugins->at(0).is_public);
   EXPECT_EQ(loaded_[1]->path().AppendASCII("extension_plugin.dll").value(),
-            loaded_[1]->plugins()[1].path.value());
-  EXPECT_FALSE(loaded_[1]->plugins()[1].is_public);
+            plugins->at(1).path.value());
+  EXPECT_FALSE(plugins->at(1).is_public);
 #endif
 
   EXPECT_EQ(Manifest::INTERNAL, loaded_[1]->location());
@@ -1810,7 +1816,7 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
   ASSERT_TRUE(prefs->DidExtensionEscalatePermissions(extension_id));
 
   // Now grant and re-enable the extension, making sure the prefs are updated.
-  service_->GrantPermissionsAndEnableExtension(extension, false);
+  service_->GrantPermissionsAndEnableExtension(extension);
 
   ASSERT_FALSE(prefs->IsExtensionDisabled(extension_id));
   ASSERT_TRUE(service_->IsExtensionEnabled(extension_id));
@@ -1853,7 +1859,7 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
   ASSERT_TRUE(prefs->DidExtensionEscalatePermissions(extension_id));
 
   // Now grant and re-enable the extension, making sure the prefs are updated.
-  service_->GrantPermissionsAndEnableExtension(extension, false);
+  service_->GrantPermissionsAndEnableExtension(extension);
 
   ASSERT_TRUE(service_->IsExtensionEnabled(extension_id));
   ASSERT_FALSE(prefs->DidExtensionEscalatePermissions(extension_id));
@@ -2320,15 +2326,7 @@ TEST_F(ExtensionServiceTest, EnsureCWSOrdinalsInitialized) {
       sorting->GetAppLaunchOrdinal(extension_misc::kWebStoreAppId).IsValid());
 }
 
-// Flaky failures on Vista. http://crbug.com/145381
-#if defined(OS_WIN)
-#define MAYBE_InstallAppsWithUnlimitedStorage \
-    DISABLED_InstallAppsWithUnlimitedStorage
-#else
-#define MAYBE_InstallAppsWithUnlimitedStorage InstallAppsWithUnlimitedStorage
-#endif
-
-TEST_F(ExtensionServiceTest, MAYBE_InstallAppsWithUnlimitedStorage) {
+TEST_F(ExtensionServiceTest, InstallAppsWithUnlimitedStorage) {
   InitializeEmptyExtensionService();
   InitializeRequestContext();
   EXPECT_TRUE(service_->extensions()->is_empty());
@@ -3597,6 +3595,43 @@ TEST_F(ExtensionServiceTest, ReloadExtensions) {
   service_->ReloadExtensions();
 
   // Extension counts shouldn't change.
+  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+}
+
+// Tests reloading an extension.
+TEST_F(ExtensionServiceTest, ReloadExtension) {
+  InitializeEmptyExtensionService();
+  InitializeExtensionProcessManager();
+
+  // Simple extension that should install without error.
+  const char* extension_id = "behllobkkfkfnphdnhnkndlbkcpglgmj";
+  base::FilePath ext = data_dir_
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII(extension_id)
+      .AppendASCII("1.0.0.0");
+  extensions::UnpackedInstaller::Create(service_)->Load(ext);
+  loop_.RunUntilIdle();
+
+  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+
+  service_->ReloadExtension(extension_id);
+
+  // Extension should be disabled now, waiting to be reloaded.
+  EXPECT_EQ(0u, service_->extensions()->size());
+  EXPECT_EQ(1u, service_->disabled_extensions()->size());
+  EXPECT_EQ(Extension::DISABLE_RELOAD,
+            service_->extension_prefs()->GetDisableReasons(extension_id));
+
+  // Reloading again should not crash.
+  service_->ReloadExtension(extension_id);
+
+  // Finish reloading
+  loop_.RunUntilIdle();
+
+  // Extension should be enabled again.
   EXPECT_EQ(1u, service_->extensions()->size());
   EXPECT_EQ(0u, service_->disabled_extensions()->size());
 }

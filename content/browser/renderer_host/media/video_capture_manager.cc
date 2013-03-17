@@ -178,9 +178,8 @@ void VideoCaptureManager::OnOpen(int capture_session_id,
         break;
       }
       case MEDIA_SCREEN_VIDEO_CAPTURE: {
-#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN)
-        CHECK(CommandLine::ForCurrentProcess()->HasSwitch(
-                switches::kEnableUserMediaScreenCapturing));
+#if (defined(OS_LINUX) && defined(USE_X11)) || \
+    defined(OS_MACOSX) || defined(OS_WIN)
         scoped_refptr<base::SequencedWorkerPool> blocking_pool =
             BrowserThread::GetBlockingPool();
         video_capture_device = new media::ScreenCaptureDevice(

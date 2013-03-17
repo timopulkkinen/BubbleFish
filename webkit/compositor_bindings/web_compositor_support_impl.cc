@@ -7,15 +7,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "cc/output_surface.h"
+#include "cc/software_output_device.h"
 #include "cc/thread_impl.h"
 #include "cc/transform_operations.h"
 #include "webkit/compositor_bindings/web_animation_impl.h"
-#include "webkit/compositor_bindings/web_compositor_support_software_output_device.h"
 #include "webkit/compositor_bindings/web_content_layer_impl.h"
 #include "webkit/compositor_bindings/web_external_texture_layer_impl.h"
 #include "webkit/compositor_bindings/web_float_animation_curve_impl.h"
 #include "webkit/compositor_bindings/web_image_layer_impl.h"
-#include "webkit/compositor_bindings/web_io_surface_layer_impl.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
 #include "webkit/compositor_bindings/web_scrollbar_layer_impl.h"
 #include "webkit/compositor_bindings/web_solid_color_layer_impl.h"
@@ -32,12 +31,9 @@ using WebKit::WebContentLayerClient;
 using WebKit::WebExternalTextureLayer;
 using WebKit::WebExternalTextureLayerClient;
 using WebKit::WebFloatAnimationCurve;
-using WebKit::WebIOSurfaceLayer;
 using WebKit::WebImageLayer;
 using WebKit::WebImageLayer;
 using WebKit::WebLayer;
-using WebKit::WebLayerTreeView;
-using WebKit::WebLayerTreeViewClient;
 using WebKit::WebScrollbar;
 using WebKit::WebScrollbarLayer;
 using WebKit::WebScrollbarThemeGeometry;
@@ -87,10 +83,9 @@ WebCompositorSupportImpl::createOutputSurfaceFor3D(
 
 WebKit::WebCompositorOutputSurface*
 WebCompositorSupportImpl::createOutputSurfaceForSoftware() {
-  scoped_ptr<WebCompositorSupportSoftwareOutputDevice> software_device =
-      make_scoped_ptr(new WebCompositorSupportSoftwareOutputDevice);
-  return new cc::OutputSurface(
-      software_device.PassAs<cc::SoftwareOutputDevice>());
+  scoped_ptr<cc::SoftwareOutputDevice> software_device =
+      make_scoped_ptr(new cc::SoftwareOutputDevice);
+  return new cc::OutputSurface(software_device.Pass());
 }
 
 WebLayer* WebCompositorSupportImpl::createLayer() {
@@ -105,10 +100,6 @@ WebContentLayer* WebCompositorSupportImpl::createContentLayer(
 WebExternalTextureLayer* WebCompositorSupportImpl::createExternalTextureLayer(
     WebExternalTextureLayerClient* client) {
   return new WebKit::WebExternalTextureLayerImpl(client);
-}
-
-WebKit::WebIOSurfaceLayer* WebCompositorSupportImpl::createIOSurfaceLayer() {
-  return new WebKit::WebIOSurfaceLayerImpl();
 }
 
 WebKit::WebImageLayer* WebCompositorSupportImpl::createImageLayer() {

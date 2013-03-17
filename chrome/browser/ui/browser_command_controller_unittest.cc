@@ -191,7 +191,7 @@ class FullscreenTestBrowserWindow : public TestBrowserWindow {
   virtual ~FullscreenTestBrowserWindow() {}
 
   // TestBrowserWindow overrides:
-  virtual bool ShouldHideUIForFullscreen() const {
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE {
     return fullscreen_;
   }
   virtual bool IsFullscreen() const OVERRIDE {
@@ -328,7 +328,8 @@ TEST_F(BrowserCommandControllerTest,
   ASSERT_TRUE(testing_profile_manager.SetUp());
 
   // Set up a profile with an off the record profile.
-  TestingProfile* profile2 = new TestingProfile();
+  TestingProfile::Builder builder;
+  TestingProfile* profile2 = builder.Build().release();
   profile2->set_incognito(true);
   TestingProfile* profile1 =
       testing_profile_manager.CreateTestingProfile("p1");

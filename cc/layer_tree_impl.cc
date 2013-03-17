@@ -5,9 +5,16 @@
 #include "cc/layer_tree_impl.h"
 
 #include "base/debug/trace_event.h"
+#include "cc/animation.h"
+#include "cc/animation_id_provider.h"
 #include "cc/heads_up_display_layer_impl.h"
+#include "cc/keyframed_animation_curve.h"
+#include "cc/layer.h"
 #include "cc/layer_tree_host_common.h"
 #include "cc/layer_tree_host_impl.h"
+#include "cc/pinch_zoom_scrollbar.h"
+#include "cc/scrollbar_layer_impl.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/vector2d_conversions.h"
 
 namespace cc {
@@ -20,6 +27,8 @@ LayerTreeImpl::LayerTreeImpl(LayerTreeHostImpl* layer_tree_host_impl)
       currently_scrolling_layer_(0),
       background_color_(0),
       has_transparent_background_(false),
+      pinch_zoom_scrollbar_horizontal_layer_id_(Layer::INVALID_ID),
+      pinch_zoom_scrollbar_vertical_layer_id_(Layer::INVALID_ID),
       page_scale_factor_(1),
       page_scale_delta_(1),
       sent_page_scale_delta_(1),
@@ -60,7 +69,7 @@ void LayerTreeImpl::SetRootLayer(scoped_ptr<LayerImpl> layer) {
   root_scroll_layer_ = NULL;
   currently_scrolling_layer_ = NULL;
 
-  layer_tree_host_impl_->OnCanDrawStateChangedForTree(this);
+  layer_tree_host_impl_->OnCanDrawStateChangedForTree();
 }
 
 void LayerTreeImpl::FindRootScrollLayer() {
@@ -87,7 +96,7 @@ scoped_ptr<LayerImpl> LayerTreeImpl::DetachLayerTree() {
   return root_layer_.Pass();
 }
 
-void LayerTreeImpl::pushPropertiesTo(LayerTreeImpl* target_tree) {
+void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
   target_tree->SetPageScaleFactorAndLimits(
       page_scale_factor(), min_page_scale_factor(), max_page_scale_factor());
   target_tree->SetPageScaleDelta(
@@ -113,17 +122,26 @@ void LayerTreeImpl::pushPropertiesTo(LayerTreeImpl* target_tree) {
   if (hud_layer())
     target_tree->set_hud_layer(static_cast<HeadsUpDisplayLayerImpl*>(
         LayerTreeHostCommon::findLayerInSubtree(
-            target_tree->RootLayer(), hud_layer()->id())));
+            target_tree->root_layer(), hud_layer()->id())));
   else
     target_tree->set_hud_layer(NULL);
+
+  target_tree->SetPinchZoomHorizontalLayerId(
+      pinch_zoom_scrollbar_horizontal_layer_id_);
+  target_tree->SetPinchZoomVerticalLayerId(
+      pinch_zoom_scrollbar_vertical_layer_id_);
 }
 
-LayerImpl* LayerTreeImpl::RootScrollLayer() {
+LayerImpl* LayerTreeImpl::RootScrollLayer() const {
   DCHECK(IsActiveTree());
   return root_scroll_layer_;
 }
 
-LayerImpl* LayerTreeImpl::CurrentlyScrollingLayer() {
+LayerImpl* LayerTreeImpl::RootClipLayer() const {
+  return root_scroll_layer_ ? root_scroll_layer_->parent() : NULL;
+}
+
+LayerImpl* LayerTreeImpl::CurrentlyScrollingLayer() const {
   DCHECK(IsActiveTree());
   return currently_scrolling_layer_;
 }
@@ -159,7 +177,7 @@ void LayerTreeImpl::SetPageScaleDelta(float delta)
   page_scale_delta_ = delta;
 
   if (IsActiveTree()) {
-    LayerTreeImpl* pending_tree = layer_tree_host_impl_->pendingTree();
+    LayerTreeImpl* pending_tree = layer_tree_host_impl_->pending_tree();
     if (pending_tree) {
       DCHECK_EQ(1, pending_tree->sent_page_scale_delta());
       pending_tree->SetPageScaleDelta(page_scale_delta_ / sent_page_scale_delta_);
@@ -171,22 +189,8 @@ void LayerTreeImpl::SetPageScaleDelta(float delta)
 }
 
 gfx::SizeF LayerTreeImpl::ScrollableViewportSize() const {
-  gfx::SizeF view_bounds;
-  // The clip layer should be used for scrolling bounds if available since it
-  // adjusts for non-overlay scrollbars. Otherwise, fall back to our knowledge
-  // of the physical viewport size.
-  LayerImpl* clip_layer = NULL;
-  if (root_scroll_layer_)
-    clip_layer = root_scroll_layer_->parent();
-  if (clip_layer && clip_layer->masksToBounds()) {
-    view_bounds = clip_layer->bounds();
-  } else {
-    view_bounds = gfx::ScaleSize(device_viewport_size(),
-        1 / device_scale_factor());
-  }
-  view_bounds.Scale(1 / total_page_scale_factor());
-
-  return view_bounds;
+  return gfx::ScaleSize(layer_tree_host_impl_->VisibleViewportSize(),
+                        1.0f / total_page_scale_factor());
 }
 
 void LayerTreeImpl::UpdateMaxScrollOffset() {
@@ -200,7 +204,7 @@ void LayerTreeImpl::UpdateMaxScrollOffset() {
   // having a vertical scrollbar but no horizontal overflow.
   max_scroll.ClampToMin(gfx::Vector2dF());
 
-  root_scroll_layer_->setMaxScrollOffset(gfx::ToFlooredVector2d(max_scroll));
+  root_scroll_layer_->SetMaxScrollOffset(gfx::ToFlooredVector2d(max_scroll));
 }
 
 gfx::Transform LayerTreeImpl::ImplTransform() const {
@@ -209,17 +213,57 @@ gfx::Transform LayerTreeImpl::ImplTransform() const {
   return transform;
 }
 
+void LayerTreeImpl::UpdateSolidColorScrollbars() {
+  DCHECK(settings().solidColorScrollbars);
+
+  LayerImpl* root_scroll = RootScrollLayer();
+  if (!root_scroll)
+    return;
+
+  if (!IsActiveTree())
+    return;
+
+  gfx::RectF scrollable_viewport(
+      gfx::PointAtOffsetFromOrigin(root_scroll->TotalScrollOffset()),
+      ScrollableViewportSize());
+  float vertical_adjust = 0.0f;
+  if (RootClipLayer())
+    vertical_adjust = layer_tree_host_impl_->VisibleViewportSize().height() -
+                      RootClipLayer()->bounds().height();
+  if (ScrollbarLayerImpl* horiz = root_scroll->horizontal_scrollbar_layer()) {
+    horiz->set_vertical_adjust(vertical_adjust);
+    horiz->SetViewportWithinScrollableArea(scrollable_viewport,
+                                           ScrollableSize());
+  }
+  if (ScrollbarLayerImpl* vertical = root_scroll->vertical_scrollbar_layer()) {
+    vertical->set_vertical_adjust(vertical_adjust);
+    vertical->SetViewportWithinScrollableArea(scrollable_viewport,
+                                              ScrollableSize());
+  }
+}
+
 struct UpdateTilePrioritiesForLayer {
   void operator()(LayerImpl *layer) {
-    layer->updateTilePriorities();
+    layer->UpdateTilePriorities();
   }
 };
 
 void LayerTreeImpl::UpdateDrawProperties(UpdateDrawPropertiesReason reason) {
+  if (settings().solidColorScrollbars && IsActiveTree()) {
+    UpdateSolidColorScrollbars();
+
+    // The top controls manager is incompatible with the WebKit-created cliprect
+    // because it can bring into view a larger amount of content when it
+    // hides. It's safe to deactivate the clip rect if no non-overlay scrollbars
+    // are present.
+    if (layer_tree_host_impl_->top_controls_manager())
+      RootScrollLayer()->parent()->SetMasksToBounds(false);
+  }
+
   if (!needs_update_draw_properties_) {
-    if (reason == UPDATE_ACTIVE_TREE_FOR_DRAW && RootLayer())
+    if (reason == UPDATE_ACTIVE_TREE_FOR_DRAW && root_layer())
       LayerTreeHostCommon::callFunctionForSubtree<UpdateTilePrioritiesForLayer>(
-          RootLayer());
+          root_layer());
     return;
   }
 
@@ -230,22 +274,25 @@ void LayerTreeImpl::UpdateDrawProperties(UpdateDrawPropertiesReason reason) {
   if (!layer_tree_host_impl_->renderer())
       return;
 
-  if (!RootLayer())
+  if (!root_layer())
     return;
 
   if (root_scroll_layer_) {
-    root_scroll_layer_->setImplTransform(ImplTransform());
+    root_scroll_layer_->SetImplTransform(ImplTransform());
     // Setting the impl transform re-sets this.
     needs_update_draw_properties_ = false;
   }
 
   {
-    TRACE_EVENT1("cc", "LayerTreeImpl::UpdateDrawProperties", "IsActive", IsActiveTree());
+    TRACE_EVENT1("cc",
+                 "LayerTreeImpl::UpdateDrawProperties",
+                 "IsActive",
+                 IsActiveTree());
     bool update_tile_priorities =
         reason == UPDATE_PENDING_TREE ||
         reason == UPDATE_ACTIVE_TREE_FOR_DRAW;
     LayerTreeHostCommon::calculateDrawProperties(
-        RootLayer(),
+        root_layer(),
         device_viewport_size(),
         device_scale_factor(),
         total_page_scale_factor(),
@@ -264,11 +311,11 @@ static void ClearRenderSurfacesOnLayerImplRecursive(LayerImpl* current)
     DCHECK(current);
     for (size_t i = 0; i < current->children().size(); ++i)
         ClearRenderSurfacesOnLayerImplRecursive(current->children()[i]);
-    current->clearRenderSurface();
+    current->ClearRenderSurface();
 }
 
 void LayerTreeImpl::ClearRenderSurfaces() {
-  ClearRenderSurfacesOnLayerImplRecursive(RootLayer());
+  ClearRenderSurfacesOnLayerImplRecursive(root_layer());
   render_surface_layer_list_.clear();
   set_needs_update_draw_properties();
 }
@@ -283,7 +330,7 @@ bool LayerTreeImpl::AreVisibleResourcesReady() const {
   LayerIteratorType end = LayerIteratorType::end(&render_surface_layer_list_);
   for (LayerIteratorType it = LayerIteratorType::begin(
            &render_surface_layer_list_); it != end; ++it) {
-    if (it.representsItself() && !(*it)->areVisibleResourcesReady())
+    if (it.representsItself() && !(*it)->AreVisibleResourcesReady())
       return false;
   }
 
@@ -320,20 +367,24 @@ void LayerTreeImpl::UnregisterLayer(LayerImpl* layer) {
 void LayerTreeImpl::PushPersistedState(LayerTreeImpl* pendingTree) {
   int id = currently_scrolling_layer_ ? currently_scrolling_layer_->id() : 0;
   pendingTree->set_currently_scrolling_layer(
-      LayerTreeHostCommon::findLayerInSubtree(pendingTree->RootLayer(), id));
+      LayerTreeHostCommon::findLayerInSubtree(pendingTree->root_layer(), id));
 }
 
 static void DidBecomeActiveRecursive(LayerImpl* layer) {
-  layer->didBecomeActive();
+  layer->DidBecomeActive();
   for (size_t i = 0; i < layer->children().size(); ++i)
     DidBecomeActiveRecursive(layer->children()[i]);
 }
 
 void LayerTreeImpl::DidBecomeActive() {
-  if (RootLayer())
-    DidBecomeActiveRecursive(RootLayer());
+  if (root_layer())
+    DidBecomeActiveRecursive(root_layer());
   FindRootScrollLayer();
   UpdateMaxScrollOffset();
+  // Main thread scrolls do not get handled in LayerTreeHostImpl, so after
+  // each commit (and after the root scroll layer has its max scroll offset
+  // set), we need to update pinch zoom scrollbars.
+  UpdatePinchZoomScrollbars();
 }
 
 bool LayerTreeImpl::ContentsTexturesPurged() const {
@@ -342,12 +393,12 @@ bool LayerTreeImpl::ContentsTexturesPurged() const {
 
 void LayerTreeImpl::SetContentsTexturesPurged() {
   contents_textures_purged_ = true;
-  layer_tree_host_impl_->OnCanDrawStateChangedForTree(this);
+  layer_tree_host_impl_->OnCanDrawStateChangedForTree();
 }
 
 void LayerTreeImpl::ResetContentsTexturesPurged() {
   contents_textures_purged_ = false;
-  layer_tree_host_impl_->OnCanDrawStateChangedForTree(this);
+  layer_tree_host_impl_->OnCanDrawStateChangedForTree();
 }
 
 bool LayerTreeImpl::ViewportSizeInvalid() const {
@@ -356,12 +407,12 @@ bool LayerTreeImpl::ViewportSizeInvalid() const {
 
 void LayerTreeImpl::SetViewportSizeInvalid() {
   viewport_size_invalid_ = true;
-  layer_tree_host_impl_->OnCanDrawStateChangedForTree(this);
+  layer_tree_host_impl_->OnCanDrawStateChangedForTree();
 }
 
 void LayerTreeImpl::ResetViewportSizeInvalid() {
   viewport_size_invalid_ = false;
-  layer_tree_host_impl_->OnCanDrawStateChangedForTree(this);
+  layer_tree_host_impl_->OnCanDrawStateChangedForTree();
 }
 
 Proxy* LayerTreeImpl::proxy() const {
@@ -373,69 +424,69 @@ const LayerTreeSettings& LayerTreeImpl::settings() const {
 }
 
 const RendererCapabilities& LayerTreeImpl::rendererCapabilities() const {
-  return layer_tree_host_impl_->rendererCapabilities();
+  return layer_tree_host_impl_->GetRendererCapabilities();
 }
 
 OutputSurface* LayerTreeImpl::output_surface() const {
-  return layer_tree_host_impl_->outputSurface();
+  return layer_tree_host_impl_->output_surface();
 }
 
 ResourceProvider* LayerTreeImpl::resource_provider() const {
-  return layer_tree_host_impl_->resourceProvider();
+  return layer_tree_host_impl_->resource_provider();
 }
 
 TileManager* LayerTreeImpl::tile_manager() const {
-  return layer_tree_host_impl_->tileManager();
+  return layer_tree_host_impl_->tile_manager();
 }
 
 FrameRateCounter* LayerTreeImpl::frame_rate_counter() const {
-  return layer_tree_host_impl_->fpsCounter();
+  return layer_tree_host_impl_->fps_counter();
 }
 
 PaintTimeCounter* LayerTreeImpl::paint_time_counter() const {
-  return layer_tree_host_impl_->paintTimeCounter();
+  return layer_tree_host_impl_->paint_time_counter();
 }
 
 MemoryHistory* LayerTreeImpl::memory_history() const {
-  return layer_tree_host_impl_->memoryHistory();
+  return layer_tree_host_impl_->memory_history();
 }
 
 bool LayerTreeImpl::IsActiveTree() const {
-  return layer_tree_host_impl_->activeTree() == this;
+  return layer_tree_host_impl_->active_tree() == this;
 }
 
 bool LayerTreeImpl::IsPendingTree() const {
-  return layer_tree_host_impl_->pendingTree() == this;
+  return layer_tree_host_impl_->pending_tree() == this;
 }
 
 bool LayerTreeImpl::IsRecycleTree() const {
-  return layer_tree_host_impl_->recycleTree() == this;
+  return layer_tree_host_impl_->recycle_tree() == this;
 }
 
 LayerImpl* LayerTreeImpl::FindActiveTreeLayerById(int id) {
-  LayerTreeImpl* tree = layer_tree_host_impl_->activeTree();
+  LayerTreeImpl* tree = layer_tree_host_impl_->active_tree();
   if (!tree)
     return NULL;
   return tree->LayerById(id);
 }
 
 LayerImpl* LayerTreeImpl::FindPendingTreeLayerById(int id) {
-  LayerTreeImpl* tree = layer_tree_host_impl_->pendingTree();
+  LayerTreeImpl* tree = layer_tree_host_impl_->pending_tree();
   if (!tree)
     return NULL;
   return tree->LayerById(id);
 }
 
 int LayerTreeImpl::MaxTextureSize() const {
-  return layer_tree_host_impl_->rendererCapabilities().maxTextureSize;
+  return layer_tree_host_impl_->GetRendererCapabilities().max_texture_size;
 }
 
 bool LayerTreeImpl::PinchGestureActive() const {
-  return layer_tree_host_impl_->pinchGestureActive();
+  return layer_tree_host_impl_->pinch_gesture_active();
 }
 
 base::TimeTicks LayerTreeImpl::CurrentFrameTime() const {
-  return layer_tree_host_impl_->currentFrameTime();
+  return layer_tree_host_impl_->CurrentFrameTime();
 }
 
 void LayerTreeImpl::SetNeedsRedraw() {
@@ -443,31 +494,31 @@ void LayerTreeImpl::SetNeedsRedraw() {
 }
 
 const LayerTreeDebugState& LayerTreeImpl::debug_state() const {
-  return layer_tree_host_impl_->debugState();
+  return layer_tree_host_impl_->debug_state();
 }
 
 float LayerTreeImpl::device_scale_factor() const {
-  return layer_tree_host_impl_->deviceScaleFactor();
+  return layer_tree_host_impl_->device_scale_factor();
 }
 
-const gfx::Size& LayerTreeImpl::device_viewport_size() const {
-  return layer_tree_host_impl_->deviceViewportSize();
+gfx::Size LayerTreeImpl::device_viewport_size() const {
+  return layer_tree_host_impl_->device_viewport_size();
 }
 
-const gfx::Size& LayerTreeImpl::layout_viewport_size() const {
-  return layer_tree_host_impl_->layoutViewportSize();
+gfx::Size LayerTreeImpl::layout_viewport_size() const {
+  return layer_tree_host_impl_->layout_viewport_size();
 }
 
 std::string LayerTreeImpl::layer_tree_as_text() const {
-  return layer_tree_host_impl_->layerTreeAsText();
+  return layer_tree_host_impl_->LayerTreeAsText();
 }
 
 DebugRectHistory* LayerTreeImpl::debug_rect_history() const {
-  return layer_tree_host_impl_->debugRectHistory();
+  return layer_tree_host_impl_->debug_rect_history();
 }
 
 AnimationRegistrar* LayerTreeImpl::animationRegistrar() const {
-  return layer_tree_host_impl_->animationRegistrar();
+  return layer_tree_host_impl_->animation_registrar();
 }
 
 scoped_ptr<base::Value> LayerTreeImpl::AsValue() const {
@@ -485,5 +536,119 @@ scoped_ptr<base::Value> LayerTreeImpl::AsValue() const {
   }
   return state.PassAs<base::Value>();
 }
+
+void LayerTreeImpl::DidBeginScroll() {
+  if (HasPinchZoomScrollbars())
+    FadeInPinchZoomScrollbars();
+}
+
+void LayerTreeImpl::DidUpdateScroll() {
+  if (HasPinchZoomScrollbars())
+    UpdatePinchZoomScrollbars();
+}
+
+void LayerTreeImpl::DidEndScroll() {
+  if (HasPinchZoomScrollbars())
+    FadeOutPinchZoomScrollbars();
+}
+
+void LayerTreeImpl::SetPinchZoomHorizontalLayerId(int layer_id) {
+  pinch_zoom_scrollbar_horizontal_layer_id_ = layer_id;
+}
+
+ScrollbarLayerImpl* LayerTreeImpl::PinchZoomScrollbarHorizontal() {
+  return static_cast<ScrollbarLayerImpl*>(LayerById(
+    pinch_zoom_scrollbar_horizontal_layer_id_));
+}
+
+void LayerTreeImpl::SetPinchZoomVerticalLayerId(int layer_id) {
+  pinch_zoom_scrollbar_vertical_layer_id_ = layer_id;
+}
+
+ScrollbarLayerImpl* LayerTreeImpl::PinchZoomScrollbarVertical() {
+  return static_cast<ScrollbarLayerImpl*>(LayerById(
+    pinch_zoom_scrollbar_vertical_layer_id_));
+}
+
+void LayerTreeImpl::UpdatePinchZoomScrollbars() {
+  LayerImpl* root_scroll_layer = RootScrollLayer();
+  if (!root_scroll_layer)
+    return;
+
+  if (ScrollbarLayerImpl* scrollbar = PinchZoomScrollbarHorizontal()) {
+    scrollbar->SetCurrentPos(root_scroll_layer->scroll_offset().x());
+    scrollbar->SetTotalSize(root_scroll_layer->bounds().width());
+    scrollbar->SetMaximum(root_scroll_layer->max_scroll_offset().x());
+  }
+  if (ScrollbarLayerImpl* scrollbar = PinchZoomScrollbarVertical()) {
+    scrollbar->SetCurrentPos(root_scroll_layer->scroll_offset().y());
+    scrollbar->SetTotalSize(root_scroll_layer->bounds().height());
+    scrollbar->SetMaximum(root_scroll_layer->max_scroll_offset().y());
+  }
+}
+
+static scoped_ptr<Animation> MakePinchZoomFadeAnimation(
+    float start_opacity, float end_opacity) {
+  scoped_ptr<KeyframedFloatAnimationCurve> curve =
+    KeyframedFloatAnimationCurve::Create();
+  curve->AddKeyframe(FloatKeyframe::Create(
+    0, start_opacity, EaseInTimingFunction::create()));
+  curve->AddKeyframe(FloatKeyframe::Create(
+    PinchZoomScrollbar::kFadeDurationInSeconds, end_opacity,
+    EaseInTimingFunction::create()));
+
+  scoped_ptr<Animation> animation = Animation::Create(
+      curve.PassAs<AnimationCurve>(), AnimationIdProvider::NextAnimationId(),
+      0, Animation::Opacity);
+  animation->set_is_impl_only(true);
+
+  return animation.Pass();
+}
+
+static void StartFadeInAnimation(ScrollbarLayerImpl* layer) {
+  DCHECK(layer);
+  float start_opacity = layer->opacity();
+  LayerAnimationController* controller = layer->layer_animation_controller();
+  // TODO() It shouldn't be necessary to manually remove the old animation.
+  if (Animation* animation = controller->GetAnimation(Animation::Opacity))
+    controller->RemoveAnimation(animation->id());
+  controller->AddAnimation(MakePinchZoomFadeAnimation(start_opacity,
+    PinchZoomScrollbar::kDefaultOpacity));
+}
+
+void LayerTreeImpl::FadeInPinchZoomScrollbars() {
+  if (!HasPinchZoomScrollbars() || page_scale_factor_ == 1)
+    return;
+
+  StartFadeInAnimation(PinchZoomScrollbarHorizontal());
+  StartFadeInAnimation(PinchZoomScrollbarVertical());
+}
+
+static void StartFadeOutAnimation(LayerImpl* layer) {
+  float opacity = layer->opacity();
+  if (!opacity)
+    return;
+
+  LayerAnimationController* controller = layer->layer_animation_controller();
+  // TODO(wjmaclean) It shouldn't be necessary to manually remove the old
+  // animation.
+  if (Animation* animation = controller->GetAnimation(Animation::Opacity))
+    controller->RemoveAnimation(animation->id());
+  controller->AddAnimation(MakePinchZoomFadeAnimation(opacity, 0));
+}
+
+void LayerTreeImpl::FadeOutPinchZoomScrollbars() {
+  if (!HasPinchZoomScrollbars())
+    return;
+
+  StartFadeOutAnimation(PinchZoomScrollbarHorizontal());
+  StartFadeOutAnimation(PinchZoomScrollbarVertical());
+}
+
+bool LayerTreeImpl::HasPinchZoomScrollbars() const {
+  return pinch_zoom_scrollbar_horizontal_layer_id_ != Layer::INVALID_ID &&
+         pinch_zoom_scrollbar_vertical_layer_id_ != Layer::INVALID_ID;
+}
+
 
 } // namespace cc

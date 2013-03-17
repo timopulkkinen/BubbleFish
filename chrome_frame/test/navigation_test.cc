@@ -857,7 +857,7 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
 
   EXPECT_CALL(save_dialog_watcher, OnWindowClose(_))
         .WillOnce(testing::DoAll(
-            WaitForFileSave(temp_file_path, 2000),
+            WaitForFileSave(temp_file_path, 3000),
             testing::InvokeWithoutArgs(
                 testing::CreateFunctor(CloseWindow, &owner_window)),
             CloseBrowserMock(&ie_mock_)));

@@ -37,7 +37,9 @@ class CC_EXPORT LayerTreeSettings {
   int solidColorScrollbarThicknessDIP;
   bool calculateTopControlsPosition;
   bool useCheapnessEstimator;
+  bool useColorEstimator;
   bool useMemoryManagement;
+  bool predictionBenchmarking;
   float minimumContentsScale;
   float lowResContentsScaleFactor;
   float topControlsHeight;
@@ -49,6 +51,7 @@ class CC_EXPORT LayerTreeSettings {
   gfx::Size defaultTileSize;
   gfx::Size maxUntiledLayerSize;
   gfx::Size minimumOcclusionTrackingSize;
+  bool usePinchZoomScrollbars;
 
   LayerTreeDebugState initialDebugState;
 };

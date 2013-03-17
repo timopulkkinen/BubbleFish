@@ -1236,12 +1236,6 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
       // Return true so the edit gets the tab event and enters keyword mode.
       return true;
     }
-
-    // Tab while showing Instant commits instant immediately.
-    // Return true so that focus traversal isn't attempted. The edit ends
-    // up doing nothing in this case.
-    if (location_entry_->model()->AcceptCurrentInstantPreview())
-      return true;
   }
 
 #if defined(USE_AURA)
@@ -1436,7 +1430,7 @@ void LocationBarView::TestPageActionPressed(size_t index) {
 
 void LocationBarView::TestActionBoxMenuItemSelected(int command_id) {
   action_box_button_view_->action_box_button_controller()->
-      ExecuteCommand(command_id);
+      ExecuteCommand(command_id, 0);
 }
 
 bool LocationBarView::GetBookmarkStarVisibility() {

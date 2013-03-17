@@ -33,9 +33,6 @@
 #include "chrome/common/localized_error.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/autofill/autofill_agent.h"
-#include "chrome/renderer/autofill/password_autofill_manager.h"
-#include "chrome/renderer/autofill/password_generation_manager.h"
 #include "chrome/renderer/benchmarking_extension.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/chrome_render_view_observer.h"
@@ -52,7 +49,6 @@
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/net_benchmarking_extension.h"
 #include "chrome/renderer/one_click_signin_agent.h"
-#include "chrome/renderer/page_click_tracker.h"
 #include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper/chrome_ppapi_interfaces.h"
 #include "chrome/renderer/pepper/pepper_helper.h"
@@ -70,6 +66,10 @@
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/spellchecker/spellcheck_provider.h"
+#include "components/autofill/renderer/autofill_agent.h"
+#include "components/autofill/renderer/page_click_tracker.h"
+#include "components/autofill/renderer/password_autofill_manager.h"
+#include "components/autofill/renderer/password_generation_manager.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_thread.h"
@@ -222,13 +222,14 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   thread->RegisterExtension(extensions_v8::ExternalExtension::Get());
   thread->RegisterExtension(extensions_v8::LoadTimesExtension::Get());
-  thread->RegisterExtension(extensions_v8::SearchBoxExtension::Get());
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableBenchmarking))
     thread->RegisterExtension(extensions_v8::BenchmarkingExtension::Get());
   if (command_line->HasSwitch(switches::kEnableNetBenchmarking))
     thread->RegisterExtension(extensions_v8::NetBenchmarkingExtension::Get());
+  if (command_line->HasSwitch(switches::kInstantProcess))
+    thread->RegisterExtension(extensions_v8::SearchBoxExtension::Get());
 
   if (command_line->HasSwitch(switches::kPlaybackMode) ||
       command_line->HasSwitch(switches::kRecordMode) ||
@@ -239,12 +240,15 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   if (command_line->HasSwitch(switches::kEnableIPCFuzzing)) {
     thread->GetChannel()->set_outgoing_message_filter(LoadExternalIPCFuzzer());
   }
-  // chrome:, chrome-devtools:, and chrome-internal: pages should not be
-  // accessible by normal content, and should also be unable to script
-  // anything but themselves (to help limit the damage that a corrupt
+  // chrome:, chrome-search:, chrome-devtools:, and chrome-internal: pages
+  // should not be accessible by normal content, and should also be unable to
+  // script anything but themselves (to help limit the damage that a corrupt
   // page could cause).
   WebString chrome_ui_scheme(ASCIIToUTF16(chrome::kChromeUIScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_ui_scheme);
+
+  WebString chrome_search_scheme(ASCIIToUTF16(chrome::kChromeSearchScheme));
+  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_search_scheme);
 
   WebString dev_tools_scheme(ASCIIToUTF16(chrome::kChromeDevToolsScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(dev_tools_scheme);
@@ -257,14 +261,17 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   WebSecurityPolicy::registerURLSchemeAsLocal(drive_scheme);
 #endif
 
-  // chrome: pages should not be accessible by bookmarklets or javascript:
-  // URLs typed in the omnibox.
+  // chrome: and chrome-search: pages should not be accessible by bookmarklets
+  // or javascript: URLs typed in the omnibox.
   WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
       chrome_ui_scheme);
+  WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
+      chrome_search_scheme);
 
-  // chrome:, and chrome-extension: resources shouldn't trigger insecure
-  // content warnings.
+  // chrome:, chrome-search:, and chrome-extension: resources shouldn't trigger
+  // insecure content warnings.
   WebSecurityPolicy::registerURLSchemeAsSecure(chrome_ui_scheme);
+  WebSecurityPolicy::registerURLSchemeAsSecure(chrome_search_scheme);
 
   WebString extension_scheme(ASCIIToUTF16(extensions::kExtensionScheme));
   WebSecurityPolicy::registerURLSchemeAsSecure(extension_scheme);
@@ -303,7 +310,6 @@ void ChromeContentRendererClient::RenderViewCreated(
 #if defined(ENABLE_PRINTING)
   new printing::PrintWebViewHelper(render_view);
 #endif
-  new SearchBox(render_view);
   new SpellCheckProvider(render_view, spellcheck_.get());
   new prerender::PrerendererClient(render_view);
 #if defined(FULL_SAFE_BROWSING)
@@ -314,10 +320,13 @@ void ChromeContentRendererClient::RenderViewCreated(
       new PasswordAutofillManager(render_view);
   AutofillAgent* autofill_agent = new AutofillAgent(render_view,
                                                     password_autofill_manager);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePasswordGeneration)) {
+
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnablePasswordGeneration))
     new PasswordGenerationManager(render_view);
-  }
+  if (command_line->HasSwitch(switches::kInstantProcess))
+    new SearchBox(render_view);
+
   PageClickTracker* page_click_tracker = new PageClickTracker(render_view);
   // Note that the order of insertion of the listeners is important.
   // The password_autocomplete_manager takes the first shot at processing the
@@ -337,10 +346,8 @@ void ChromeContentRendererClient::RenderViewCreated(
 
 #if defined(ENABLE_AUTOMATION)
   // Used only for testing/automation.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDomAutomationController)) {
+  if (command_line->HasSwitch(switches::kDomAutomationController))
     new AutomationRendererHelper(render_view);
-  }
 #endif
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -695,19 +702,26 @@ bool ChromeContentRendererClient::IsNaClAllowed(
           top_url.host() == "plus.sandbox.google.com") &&
       top_url.path().find("/games") == 0;
 
-  // Allow Chrome Web Store extensions, built-in extensions, extensions
-  // under development, invocations from whitelisted URLs, and all invocations
+  bool is_invoked_by_extension = top_url.SchemeIs("chrome-extension");
+
+  // NaCl PDF viewer can be loaded from all URLs.
+  bool is_nacl_pdf_viewer =
+      (is_extension_from_webstore &&
+       manifest_url.SchemeIs("chrome-extension") &&
+       manifest_url.host() == "acadkphlmlegjaadjagenfimbpphcgnh");
+
+  // Allow Chrome Web Store extensions, built-in extensions and extensions
+  // under development if the invocation comes from a URL with an extension
+  // scheme. Also allow invocations if they are from whitelisted URLs or
   // if --enable-nacl is set.
-  bool is_nacl_allowed = is_extension_from_webstore ||
+  bool is_nacl_allowed = is_nacl_unrestricted ||
                          is_whitelisted_url ||
-                         is_extension_unrestricted ||
-                         is_nacl_unrestricted;
+                         is_nacl_pdf_viewer ||
+                         (is_invoked_by_extension &&
+                             (is_extension_from_webstore ||
+                                 is_extension_unrestricted));
   if (is_nacl_allowed) {
-    bool app_can_use_dev_interfaces =
-        // NaCl PDF viewer extension
-        (is_extension_from_webstore &&
-        manifest_url.SchemeIs("chrome-extension") &&
-        manifest_url.host() == "acadkphlmlegjaadjagenfimbpphcgnh");
+    bool app_can_use_dev_interfaces = is_nacl_pdf_viewer;
     // Make sure that PPAPI 'dev' interfaces aren't available for production
     // apps unless they're whitelisted.
     WebString dev_attribute = WebString::fromUTF8("@dev");
@@ -836,6 +850,17 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
   // check when cross-process POST submissions are supported.
   if (http_method != "GET")
     return false;
+
+  // If this is the Signin process, fork all navigations originating from the
+  // renderer.  The destination page will then be bucketed back to this Signin
+  // process if it is a Signin url, or to another process if not.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSigninProcess)) {
+    // We never want to allow non-signin pages to fork-on-POST to a
+    // signin-related action URL. We'll need to handle this carefully once
+    // http://crbug.com/101395 is fixed. The CHECK ensures we don't forget.
+    CHECK_NE(http_method, "POST");
+    return true;
+  }
 
   // If |url| matches one of the prerendered URLs, stop this navigation and try
   // to swap in the prerendered page on the browser process. If the prerendered

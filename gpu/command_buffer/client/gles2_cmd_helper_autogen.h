@@ -2035,6 +2035,14 @@
     }
   }
 
+  void WaitAsyncTexImage2DCHROMIUM(GLenum target) {
+    gles2::cmds::WaitAsyncTexImage2DCHROMIUM* c =
+        GetCmdSpace<gles2::cmds::WaitAsyncTexImage2DCHROMIUM>();
+    if (c) {
+      c->Init(target);
+    }
+  }
+
   void DiscardFramebufferEXT(
       GLenum target, GLsizei count, uint32 attachments_shm_id,
       uint32 attachments_shm_offset) {
@@ -2069,6 +2077,26 @@
         GetCmdSpace<gles2::cmds::WaitSyncPointCHROMIUM>();
     if (c) {
       c->Init(sync_point);
+    }
+  }
+
+  void DrawBuffersEXT(
+      GLsizei count, uint32 bufs_shm_id, uint32 bufs_shm_offset) {
+    gles2::cmds::DrawBuffersEXT* c =
+        GetCmdSpace<gles2::cmds::DrawBuffersEXT>();
+    if (c) {
+      c->Init(count, bufs_shm_id, bufs_shm_offset);
+    }
+  }
+
+  void DrawBuffersEXTImmediate(GLsizei count, const GLenum* bufs) {
+    const uint32 size =
+        gles2::cmds::DrawBuffersEXTImmediate::ComputeSize(count);
+    gles2::cmds::DrawBuffersEXTImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::cmds::DrawBuffersEXTImmediate>(
+            size);
+    if (c) {
+      c->Init(count, bufs);
     }
   }
 

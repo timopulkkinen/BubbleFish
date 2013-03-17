@@ -67,12 +67,15 @@ var WebKitMutationObserver = function(callback) {};
     @param {Object} options */
 WebKitMutationObserver.prototype.observe = function(element, options) {};
 
+// TODO(jamiewalch): Flesh this out with the correct type when we're a v2 app.
+/** @type {remoting.MockStorage} */
+remoting.storage.local = null;
+
 /** @type {Object} */
 chrome.storage = {};
 
-// TODO(jamiewalch): Flesh this out with the correct type when we're a v2 app.
 /** @type {remoting.MockStorage} */
-chrome.storage.local = null;
+chrome.storage.local;
 
 /** @type {Object} */
 chrome.app.runtime = {

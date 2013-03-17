@@ -26,11 +26,11 @@ DelegatedRendererLayerImpl::~DelegatedRendererLayerImpl() {
   ClearChildId();
 }
 
-bool DelegatedRendererLayerImpl::hasDelegatedContent() const {
+bool DelegatedRendererLayerImpl::HasDelegatedContent() const {
   return !render_passes_in_draw_order_.empty();
 }
 
-bool DelegatedRendererLayerImpl::hasContributingDelegatedRenderPasses() const {
+bool DelegatedRendererLayerImpl::HasContributingDelegatedRenderPasses() const {
   // The root RenderPass for the layer is merged with its target
   // RenderPass in each frame. So we only have extra RenderPasses
   // to merge when we have a non-root RenderPass present.
@@ -60,77 +60,65 @@ void DelegatedRendererLayerImpl::SetFrameData(
     scoped_ptr<DelegatedFrameData> frame_data,
     gfx::RectF damage_in_frame,
     TransferableResourceArray* resources_for_ack) {
-  // A frame with an empty root render pass is invalid.
-  DCHECK(frame_data->render_pass_list.empty() ||
-         !frame_data->render_pass_list.back()->output_rect.IsEmpty());
-
   CreateChildIdIfNeeded();
   DCHECK(child_id_);
 
-  // Display size is already set so we can compute what the damage rect
-  // will be in layer space.
-  if (!frame_data->render_pass_list.empty()) {
-    RenderPass* new_root_pass = frame_data->render_pass_list.back();
-    gfx::RectF damage_in_layer = MathUtil::mapClippedRect(
-        DelegatedFrameToLayerSpaceTransform(new_root_pass->output_rect.size()),
-        damage_in_frame);
-    setUpdateRect(gfx::UnionRects(updateRect(), damage_in_layer));
-  }
+  ResourceProvider* resource_provider = layer_tree_impl()->resource_provider();
+    const ResourceProvider::ResourceIdMap& resource_map =
+        resource_provider->GetChildToParentMap(child_id_);
 
-  // Save the resources from the last frame.
-  ResourceProvider::ResourceIdSet new_resources;
+  if (frame_data) {
+    // A frame with an empty root render pass is invalid.
+    DCHECK(frame_data->render_pass_list.empty() ||
+           !frame_data->render_pass_list.back()->output_rect.IsEmpty());
 
-  // Receive the current frame's resources from the child compositor.
-  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
-  resource_provider->receiveFromChild(child_id_, frame_data->resource_list);
+    // Display size is already set so we can compute what the damage rect
+    // will be in layer space.
+    if (!frame_data->render_pass_list.empty()) {
+      RenderPass* new_root_pass = frame_data->render_pass_list.back();
+      gfx::RectF damage_in_layer = MathUtil::mapClippedRect(
+          DelegatedFrameToLayerSpaceTransform(
+              new_root_pass->output_rect.size()),
+          damage_in_frame);
+      set_update_rect(gfx::UnionRects(update_rect(), damage_in_layer));
+    }
 
-  // Remap resource ids in the current frame's quads to the parent's namespace.
-  bool invalid_frame = false;
-  DrawQuad::ResourceIteratorCallback remap_callback = base::Bind(
-      &ResourceRemapHelper,
-      &invalid_frame,
-      resource_provider->getChildToParentMap(child_id_),
-      &new_resources);
-  for (size_t i = 0; i < frame_data->render_pass_list.size(); ++i) {
-    RenderPass* pass = frame_data->render_pass_list[i];
-    for (size_t j = 0; j < pass->quad_list.size(); ++j) {
-      DrawQuad* quad = pass->quad_list[j];
-      quad->IterateResources(remap_callback);
+    resource_provider->ReceiveFromChild(child_id_, frame_data->resource_list);
+
+    bool invalid_frame = false;
+    ResourceProvider::ResourceIdSet used_resources;
+    DrawQuad::ResourceIteratorCallback remap_resources_to_parent_callback =
+        base::Bind(&ResourceRemapHelper,
+                   &invalid_frame,
+                   resource_map,
+                   &used_resources);
+    for (size_t i = 0; i < frame_data->render_pass_list.size(); ++i) {
+      RenderPass* pass = frame_data->render_pass_list[i];
+      for (size_t j = 0; j < pass->quad_list.size(); ++j) {
+        DrawQuad* quad = pass->quad_list[j];
+        quad->IterateResources(remap_resources_to_parent_callback);
+      }
+    }
+
+    if (!invalid_frame) {
+      // Save the remapped quads on the layer. This steals the quads and render
+      // passes from the frame_data.
+      SetRenderPasses(&frame_data->render_pass_list);
+      resources_.swap(used_resources);
     }
   }
 
-  // If the frame has invalid data in it, don't display it.
-  if (invalid_frame) {
-    // Keep the resources given to us this frame.
-    for (ResourceProvider::ResourceIdSet::iterator it = new_resources.begin();
-         it != new_resources.end();
-         ++it)
-      resources_.insert(*it);
-    return;
-  }
-
-  // Save the resources that this layer owns now.
-  ResourceProvider::ResourceIdSet previous_frame_resources;
-  previous_frame_resources.swap(resources_);
-  resources_.swap(new_resources);
-
-  // Save the remapped quads on the layer. This steals the quads and render
-  // passes from the frame_data.
-  SetRenderPasses(&frame_data->render_pass_list);
-
-  // Release the resources from the previous frame to prepare them for transport
-  // back to the child compositor.
   ResourceProvider::ResourceIdArray unused_resources;
-  for (ResourceProvider::ResourceIdSet::iterator it =
-           previous_frame_resources.begin();
-       it != previous_frame_resources.end();
+  for (ResourceProvider::ResourceIdMap::const_iterator it =
+           resource_map.begin();
+       it != resource_map.end();
        ++it) {
-    bool resource_is_not_in_current_frame =
-        resources_.find(*it) == resources_.end();
-    if (resource_is_not_in_current_frame)
-      unused_resources.push_back(*it);
+    bool resource_is_in_current_frame = resources_.count(it->second);
+    bool resource_is_in_use = resource_provider->InUseByConsumer(it->second);
+    if (!resource_is_in_current_frame && !resource_is_in_use)
+      unused_resources.push_back(it->second);
   }
-  resource_provider->prepareSendToChild(
+  resource_provider->PrepareSendToChild(
       child_id_, unused_resources, resources_for_ack);
 }
 
@@ -138,7 +126,7 @@ void DelegatedRendererLayerImpl::SetDisplaySize(gfx::Size size) {
   if (display_size_ == size)
     return;
   display_size_ = size;
-  noteLayerPropertyChanged();
+  NoteLayerPropertyChanged();
 }
 
 void DelegatedRendererLayerImpl::SetRenderPasses(
@@ -169,12 +157,12 @@ void DelegatedRendererLayerImpl::ClearRenderPasses() {
   render_passes_in_draw_order_.clear();
 }
 
-scoped_ptr<LayerImpl> DelegatedRendererLayerImpl::createLayerImpl(
+scoped_ptr<LayerImpl> DelegatedRendererLayerImpl::CreateLayerImpl(
     LayerTreeImpl* treeImpl) {
-  return DelegatedRendererLayerImpl::create(treeImpl, id()).PassAs<LayerImpl>();
+  return DelegatedRendererLayerImpl::Create(treeImpl, id()).PassAs<LayerImpl>();
 }
 
-void DelegatedRendererLayerImpl::didLoseOutputSurface() {
+void DelegatedRendererLayerImpl::DidLoseOutputSurface() {
   ClearRenderPasses();
   ClearChildId();
 }
@@ -193,12 +181,12 @@ gfx::Transform DelegatedRendererLayerImpl::DelegatedFrameToLayerSpaceTransform(
 static inline int IndexToId(int index) { return index + 1; }
 static inline int IdToIndex(int id) { return id - 1; }
 
-RenderPass::Id DelegatedRendererLayerImpl::firstContributingRenderPassId()
+RenderPass::Id DelegatedRendererLayerImpl::FirstContributingRenderPassId()
     const {
   return RenderPass::Id(id(), IndexToId(0));
 }
 
-RenderPass::Id DelegatedRendererLayerImpl::nextContributingRenderPassId(
+RenderPass::Id DelegatedRendererLayerImpl::NextContributingRenderPassId(
     RenderPass::Id previous) const {
   return RenderPass::Id(previous.layer_id, previous.index + 1);
 }
@@ -214,7 +202,7 @@ RenderPass::Id DelegatedRendererLayerImpl::ConvertDelegatedRenderPassId(
 
 void DelegatedRendererLayerImpl::AppendContributingRenderPasses(
     RenderPassSink* render_pass_sink) {
-  DCHECK(hasContributingDelegatedRenderPasses());
+  DCHECK(HasContributingDelegatedRenderPasses());
 
   for (size_t i = 0; i < render_passes_in_draw_order_.size() - 1; ++i) {
     RenderPass::Id output_render_pass_id =
@@ -223,17 +211,18 @@ void DelegatedRendererLayerImpl::AppendContributingRenderPasses(
     // Don't clash with the RenderPass we generate if we own a RenderSurface.
     DCHECK(output_render_pass_id.index > 0);
 
-    render_pass_sink->appendRenderPass(
+    render_pass_sink->AppendRenderPass(
         render_passes_in_draw_order_[i]->Copy(output_render_pass_id));
   }
 }
 
-void DelegatedRendererLayerImpl::appendQuads(
-    QuadSink& quad_sink, AppendQuadsData& append_quads_data) {
+void DelegatedRendererLayerImpl::AppendQuads(
+    QuadSink* quad_sink,
+    AppendQuadsData* append_quads_data) {
   if (render_passes_in_draw_order_.empty())
     return;
 
-  RenderPass::Id target_render_pass_id = append_quads_data.renderPassId;
+  RenderPass::Id target_render_pass_id = append_quads_data->renderPassId;
 
   const RenderPass* root_delegated_render_pass =
       render_passes_in_draw_order_.back();
@@ -249,10 +238,10 @@ void DelegatedRendererLayerImpl::appendQuads(
   if (should_merge_root_render_pass_with_target) {
     // Verify that the renderPass we are appending to is created our
     // renderTarget.
-    DCHECK(target_render_pass_id.layer_id == renderTarget()->id());
+    DCHECK(target_render_pass_id.layer_id == render_target()->id());
 
     AppendRenderPassQuads(
-        &quad_sink, &append_quads_data, root_delegated_render_pass, frame_size);
+        quad_sink, append_quads_data, root_delegated_render_pass, frame_size);
   } else {
     // Verify that the renderPass we are appending to was created by us.
     DCHECK(target_render_pass_id.layer_id == id());
@@ -261,7 +250,7 @@ void DelegatedRendererLayerImpl::appendQuads(
     const RenderPass* delegated_render_pass =
         render_passes_in_draw_order_[render_pass_index];
     AppendRenderPassQuads(
-        &quad_sink, &append_quads_data, delegated_render_pass, frame_size);
+        quad_sink, append_quads_data, delegated_render_pass, frame_size);
   }
 }
 
@@ -289,19 +278,19 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
         DCHECK(display_size_.IsEmpty() ||
                gfx::Rect(display_size_).Contains(gfx::Rect(bounds())));
         gfx::Transform delegated_frame_to_target_transform =
-            drawTransform() * DelegatedFrameToLayerSpaceTransform(frame_size);
+            draw_transform() * DelegatedFrameToLayerSpaceTransform(frame_size);
 
         output_shared_quad_state->content_to_target_transform.ConcatTransform(
             delegated_frame_to_target_transform);
 
-        if (renderTarget() == this) {
-          DCHECK(!isClipped());
-          DCHECK(renderSurface());
+        if (render_target() == this) {
+          DCHECK(!is_clipped());
+          DCHECK(render_surface());
           output_shared_quad_state->clip_rect = MathUtil::mapClippedRect(
               delegated_frame_to_target_transform,
               output_shared_quad_state->clip_rect);
         } else {
-          gfx::Rect clip_rect = drawableContentRect();
+          gfx::Rect clip_rect = drawable_content_rect();
           if (output_shared_quad_state->is_clipped) {
             clip_rect.Intersect(MathUtil::mapClippedRect(
                 delegated_frame_to_target_transform,
@@ -311,7 +300,7 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
           output_shared_quad_state->is_clipped = true;
         }
 
-        output_shared_quad_state->opacity *= drawOpacity();
+        output_shared_quad_state->opacity *= draw_opacity();
       }
     }
     DCHECK(output_shared_quad_state);
@@ -333,11 +322,11 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
     }
     DCHECK(output_quad.get());
 
-    quad_sink->append(output_quad.Pass(), *append_quads_data);
+    quad_sink->append(output_quad.Pass(), append_quads_data);
   }
 }
 
-const char* DelegatedRendererLayerImpl::layerTypeAsString() const {
+const char* DelegatedRendererLayerImpl::LayerTypeAsString() const {
   return "DelegatedRendererLayer";
 }
 
@@ -345,16 +334,16 @@ void DelegatedRendererLayerImpl::CreateChildIdIfNeeded() {
   if (child_id_)
     return;
 
-  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
-  child_id_ = resource_provider->createChild();
+  ResourceProvider* resource_provider = layer_tree_impl()->resource_provider();
+  child_id_ = resource_provider->CreateChild();
 }
 
 void DelegatedRendererLayerImpl::ClearChildId() {
   if (!child_id_)
     return;
 
-  ResourceProvider* resource_provider = layerTreeImpl()->resource_provider();
-  resource_provider->destroyChild(child_id_);
+  ResourceProvider* resource_provider = layer_tree_impl()->resource_provider();
+  resource_provider->DestroyChild(child_id_);
   child_id_ = 0;
 }
 

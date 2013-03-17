@@ -47,25 +47,17 @@ class StorageMonitorCros
   // Returns false if unable to find the device.
   virtual bool GetStorageInfoForPath(
       const base::FilePath& path,
-      StorageInfo* device_info) const OVERRIDE;
+      chrome::StorageInfo* device_info) const OVERRIDE;
 
   // Returns the storage size of the device present at |location|. If the
   // device information is unavailable, returns zero.
   virtual uint64 GetStorageSize(const std::string& location) const OVERRIDE;
 
  private:
-  struct StorageObjectInfo {
-    // Basic details {storage device name, location and identifier}.
-    StorageInfo storage_info;
-
-    // Device storage size.
-    uint64 storage_size_in_bytes;
-  };
-
   friend class base::RefCountedThreadSafe<StorageMonitorCros>;
 
   // Mapping of mount path to removable mass storage info.
-  typedef std::map<std::string, StorageObjectInfo> MountMap;
+  typedef std::map<std::string, chrome::StorageInfo> MountMap;
 
   // Private to avoid code deleting the object.
   virtual ~StorageMonitorCros();

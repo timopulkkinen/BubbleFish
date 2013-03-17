@@ -15,7 +15,6 @@
 #include "net/base/connection_type_histograms.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
-#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_pipelined_connection.h"
@@ -38,6 +37,7 @@
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
+#include "net/ssl/ssl_cert_request_info.h"
 
 namespace net {
 
@@ -655,7 +655,7 @@ bool HttpStreamFactoryImpl::Job::ShouldForceSpdyWithoutSSL() const {
 }
 
 bool HttpStreamFactoryImpl::Job::ShouldForceQuic() const {
-  return session_->params().enable_quic &&
+  return session_->params().enable_quic && request_info_.url.SchemeIs("http") &&
       session_->params().origin_port_to_force_quic_on == origin_.port() &&
       proxy_info_.is_direct();
 }

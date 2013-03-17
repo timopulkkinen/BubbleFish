@@ -15,18 +15,25 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "cc/layer_tree_host.h"
+#include "cc/output_surface.h"
+#include "cc/switches.h"
 #include "cc/thread.h"
 #include "cc/thread_impl.h"
+#include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
-#include "content/renderer/gpu/compositor_thread.h"
+#include "content/renderer/gpu/compositor_output_surface.h"
+#include "content/renderer/gpu/compositor_software_output_device_gl_adapter.h"
+#include "content/renderer/gpu/input_handler_manager.h"
+#include "content/renderer/gpu/mailbox_output_surface.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
@@ -47,6 +54,7 @@
 #include "ui/surface/transport_dib.h"
 #include "webkit/compositor_bindings/web_rendering_stats_impl.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
@@ -137,6 +145,7 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       next_paint_flags_(0),
       filtered_time_per_frame_(0.0f),
       update_reply_pending_(false),
+      auto_resize_mode_(false),
       need_update_rect_for_auto_resize_(false),
       using_asynchronous_swapbuffers_(false),
       num_swapbuffers_complete_pending_(0),
@@ -162,7 +171,8 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       device_scale_factor_(screen_info_.deviceScaleFactor),
       throttle_input_events_(true),
       next_smooth_scroll_gesture_id_(0),
-      is_threaded_compositing_enabled_(false) {
+      is_threaded_compositing_enabled_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   if (!swapped_out)
     RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
@@ -277,6 +287,10 @@ void RenderWidget::SetSwappedOut(bool is_swapped_out) {
     RenderProcess::current()->AddRefProcess();
 }
 
+bool RenderWidget::AllowPartialSwap() const {
+  return true;
+}
+
 bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderWidget, message)
@@ -288,7 +302,8 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_WasShown, OnWasShown)
     IPC_MESSAGE_HANDLER(ViewMsg_WasSwappedOut, OnWasSwappedOut)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateRect_ACK, OnUpdateRectAck)
-    IPC_MESSAGE_HANDLER(ViewMsg_SwapBuffers_ACK, OnSwapBuffersComplete)
+    IPC_MESSAGE_HANDLER(ViewMsg_SwapBuffers_ACK,
+                        OnViewContextSwapBuffersComplete)
     IPC_MESSAGE_HANDLER(ViewMsg_HandleInputEvent, OnHandleInputEvent)
     IPC_MESSAGE_HANDLER(ViewMsg_MouseCaptureLost, OnMouseCaptureLost)
     IPC_MESSAGE_HANDLER(ViewMsg_SetFocus, OnSetFocus)
@@ -517,7 +532,17 @@ void RenderWidget::OnUpdateRectAck() {
 }
 
 bool RenderWidget::SupportsAsynchronousSwapBuffers() {
-  return false;
+  // Contexts using the command buffer support asynchronous swapbuffers.
+  // See RenderWidget::CreateOutputSurface().
+  if (RenderThreadImpl::current()->compositor_message_loop_proxy() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL))
+    return false;
+
+  return true;
+}
+
+GURL RenderWidget::GetURLForGraphicsContext3D() {
+  return GURL();
 }
 
 bool RenderWidget::ForceCompositingModeEnabled() {
@@ -525,10 +550,46 @@ bool RenderWidget::ForceCompositingModeEnabled() {
 }
 
 scoped_ptr<cc::OutputSurface> RenderWidget::CreateOutputSurface() {
-  return scoped_ptr<cc::OutputSurface>();
+  // Explicitly disable antialiasing for the compositor. As of the time of
+  // this writing, the only platform that supported antialiasing for the
+  // compositor was Mac OS X, because the on-screen OpenGL context creation
+  // code paths on Windows and Linux didn't yet have multisampling support.
+  // Mac OS X essentially always behaves as though it's rendering offscreen.
+  // Multisampling has a heavy cost especially on devices with relatively low
+  // fill rate like most notebooks, and the Mac implementation would need to
+  // be optimized to resolve directly into the IOSurface shared between the
+  // GPU and browser processes. For these reasons and to avoid platform
+  // disparities we explicitly disable antialiasing.
+  WebKit::WebGraphicsContext3D::Attributes attributes;
+  attributes.antialias = false;
+  attributes.shareResources = true;
+  attributes.noAutomaticFlushes = true;
+  WebGraphicsContext3D* context = CreateGraphicsContext3D(attributes);
+  if (!context)
+    return scoped_ptr<cc::OutputSurface>();
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kEnableSoftwareCompositingGLAdapter)) {
+      // In the absence of a software-based delegating renderer, use this
+      // stopgap adapter class to present the software renderer output using a
+      // 3d context.
+      return scoped_ptr<cc::OutputSurface>(
+          new CompositorOutputSurface(routing_id(), NULL,
+              new CompositorSoftwareOutputDeviceGLAdapter(context)));
+  } else {
+      bool composite_to_mailbox =
+          command_line.HasSwitch(cc::switches::kCompositeToMailbox);
+      DCHECK(!composite_to_mailbox || command_line.HasSwitch(
+          cc::switches::kEnableCompositorFrameMessage));
+      // No swap throttling yet when compositing on the main thread.
+      DCHECK(!composite_to_mailbox || is_threaded_compositing_enabled_);
+      return scoped_ptr<cc::OutputSurface>(composite_to_mailbox ?
+          new MailboxOutputSurface(routing_id(), context, NULL) :
+              new CompositorOutputSurface(routing_id(), context, NULL));
+  }
 }
 
-void RenderWidget::OnSwapBuffersAborted() {
+void RenderWidget::OnViewContextSwapBuffersAborted() {
   TRACE_EVENT0("renderer", "RenderWidget::OnSwapBuffersAborted");
   while (!updates_pending_swap_.empty()) {
     ViewHostMsg_UpdateRect* msg = updates_pending_swap_.front();
@@ -544,7 +605,7 @@ void RenderWidget::OnSwapBuffersAborted() {
   scheduleComposite();
 }
 
-void RenderWidget::OnSwapBuffersPosted() {
+void RenderWidget::OnViewContextSwapBuffersPosted() {
   TRACE_EVENT0("renderer", "RenderWidget::OnSwapBuffersPosted");
 
   if (using_asynchronous_swapbuffers_) {
@@ -561,7 +622,7 @@ void RenderWidget::OnSwapBuffersPosted() {
   }
 }
 
-void RenderWidget::OnSwapBuffersComplete() {
+void RenderWidget::OnViewContextSwapBuffersComplete() {
   TRACE_EVENT0("renderer", "RenderWidget::OnSwapBuffersComplete");
 
   // Notify subclasses that composited rendering was flushed to the screen.
@@ -931,10 +992,11 @@ void RenderWidget::AnimateIfNeeded() {
                            &RenderWidget::AnimationCallback);
     animation_update_pending_ = false;
     if (is_accelerated_compositing_active_ && compositor_) {
-      compositor_->layer_tree_host()->updateAnimations(
-          base::TimeTicks::Now());
+      compositor_->Animate(base::TimeTicks::Now());
     } else {
-      webwidget_->animate(0.0);
+      double frame_begin_time =
+        (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF();
+      webwidget_->animate(frame_begin_time);
     }
     return;
   }
@@ -1178,7 +1240,7 @@ void RenderWidget::DoDeferredUpdate() {
     // If it needs to (e.g. composited UI), the GPU process does its own ACK
     // with the browser for the GPU surface.
     pending_update_params_->needs_ack = false;
-    Composite();
+    Composite(frame_begin_ticks);
   }
 
   // If we're holding a pending input event ACK, send the ACK before sending the
@@ -1204,10 +1266,10 @@ void RenderWidget::DoDeferredUpdate() {
     DidInitiatePaint();
 }
 
-void RenderWidget::Composite() {
+void RenderWidget::Composite(base::TimeTicks frame_begin_time) {
   DCHECK(is_accelerated_compositing_active_);
   if (compositor_)  // TODO(jamesr): Figure out how this can be null.
-    compositor_->composite();
+    compositor_->Composite(frame_begin_time);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1294,13 +1356,33 @@ void RenderWidget::didScrollRect(int dx, int dy,
 void RenderWidget::didAutoResize(const WebSize& new_size) {
   if (size_.width() != new_size.width || size_.height() != new_size.height) {
     size_ = new_size;
-    need_update_rect_for_auto_resize_ = true;
     // If we don't clear PaintAggregator after changing autoResize state, then
     // we might end up in a situation where bitmap_rect is larger than the
     // view_size. By clearing PaintAggregator, we ensure that we don't end up
     // with invalid damage rects.
     paint_aggregator_.ClearPendingUpdate();
+
+    AutoResizeCompositor();
+
+    if (RenderThreadImpl::current()->short_circuit_size_updates()) {
+      setWindowRect(WebRect(rootWindowRect().x,
+                            rootWindowRect().y,
+                            new_size.width,
+                            new_size.height));
+    } else {
+      need_update_rect_for_auto_resize_ = true;
+    }
   }
+}
+
+void RenderWidget::AutoResizeCompositor() {
+  if (!auto_resize_mode_)
+    return;
+
+  physical_backing_size_ = gfx::ToCeiledSize(gfx::ScaleSize(size_,
+      device_scale_factor_));
+  if (compositor_)
+    compositor_->setViewportSize(size_, physical_backing_size_);
 }
 
 void RenderWidget::didActivateCompositor(int input_handler_identifier) {
@@ -1344,18 +1426,23 @@ void RenderWidget::didDeactivateCompositor() {
     webwidget_->enterForceCompositingMode(false);
 }
 
+void RenderWidget::initializeLayerTreeView() {
+  compositor_ = RenderWidgetCompositor::Create(this);
+  if (!compositor_)
+    return;
+
+  compositor_->setViewportSize(size_, physical_backing_size_);
+  if (init_complete_)
+    compositor_->setSurfaceReady();
+}
+
 void RenderWidget::initializeLayerTreeView(
     WebKit::WebLayerTreeViewClient* client,
     const WebKit::WebLayer& root_layer,
     const WebKit::WebLayerTreeView::Settings& settings) {
-  compositor_ = RenderWidgetCompositor::Create(this, client, settings);
-  if (!compositor_)
-    return;
-
-  compositor_->setRootLayer(root_layer);
-  compositor_->setViewportSize(size_, physical_backing_size_);
-  if (init_complete_)
-    compositor_->setSurfaceReady();
+  initializeLayerTreeView();
+  if (compositor_)
+    compositor_->setRootLayer(root_layer);
 }
 
 WebKit::WebLayerTreeView* RenderWidget::layerTreeView() {
@@ -1370,7 +1457,7 @@ void RenderWidget::suppressCompositorScheduling(bool enable) {
 void RenderWidget::willBeginCompositorFrame() {
   TRACE_EVENT0("gpu", "RenderWidget::willBeginCompositorFrame");
 
-  DCHECK(RenderThreadImpl::current()->compositor_thread());
+  DCHECK(RenderThreadImpl::current()->compositor_message_loop_proxy());
 
   // The following two can result in further layout and possibly
   // enable GPU acceleration so they need to be called before any painting
@@ -1429,7 +1516,7 @@ void RenderWidget::didCompleteSwapBuffers() {
 
 void RenderWidget::scheduleComposite() {
   TRACE_EVENT0("gpu", "RenderWidget::scheduleComposite");
-  if (RenderThreadImpl::current()->compositor_thread() &&
+  if (RenderThreadImpl::current()->compositor_message_loop_proxy() &&
       compositor_) {
     compositor_->setNeedsRedraw();
   } else {
@@ -1543,8 +1630,15 @@ void RenderWidget::setToolTipText(const WebKit::WebString& text,
 
 void RenderWidget::setWindowRect(const WebRect& pos) {
   if (did_show_) {
-    Send(new ViewHostMsg_RequestMove(routing_id_, pos));
-    SetPendingWindowRect(pos);
+    if (!RenderThreadImpl::current()->short_circuit_size_updates()) {
+      Send(new ViewHostMsg_RequestMove(routing_id_, pos));
+      SetPendingWindowRect(pos);
+    } else {
+      WebSize new_size(pos.width, pos.height);
+      Resize(new_size, new_size, WebRect(), is_fullscreen_, NO_RESIZE_ACK);
+      view_screen_rect_ = pos;
+      window_screen_rect_ = pos;
+    }
   } else {
     initial_pos_ = pos;
   }
@@ -2105,7 +2199,7 @@ void RenderWidget::CleanupWindowInPluginMoves(gfx::PluginWindowHandle window) {
 void RenderWidget::GetRenderingStats(
     WebKit::WebRenderingStatsImpl& stats) const {
   if (compositor_)
-    compositor_->layer_tree_host()->renderingStats(&stats.rendering_stats);
+    compositor_->GetRenderingStats(&stats.rendering_stats);
 
   stats.rendering_stats.numAnimationFrames +=
       software_stats_.numAnimationFrames;
@@ -2159,6 +2253,33 @@ bool RenderWidget::WillHandleGestureEvent(
 
 bool RenderWidget::HasTouchEventHandlersAt(const gfx::Point& point) const {
   return true;
+}
+
+WebGraphicsContext3D* RenderWidget::CreateGraphicsContext3D(
+    const WebGraphicsContext3D::Attributes& attributes) {
+  if (!webwidget_)
+    return NULL;
+  // The WebGraphicsContext3DInProcessImpl code path is used for
+  // layout tests (though not through this code) as well as for
+  // debugging and bringing up new ports.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
+    return webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWebView(
+        attributes, true);
+  } else {
+    scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
+        new WebGraphicsContext3DCommandBufferImpl(
+            surface_id(),
+            GetURLForGraphicsContext3D(),
+            RenderThreadImpl::current(),
+            weak_ptr_factory_.GetWeakPtr()));
+
+    if (!context->Initialize(
+            attributes,
+            false /* bind generates resources */,
+            CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE))
+      return NULL;
+    return context.release();
+  }
 }
 
 }  // namespace content

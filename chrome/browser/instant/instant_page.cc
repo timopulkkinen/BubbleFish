@@ -56,6 +56,12 @@ void InstantPage::InitializeFonts() {
       routing_id(), omnibox_font_name, omnibox_font_size));
 }
 
+void InstantPage::GrantChromeSearchAccessFromOrigin(const GURL& origin_url) {
+  DCHECK(origin_url.is_valid());
+  Send(new ChromeViewMsg_SearchBoxGrantChromeSearchAccessFromOrigin(
+      routing_id(), origin_url));
+}
+
 void InstantPage::DetermineIfPageSupportsInstant() {
   Send(new ChromeViewMsg_DetermineIfPageSupportsInstant(routing_id()));
 }
@@ -89,8 +95,8 @@ void InstantPage::KeyCaptureChanged(bool is_key_capture_enabled) {
 }
 
 void InstantPage::SendMostVisitedItems(
-    const std::vector<MostVisitedItem>& items) {
-  Send(new ChromeViewMsg_InstantMostVisitedItemsChanged(routing_id(), items));
+    const std::vector<InstantMostVisitedItem>& items) {
+  Send(new ChromeViewMsg_SearchBoxMostVisitedItemsChanged(routing_id(), items));
 }
 
 InstantPage::InstantPage(Delegate* delegate)
@@ -119,6 +125,10 @@ bool InstantPage::ShouldProcessSetSuggestions() {
 }
 
 bool InstantPage::ShouldProcessShowInstantOverlay() {
+  return false;
+}
+
+bool InstantPage::ShouldProcessFocusOmnibox() {
   return false;
 }
 
@@ -156,17 +166,18 @@ bool InstantPage::OnMessageReceived(const IPC::Message& message) {
                         OnInstantSupportDetermined)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ShowInstantOverlay,
                         OnShowInstantOverlay)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FocusOmnibox, OnFocusOmnibox)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_StartCapturingKeyStrokes,
                         OnStartCapturingKeyStrokes);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_StopCapturingKeyStrokes,
                         OnStopCapturingKeyStrokes);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxNavigate,
                         OnSearchBoxNavigate);
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantDeleteMostVisitedItem,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem,
                         OnDeleteMostVisitedItem);
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantUndoMostVisitedDeletion,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion,
                         OnUndoMostVisitedDeletion);
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions,
                         OnUndoAllMostVisitedDeletions);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -214,13 +225,20 @@ void InstantPage::OnInstantSupportDetermined(int page_id,
 }
 
 void InstantPage::OnShowInstantOverlay(int page_id,
-                                       InstantShownReason reason,
                                        int height,
                                        InstantSizeUnits units) {
   if (contents()->IsActiveEntry(page_id)) {
     OnInstantSupportDetermined(page_id, true);
     if (ShouldProcessShowInstantOverlay())
-      delegate_->ShowInstantOverlay(contents(), reason, height, units);
+      delegate_->ShowInstantOverlay(contents(), height, units);
+  }
+}
+
+void InstantPage::OnFocusOmnibox(int page_id) {
+  if (contents()->IsActiveEntry(page_id)) {
+    OnInstantSupportDetermined(page_id, true);
+    if (ShouldProcessFocusOmnibox())
+      delegate_->FocusOmnibox(contents());
   }
 }
 
@@ -251,12 +269,12 @@ void InstantPage::OnSearchBoxNavigate(int page_id,
   }
 }
 
-void InstantPage::OnDeleteMostVisitedItem(const GURL& url) {
-  delegate_->DeleteMostVisitedItem(url);
+void InstantPage::OnDeleteMostVisitedItem(uint64 most_visited_item_id) {
+  delegate_->DeleteMostVisitedItem(most_visited_item_id);
 }
 
-void InstantPage::OnUndoMostVisitedDeletion(const GURL& url) {
-  delegate_->UndoMostVisitedDeletion(url);
+void InstantPage::OnUndoMostVisitedDeletion(uint64 most_visited_item_id) {
+  delegate_->UndoMostVisitedDeletion(most_visited_item_id);
 }
 
 void InstantPage::OnUndoAllMostVisitedDeletions() {

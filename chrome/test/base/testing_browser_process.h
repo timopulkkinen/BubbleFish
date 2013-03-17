@@ -58,6 +58,7 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual GLStringManager* gl_string_manager() OVERRIDE;
+  virtual GpuModeManager* gpu_mode_manager() OVERRIDE;
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
@@ -135,9 +136,6 @@ class TestingBrowserProcess : public BrowserProcess {
 #endif
   scoped_ptr<ProfileManager> profile_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-  scoped_ptr<message_center::MessageCenter> message_center_;
-#endif
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
   scoped_refptr<printing::PrintPreviewDialogController>
       print_preview_dialog_controller_;

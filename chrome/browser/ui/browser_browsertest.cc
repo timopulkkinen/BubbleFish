@@ -82,6 +82,7 @@
 #endif
 
 using content::InterstitialPage;
+using content::HostZoomMap;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -1369,7 +1370,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
 namespace {
 
 void OnZoomLevelChanged(const base::Closure& callback,
-                        const std::string& host) {
+                        const HostZoomMap::ZoomLevelChange& host) {
   callback.Run();
 }
 
@@ -1670,6 +1671,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
   chrome::ToggleFullscreenMode(browser());
   EXPECT_TRUE(browser()->window()->IsFullscreen());
 #if defined(OS_MACOSX)
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+#elif defined(OS_CHROMEOS)
+  // Immersive fullscreen behaves like Mac presentation mode.
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 #else
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());

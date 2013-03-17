@@ -377,12 +377,6 @@ IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
                     bool /* whether the install was successful */,
                     std::string /* error */)
 
-// Response to the renderer for ExtensionHostMsg_GetAppNotifyChannel.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_GetAppNotifyChannelResponse,
-                    std::string /* channel_id */,
-                    std::string /* error */,
-                    int32 /* callback_id */)
-
 // Response to the renderer for ExtensionHostMsg_GetAppInstallState.
 IPC_MESSAGE_ROUTED2(ExtensionMsg_GetAppInstallStateResponse,
                     std::string /* state */,
@@ -404,7 +398,7 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
 // Dispatch the Port.onDisconnect event for message channels.
 IPC_MESSAGE_ROUTED2(ExtensionMsg_DispatchOnDisconnect,
                     int /* port_id */,
-                    bool /* connection_error */)
+                    std::string /* error_message */)
 
 // Informs the renderer what channel (dev, beta, stable, etc) is running.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_SetChannel,
@@ -516,7 +510,7 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_PostMessage,
 // by ViewHostMsg_OpenChannelTo*.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_CloseChannel,
                      int /* port_id */,
-                     bool /* connection_error */)
+                     std::string /* error_message */)
 
 // Used to get the extension message bundle.
 IPC_SYNC_MESSAGE_CONTROL1_1(ExtensionHostMsg_GetMessageBundle,
@@ -547,24 +541,12 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_DidGetApplicationInfo,
                     int32 /* page_id */,
                     WebApplicationInfo)
 
-// Sent by the renderer to implement chrome.app.install().
-IPC_MESSAGE_ROUTED1(ExtensionHostMsg_InstallApplication,
-                    WebApplicationInfo)
-
 // Sent by the renderer to implement chrome.webstore.install().
 IPC_MESSAGE_ROUTED4(ExtensionHostMsg_InlineWebstoreInstall,
                     int32 /* install id */,
                     int32 /* return route id */,
                     std::string /* Web Store item ID */,
                     GURL /* requestor URL */)
-
-// Sent by the renderer when an App is requesting permission to send server
-// pushed notifications.
-IPC_MESSAGE_ROUTED4(ExtensionHostMsg_GetAppNotifyChannel,
-                    GURL /* requestor_url */,
-                    std::string /* client_id */,
-                    int32 /* return_route_id */,
-                    int32 /* callback_id */)
 
 // Sent by the renderer when a web page is checking if its app is installed.
 IPC_MESSAGE_ROUTED3(ExtensionHostMsg_GetAppInstallState,

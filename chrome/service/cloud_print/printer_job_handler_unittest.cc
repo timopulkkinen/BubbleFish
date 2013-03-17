@@ -248,7 +248,7 @@ class CloudPrintURLFetcherNoServiceProcess
       context_getter_(new net::TestURLRequestContextGetter(
           base::MessageLoopProxy::current())) {}
  protected:
-  virtual net::URLRequestContextGetter* GetRequestContextGetter() {
+  virtual net::URLRequestContextGetter* GetRequestContextGetter() OVERRIDE {
     return context_getter_.get();
   }
 
@@ -261,7 +261,7 @@ class CloudPrintURLFetcherNoServiceProcess
 class CloudPrintURLFetcherNoServiceProcessFactory
     : public CloudPrintURLFetcherFactory {
  public:
-  virtual CloudPrintURLFetcher* CreateCloudPrintURLFetcher() {
+  virtual CloudPrintURLFetcher* CreateCloudPrintURLFetcher() OVERRIDE {
     return new CloudPrintURLFetcherNoServiceProcess;
   }
 
@@ -437,8 +437,8 @@ class MockPrintSystem : public PrintSystem {
 class PrinterJobHandlerTest : public ::testing::Test {
  public:
   PrinterJobHandlerTest();
-  void SetUp() OVERRIDE;
-  void TearDown() OVERRIDE;
+  virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
   void IdleOut();
   bool GetPrinterInfo(printing::PrinterBasicInfo* info);
   void SendCapsAndDefaults(
@@ -656,7 +656,8 @@ MockPrintSystem::MockPrintSystem()
 
 // This test simulates an end-to-end printing of a document
 // but tests only non-failure cases.
-TEST_F(PrinterJobHandlerTest, HappyPathTest) {
+// Disabled - http://crbug.com/184245
+TEST_F(PrinterJobHandlerTest, DISABLED_HappyPathTest) {
   factory_.SetFakeResponse(JobListURI(kJobFetchReasonStartup),
                            JobListResponse(1), true);
   factory_.SetFakeResponse(JobListURI(kJobFetchReasonQueryMore),
@@ -670,7 +671,7 @@ TEST_F(PrinterJobHandlerTest, HappyPathTest) {
       .Times(Exactly(1));
 
   SetUpJobSuccessTest(1);
-  BeginTest(1);
+  BeginTest(20);
 }
 
 TEST_F(PrinterJobHandlerTest, TicketDownloadFailureTest) {
@@ -698,7 +699,7 @@ TEST_F(PrinterJobHandlerTest, TicketDownloadFailureTest) {
       .Times(AtLeast(1));
 
   SetUpJobSuccessTest(2);
-  BeginTest(1);
+  BeginTest(20);
 }
 
 // TODO(noamsml): Figure out how to make this test not take 1 second and
@@ -782,4 +783,3 @@ TEST_F(PrinterJobHandlerTest, DISABLED_CompleteFailureTest) {
 }
 
 }  // namespace cloud_print
-

@@ -20,6 +20,7 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/password_manager/password_manager.h"
@@ -45,7 +46,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search/search_ui.h"
@@ -62,9 +62,10 @@
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
 #include "chrome/browser/ui/views/frame/contents_container.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/instant_overlay_controller_views.h"
+#include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/fullscreen_exit_bubble_views.h"
-#include "chrome/browser/ui/views/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -121,7 +122,6 @@
 #include "ui/views/window/dialog_delegate.h"
 
 #if defined(USE_ASH)
-#include "ash/ash_switches.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
@@ -181,25 +181,12 @@ void PaintDetachedBookmarkBar(gfx::Canvas* canvas,
                               DetachableToolbarView* view,
                               ui::ThemeProvider* theme_provider) {
   // Paint background for detached state; if animating, this is fade in/out.
-  bool themed = theme_provider->HasCustomImage(IDR_THEME_NTP_BACKGROUND);
-  SkColor themed_background_color =
-      theme_provider->GetColor(ThemeProperties::COLOR_TOOLBAR);
-  canvas->FillRect(view->GetLocalBounds(),
-                   themed ? themed_background_color :
-                            SkColorSetARGB(0xFF, 0xF1, 0xF1, 0xF1));
+  canvas->DrawColor(
+      chrome::search::GetDetachedBookmarkBarBackgroundColor(theme_provider));
   // Draw the separators above and below bookmark bar;
   // if animating, these are fading in/out.
-  SkColor separator_color = themed ? SkColorSetARGB(128, 0, 0, 0) :
-      ThemeProperties::GetDefaultColor(
-          ThemeProperties::COLOR_TOOLBAR_SEPARATOR);
-  if (themed) {
-    // If theme is too dark to use 0.5 black for separator, use 0.5 readable
-    // color, which is usually 0.5 white.
-    SkColor readable_color = color_utils::GetReadableColor(
-        separator_color, themed_background_color);
-    if (readable_color != separator_color)
-      separator_color = SkColorSetA(readable_color, 128);
-  }
+  SkColor separator_color =
+      chrome::search::GetDetachedBookmarkBarSeparatorColor(theme_provider);
   DetachableToolbarView::PaintHorizontalBorder(canvas, view, true,
                                                separator_color);
   DetachableToolbarView::PaintHorizontalBorder(canvas, view, false,
@@ -228,10 +215,6 @@ void PaintAttachedBookmarkBar(gfx::Canvas* canvas,
 
 // Returned from BrowserView::GetClassName.
 const char BrowserView::kViewClassName[] = "browser/ui/views/BrowserView";
-// static
-const int BrowserView::kTabstripIndex = 0;
-const int BrowserView::kInfoBarIndex = 1;
-const int BrowserView::kToolbarIndex = 2;
 
 namespace {
 
@@ -248,14 +231,10 @@ bool ShouldSaveOrRestoreWindowPos() {
 // Returns whether immersive mode should replace fullscreen, which should only
 // occur for "browser-fullscreen" and not for "tab-fullscreen" (which has a URL
 // for the tab entering fullscreen).
-bool UseImmersiveFullscreen(const GURL& url) {
-#if defined(USE_ASH)
+bool UseImmersiveFullscreenForUrl(const GURL& url) {
   bool is_browser_fullscreen = url.is_empty();
   return is_browser_fullscreen &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAshImmersiveMode);
-#endif
-  return false;
+      ImmersiveModeController::UseImmersiveFullscreen();
 }
 
 }  // namespace
@@ -312,7 +291,7 @@ void BookmarkExtensionBackground::Paint(gfx::Canvas* canvas,
     // - if animating between pinned and unpinned states:
     //   - cross-fade the bar backgrounds
     //   - fade in/out the separator between toolbar and bookmark bar.
-    if (browser_->search_model()->mode().is_ntp()) {
+    if (chrome::search::IsInstantExtendedAPIEnabled()) {
       if (current_state == 0.0 || current_state == 1.0) {
         PaintDetachedBookmarkBar(canvas, host_view_, tp);
         return;
@@ -442,6 +421,7 @@ BrowserView::BrowserView(Browser* browser)
           views::ViewStorage::GetInstance()->CreateStorageID()),
       frame_(NULL),
       browser_(browser),
+      top_container_(NULL),
       active_bookmark_bar_(NULL),
       tabstrip_(NULL),
       toolbar_(NULL),
@@ -461,7 +441,7 @@ BrowserView::BrowserView(Browser* browser)
 #endif
       force_location_bar_focus_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          immersive_mode_controller_(new ImmersiveModeController(this))),
+          immersive_mode_controller_(new ImmersiveModeController)),
       ALLOW_THIS_IN_INITIALIZER_LIST(color_change_listener_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(activate_modal_dialog_factory_(this)) {
   browser_->tab_strip_model()->AddObserver(this);
@@ -519,7 +499,6 @@ BrowserView::~BrowserView() {
   browser_.reset();
 }
 
-#if defined(OS_WIN) || defined(USE_AURA)
 // static
 BrowserView* BrowserView::GetBrowserViewForNativeWindow(
     gfx::NativeWindow window) {
@@ -528,7 +507,6 @@ BrowserView* BrowserView::GetBrowserViewForNativeWindow(
       reinterpret_cast<BrowserView*>(widget->GetNativeWindowProperty(
           kBrowserViewKey)) : NULL;
 }
-#endif
 
 // static
 BrowserView* BrowserView::GetBrowserViewForBrowser(const Browser* browser) {
@@ -868,7 +846,7 @@ void BrowserView::UpdateFullscreenExitBubbleContent(
   // Immersive mode has no exit bubble because it has a visible strip at the
   // top that gives the user a hover target.
   // TODO(jamescook): Figure out what to do with mouse-lock.
-  if (bubble_type == FEB_TYPE_NONE || UseImmersiveFullscreen(url)) {
+  if (bubble_type == FEB_TYPE_NONE || UseImmersiveFullscreenForUrl(url)) {
     fullscreen_bubble_.reset();
   } else if (fullscreen_bubble_.get()) {
     fullscreen_bubble_->UpdateContent(url, bubble_type);
@@ -962,7 +940,7 @@ void BrowserView::ToolbarSizeChanged(bool is_animating) {
   {
     int top_arrow_height = 0;
     // Hide the arrows on the Instant Extended NTP.
-    if (!chrome::search::IsInstantExtendedAPIEnabled(browser()->profile()) ||
+    if (!chrome::search::IsInstantExtendedAPIEnabled() ||
         !browser()->search_model()->mode().is_ntp()) {
       const LocationIconView* location_icon_view =
           toolbar_->location_bar()->location_icon_view();
@@ -992,8 +970,7 @@ void BrowserView::ToolbarSizeChanged(bool is_animating) {
 }
 
 void BrowserView::MaybeStackImmersiveRevealAtTop() {
-  if (immersive_mode_controller_)
-    immersive_mode_controller_->MaybeStackViewAtTop();
+  immersive_mode_controller_->MaybeStackViewAtTop();
 }
 
 LocationBar* BrowserView::GetLocationBar() const {
@@ -1949,7 +1926,6 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
 }
 
 void BrowserView::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
   state->role = ui::AccessibilityTypes::ROLE_CLIENT;
 }
 
@@ -2037,7 +2013,7 @@ void BrowserView::Init() {
                                        browser_->profile());
 
   // Initialize after |this| has a Widget and native window.
-  immersive_mode_controller_->Init();
+  immersive_mode_controller_->Init(this);
 
   // Start a hung plugin window detector for this browser object (as long as
   // hang detection is not disabled).
@@ -2048,25 +2024,13 @@ void BrowserView::Init() {
 
   LoadAccelerators();
 
-  // TabStrip takes ownership of the controller.
-  BrowserTabStripController* tabstrip_controller =
-      new BrowserTabStripController(browser_.get(),
-                                    browser_->tab_strip_model());
-  tabstrip_ = new TabStrip(tabstrip_controller);
-  AddChildViewAt(tabstrip_, kTabstripIndex);
-  tabstrip_controller->InitFromModel(tabstrip_);
-
   infobar_container_ = new InfoBarContainerView(this,
                                                 browser()->search_model());
-  AddChildViewAt(infobar_container_, kInfoBarIndex);
+  AddChildView(infobar_container_);
 
   contents_container_ = new views::WebView(browser_->profile());
   contents_container_->set_id(VIEW_ID_TAB_CONTAINER);
   contents_ = new ContentsContainer(contents_container_);
-
-  toolbar_ = new ToolbarView(browser_.get());
-  AddChildViewAt(toolbar_, kToolbarIndex);
-  toolbar_->Init();
 
   overlay_controller_.reset(
       new InstantOverlayControllerViews(browser(), contents_));
@@ -2094,6 +2058,23 @@ void BrowserView::Init() {
   set_contents_view(contents_split_);
 
   status_bubble_.reset(new StatusBubbleViews(contents_));
+
+  // Top container holds tab strip and toolbar and lives at the front of the
+  // view hierarchy.
+  top_container_ = new TopContainerView(this);
+  AddChildView(top_container_);
+
+  // TabStrip takes ownership of the controller.
+  BrowserTabStripController* tabstrip_controller =
+      new BrowserTabStripController(browser_.get(),
+                                    browser_->tab_strip_model());
+  tabstrip_ = new TabStrip(tabstrip_controller);
+  top_container_->AddChildView(tabstrip_);
+  tabstrip_controller->InitFromModel(tabstrip_);
+
+  toolbar_ = new ToolbarView(browser_.get());
+  top_container_->AddChildView(toolbar_);
+  toolbar_->Init();
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Create a custom JumpList and add it to an observer of TabRestoreService
@@ -2390,7 +2371,7 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   }
 
   // Enable immersive before the browser refreshes its list of enabled commands.
-  if (UseImmersiveFullscreen(url))
+  if (UseImmersiveFullscreenForUrl(url))
     immersive_mode_controller_->SetEnabled(fullscreen);
 
   browser_->WindowFullscreenStateChanged();
@@ -2398,7 +2379,7 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   if (fullscreen) {
     if (!chrome::IsRunningInAppMode() &&
         type != FOR_METRO &&
-        !UseImmersiveFullscreen(url)) {
+        !UseImmersiveFullscreenForUrl(url)) {
       fullscreen_bubble_.reset(new FullscreenExitBubbleViews(
           GetWidget(), browser_.get(), url, bubble_type));
     }
@@ -2455,10 +2436,16 @@ void BrowserView::LoadAccelerators() {
   DCHECK(focus_manager);
 
   // Let's fill our own accelerator table.
+  const bool is_app_mode = chrome::IsRunningInForcedAppMode();
   const std::vector<chrome::AcceleratorMapping> accelerator_list(
       chrome::GetAcceleratorList());
   for (std::vector<chrome::AcceleratorMapping>::const_iterator it =
            accelerator_list.begin(); it != accelerator_list.end(); ++it) {
+    // In app mode, only allow accelerators of white listed commands to pass
+    // through.
+    if (is_app_mode && !chrome::IsCommandAllowedInAppMode(it->command_id))
+      continue;
+
     ui::Accelerator accelerator(it->keycode, it->modifiers);
     accelerator_table_[accelerator] = it->command_id;
 
@@ -2656,7 +2643,7 @@ void BrowserView::ShowPasswordGenerationBubble(
 
   views::BubbleDelegateView::CreateBubble(bubble);
   bubble->SetAlignment(views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR);
-  bubble->Show();
+  bubble->GetWidget()->Show();
 }
 
 void BrowserView::DoCutCopyPaste(void (content::RenderWidgetHost::*method)(),
@@ -2679,7 +2666,9 @@ void BrowserView::DoCutCopyPaste(void (content::RenderWidgetHost::*method)(),
 
   views::FocusManager* focus_manager = GetFocusManager();
   views::View* focused = focus_manager->GetFocusedView();
-  if (focused->GetClassName() == views::Textfield::kViewClassName) {
+  if (focused &&
+      (focused->GetClassName() == views::Textfield::kViewClassName ||
+       focused->GetClassName() == OmniboxViewViews::kViewClassName)) {
     views::Textfield* textfield = static_cast<views::Textfield*>(focused);
     textfield->ExecuteCommand(command_id);
     return;

@@ -83,6 +83,7 @@ class FakeDriveFileSystem : public DriveFileSystemInterface {
       const DriveClientContext& context,
       const GetFileCallback& get_file_callback,
       const google_apis::GetContentCallback& get_content_callback) OVERRIDE;
+  virtual void CancelGetFile(const base::FilePath& drive_file_path) OVERRIDE;
   virtual void UpdateFileByResourceId(
       const std::string& resource_id,
       const DriveClientContext& context,
@@ -93,16 +94,16 @@ class FakeDriveFileSystem : public DriveFileSystemInterface {
   virtual void ReadDirectoryByPath(
       const base::FilePath& file_path,
       const ReadDirectoryWithSettingCallback& callback) OVERRIDE;
-  virtual void RequestDirectoryRefresh(
-      const base::FilePath& file_path) OVERRIDE;
+  virtual void RefreshDirectory(
+      const base::FilePath& file_path,
+      const FileOperationCallback& callback) OVERRIDE;
   virtual void Search(const std::string& search_query,
                       bool shared_with_me,
                       const GURL& next_feed,
                       const SearchCallback& callback) OVERRIDE;
   virtual void GetAvailableSpace(
       const GetAvailableSpaceCallback& callback) OVERRIDE;
-  virtual void AddUploadedFile(const base::FilePath& directory_path,
-                               scoped_ptr<google_apis::ResourceEntry> doc_entry,
+  virtual void AddUploadedFile(scoped_ptr<google_apis::ResourceEntry> doc_entry,
                                const base::FilePath& file_content_path,
                                const FileOperationCallback& callback) OVERRIDE;
   virtual void GetMetadata(

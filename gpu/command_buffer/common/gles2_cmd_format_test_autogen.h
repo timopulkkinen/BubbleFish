@@ -4366,6 +4366,20 @@ TEST_F(GLES2FormatTest, AsyncTexImage2DCHROMIUM) {
       next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, WaitAsyncTexImage2DCHROMIUM) {
+  cmds::WaitAsyncTexImage2DCHROMIUM& cmd =
+      *GetBufferAs<cmds::WaitAsyncTexImage2DCHROMIUM>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11));
+  EXPECT_EQ(static_cast<uint32>(cmds::WaitAsyncTexImage2DCHROMIUM::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, DiscardFramebufferEXT) {
   cmds::DiscardFramebufferEXT& cmd =
       *GetBufferAs<cmds::DiscardFramebufferEXT>();
@@ -4428,6 +4442,7 @@ TEST_F(GLES2FormatTest, LoseContextCHROMIUM) {
       next_cmd, sizeof(cmd));
 }
 
+// TODO(gman): Write test for InsertSyncPointCHROMIUM
 TEST_F(GLES2FormatTest, WaitSyncPointCHROMIUM) {
   cmds::WaitSyncPointCHROMIUM& cmd =
       *GetBufferAs<cmds::WaitSyncPointCHROMIUM>();
@@ -4440,6 +4455,47 @@ TEST_F(GLES2FormatTest, WaitSyncPointCHROMIUM) {
   EXPECT_EQ(static_cast<GLuint>(11), cmd.sync_point);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, DrawBuffersEXT) {
+  cmds::DrawBuffersEXT& cmd = *GetBufferAs<cmds::DrawBuffersEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLsizei>(11),
+      static_cast<uint32>(12),
+      static_cast<uint32>(13));
+  EXPECT_EQ(static_cast<uint32>(cmds::DrawBuffersEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(11), cmd.count);
+  EXPECT_EQ(static_cast<uint32>(12), cmd.bufs_shm_id);
+  EXPECT_EQ(static_cast<uint32>(13), cmd.bufs_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, DrawBuffersEXTImmediate) {
+  const int kSomeBaseValueToTestWith = 51;
+  static GLenum data[] = {
+    static_cast<GLenum>(kSomeBaseValueToTestWith + 0),
+  };
+  cmds::DrawBuffersEXTImmediate& cmd =
+      *GetBufferAs<cmds::DrawBuffersEXTImmediate>();
+  const GLsizei kNumElements = 1;
+  const size_t kExpectedCmdSize =
+      sizeof(cmd) + kNumElements * sizeof(GLenum) * 1;
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLsizei>(1),
+      data);
+  EXPECT_EQ(static_cast<uint32>(cmds::DrawBuffersEXTImmediate::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(kExpectedCmdSize, cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLsizei>(1), cmd.count);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd) +
+      RoundSizeToMultipleOfEntries(sizeof(data)));
+  // TODO(gman): Check that data was inserted;
 }
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_TEST_AUTOGEN_H_

@@ -13,7 +13,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -1729,6 +1729,11 @@ void* WebGraphicsContext3DInProcessImpl::mapBufferCHROMIUM(
 WGC3Dboolean WebGraphicsContext3DInProcessImpl::unmapBufferCHROMIUM(
     WGC3Denum target) {
   return false;
+}
+
+void WebGraphicsContext3DInProcessImpl::drawBuffersEXT(
+    WGC3Dsizei n, const WGC3Denum* bufs) {
+  NOTIMPLEMENTED();
 }
 
 GrGLInterface* WebGraphicsContext3DInProcessImpl::onCreateGrGLInterface() {

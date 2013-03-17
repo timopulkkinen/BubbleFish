@@ -13,97 +13,84 @@
 
 namespace cc {
 
-scoped_refptr<ImageLayer> ImageLayer::create()
-{
-    return make_scoped_refptr(new ImageLayer());
+scoped_refptr<ImageLayer> ImageLayer::Create() {
+  return make_scoped_refptr(new ImageLayer());
 }
 
-ImageLayer::ImageLayer()
-    : TiledLayer()
-{
+ImageLayer::ImageLayer() : TiledLayer() {}
+
+ImageLayer::~ImageLayer() {}
+
+void ImageLayer::SetBitmap(const SkBitmap& bitmap) {
+  // SetBitmap() currently gets called whenever there is any
+  // style change that affects the layer even if that change doesn't
+  // affect the actual contents of the image (e.g. a CSS animation).
+  // With this check in place we avoid unecessary texture uploads.
+  if (bitmap.pixelRef() && bitmap.pixelRef() == bitmap_.pixelRef())
+    return;
+
+  bitmap_ = bitmap;
+  SetNeedsDisplay();
 }
 
-ImageLayer::~ImageLayer()
-{
+void ImageLayer::SetTexturePriorities(const PriorityCalculator& priority_calc) {
+  // Update the tile data before creating all the layer's tiles.
+  UpdateTileSizeAndTilingOption();
+
+  TiledLayer::SetTexturePriorities(priority_calc);
 }
 
-void ImageLayer::setBitmap(const SkBitmap& bitmap)
-{
-    // setBitmap() currently gets called whenever there is any
-    // style change that affects the layer even if that change doesn't
-    // affect the actual contents of the image (e.g. a CSS animation).
-    // With this check in place we avoid unecessary texture uploads.
-    if (bitmap.pixelRef() && bitmap.pixelRef() == m_bitmap.pixelRef())
-        return;
-
-    m_bitmap = bitmap;
-    setNeedsDisplay();
+void ImageLayer::Update(ResourceUpdateQueue* queue,
+                        const OcclusionTracker* occlusion,
+                        RenderingStats* stats) {
+  CreateUpdaterIfNeeded();
+  if (needs_display_) {
+    updater_->setBitmap(bitmap_);
+    UpdateTileSizeAndTilingOption();
+    InvalidateContentRect(gfx::Rect(content_bounds()));
+    needs_display_ = false;
+  }
+  TiledLayer::Update(queue, occlusion, stats);
 }
 
-void ImageLayer::setTexturePriorities(const PriorityCalculator& priorityCalc)
-{
-    // Update the tile data before creating all the layer's tiles.
-    updateTileSizeAndTilingOption();
+void ImageLayer::CreateUpdaterIfNeeded() {
+  if (updater_)
+    return;
 
-    TiledLayer::setTexturePriorities(priorityCalc);
+  updater_ = ImageLayerUpdater::create();
+  GLenum texture_format =
+      layer_tree_host()->GetRendererCapabilities().best_texture_format;
+  SetTextureFormat(texture_format);
 }
 
-void ImageLayer::update(ResourceUpdateQueue& queue, const OcclusionTracker* occlusion, RenderingStats* stats)
-{
-    createUpdaterIfNeeded();
-    if (m_needsDisplay) {
-        m_updater->setBitmap(m_bitmap);
-        updateTileSizeAndTilingOption();
-        invalidateContentRect(gfx::Rect(gfx::Point(), contentBounds()));
-        m_needsDisplay = false;
-    }
-    TiledLayer::update(queue, occlusion, stats);
+LayerUpdater* ImageLayer::Updater() const {
+  return updater_.get();
 }
 
-void ImageLayer::createUpdaterIfNeeded()
-{
-    if (m_updater)
-        return;
-
-    m_updater = ImageLayerUpdater::create();
-    GLenum textureFormat = layerTreeHost()->rendererCapabilities().bestTextureFormat;
-    setTextureFormat(textureFormat);
+void ImageLayer::CalculateContentsScale(float ideal_contents_scale,
+                                        bool animating_transform_to_screen,
+                                        float* contents_scale_x,
+                                        float* contents_scale_y,
+                                        gfx::Size* content_bounds) {
+  *contents_scale_x = ImageContentsScaleX();
+  *contents_scale_y = ImageContentsScaleY();
+  *content_bounds = gfx::Size(bitmap_.width(), bitmap_.height());
 }
 
-LayerUpdater* ImageLayer::updater() const
-{
-    return m_updater.get();
+bool ImageLayer::DrawsContent() const {
+  return !bitmap_.isNull() && TiledLayer::DrawsContent();
 }
 
-void ImageLayer::calculateContentsScale(
-    float ideal_contents_scale,
-    bool animating_transform_to_screen,
-    float* contentsScaleX,
-    float* contentsScaleY,
-    gfx::Size* contentBounds)
-{
-    *contentsScaleX = imageContentsScaleX();
-    *contentsScaleY = imageContentsScaleY();
-    *contentBounds = gfx::Size(m_bitmap.width(), m_bitmap.height());
+float ImageLayer::ImageContentsScaleX() const {
+  if (bounds().IsEmpty() || bitmap_.width() == 0)
+    return 1;
+  return static_cast<float>(bitmap_.width()) / bounds().width();
 }
 
-bool ImageLayer::drawsContent() const
-{
-    return !m_bitmap.isNull() && TiledLayer::drawsContent();
-}
-
-float ImageLayer::imageContentsScaleX() const
-{
-    if (bounds().IsEmpty() || m_bitmap.width() == 0)
-        return 1;
-    return static_cast<float>(m_bitmap.width()) / bounds().width();
-}
-
-float ImageLayer::imageContentsScaleY() const
-{
-    if (bounds().IsEmpty() || m_bitmap.height() == 0)
-        return 1;
-    return static_cast<float>(m_bitmap.height()) / bounds().height();
+float ImageLayer::ImageContentsScaleY() const {
+  if (bounds().IsEmpty() || bitmap_.height() == 0)
+    return 1;
+  return static_cast<float>(bitmap_.height()) / bounds().height();
 }
 
 }  // namespace cc

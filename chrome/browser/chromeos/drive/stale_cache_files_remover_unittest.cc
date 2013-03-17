@@ -60,9 +60,10 @@ class StaleCacheFilesRemoverTest : public testing::Test {
 
     fake_drive_service_.reset(new google_apis::FakeDriveService);
     fake_drive_service_->LoadResourceListForWapi(
-        "gdata/root_feed.json");
+        "chromeos/gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "gdata/account_metadata.json");
+        "chromeos/gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -107,10 +108,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
     stale_cache_files_remover_.reset();
     delete file_system_;
     file_system_ = NULL;
-    cache_->Destroy();
-    // The cache destruction requires to post a task to the blocking pool.
-    google_apis::test_util::RunBlockingPoolTask();
-
+    test_util::DeleteDriveCache(cache_);
     profile_.reset(NULL);
   }
 
@@ -134,7 +132,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
 
 TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   base::FilePath dummy_file =
-      google_apis::test_util::GetTestFilePath("gdata/root_feed.json");
+      google_apis::test_util::GetTestFilePath("chromeos/gdata/root_feed.json");
   std::string resource_id("pdf:1a2b3c");
   std::string md5("abcdef0123456789");
 

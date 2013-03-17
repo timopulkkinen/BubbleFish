@@ -33,7 +33,7 @@ public:
     MockLayerTreeHost()
         : LayerTreeHost(&m_fakeClient, LayerTreeSettings())
     {
-        initialize(scoped_ptr<Thread>(NULL));
+        Initialize(scoped_ptr<Thread>(NULL));
     }
 
 private:
@@ -47,42 +47,42 @@ public:
     {
     }
 
-    Proxy* proxy() const { return m_layerTreeHost->proxy(); }
+    Proxy* proxy() const { return layer_tree_host_->proxy(); }
 
 protected:
     virtual void SetUp()
     {
-        m_layerTreeHost.reset(new MockLayerTreeHost);
+        layer_tree_host_.reset(new MockLayerTreeHost);
     }
 
     virtual void TearDown()
     {
-        Mock::VerifyAndClearExpectations(m_layerTreeHost.get());
+        Mock::VerifyAndClearExpectations(layer_tree_host_.get());
     }
 
-    scoped_ptr<MockLayerTreeHost> m_layerTreeHost;
+    scoped_ptr<MockLayerTreeHost> layer_tree_host_;
 };
 
 TEST_F(NinePatchLayerTest, triggerFullUploadOnceWhenChangingBitmap)
 {
-    scoped_refptr<NinePatchLayer> testLayer = NinePatchLayer::create();
+    scoped_refptr<NinePatchLayer> testLayer = NinePatchLayer::Create();
     ASSERT_TRUE(testLayer);
-    testLayer->setIsDrawable(true);
-    testLayer->setBounds(gfx::Size(100, 100));
+    testLayer->SetIsDrawable(true);
+    testLayer->SetBounds(gfx::Size(100, 100));
 
-    m_layerTreeHost->setRootLayer(testLayer);
-    Mock::VerifyAndClearExpectations(m_layerTreeHost.get());
-    EXPECT_EQ(testLayer->layerTreeHost(), m_layerTreeHost.get());
+    layer_tree_host_->SetRootLayer(testLayer);
+    Mock::VerifyAndClearExpectations(layer_tree_host_.get());
+    EXPECT_EQ(testLayer->layer_tree_host(), layer_tree_host_.get());
 
-    m_layerTreeHost->initializeRendererIfNeeded();
+    layer_tree_host_->InitializeRendererIfNeeded();
 
     PriorityCalculator calculator;
     ResourceUpdateQueue queue;
     OcclusionTracker occlusionTracker(gfx::Rect(), false);
 
     // No bitmap set should not trigger any uploads.
-    testLayer->setTexturePriorities(calculator);
-    testLayer->update(queue, &occlusionTracker, NULL);
+    testLayer->SetTexturePriorities(calculator);
+    testLayer->Update(&queue, &occlusionTracker, NULL);
     EXPECT_EQ(queue.fullUploadSize(), 0);
     EXPECT_EQ(queue.partialUploadSize(), 0);
 
@@ -90,17 +90,17 @@ TEST_F(NinePatchLayerTest, triggerFullUploadOnceWhenChangingBitmap)
     SkBitmap bitmap;
     bitmap.setConfig(SkBitmap::kARGB_8888_Config, 10, 10);
     bitmap.allocPixels();
-    testLayer->setBitmap(bitmap, gfx::Rect(5, 5, 1, 1));
-    testLayer->setTexturePriorities(calculator);
-    testLayer->update(queue, &occlusionTracker, NULL);
+    testLayer->SetBitmap(bitmap, gfx::Rect(5, 5, 1, 1));
+    testLayer->SetTexturePriorities(calculator);
+    testLayer->Update(&queue, &occlusionTracker, NULL);
     EXPECT_EQ(queue.fullUploadSize(), 1);
     EXPECT_EQ(queue.partialUploadSize(), 0);
     ResourceUpdate params = queue.takeFirstFullUpload();
     EXPECT_TRUE(params.texture != NULL);
 
     // Upload the texture.
-    m_layerTreeHost->contentsTextureManager()->setMaxMemoryLimitBytes(1024 * 1024);
-    m_layerTreeHost->contentsTextureManager()->prioritizeTextures();
+    layer_tree_host_->contents_texture_manager()->setMaxMemoryLimitBytes(1024 * 1024);
+    layer_tree_host_->contents_texture_manager()->prioritizeTextures();
 
     scoped_ptr<OutputSurface> outputSurface;
     scoped_ptr<ResourceProvider> resourceProvider;
@@ -108,40 +108,40 @@ TEST_F(NinePatchLayerTest, triggerFullUploadOnceWhenChangingBitmap)
         DebugScopedSetImplThread implThread(proxy());
         DebugScopedSetMainThreadBlocked mainThreadBlocked(proxy());
         outputSurface = createFakeOutputSurface();
-        resourceProvider = ResourceProvider::create(outputSurface.get());
+        resourceProvider = ResourceProvider::Create(outputSurface.get());
         params.texture->acquireBackingTexture(resourceProvider.get());
         ASSERT_TRUE(params.texture->haveBackingTexture());
     }
 
     // Nothing changed, so no repeated upload.
-    testLayer->setTexturePriorities(calculator);
-    testLayer->update(queue, &occlusionTracker, NULL);
+    testLayer->SetTexturePriorities(calculator);
+    testLayer->Update(&queue, &occlusionTracker, NULL);
     EXPECT_EQ(queue.fullUploadSize(), 0);
     EXPECT_EQ(queue.partialUploadSize(), 0);
 
     {
         DebugScopedSetImplThread implThread(proxy());
         DebugScopedSetMainThreadBlocked mainThreadBlocked(proxy());
-        m_layerTreeHost->contentsTextureManager()->clearAllMemory(resourceProvider.get());
+        layer_tree_host_->contents_texture_manager()->clearAllMemory(resourceProvider.get());
     }
 
     // Reupload after eviction
-    testLayer->setTexturePriorities(calculator);
-    testLayer->update(queue, &occlusionTracker, NULL);
+    testLayer->SetTexturePriorities(calculator);
+    testLayer->Update(&queue, &occlusionTracker, NULL);
     EXPECT_EQ(queue.fullUploadSize(), 1);
     EXPECT_EQ(queue.partialUploadSize(), 0);
 
     // PrioritizedResourceManager clearing
-    m_layerTreeHost->contentsTextureManager()->unregisterTexture(params.texture);
+    layer_tree_host_->contents_texture_manager()->unregisterTexture(params.texture);
     EXPECT_EQ(NULL, params.texture->resourceManager());
-    testLayer->setTexturePriorities(calculator);
+    testLayer->SetTexturePriorities(calculator);
     ResourceUpdateQueue queue2;
-    testLayer->update(queue2, &occlusionTracker, NULL);
+    testLayer->Update(&queue2, &occlusionTracker, NULL);
     EXPECT_EQ(queue2.fullUploadSize(), 1);
     EXPECT_EQ(queue2.partialUploadSize(), 0);
     params = queue2.takeFirstFullUpload();
     EXPECT_TRUE(params.texture != NULL);
-    EXPECT_EQ(params.texture->resourceManager(), m_layerTreeHost->contentsTextureManager());
+    EXPECT_EQ(params.texture->resourceManager(), layer_tree_host_->contents_texture_manager());
 }
 
 }  // namespace

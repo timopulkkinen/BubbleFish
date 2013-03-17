@@ -17,7 +17,6 @@
 var historyModel;
 var historyView;
 var pageState;
-var deleteQueue = [];
 var selectionAnchor = -1;
 var activeVisit = null;
 
@@ -90,13 +89,15 @@ function Visit(result, continued, model) {
 
   // Whether this is the continuation of a previous day.
   this.continued = continued;
+
+  this.allTimestamps = result.allTimestamps;
 }
 
 // Visit, public: -------------------------------------------------------------
 
 /**
  * Records the timestamp of another visit to the same URL as this visit.
- * @param {Number} timestamp The timestamp to add.
+ * @param {number} timestamp The timestamp to add.
  */
 Visit.prototype.addDuplicateTimestamp = function(timestamp) {
   this.duplicateTimestamps_.push(timestamp);
@@ -191,8 +192,19 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   }
 
   this.domNode_ = node;
+  node.visit = this;
 
   return node;
+};
+
+/**
+ * Remove this visit from the history.
+ */
+Visit.prototype.removeFromHistory = function() {
+  var self = this;
+  this.model_.removeVisitsFromHistory([this], function() {
+    removeEntryFromView(self.domNode_);
+  });
 };
 
 // Visit, private: ------------------------------------------------------------
@@ -290,20 +302,7 @@ Visit.prototype.addFaviconToElement_ = function(el) {
  * @private
  */
 Visit.prototype.showMoreFromSite_ = function() {
-  setSearch(this.getDomainFromURL_(this.url_));
-};
-
-/**
- * Remove a single entry from the history.
- * @private
- */
-Visit.prototype.removeFromHistory_ = function() {
-  var self = this;
-  var onSuccessCallback = function() {
-    removeEntryFromView(self.domNode_);
-  };
-  queueURLsForDeletion(this.date, [this.url_], onSuccessCallback);
-  deleteNextInQueue();
+  historyView.setSearch(this.getDomainFromURL_(this.url_));
 };
 
 /**
@@ -322,8 +321,8 @@ Visit.prototype.starClicked_ = function(event) {
 
 /**
  * Quote a string so it can be used in a regular expression.
- * @param {string} str The source string
- * @return {string} The escaped string
+ * @param {string} str The source string.
+ * @return {string} The escaped string.
  * @private
  */
 Visit.pregQuote_ = function(str) {
@@ -364,26 +363,6 @@ HistoryModel.Range = {
  */
 HistoryModel.prototype.setView = function(view) {
   this.view_ = view;
-};
-
-/**
- * Start a new search - this will clear out our model.
- * @param {string} searchText The text to search for
- * @param {number} opt_page The page to view - this is mostly used when setting
- *     up an initial view, use #requestPage otherwise.
- */
-HistoryModel.prototype.setSearchText = function(searchText, opt_page) {
-  this.clearModel_();
-  this.searchText_ = searchText;
-  this.requestedPage_ = opt_page ? opt_page : 0;
-  this.queryHistory_();
-};
-
-/**
- * Clear the search text.
- */
-HistoryModel.prototype.clearSearchText = function() {
-  this.searchText_ = '';
 };
 
 /**
@@ -443,11 +422,20 @@ HistoryModel.prototype.addResults = function(info, results) {
   var lastVisit = this.visits_.slice(-1)[0];
   var lastDay = lastVisit ? lastVisit.dateRelativeDay : null;
 
-  for (var i = 0, thisResult; thisResult = results[i]; i++) {
-    var thisDay = thisResult.dateRelativeDay;
+  for (var i = 0, result; result = results[i]; i++) {
+    var thisDay = result.dateRelativeDay;
     var isSameDay = lastDay == thisDay;
-    this.visits_.push(new Visit(thisResult, isSameDay, this));
+    this.visits_.push(new Visit(result, isSameDay, this));
     lastDay = thisDay;
+  }
+
+  if (loadTimeData.getBoolean('isFullHistorySyncEnabled')) {
+    if (info.hasSyncedResults) {
+      this.view_.showNotification(loadTimeData.getString('hasSyncedResults'));
+    } else {
+      this.view_.showNotification(
+          loadTimeData.getString('noResponseFromServer'));
+    }
   }
 
   this.updateSearch_();
@@ -462,9 +450,9 @@ HistoryModel.prototype.getSize = function() {
 
 /**
  * Get a list of visits between specified index positions.
- * @param {number} start The start index
- * @param {number} end The end index
- * @return {Array.<Visit>} A list of visits
+ * @param {number} start The start index.
+ * @param {number} end The end index.
+ * @return {Array.<Visit>} A list of visits.
  */
 HistoryModel.prototype.getNumberedRange = function(start, end) {
   return this.visits_.slice(start, end);
@@ -477,6 +465,33 @@ HistoryModel.prototype.getNumberedRange = function(start, end) {
 HistoryModel.prototype.hasMoreResults = function() {
   return this.haveDataForPage_(this.requestedPage_ + 1) ||
       !this.isQueryFinished_;
+};
+
+/**
+ * Removes a list of visits from the history, and calls |callback| when the
+ * removal has successfully completed.
+ * @param {Array<Visit>} visits The visits to remove.
+ * @param {Function} callback The function to call after removal succeeds.
+ */
+HistoryModel.prototype.removeVisitsFromHistory = function(visits, callback) {
+  var toBeRemoved = [];
+  for (var i = 0; i < visits.length; i++) {
+    toBeRemoved.push({
+      url: visits[i].url_,
+      timestamps: visits[i].allTimestamps
+    });
+  }
+  chrome.send('removeVisits', toBeRemoved);
+  this.deleteCompleteCallback_ = callback;
+};
+
+/**
+ * Called when visits have been succesfully removed from the history.
+ */
+HistoryModel.prototype.deleteComplete = function() {
+  // Call the callback, with 'this' undefined inside the callback.
+  this.deleteCompleteCallback_.call();
+  this.deleteCompleteCallback_ = null;
 };
 
 // Getter and setter for HistoryModel.rangeInDays_.
@@ -600,7 +615,7 @@ HistoryModel.prototype.queryHistory_ = function() {
  * @private
  */
 HistoryModel.prototype.haveDataForPage_ = function(page) {
-  return (page * RESULTS_PER_PAGE < this.getSize());
+  return page * RESULTS_PER_PAGE < this.getSize();
 };
 
 /**
@@ -682,8 +697,8 @@ function HistoryView(model) {
     self.setRangeInDays(parseInt(e.target.value, 10));
   });
 
-  $('display-filter-sites').addEventListener('click', function(e) {
-    self.setGroupByDomain($('display-filter-sites').checked);
+  $('group-by-domain').addEventListener('click', function(e) {
+    self.setGroupByDomain($('group-by-domain').checked);
   });
 
   $('range-previous').addEventListener('click', function(e) {
@@ -708,17 +723,13 @@ function HistoryView(model) {
 
 // HistoryView, public: -------------------------------------------------------
 /**
- * Do a search and optionally view a certain page.
+ * Do a search on a specific term.
  * @param {string} term The string to search for.
- * @param {number} opt_page The page we wish to view, only use this for
- *     setting up initial views, as this triggers a search.
  */
-HistoryView.prototype.setSearch = function(term, opt_page) {
-  this.pageIndex_ = parseInt(opt_page || 0, 10);
+HistoryView.prototype.setSearch = function(term) {
   window.scrollTo(0, 0);
-  this.model_.setSearchText(term, this.pageIndex_);
-  pageState.setUIState(term, this.pageIndex_, this.model_.getGroupByDomain(),
-                       this.getRangeInDays(), this.getOffset());
+  this.setPageState(term, 0, this.model_.getGroupByDomain(),
+                    this.getRangeInDays(), this.getOffset());
 };
 
 /**
@@ -728,14 +739,8 @@ HistoryView.prototype.setSearch = function(term, opt_page) {
 HistoryView.prototype.setGroupByDomain = function(groupedByDomain) {
   // Group by domain is not currently supported for search results, so reset
   // the search term if there was one.
-  this.model_.clearSearchText();
-  this.model_.setGroupByDomain(groupedByDomain);
-  this.model_.reload();
-  pageState.setUIState(this.model_.getSearchText(),
-                       this.pageIndex_,
-                       this.model_.getGroupByDomain(),
-                       this.getRangeInDays(),
-                       this.getOffset());
+  this.setPageState('', this.pageIndex_, groupedByDomain, this.getRangeInDays(),
+                    this.getOffset());
 };
 
 /**
@@ -744,6 +749,33 @@ HistoryView.prototype.setGroupByDomain = function(groupedByDomain) {
 HistoryView.prototype.reload = function() {
   this.model_.reload();
   this.updateSelectionEditButtons();
+  this.updateRangeButtons_();
+};
+
+/**
+ * Sets all the parameters for the history page and then reloads the view to
+ * update the results.
+ * @param {string} searchText The search string to set.
+ * @param {number} page The page to be viewed.
+ * @param {boolean} groupByDomain Whether the results are grouped or not.
+ * @param {HistoryModel.Range} range The range to view or search over.
+ * @param {number} offset Set the begining of the query to the specific offset.
+ */
+HistoryView.prototype.setPageState = function(searchText, page, groupByDomain,
+    range, offset) {
+  this.clear_();
+  this.model_.searchText_ = searchText;
+  this.pageIndex_ = page;
+  this.model_.requestedPage_ = page;
+  this.model_.groupByDomain_ = groupByDomain;
+  this.model_.rangeInDays_ = range;
+  this.model_.offset_ = offset;
+  this.reload();
+  pageState.setUIState(this.model_.getSearchText(),
+                       this.pageIndex_,
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
 };
 
 /**
@@ -751,6 +783,8 @@ HistoryView.prototype.reload = function() {
  * @param {number} page The page we wish to view.
  */
 HistoryView.prototype.setPage = function(page) {
+  // TODO(sergiu): Move this function to setPageState as well and see why one
+  // of the tests fails when using setPageState.
   this.clear_();
   this.pageIndex_ = parseInt(page, 10);
   window.scrollTo(0, 0);
@@ -774,15 +808,9 @@ HistoryView.prototype.getPage = function() {
  * @param {string} range The number of days to which the range should be set.
  */
 HistoryView.prototype.setRangeInDays = function(range) {
-  // Set the range, offset and reset the page
-  this.model_.rangeInDays = range;
-  this.model_.offset = 0;
-  this.pageIndex_ = 0;
-  if (range == HistoryModel.Range.ALL_TIME)
-    this.model_.requestedPage = 0;
-  this.model_.reload();
-  pageState.setUIState(this.model_.getSearchText(), this.pageIndex_,
-      this.model_.getGroupByDomain(), range, this.getOffset());
+  // Set the range, offset and reset the page.
+  this.setPageState(this.model_.getSearchText(), 0,
+                    this.model_.getGroupByDomain(), range, 0);
 };
 
 /**
@@ -801,13 +829,11 @@ HistoryView.prototype.setOffset = function(offset) {
   // If there is another query already in flight wait for that to complete.
   if (this.model_.inFlight_)
     return;
-  this.model_.offset = offset;
-  this.model_.reload();
-  pageState.setUIState(this.model_.getSearchText(),
-                       this.pageIndex_,
-                       this.model_.getGroupByDomain(),
-                       this.getRangeInDays(),
-                       this.getOffset());
+  this.setPageState(this.model_.getSearchText(),
+                    this.pageIndex_,
+                    this.model_.getGroupByDomain(),
+                    this.getRangeInDays(),
+                    offset);
 };
 
 /**
@@ -875,6 +901,27 @@ HistoryView.prototype.updateManagedEntries = function(entries) {
   }
 };
 
+/**
+ * Shows the notification bar at the top of the page with |innerHTML| as its
+ * content.
+ * @param {string} innerHTML The HTML content of the warning.
+ * @param {boolean} isWarning If true, style the notification as a warning.
+ */
+HistoryView.prototype.showNotification = function(innerHTML, isWarning) {
+  var bar = $('notification-bar');
+  bar.innerHTML = innerHTML;
+  bar.hidden = false;
+  if (isWarning)
+    bar.classList.add('warning');
+  else
+    bar.classList.remove('warning');
+
+  // Make sure that any links in the HTML are targeting the top level.
+  var links = bar.querySelectorAll('a');
+  for (var i = 0; i < links.length; i++)
+    links[i].target = '_top';
+};
+
 // HistoryView, private: ------------------------------------------------------
 
 /**
@@ -935,7 +982,7 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
   var numberOfVisits = createElementWithClassName('span', 'number-visits');
   var domainElement = document.createElement('span');
 
-  numberOfVisits.textContent = loadTimeData.getStringF('numbervisits',
+  numberOfVisits.textContent = loadTimeData.getStringF('numberVisits',
                                                        domainVisits.length);
   siteDomain.appendChild(numberOfVisits);
 
@@ -970,6 +1017,9 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
  * @private
  */
 HistoryView.prototype.updateRangeButtons_ = function() {
+  // Update the range button to the current value.
+  $('timeframe-filter').value = this.getRangeInDays();
+
   // The enabled state for the previous, today and next buttons.
   var previousState = false;
   var todayState = false;
@@ -1102,7 +1152,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
     // Add a header for the search results, if there isn't already one.
     if (!this.resultDiv_.querySelector('h3')) {
       var header = document.createElement('h3');
-      header.textContent = loadTimeData.getStringF('searchresultsfor',
+      header.textContent = loadTimeData.getStringF('searchResultsFor',
                                                    searchText);
       this.resultDiv_.appendChild(header);
     }
@@ -1110,7 +1160,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
     var searchResults = createElementWithClassName('ol', 'search-results');
     if (results.length == 0 && doneLoading) {
       var noSearchResults = document.createElement('div');
-      noSearchResults.textContent = loadTimeData.getString('nosearchresults');
+      noSearchResults.textContent = loadTimeData.getString('noSearchResults');
       searchResults.appendChild(noSearchResults);
     } else {
       for (var i = 0, visit; visit = results[i]; i++) {
@@ -1127,7 +1177,8 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
   } else {
     var resultsFragment = document.createDocumentFragment();
 
-    if (this.getRangeInDays() != HistoryModel.Range.ALL_TIME) {
+    if (this.getRangeInDays() == HistoryModel.Range.WEEK ||
+        this.getRangeInDays() == HistoryModel.Range.MONTH) {
       // If this is a time range result add some text that shows what is the
       // time range for the results the user is viewing.
       var timeFrame = resultsFragment.appendChild(
@@ -1135,7 +1186,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
       // TODO(sergiu): Figure the best way to show this for the first day of
       // the month.
       timeFrame.appendChild(document.createTextNode(loadTimeData.getStringF(
-          'historyinterval',
+          'historyInterval',
           this.model_.queryStartTime,
           this.model_.queryEndTime)));
     }
@@ -1143,7 +1194,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
     if (results.length == 0 && doneLoading) {
       var noResults = resultsFragment.appendChild(
           document.createElement('div'));
-      noResults.textContent = loadTimeData.getString('noresults');
+      noResults.textContent = loadTimeData.getString('noResults');
       this.resultDiv_.appendChild(resultsFragment);
       this.updateNavBar_();
       return;
@@ -1212,21 +1263,21 @@ function PageState(model, view) {
 
   // TODO(glen): Replace this with a bound method so we don't need
   //     public model and view.
-  this.checker_ = setInterval((function(state_obj) {
-    var hashData = state_obj.getHashData();
-    var isGroupedByDomain = (hashData.g == 'true');
-    if (hashData.q != state_obj.model.getSearchText()) {
-      state_obj.view.setSearch(hashData.q, parseInt(hashData.p, 10));
-    } else if (parseInt(hashData.p, 10) != state_obj.view.getPage()) {
-      state_obj.view.setPage(hashData.p);
-    } else if (isGroupedByDomain != state_obj.view.model_.getGroupByDomain()) {
-      state_obj.view.setGroupByDomain(isGroupedByDomain);
-    } else if (parseInt(hashData.r, 10) != state_obj.model.rangeInDays) {
-      state_obj.view.setRangeInDays(parseInt(hashData.r, 10));
-    } else if (parseInt(hashData.o, 10) != state_obj.model.offset) {
-      state_obj.view.setOffset(parseInt(hashData.o, 10));
+  this.checker_ = window.setInterval(function(stateObj) {
+    var hashData = stateObj.getHashData();
+    var isGroupedByDomain = hashData.grouped == 'true';
+    var page = parseInt(hashData.page, 10);
+    var range = parseInt(hashData.range, 10);
+    var offset = parseInt(hashData.offset, 10);
+    if (hashData.q != stateObj.model.getSearchText() ||
+        page != stateObj.view.getPage() ||
+        isGroupedByDomain != stateObj.view.model_.getGroupByDomain() ||
+        range != stateObj.model.rangeInDays ||
+        offset != stateObj.model.offset) {
+      stateObj.view.setPageState(hashData.q, page, isGroupedByDomain,
+                                 range, offset);
     }
-  }), 50, this);
+  }, 50, this);
 }
 
 /**
@@ -1239,12 +1290,11 @@ PageState.instance = null;
  */
 PageState.prototype.getHashData = function() {
   var result = {
-    e: 0,
     q: '',
-    p: 0,
-    g: false,
-    r: 0,
-    o: 0
+    page: 0,
+    grouped: false,
+    range: 0,
+    offset: 0
   };
 
   if (!window.location.hash)
@@ -1274,10 +1324,10 @@ PageState.prototype.getHashData = function() {
 PageState.prototype.setUIState = function(term, page, grouped, range, offset) {
   // Make sure the form looks pretty.
   $('search-field').value = term;
-  $('display-filter-sites').checked = grouped;
+  $('group-by-domain').checked = grouped;
   var hash = this.getHashData();
-  if (hash.q != term || hash.p != page || hash.g != grouped ||
-      hash.r != range || hash.o != offset) {
+  if (hash.q != term || hash.page != page || hash.grouped != grouped ||
+      hash.range != range || hash.offset != offset) {
     window.location.hash = PageState.getHashString(
         term, page, grouped, range, offset);
   }
@@ -1300,16 +1350,16 @@ PageState.getHashString = function(term, page, grouped, range, offset) {
     newHash.push('q=' + encodeURIComponent(term));
 
   if (page)
-    newHash.push('p=' + page);
+    newHash.push('page=' + page);
 
   if (grouped)
-    newHash.push('g=' + grouped);
+    newHash.push('grouped=' + grouped);
 
   if (range)
-    newHash.push('r=' + range);
+    newHash.push('range=' + range);
 
   if (offset)
-    newHash.push('o=' + offset);
+    newHash.push('offset=' + offset);
 
   return newHash.join('&');
 };
@@ -1331,15 +1381,23 @@ function load() {
 
   // Create default view.
   var hashData = pageState.getHashData();
-  historyView.setSearch(hashData.q, hashData.p);
+  var grouped = (hashData.grouped == 'true') || historyModel.getGroupByDomain();
+  var page = parseInt(hashData.page, 10) || historyView.getPage();
+  var range = parseInt(hashData.range, 10) || historyView.getRangeInDays();
+  var offset = parseInt(hashData.offset, 10) || historyView.getOffset();
+  historyView.setPageState(hashData.q, page, grouped, range, offset);
 
-  $('search-form').onsubmit = function() {
-    setSearch(searchField.value);
-    return false;
+  var doSearch = function(e) {
+    // Disable the group by domain control when a search is active.
+    $('group-by-domain').disabled = (searchField.value != '');
+    historyView.setSearch(searchField.value);
   };
 
+  searchField.addEventListener('search', doSearch);
+  $('search-button').addEventListener('click', doSearch);
+
   $('remove-visit').addEventListener('activate', function(e) {
-    activeVisit.removeFromHistory_();
+    activeVisit.removeFromHistory();
     activeVisit = null;
   });
   $('more-from-site').addEventListener('activate', function(e) {
@@ -1373,29 +1431,6 @@ function load() {
       searchField.focus();
   });
 }
-
-/**
- * TODO(glen): Get rid of this function.
- * Set the history view to a specified page.
- * @param {string} term The string to search for
- */
-function setSearch(term) {
-  if (historyView) {
-    historyView.setSearch(term);
-  }
-}
-
-/**
- * TODO(glen): Get rid of this function.
- * Set the history view to a specified page.
- * @param {number} page The page to set the view to.
- */
-function setPage(page) {
-  if (historyView) {
-    historyView.setPage(page);
-  }
-}
-
 
 /**
  * Adds manual rules for allowing or blocking the the selected items.
@@ -1452,29 +1487,16 @@ function updateHostStatus(statusElement, newStatus) {
     manualBehaviorDiv.textContent = '';
     break;
   case ManagedModeManualBehavior.ALLOW:
-    manualBehaviorDiv.textContent = loadTimeData.getString('filterallowed');
+    manualBehaviorDiv.textContent = loadTimeData.getString('filterAllowed');
     manualBehaviorDiv.classList.add('filter-allowed');
     break;
   case ManagedModeManualBehavior.BLOCK:
-    manualBehaviorDiv.textContent = loadTimeData.getString('filterblocked');
+    manualBehaviorDiv.textContent = loadTimeData.getString('filterBlocked');
     manualBehaviorDiv.classList.add('filter-blocked');
     break;
   }
 }
 
-
-/**
- * Delete the next item in our deletion queue.
- */
-function deleteNextInQueue() {
-  if (deleteQueue.length > 0) {
-    // Call the native function to remove history entries.
-    // First arg is a time (in ms since the epoch) identifying the day.
-    // Remaining args are URLs of history entries from that day to delete.
-    chrome.send('removeUrlsOnOneDay',
-                [deleteQueue[0].date.getTime()].concat(deleteQueue[0].urls));
-  }
-}
 
 /**
  * Click handler for the 'Clear browsing data' dialog.
@@ -1485,70 +1507,42 @@ function openClearBrowsingData(e) {
 }
 
 /**
- * Queue a set of URLs from the same day for deletion.
- * @param {Date} date A date indicating the day the URLs were visited.
- * @param {Array} urls Array of URLs from the same day to be deleted.
- * @param {Function} opt_callback An optional callback to be executed when
- *        the deletion is complete.
- */
-function queueURLsForDeletion(date, urls, opt_callback) {
-  deleteQueue.push({ 'date': date, 'urls': urls, 'callback': opt_callback });
-}
-
-function reloadHistory() {
-  historyView.reload();
-}
-
-/**
  * Click handler for the 'Remove selected items' button.
- * Collect IDs from the checked checkboxes and send to Chrome for deletion.
+ * Confirms the deletion with the user, and then deletes the selected visits.
  */
 function removeItems() {
   var checked = $('results-display').querySelectorAll(
       '.entry-box input[type=checkbox]:checked:not([disabled])');
-  var urls = [];
   var disabledItems = [];
-  var queue = [];
-  var date = new Date();
+  var toBeRemoved = [];
 
   for (var i = 0; i < checked.length; i++) {
     var checkbox = checked[i];
-    var cbDate = new Date(checkbox.time);
-    if (date.getFullYear() != cbDate.getFullYear() ||
-        date.getMonth() != cbDate.getMonth() ||
-        date.getDate() != cbDate.getDate()) {
-      if (urls.length > 0) {
-        queue.push([date, urls]);
-      }
-      urls = [];
-      date = cbDate;
-    }
-    var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
+    var entry = findAncestorByClass(checkbox, 'entry');
+    toBeRemoved.push(entry.visit);
+
+    // Disable the checkbox and put a strikethrough style on the link, so the
+    // user can see what will be deleted.
+    var link = entry.querySelector('a');
     checkbox.disabled = true;
     link.classList.add('to-be-removed');
     disabledItems.push(checkbox);
-    urls.push(link.href);
   }
-  if (urls.length > 0) {
-    queue.push([date, urls]);
-  }
-  if (checked.length > 0 && confirm(loadTimeData.getString('deletewarning'))) {
-    for (var i = 0; i < queue.length; i++) {
-      // Reload the page when the final entry has been deleted.
-      var callback = i == 0 ? reloadHistory : null;
 
-      queueURLsForDeletion(queue[i][0], queue[i][1], callback);
-    }
-    deleteNextInQueue();
-  } else {
-    // If the remove is cancelled, return the checkboxes to their
-    // enabled, non-line-through state.
-    for (var i = 0; i < disabledItems.length; i++) {
-      var checkbox = disabledItems[i];
-      var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
-      checkbox.disabled = false;
-      link.classList.remove('to-be-removed');
-    }
+  if (checked.length && confirm(loadTimeData.getString('deleteWarning'))) {
+    historyModel.removeVisitsFromHistory(toBeRemoved, function() {
+      historyView.reload();
+    });
+    return;
+  }
+
+  // Return everything to its previous state.
+  for (var i = 0; i < disabledItems.length; i++) {
+    var checkbox = disabledItems[i];
+    checkbox.disabled = false;
+
+    var link = findAncestorByClass(checkbox, 'entry-box').querySelector('a');
+    link.classList.remove('to-be-removed');
   }
 }
 
@@ -1610,9 +1604,9 @@ function updateParentCheckbox(checkbox) {
   if (!entry)
     return;
 
-  var group_checkbox = entry.querySelector('.site-domain-wrapper input');
-  if (group_checkbox)
-      group_checkbox.checked = false;
+  var groupCheckbox = entry.querySelector('.site-domain-wrapper input');
+  if (groupCheckbox)
+      groupCheckbox.checked = false;
 }
 
 function entryBoxMousedown(event) {
@@ -1695,7 +1689,7 @@ function toggleHandler(e) {
 function getManagedStatusDOM(manualBehavior, inContentPack) {
   var filterStatusDiv = createElementWithClassName('div', 'filter-status');
   var inContentPackDiv = createElementWithClassName('div', 'in-content-pack');
-  inContentPackDiv.textContent = loadTimeData.getString('incontentpack');
+  inContentPackDiv.textContent = loadTimeData.getString('inContentPack');
   var manualBehaviorDiv = createElementWithClassName('div', 'manual-behavior');
   filterStatusDiv.appendChild(inContentPackDiv);
   filterStatusDiv.appendChild(manualBehaviorDiv);
@@ -1721,30 +1715,17 @@ function historyResult(info, results) {
 }
 
 /**
- * Our history system calls this function when a deletion has finished.
+ * Called by the history backend when history removal is successful.
  */
 function deleteComplete() {
-  if (deleteQueue.length > 0) {
-    // Remove the successfully deleted entry from the queue.
-    if (deleteQueue[0].callback)
-      deleteQueue[0].callback.apply();
-    deleteQueue.splice(0, 1);
-    deleteNextInQueue();
-  } else {
-    console.error('Received deleteComplete but queue is empty.');
-  }
+  historyModel.deleteComplete();
 }
 
 /**
- * Our history system calls this function if a delete is not ready (e.g.
- * another delete is in-progress).
+ * Called by the history backend when history removal is unsuccessful.
  */
 function deleteFailed() {
   window.console.log('Delete failed');
-
-  // The deletion failed - try again later.
-  // TODO(dubroy): We should probably give up at some point.
-  setTimeout(deleteNextInQueue, 500);
 }
 
 /**

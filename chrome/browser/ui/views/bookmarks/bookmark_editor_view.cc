@@ -18,6 +18,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "components/user_prefs/user_prefs.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -192,7 +193,7 @@ bool BookmarkEditorView::GetAcceleratorForCommandId(
   return GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
-void BookmarkEditorView::ExecuteCommand(int command_id) {
+void BookmarkEditorView::ExecuteCommand(int command_id, int event_flags) {
   DCHECK(tree_view_->GetSelectedNode());
   if (command_id == IDS_EDIT) {
     tree_view_->StartEditing(tree_view_->GetSelectedNode());
@@ -335,7 +336,7 @@ void BookmarkEditorView::Init() {
 
     url_tf_ = new views::Textfield;
     PrefService* prefs = profile_ ?
-        PrefServiceFromBrowserContext(profile_) :
+        components::UserPrefs::Get(profile_) :
         NULL;
     url_tf_->SetText(chrome::FormatBookmarkURLForDisplay(url, prefs));
     url_tf_->SetController(this);

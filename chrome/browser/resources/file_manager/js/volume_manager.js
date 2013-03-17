@@ -23,6 +23,13 @@ function VolumeManager() {
    */
   this.mountedVolumes_ = {};
 
+  /**
+   * True, if mount points have been initialized.
+   * @type {boolean}
+   * @private
+   */
+  this.ready_ = false;
+
   this.initMountPoints_();
   this.driveStatus_ = VolumeManager.DriveStatus.UNMOUNTED;
 }
@@ -108,6 +115,13 @@ VolumeManager.prototype.isMounted = function(mountPath) {
 };
 
 /**
+ * @return {boolean} True if already initialized.
+ */
+VolumeManager.prototype.isReady = function() {
+  return this.ready_;
+};
+
+/**
  * Initialized mount points.
  * @private
  */
@@ -144,6 +158,8 @@ VolumeManager.prototype.initMountPoints_ = function() {
         deferredQueue[i]();
       }
 
+      cr.dispatchSimpleEvent(self, 'ready');
+      this.ready_ = true;
       if (mountedVolumes.length > 0)
         cr.dispatchSimpleEvent(self, 'change');
     }
@@ -504,7 +520,8 @@ VolumeManager.prototype.validateError_ = function(error) {
  * @private
  */
 VolumeManager.prototype.validateMountPath_ = function(mountPath) {
-  if (!/^\/(((archive|removable)\/[^\/]+)|drive|drive_offline|Downloads)$/.
-      test(mountPath))
+  console.log(mountPath);
+  if (!/^\/(drive|drive_offline|Downloads)$/.test(mountPath) &&
+      !/^\/((archive|removable|drive)\/[^\/]+)$/.test(mountPath))
     throw new Error('Invalid mount path: ', mountPath);
 };

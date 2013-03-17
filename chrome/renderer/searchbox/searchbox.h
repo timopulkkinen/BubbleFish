@@ -27,13 +27,18 @@ class SearchBox : public content::RenderViewObserver,
   explicit SearchBox(content::RenderView* render_view);
   virtual ~SearchBox();
 
-  // Sends ChromeViewHostMsg_SetSuggestions to the browser.
+  // Sends ChromeViewHostMsg_SetSuggestion to the browser.
   void SetSuggestions(const std::vector<InstantSuggestion>& suggestions);
 
+  // Clears the current query text, used to ensure that restricted query strings
+  // are not retained.
+  void ClearQuery();
+
   // Sends ChromeViewHostMsg_ShowInstantOverlay to the browser.
-  void ShowInstantOverlay(InstantShownReason reason,
-                          int height,
-                          InstantSizeUnits units);
+  void ShowInstantOverlay(int height, InstantSizeUnits units);
+
+  // Sends ChromeViewHostMsg_FocusOmnibox to the browser.
+  void FocusOmnibox();
 
   // Sends ChromeViewHostMsg_StartCapturingKeyStrokes to the browser.
   void StartCapturingKeyStrokes();
@@ -46,13 +51,14 @@ class SearchBox : public content::RenderViewObserver,
                      content::PageTransition transition,
                      WindowOpenDisposition disposition);
 
-  // Sends ChromeViewHostMsg_InstantDeleteMostVisitedItem to the browser.
-  void DeleteMostVisitedItem(int restrict_id);
+  // Sends ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem to the browser.
+  void DeleteMostVisitedItem(uint64 most_visited_item_id);
 
-  // Sends ChromeViewHostMsg_InstantUndoMostVisitedDeletion to the browser.
-  void UndoMostVisitedDeletion(int restrict_id);
+  // Sends ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion to the browser.
+  void UndoMostVisitedDeletion(uint64 most_visited_item_id);
 
-  // Sends ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions to the browser.
+  // Sends ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions to the
+  // browser.
   void UndoAllMostVisitedDeletions();
 
   const string16& query() const { return query_; }
@@ -75,17 +81,11 @@ class SearchBox : public content::RenderViewObserver,
   const std::vector<InstantAutocompleteResult>& GetAutocompleteResults();
   // Searchbox retains ownership of this object.
   const InstantAutocompleteResult*
-      GetAutocompleteResultWithId(size_t restricted_id) const;
+      GetAutocompleteResultWithId(size_t autocomplete_result_id) const;
   const ThemeBackgroundInfo& GetThemeBackgroundInfo();
 
   // Most Visited items.
-  const std::vector<MostVisitedItem>& GetMostVisitedItems();
-
-  // Secure Urls.
-  int UrlToRestrictedId(const string16 url);
-  string16 RestrictedIdToURL(int id);
-  string16 GenerateThumbnailUrl(int id);
-  string16 GenerateFaviconUrl(int id);
+  const std::vector<InstantMostVisitedItem>& GetMostVisitedItems() const;
 
  private:
   // Overridden from content::RenderViewObserver:
@@ -111,7 +111,8 @@ class SearchBox : public content::RenderViewObserver,
   void OnThemeAreaHeightChanged(int height);
   void OnFontInformationReceived(const string16& omnibox_font,
                                  size_t omnibox_font_size);
-  void OnMostVisitedChanged(const std::vector<MostVisitedItem>& items);
+  void OnGrantChromeSearchAccessFromOrigin(const GURL& origin_url);
+  void OnMostVisitedChanged(const std::vector<InstantMostVisitedItem>& items);
 
   // Returns the current zoom factor of the render view or 1 on failure.
   double GetZoom() const;
@@ -134,14 +135,7 @@ class SearchBox : public content::RenderViewObserver,
   bool display_instant_results_;
   string16 omnibox_font_;
   size_t omnibox_font_size_;
-  std::vector<MostVisitedItem> most_visited_items_;
-
-  // URL to Restricted Id mapping.
-  // TODO(dcblack): Unify this logic to work with both Most Visited and
-  // history suggestions.  (crbug/175768)
-  std::map<string16, int> url_to_restricted_id_map_;
-  std::map<int, string16> restricted_id_to_url_map_;
-  int last_restricted_id_;
+  std::vector<InstantMostVisitedItem> most_visited_items_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchBox);
 };

@@ -36,6 +36,24 @@ class MediaStorageUtil {
   typedef std::set<std::string /*device id*/> DeviceIdSet;
   typedef base::Callback<void(bool)> BoolCallback;
 
+
+  // Check if the file system at the passed mount point looks like a media
+  // device using the existence of DCIM directory.
+  // Returns true if it looks like a media device, otherwise returns false.
+  // Mac OS X behaves similarly, but this is not the only heuristic it uses.
+  // TODO(vandebo) Try to figure out how Mac OS X decides this, and rename
+  // if additional OS X heuristic is implemented.
+  static bool HasDcim(const base::FilePath::StringType& mount_point);
+
+  // Constructs the device product name from |vendor_name| and |model_name|.
+  static string16 GetFullProductName(const std::string& vendor_name,
+                                     const std::string& model_name);
+
+  // Constructs the display name for device from |storage_size_in_bytes| and
+  // |name|.
+  static string16 GetDisplayNameForDevice(uint64 storage_size_in_bytes,
+                                          const string16& name);
+
   // Returns a device id given properties of the device. A prefix dependent on
   // |type| is added so |unique_id| need only be unique within the given type.
   // Returns an empty string if an invalid type is passed in.
@@ -72,10 +90,9 @@ class MediaStorageUtil {
 
   // Given |path|, fill in |device_info|, and |relative_path|
   // (from the root of the device) if they are not NULL.
-  static bool GetDeviceInfoFromPath(
-      const base::FilePath& path,
-      StorageMonitor::StorageInfo* device_info,
-      base::FilePath* relative_path);
+  static bool GetDeviceInfoFromPath(const base::FilePath& path,
+                                    StorageInfo* device_info,
+                                    base::FilePath* relative_path);
 
   // Get a base::FilePath for the given |device_id|.  If the device isn't a mass
   // storage type, the base::FilePath will be empty.  This does not check that

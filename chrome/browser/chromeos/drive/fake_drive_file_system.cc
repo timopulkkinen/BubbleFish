@@ -133,6 +133,10 @@ void FakeDriveFileSystem::GetFileByResourceId(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
+void FakeDriveFileSystem::CancelGetFile(const base::FilePath& drive_file_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
 void FakeDriveFileSystem::UpdateFileByResourceId(
     const std::string& resource_id,
     const DriveClientContext& context,
@@ -152,8 +156,9 @@ void FakeDriveFileSystem::ReadDirectoryByPath(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-void FakeDriveFileSystem::RequestDirectoryRefresh(
-    const base::FilePath& file_path) {
+void FakeDriveFileSystem::RefreshDirectory(
+    const base::FilePath& file_path,
+    const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -170,7 +175,6 @@ void FakeDriveFileSystem::GetAvailableSpace(
 }
 
 void FakeDriveFileSystem::AddUploadedFile(
-    const base::FilePath& directory_path,
     scoped_ptr<google_apis::ResourceEntry> doc_entry,
     const base::FilePath& file_content_path,
     const FileOperationCallback& callback) {

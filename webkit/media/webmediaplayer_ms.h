@@ -59,6 +59,9 @@ class WebMediaPlayerMS
   virtual ~WebMediaPlayerMS();
 
   virtual void load(const WebKit::WebURL& url, CORSMode cors_mode) OVERRIDE;
+  virtual void load(const WebKit::WebURL& url,
+                    WebKit::WebMediaSource* media_source,
+                    CORSMode cors_mode) OVERRIDE;
   virtual void cancelLoad() OVERRIDE;
 
   // Playback controls.
@@ -172,10 +175,6 @@ class WebMediaPlayerMS
   scoped_refptr<MediaStreamAudioRenderer> audio_renderer_;
 
   scoped_refptr<media::MediaLog> media_log_;
-
-  // Used to auto mute the local media streams when getting the first
-  // SetVolume() from WebMediaPlayer.
-  bool volume_modified_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMS);
 };

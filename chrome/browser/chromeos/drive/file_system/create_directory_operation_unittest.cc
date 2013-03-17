@@ -40,9 +40,11 @@ class CreateDirectoryOperationTest
     profile_.reset(new TestingProfile);
 
     fake_drive_service_.reset(new google_apis::FakeDriveService);
-    fake_drive_service_->LoadResourceListForWapi("gdata/root_feed.json");
+    fake_drive_service_->LoadResourceListForWapi(
+        "chromeos/gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "gdata/account_metadata.json");
+        "chromeos/gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
 
     metadata_.reset(
         new DriveResourceMetadata(fake_drive_service_->GetRootResourceId()));
@@ -64,7 +66,8 @@ class CreateDirectoryOperationTest
         cache_, blocking_task_runner_));
 
     DriveFileError error = DRIVE_FILE_OK;
-    change_list_loader_->ReloadFromServerIfNeeded(
+    change_list_loader_->LoadFromServerIfNeeded(
+        DirectoryFetchInfo(),
         base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
                    &error));
     cache_->RequestInitializeForTesting();
@@ -77,11 +80,7 @@ class CreateDirectoryOperationTest
   virtual void TearDown() OVERRIDE {
     operation_.reset();
     change_list_loader_.reset();
-
-    cache_->Destroy();
-    // The cache destruction requires to post a task to the blocking pool.
-    google_apis::test_util::RunBlockingPoolTask();
-
+    test_util::DeleteDriveCache(cache_);
     fake_free_disk_space_getter_.reset();
     drive_web_apps_registry_.reset();
     scheduler_.reset();
@@ -142,7 +141,7 @@ class CreateDirectoryOperationTest
 };
 
 TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
-  ASSERT_TRUE(LoadRootFeedDocument("gdata/root_feed.json"));
+  ASSERT_TRUE(LoadRootFeedDocument("chromeos/gdata/root_feed.json"));
 
   CreateDirectoryOperation::FindFirstMissingParentDirectoryResult result;
 

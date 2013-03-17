@@ -7,13 +7,13 @@
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window_property.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/ime/input_method_win.h"
 #include "ui/base/win/shell.h"
+#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/path_win.h"
 #include "ui/native_theme/native_theme_aura.h"
@@ -25,6 +25,7 @@
 #include "ui/views/corewm/input_method_event_filter.h"
 #include "ui/views/ime/input_method_bridge.h"
 #include "ui/views/widget/desktop_aura/desktop_activation_client.h"
+#include "ui/views/widget/desktop_aura/desktop_capture_client.h"
 #include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
 #include "ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h"
 #include "ui/views/widget/desktop_aura/desktop_focus_rules.h"
@@ -123,7 +124,7 @@ aura::RootWindow* DesktopRootWindowHostWin::Init(
 
   native_widget_delegate_->OnNativeWidgetCreated();
 
-  capture_client_.reset(new aura::client::DefaultCaptureClient(root_window_));
+  capture_client_.reset(new views::DesktopCaptureClient(root_window_));
   aura::client::SetCaptureClient(root_window_, capture_client_.get());
 
   if (corewm::UseFocusControllerOnDesktop()) {
@@ -328,20 +329,6 @@ void DesktopRootWindowHostWin::SetWindowIcons(
   message_handler_->SetWindowIcons(window_icon, app_icon);
 }
 
-void DesktopRootWindowHostWin::SetAccessibleName(const string16& name) {
-  message_handler_->SetAccessibleName(name);
-}
-
-void DesktopRootWindowHostWin::SetAccessibleRole(
-    ui::AccessibilityTypes::Role role) {
-  message_handler_->SetAccessibleRole(role);
-}
-
-void DesktopRootWindowHostWin::SetAccessibleState(
-    ui::AccessibilityTypes::State state) {
-  message_handler_->SetAccessibleState(state);
-}
-
 void DesktopRootWindowHostWin::InitModalType(ui::ModalType modal_type) {
   message_handler_->InitModalType(modal_type);
 }
@@ -393,6 +380,13 @@ gfx::Rect DesktopRootWindowHostWin::GetBounds() const {
 
 void DesktopRootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
   message_handler_->SetBounds(bounds);
+}
+
+gfx::Insets DesktopRootWindowHostWin::GetInsets() const {
+  return gfx::Insets();
+}
+
+void DesktopRootWindowHostWin::SetInsets(const gfx::Insets& insets) {
 }
 
 gfx::Point DesktopRootWindowHostWin::GetLocationOnNativeScreen() const {
@@ -569,6 +563,10 @@ InputMethod* DesktopRootWindowHostWin::GetInputMethod() {
   return GetWidget()->GetInputMethodDirect();
 }
 
+bool DesktopRootWindowHostWin::ShouldHandleSystemCommands() const {
+  return GetWidget()->widget_delegate()->ShouldHandleSystemCommands();
+}
+
 void DesktopRootWindowHostWin::HandleAppDeactivated() {
   native_widget_delegate_->EnableInactiveRendering();
 }
@@ -739,9 +737,6 @@ bool DesktopRootWindowHostWin::HandlePaintAccelerated(
 
 void DesktopRootWindowHostWin::HandlePaint(gfx::Canvas* canvas) {
   root_window_host_delegate_->OnHostPaint();
-}
-
-void DesktopRootWindowHostWin::HandleScreenReaderDetected() {
 }
 
 bool DesktopRootWindowHostWin::HandleTooltipNotify(int w_param,

@@ -24,9 +24,8 @@
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/policy/user_cloud_policy_manager.h"
-#include "chrome/browser/policy/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
@@ -51,7 +50,6 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/options/options_util.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -76,8 +74,8 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
 
@@ -123,11 +121,23 @@ using content::UserMetricsAction;
 
 namespace options {
 
+namespace {
+
+bool ShouldShowMultiProfilesUserList() {
+#if defined(OS_CHROMEOS)
+  // On Chrome OS we use different UI for multi-profiles.
+  return false;
+#else
+  return ProfileManager::IsMultipleProfilesEnabled();
+#endif
+}
+
+}  // namespace
+
 BrowserOptionsHandler::BrowserOptionsHandler()
     : page_initialized_(false),
       template_url_service_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
-  multiprofile_ = ProfileManager::IsMultipleProfilesEnabled();
 #if !defined(OS_MACOSX)
   default_browser_worker_ = new ShellIntegration::DefaultBrowserWorker(this);
 #endif
@@ -349,12 +359,13 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #if defined(OS_CHROMEOS) && defined(USE_ASH)
     { "setWallpaper", IDS_SET_WALLPAPER_BUTTON },
 #endif
+    { "advancedSectionTitleSystem",
+      IDS_OPTIONS_ADVANCED_SECTION_TITLE_SYSTEM },
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-    { "advancedSectionTitleBackground",
-      IDS_OPTIONS_ADVANCED_SECTION_TITLE_BACKGROUND },
-    { "backgroundModeCheckbox", IDS_OPTIONS_BACKGROUND_ENABLE_BACKGROUND_MODE },
+    { "backgroundModeCheckbox", IDS_OPTIONS_SYSTEM_ENABLE_BACKGROUND_MODE },
 #endif
-
+    { "hardwareAccelerationModeCheckbox",
+      IDS_OPTIONS_SYSTEM_ENABLE_HARDWARE_ACCELERATION_MODE },
     // Strings with product-name substitutions.
 #if !defined(OS_CHROMEOS)
     { "syncOverview", IDS_SYNC_OVERVIEW, IDS_PRODUCT_NAME },
@@ -407,15 +418,11 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
       "defaultSearchGroupLabel",
       l10n_util::GetStringFUTF16(IDS_SEARCH_PREF_EXPLANATION, omnibox_url));
 
+  std::string instant_pref_name = chrome::search::GetInstantPrefName();
+  int instant_message_id = instant_pref_name == prefs::kInstantEnabled ?
+      IDS_INSTANT_PREF_WITH_WARNING : IDS_INSTANT_EXTENDED_PREF_WITH_WARNING;
   string16 instant_learn_more_url = ASCIIToUTF16(chrome::kInstantLearnMoreURL);
-  int instant_message_id = IDS_INSTANT_PREF_WITH_WARNING;
-  if (chrome::search::IsInstantExtendedAPIEnabled(
-      Profile::FromWebUI(web_ui()))) {
-    instant_message_id = IDS_INSTANT_EXTENDED_PREF_WITH_WARNING;
-    values->SetString("instant_enabled", "instant_extended.enabled");
-  } else {
-    values->SetString("instant_enabled", "instant.enabled");
-  }
+  values->SetString("instant_enabled", instant_pref_name);
   values->SetString(
       "instantPrefAndWarning",
       l10n_util::GetStringFUTF16(instant_message_id, instant_learn_more_url));
@@ -474,7 +481,7 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
       g_browser_process->profile_manager()->GetNumberOfProfiles() > 1);
 #endif
 
-  if (multiprofile_)
+  if (ShouldShowMultiProfilesUserList())
     values->Set("profilesInfo", GetProfilesInfoList().release());
 
 #if defined(ENABLE_MANAGED_USERS)
@@ -945,7 +952,7 @@ void BrowserOptionsHandler::Observe(
       break;
 #endif
     case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
-      if (multiprofile_)
+      if (ShouldShowMultiProfilesUserList())
         SendProfilesInfo();
       break;
     case chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL:
@@ -1002,7 +1009,6 @@ scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
     profile_value->SetBoolean("isCurrentProfile",
                               profile_path == current_profile_path);
     profile_value->SetBoolean("isManaged", cache.ProfileIsManagedAtIndex(i));
-
 
     bool is_gaia_picture =
         cache.IsUsingGAIAPictureOfProfileAtIndex(i) &&

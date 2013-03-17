@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "cc/memory_history.h"
+#include "cc/picture_pile_impl.h"
 #include "cc/rendering_stats.h"
 #include "cc/resource_pool.h"
 #include "cc/tile_priority.h"
@@ -28,7 +29,7 @@ class TileVersion;
 class CC_EXPORT TileManagerClient {
  public:
   virtual void ScheduleManageTiles() = 0;
-  virtual void DidUploadVisibleHighResolutionTile() = 0;
+  virtual void DidInitializeVisibleTile() = 0;
 
  protected:
   virtual ~TileManagerClient() {}
@@ -60,39 +61,11 @@ enum TileRasterState {
   WAITING_FOR_RASTER_STATE = 1,
   RASTER_STATE = 2,
   UPLOAD_STATE = 3,
-  NUM_STATES = 4
+  FORCED_UPLOAD_COMPLETION_STATE = 4,
+  NUM_STATES = 5
 };
 scoped_ptr<base::Value> TileRasterStateAsValue(
     TileRasterState bin);
-
-// This is state that is specific to a tile that is
-// managed by the TileManager.
-class CC_EXPORT ManagedTileState {
- public:
-  ManagedTileState();
-  ~ManagedTileState();
-  scoped_ptr<base::Value> AsValue() const;
-
-  // Persisted state: valid all the time.
-  bool can_use_gpu_memory;
-  bool can_be_freed;
-  scoped_ptr<ResourcePool::Resource> resource;
-  bool resource_is_being_initialized;
-  bool contents_swizzled;
-  bool need_to_gather_pixel_refs;
-  std::list<skia::LazyPixelRef*> pending_pixel_refs;
-  TileRasterState raster_state;
-
-  // Ephemeral state, valid only during Manage.
-  TileManagerBin bin[NUM_BIN_PRIORITIES];
-  TileManagerBin tree_bin[NUM_TREES];
-  // The bin that the tile would have if the GPU memory manager had a maximally permissive policy,
-  // send to the GPU memory manager to determine policy.
-  TileManagerBin gpu_memmgr_stats_bin;
-  TileResolution resolution;
-  float time_to_needed_in_seconds;
-  float distance_to_visible_in_pixels;
-};
 
 // This class manages tiles, deciding which should get rasterized and which
 // should no longer have any memory assigned to them. Tile objects are "owned"
@@ -103,7 +76,9 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
   TileManager(TileManagerClient* client,
               ResourceProvider *resource_provider,
               size_t num_raster_threads,
-              bool use_cheapess_estimator);
+              bool use_cheapess_estimator,
+              bool use_color_estimator,
+              bool prediction_benchmarking);
   virtual ~TileManager();
 
   const GlobalStateThatImpactsTilePriority& GlobalState() const {
@@ -114,6 +89,7 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
   void ManageTiles();
   void CheckForCompletedTileUploads();
   void AbortPendingTileUploads();
+  void ForceTileUploadToComplete(Tile* tile);
   void DidCompleteFrame();
 
   scoped_ptr<base::Value> BasicStateAsValue() const;
@@ -148,13 +124,14 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
 
   // Data that is passed to raster tasks.
   struct RasterTaskMetadata {
-      bool use_cheapness_estimator;
+      bool prediction_benchmarking;
       bool is_tile_in_pending_tree_now_bin;
       TileResolution tile_resolution;
       int layer_id;
   };
 
   RasterTaskMetadata GetRasterTaskMetadata(const Tile& tile) const;
+
   void SortTiles();
   void AssignGpuMemoryToTiles();
   void FreeResourcesForTile(Tile* tile);
@@ -165,6 +142,7 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
     manage_tiles_pending_ = true;
   }
   void DispatchMoreTasks();
+  void AnalyzeTile(Tile* tile);
   void GatherPixelRefsForTile(Tile* tile);
   void DispatchImageDecodeTasksForTile(Tile* tile);
   void DispatchOneImageDecodeTask(
@@ -197,6 +175,11 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
 
   static void RecordCheapnessPredictorResults(bool is_predicted_cheap,
                                               bool is_actually_cheap);
+  static void RecordSolidColorPredictorResults(const SkColor* actual_colors,
+                                               size_t color_count,
+                                               bool is_predicted_solid,
+                                               SkColor predicted_color,
+                                               bool is_predicted_transparent);
 
   TileManagerClient* client_;
   scoped_ptr<ResourcePool> resource_pool_;
@@ -231,9 +214,14 @@ class CC_EXPORT TileManager : public WorkerPoolClient {
   RenderingStats rendering_stats_;
 
   bool use_cheapness_estimator_;
+  bool use_color_estimator_;
   bool did_schedule_cheap_tasks_;
   bool allow_cheap_tasks_;
   int raster_state_count_[NUM_STATES][NUM_TREES][NUM_BINS];
+  bool prediction_benchmarking_;
+
+  size_t pending_tasks_;
+  size_t max_pending_tasks_;
 
   DISALLOW_COPY_AND_ASSIGN(TileManager);
 };

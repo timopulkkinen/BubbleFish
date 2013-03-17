@@ -162,12 +162,6 @@ Press any key to continue exploring.
   <message name="IDS_NETWORK_ENROLLMENT_HANDLER_BUTTON" desc="Text of the accept button for generating a new network certificate.">
     Get new certificate
   </message>
-  <message name="IDS_NETWORK_CONNECTION_ERROR_TITLE" desc="Title for network connection error notification">
-    Network Connection Error
-  </message>
-  <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_DETAILS" desc="Message for network connection error notification with details">
-    Failed to connect to network '<ph name="name">$1<ex>GoogleGuest</ex></ph>': <ph name="details">$2<ex>Unrecognized error</ex></ph>
-  </message>
   <message name="IDS_NETWORK_ACTIVATION_ERROR_TITLE" desc="Title for network connection error notification">
     Network Activation Error
   </message>
@@ -336,8 +330,11 @@ Press any key to continue exploring.
   <message name="IDS_DISABLED_ADD_USER_TOOLTIP_ENTERPRISE" desc="Tooltip over disabled Add user button">
     The administrator of this device has disabled new users from being added
   </message>
-  <message name="IDS_APP_START_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
-    Installing application...
+  <message name="IDS_APP_START_NETWORK_WAIT_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
+    Waiting for network connection...
+  </message>
+  <message name="IDS_APP_START_APP_WAIT_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
+    Initializing application...
   </message>
   <message name="IDS_KIOSK_MODE_LOGIN_MESSAGE">
     Click to start
@@ -460,17 +457,38 @@ Press any key to continue exploring.
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_PASSWORD_TOO_SHORT" desc="Error text shown in locally managed user creation dialog when typed password is too short.">
     Password is too short.
   </message>
-  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_MESSAGE" desc="Text shown when locally managed user was successfully created">
-    Locally managed user is successfully created.
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_TITLE" desc="Text shown when locally managed user was successfully created">
+    Setup is complete! Now learn what features are available to the manager of this account.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_IMAGE_TEXT" desc="Text shown when locally managed user was successfully created">
+    Text explaining feature(s).
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_EMAIL_INSTRUCTIONS" desc="Text shown when locally managed user was successfully created">
+    Email instructions to the manager of this account
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_BUTTON_TITLE" desc="Text for button on a screen with successful locally managed user creation text">
-    Finish
+    Got it
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TITLE" desc="Text shown in a title when locally managed user creation has failed for some reason">
     Locally managed user creation failed.
   </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TPM_ERROR" desc="Text shown in a title when locally managed user creation has failed in case of TPM error">
+    TPM error.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_NOT_CONNECTED" desc="Text shown in a title when locally managed user creation has failed in case when device is offline">
+    You need to have internet access to create locally managed user.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TIMED_OUT" desc="Text shown in a title when locally managed user creation has failed in case when network timed out">
+    Network timeout. Please check your internet connection and try again.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_SERVER_ERROR" desc="Text shown in a title when locally managed user creation has failed in case when there was server error on a remote side">
+    Server error. Please try again later.
+  </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_CANCEL_BUTTON_TITLE" desc="Text for button on an error reporting screen for locally managed user creation, that is used to abort whole operation">
     Cancel
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_RETRY_BUTTON_TITLE" desc="Text for button on an error reporting screen for locally managed user creation, that is used to retry failed operation">
+    Retry
   </message>
   <message name="IDS_OFFLINE_LOGIN_HTML" desc="Text which suggests enter as an existing user when valid network isn't presented.">
     If you've already registered on this device, you can <ph name="LINK2_START">$1<ex>&gt;a&lt;</ex></ph>sign in as an existing user<ph name="LINK2_END">$2<ex>&gt;/a&lt;</ex></ph>.
@@ -2533,47 +2551,6 @@ Battery full
     Unable to connect.
   </message>
 
-  <!-- Network state strings for ChromeOS -->
-  <message name="IDS_CHROMEOS_NETWORK_STATE_UNKNOWN" desc="Network state in about:network: UNKNOWN">
-    Unknown
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_IDLE" desc="Network state in about:network: IDLE">
-    Idle
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CARRIER" desc="Network state in about:network: CARRIER">
-    Carrier
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION" desc="Network state in about:network: ASSOCIATION">
-    Association
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION" desc="Network state in about:network: CONFIGURATION">
-    Configuration
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_READY" desc="Network state in about:network: READY">
-    Connected
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_DISCONNECT" desc="Network state in about:network: DISCONNECT">
-    Disconnect
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_FAILURE" desc="Network state in about:network: FAILURE">
-    Failure
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE" desc="Network state in about:network: ACTIVATION_FAILURE">
-    Activation failure
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED" desc="Network state in about:network: Unrecognized">
-    Unrecognized state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_PORTAL" desc="Network state in about:network: Portal">
-    Portal state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ONLINE" desc="Network state in about:network: Online">
-    Online state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CONNECT_REQUESTED" desc="Network state in about:network: Connect Requested">
-    Connect Requested
-  </message>
-
   <!-- Captive Portal state strings for ChromeOS -->
   <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNKNOWN" desc="Captive Portal status in about:network: Unknown">
     Unknown
@@ -2592,65 +2569,6 @@ Battery full
   </message>
   <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNRECOGNIZED" desc="Captive Portal status in about:network: Unrecognized">
     Unrecognized
-  </message>
-
-  <!-- Network error strings for ChromeOS -->
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN" desc="Network error in about:network: UNKNOWN">
-    Unknown network error
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE" desc="Network error in about:network: OUT_OF_RANGE">
-    Out of range
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING" desc="Network error in about:network: PIN_MISSING">
-    PIN missing
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED" desc="Network error in about:network: DHCP_FAILED">
-    DHCP lookup failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED" desc="Network error in about:network: CONNECT_FAILED">
-    Connect failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE" desc="Network error in about:network: BAD_PASSPHRASE">
-    Bad passphrase
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY" desc="Network error in about:network: BAD_WEPKEY">
-    Bad WEP key
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED" desc="Network error in about:network: ACTIVATION_FAILED">
-    Activation failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO" desc="Network error in about:network: NEED_EVDO">
-    Need EVDO
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK" desc="Network error in about:network: NEED_HOME_NETWORK">
-    Need home network
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED" desc="Network error in about:network: OTASP_FAILED">
-    OTASP failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED" desc="Network error in about:network: AAA_FAILED">
-    AAA check failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_INTERNAL" desc="Network error in about:network: INTERNAL">
-    Internal error
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DNS_LOOKUP_FAILED" desc="Network error in about:network: DNS_LOOKUP_FAILED">
-    DNS lookup failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED" desc="Network error in about:network: HTTP_GET_FAILED">
-    HTTP get failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED" desc="Network error in about:network: IPSEC_PSK_AUTH_FAILED">
-    Failed to authenticate with provided pre-shared key
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED" desc="Network error in about:network: IPSEC_CERT_AUTH_FAILED">
-    Failed to authenticate with provided certificate
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED" desc="Network error in about:network: PPP_AUTH_FAILED">
-    Failed to authenticate with provided username or password
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNRECOGNIZED" desc="Network error in about:network: Unrecognized">
-    Unrecognized error
   </message>
 
   <!-- Cellular network technology description strings for ChromeOS -->

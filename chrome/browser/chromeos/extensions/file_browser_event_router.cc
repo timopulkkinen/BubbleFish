@@ -12,7 +12,6 @@
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/stl_util.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
@@ -22,6 +21,7 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -33,6 +33,7 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -129,18 +130,24 @@ void RelayFileWatcherCallbackToUIThread(
 // seconds. This is to give DiskManager time to process device removed/added
 // events (events for the devices that were present before suspend should not
 // trigger any new notifications or file manager windows).
+// The delegate will go into the same state after screen is unlocked. Cros-disks
+// will not send events while the screen is locked. The events will be postponed
+// until the screen is unlocked. These have to be handled too.
 class SuspendStateDelegateImpl
     : public chromeos::PowerManagerClient::Observer,
+      public chromeos::SessionManagerClient::Observer,
       public FileBrowserEventRouter::SuspendStateDelegate {
  public:
   SuspendStateDelegateImpl()
       : is_resuming_(false),
         weak_factory_(this) {
     DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
+    DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
   }
 
   virtual ~SuspendStateDelegateImpl() {
     DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
+    DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
   }
 
   // chromeos::PowerManagerClient::Observer implementation.
@@ -152,6 +159,20 @@ class SuspendStateDelegateImpl
   // chromeos::PowerManagerClient::Observer implementation.
   virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE {
     is_resuming_ = true;
+    // Undo any previous resets.
+    weak_factory_.InvalidateWeakPtrs();
+    base::MessageLoopProxy::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&SuspendStateDelegateImpl::Reset,
+                   weak_factory_.GetWeakPtr()),
+        base::TimeDelta::FromSeconds(5));
+  }
+
+  // chromeos::SessionManagerClient::Observer implementation.
+  virtual void ScreenIsUnlocked() OVERRIDE {
+    is_resuming_ = true;
+    // Undo any previous resets.
+    weak_factory_.InvalidateWeakPtrs();
     base::MessageLoopProxy::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&SuspendStateDelegateImpl::Reset,
@@ -251,14 +272,10 @@ void FileBrowserEventRouter::Shutdown() {
     system_service->drive_service()->RemoveObserver(this);
   }
 
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (cros_library) {
-    chromeos::NetworkLibrary* network_library =
-        cros_library->GetNetworkLibrary();
-    if (network_library)
-      network_library->RemoveNetworkManagerObserver(this);
+  if (chromeos::ConnectivityStateHelper::IsInitialized()) {
+    chromeos::ConnectivityStateHelper::Get()->
+        RemoveNetworkManagerObserver(this);
   }
-
   profile_ = NULL;
 }
 
@@ -284,14 +301,10 @@ void FileBrowserEventRouter::ObserveFileSystemEvents() {
     system_service->file_system()->AddObserver(this);
   }
 
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (cros_library) {
-    chromeos::NetworkLibrary* network_library =
-        cros_library->GetNetworkLibrary();
-    if (network_library)
-     network_library->AddNetworkManagerObserver(this);
+  if (chromeos::ConnectivityStateHelper::IsInitialized()) {
+    chromeos::ConnectivityStateHelper::Get()->
+        AddNetworkManagerObserver(this);
   }
-
   suspend_state_delegate_.reset(new SuspendStateDelegateImpl());
 
   pref_change_registrar_->Init(profile_->GetPrefs());
@@ -512,8 +525,7 @@ void FileBrowserEventRouter::OnFormatEvent(
   }
 }
 
-void FileBrowserEventRouter::OnNetworkManagerChanged(
-    chromeos::NetworkLibrary* network_library) {
+void FileBrowserEventRouter::NetworkManagerChanged() {
   if (!profile_ ||
       !extensions::ExtensionSystem::Get(profile_)->event_router()) {
     NOTREACHED();
@@ -538,7 +550,8 @@ void FileBrowserEventRouter::OnExternalStorageDisabledChanged() {
       LOG(INFO) << "Unmounting " << it->second.mount_path
                 << " because of policy.";
       manager->UnmountPath(it->second.mount_path,
-                           chromeos::UNMOUNT_OPTIONS_NONE);
+                           chromeos::UNMOUNT_OPTIONS_NONE,
+                           DiskMountManager::UnmountPathCallback());
     }
   }
 }
@@ -727,11 +740,27 @@ void FileBrowserEventRouter::ShowRemovableDeviceInFileManager(
   const base::FilePath dcim_path = mount_path.Append(
       FILE_PATH_LITERAL("DCIM"));
 
-  // Show the action choice dialog only for media with a DCIM directory.
-  // Otherwise, just show Files.app.
+  // TODO(mtomasz): Temporarily for M26. Remove it on M27.
+  // If an external photo importer is installed, then do not show the action
+  // choice dialog.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  if (!service)
+    return;
+  const std::string kExternalPhotoImporterExtensionId =
+      "efjnaogkjbogokcnohkmnjdojkikgobo";
+  const bool external_photo_importer_available =
+      service->GetExtensionById(kExternalPhotoImporterExtensionId,
+                                false /* include_disable */) != NULL;
+
+  // If DCIM folder is available and there is no external photo importer,
+  // then open the action choose dialog. If DCIM folder doesn't exist, then
+  // just launch Files.app.
   DirectoryExistsOnUIThread(
       dcim_path,
-      base::Bind(&file_manager_util::OpenActionChoiceDialog, mount_path),
+      external_photo_importer_available ?
+        base::Bind(&base::DoNothing) :
+        base::Bind(&file_manager_util::OpenActionChoiceDialog, mount_path),
       base::Bind(&file_manager_util::ViewRemovableDrive, mount_path));
 }
 
@@ -776,7 +805,9 @@ void FileBrowserEventRouter::OnDiskRemoved(
           disk->system_path_prefix());
     }
     DiskMountManager::GetInstance()->UnmountPath(
-        disk->mount_path(), chromeos::UNMOUNT_OPTIONS_LAZY);
+        disk->mount_path(),
+        chromeos::UNMOUNT_OPTIONS_LAZY,
+        DiskMountManager::UnmountPathCallback());
   }
 }
 

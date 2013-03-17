@@ -39,6 +39,8 @@
       ],
       'sources': [
         # All .cc, .h under views, except unittests
+        'accessibility/native_view_accessibility.cc',
+        'accessibility/native_view_accessibility.h',
         'accessibility/native_view_accessibility_win.cc',
         'accessibility/native_view_accessibility_win.h',
         'accessible_pane_view.cc',
@@ -177,6 +179,8 @@
         'controls/scrollbar/base_scroll_bar_thumb.h',
         'controls/scrollbar/bitmap_scroll_bar.cc',
         'controls/scrollbar/bitmap_scroll_bar.h',
+        'controls/scrollbar/kennedy_scroll_bar.cc',
+        'controls/scrollbar/kennedy_scroll_bar.h',
         'controls/scrollbar/native_scroll_bar_views.cc',
         'controls/scrollbar/native_scroll_bar_views.h',
         'controls/scrollbar/native_scroll_bar_wrapper.h',
@@ -193,6 +197,9 @@
         'controls/slide_out_view.h',
         'controls/slider.cc',
         'controls/slider.h',
+        'controls/styled_label.cc',
+        'controls/styled_label.h',
+        'controls/styled_label_listener.h',
         'controls/tabbed_pane/tabbed_pane.cc',
         'controls/tabbed_pane/tabbed_pane.h',
         'controls/tabbed_pane/tabbed_pane_listener.h',
@@ -339,6 +346,8 @@
         'widget/default_theme_provider.h',
         'widget/desktop_aura/desktop_activation_client.cc',
         'widget/desktop_aura/desktop_activation_client.h',
+        'widget/desktop_aura/desktop_capture_client.cc',
+        'widget/desktop_aura/desktop_capture_client.h',
         'widget/desktop_aura/desktop_dispatcher_client.cc',
         'widget/desktop_aura/desktop_dispatcher_client.h',
         'widget/desktop_aura/desktop_drag_drop_client_win.cc',
@@ -499,6 +508,8 @@
             ['include', 'controls/menu/menu_config_win.cc'],
             ['include', 'controls/menu/menu_item_view_win.cc'],
             ['include', 'controls/menu/menu_separator_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.cc'],
+            ['include', 'accessibility/native_view_accessibility_win.h'],
           ],
         }],
         ['use_aura==1 and OS=="linux" and chromeos==0', {
@@ -659,12 +670,14 @@
         'controls/combobox/native_combobox_views_unittest.cc',
         'controls/label_unittest.cc',
         'controls/menu/menu_model_adapter_unittest.cc',
+        'controls/native/native_view_host_aura_unittest.cc',
         'controls/native/native_view_host_unittest.cc',
         'controls/progress_bar_unittest.cc',
         'controls/scrollbar/scrollbar_unittest.cc',
         'controls/scroll_view_unittest.cc',
         'controls/single_split_view_unittest.cc',
         'controls/slider_unittest.cc',
+        'controls/styled_label_unittest.cc',
         'controls/tabbed_pane/tabbed_pane_unittest.cc',
         'controls/table/table_utils_unittest.cc',
         'controls/table/table_view_unittest.cc',
@@ -692,6 +705,7 @@
         'view_model_unittest.cc',
         'view_model_utils_unittest.cc',
         'view_unittest.cc',
+        'widget/desktop_aura/desktop_capture_client_unittest.cc',
         'widget/native_widget_aura_unittest.cc',
         'widget/native_widget_unittest.cc',
         'widget/native_widget_win_unittest.cc',
@@ -702,6 +716,10 @@
         ['chromeos==0', {
           'sources!': [
             'touchui/touch_selection_controller_impl_unittest.cc',
+          ],
+        }, { # use_aura==0
+          'sources/': [
+            ['exclude', 'widget/desktop_aura'],
           ],
         }],
         ['OS=="win"', {
@@ -729,10 +747,12 @@
           ],
         }, {  # use_aura==0
           'sources!': [
+            'controls/native/native_view_host_aura_unittest.cc',
             'widget/native_widget_aura_unittest.cc',
           ],
           'sources/': [
             ['exclude', 'corewm'],
+            ['exclude', 'widget/desktop_aura'],
           ],
         }],
       ],

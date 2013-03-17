@@ -17,9 +17,14 @@ import android.os.Bundle;
 import android.os.Message;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 import android.webkit.GeolocationPermissions;
 import android.webkit.ValueCallback;
 
@@ -29,6 +34,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.content.browser.ContentSettings;
 import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.ContentViewStatics;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.NavigationHistory;
 import org.chromium.content.browser.PageTransitionTypes;
@@ -40,6 +46,7 @@ import org.chromium.ui.gfx.DeviceDisplayInfo;
 import org.chromium.ui.gfx.NativeWindow;
 
 import java.io.File;
+import java.lang.annotation.Annotation;
 import java.net.MalformedURLException;
 import java.net.URL;
 
@@ -135,32 +142,44 @@ public class AwContents {
 
         @Override
         public int getCacheMode() {
-            return AwContents.this.mSettings.getCacheMode();
+            return mSettings.getCacheMode();
         }
 
         @Override
-        public InterceptedRequestData shouldInterceptRequest(final String url) {
+        public InterceptedRequestData shouldInterceptRequest(final String url,
+                boolean isMainFrame) {
             InterceptedRequestData interceptedRequestData =
-                AwContents.this.mContentsClient.shouldInterceptRequest(url);
+                mContentsClient.shouldInterceptRequest(url);
+
             if (interceptedRequestData == null) {
                 mContentsClient.getCallbackHelper().postOnLoadResource(url);
+            }
+
+            if (isMainFrame && interceptedRequestData != null &&
+                    interceptedRequestData.getData() == null) {
+                // In this case the intercepted URLRequest job will simulate an empty response
+                // which doesn't trigger the onReceivedError callback. For WebViewClassic
+                // compatibility we synthesize that callback. http://crbug.com/180950
+                mContentsClient.getCallbackHelper().postOnReceivedError(
+                        ErrorCodeConversionHelper.ERROR_UNKNOWN,
+                        null /* filled in by the glue layer */, url);
             }
             return interceptedRequestData;
         }
 
         @Override
         public boolean shouldBlockContentUrls() {
-            return !AwContents.this.mSettings.getAllowContentAccess();
+            return !mSettings.getAllowContentAccess();
         }
 
         @Override
         public boolean shouldBlockFileUrls() {
-            return !AwContents.this.mSettings.getAllowFileAccess();
+            return !mSettings.getAllowFileAccess();
         }
 
         @Override
         public boolean shouldBlockNetworkLoads() {
-            return AwContents.this.mSettings.getBlockNetworkLoads();
+            return mSettings.getBlockNetworkLoads();
         }
 
         @Override
@@ -200,7 +219,7 @@ public class AwContents {
                 // The embedder is also not allowed to intercept POST requests because of
                 // crbug.com/155250.
             } else if (!navigationParams.isPost) {
-                ignoreNavigation = AwContents.this.mContentsClient.shouldIgnoreNavigation(url);
+                ignoreNavigation = mContentsClient.shouldIgnoreNavigation(url);
             }
 
             // The existing contract is that shouldIgnoreNavigation callbacks are delivered before
@@ -233,13 +252,6 @@ public class AwContents {
         public void setMeasuredDimension(int measuredWidth, int measuredHeight) {
             mInternalAccessAdapter.setMeasuredDimension(measuredWidth, measuredHeight);
         }
-    }
-
-    // TODO(joth): Delete this when all callers pass browserContext
-    public AwContents(ViewGroup containerView, InternalAccessDelegate internalAccessAdapter,
-            AwContentsClient contentsClient, boolean isAccessFromFileURLsGrantedByDefault) {
-        this(AwBrowserProcess.getDefaultBrowserContext(), containerView, internalAccessAdapter,
-                contentsClient, isAccessFromFileURLsGrantedByDefault);
     }
 
     /**
@@ -291,6 +303,7 @@ public class AwContents {
                 new AwContentVideoViewDelegate(contentsClient, containerView.getContext()));
     }
 
+    // TODO(mkosiba): Remove this once we move the embedding layer to use methods on AwContents.
     public ContentViewCore getContentViewCore() {
         return mContentViewCore;
     }
@@ -361,11 +374,11 @@ public class AwContents {
     }
 
     public int getContentHeightCss() {
-        return (int) Math.ceil(getContentViewCore().getContentHeightCss());
+        return (int) Math.ceil(mContentViewCore.getContentHeightCss());
     }
 
     public int getContentWidthCss() {
-        return (int) Math.ceil(getContentViewCore().getContentWidthCss());
+        return (int) Math.ceil(mContentViewCore.getContentWidthCss());
     }
 
     public Picture capturePicture() {
@@ -381,9 +394,12 @@ public class AwContents {
         nativeEnableOnNewPicture(mNativeAwContents, enabled, invalidationOnly);
     }
 
+    // This is no longer synchronous and just calls the Async version and return 0.
+    // TODO(boliu): Remove this method.
+    @Deprecated
     public int findAllSync(String searchString) {
-        if (mNativeAwContents == 0) return 0;
-        return nativeFindAllSync(mNativeAwContents, searchString);
+        findAllAsync(searchString);
+        return 0;
     }
 
     public void findAllAsync(String searchString) {
@@ -454,11 +470,7 @@ public class AwContents {
 
         mContentViewCore.loadUrl(params);
 
-        if (mInterceptNavigationDelegate != null) {
-            // getUrl returns a sanitized address in the same format that will be used for
-            // callbacks, so it's safe to use string comparison as an equality check later on.
-            mInterceptNavigationDelegate.onUrlLoadRequested(mContentViewCore.getUrl());
-        }
+        suppressInterceptionForThisNavigation();
 
         // The behavior of WebViewClassic uses the populateVisitedLinks callback in WebKit.
         // Chromium does not use this use code path and the best emulation of this behavior to call
@@ -469,6 +481,24 @@ public class AwContents {
         }
     }
 
+    private void suppressInterceptionForThisNavigation() {
+        if (mInterceptNavigationDelegate != null) {
+            // getUrl returns a sanitized address in the same format that will be used for
+            // callbacks, so it's safe to use string comparison as an equality check later on.
+            mInterceptNavigationDelegate.onUrlLoadRequested(mContentViewCore.getUrl());
+        }
+    }
+
+    /**
+     * Get the URL of the current page.
+     *
+     * @return The URL of the current page or null if it's empty.
+     */
+    public String getUrl() {
+        String url =  mContentViewCore.getUrl();
+        if (url == null || url.trim().isEmpty()) return null;
+        return url;
+    }
     /**
      * Called on the "source" AwContents that is opening the popup window to
      * provide the AwContents to host the pop up content.
@@ -532,17 +562,123 @@ public class AwContents {
     //--------------------------------------------------------------------------------------------
 
     /**
+     * @see ContentViewCore#getContentSettings()
+     */
+    public ContentSettings getContentSettings() {
+        return mContentViewCore.getContentSettings();
+    }
+
+    /**
+     * @see ContentViewCore#computeHorizontalScrollRange()
+     */
+    public int computeHorizontalScrollRange() {
+        return mContentViewCore.computeHorizontalScrollRange();
+    }
+
+    /**
+     * @see ContentViewCore#computeHorizontalScrollOffset()
+     */
+    public int computeHorizontalScrollOffset() {
+        return mContentViewCore.computeHorizontalScrollOffset();
+    }
+
+    /**
+     * @see ContentViewCore#computeVerticalScrollRange()
+     */
+    public int computeVerticalScrollRange() {
+        return mContentViewCore.computeVerticalScrollRange();
+    }
+
+    /**
+     * @see ContentViewCore#computeVerticalScrollOffset()
+     */
+    public int computeVerticalScrollOffset() {
+        return mContentViewCore.computeVerticalScrollOffset();
+    }
+
+    /**
+     * @see ContentViewCore#computeVerticalScrollExtent()
+     */
+    public int computeVerticalScrollExtent() {
+        return mContentViewCore.computeVerticalScrollExtent();
+    }
+
+    /**
+     * @see android.webkit.WebView#stopLoading()
+     */
+    public void stopLoading() {
+        mContentViewCore.stopLoading();
+    }
+
+    /**
+     * @see android.webkit.WebView#reload()
+     */
+    public void reload() {
+        mContentViewCore.reload();
+    }
+
+    /**
+     * @see android.webkit.WebView#canGoBack()
+     */
+    public boolean canGoBack() {
+        return mContentViewCore.canGoBack();
+    }
+
+    /**
+     * @see android.webkit.WebView#goBack()
+     */
+    public void goBack() {
+        mContentViewCore.goBack();
+
+        suppressInterceptionForThisNavigation();
+    }
+
+    /**
+     * @see android.webkit.WebView#canGoForward()
+     */
+    public boolean canGoForward() {
+        return mContentViewCore.canGoForward();
+    }
+
+    /**
+     * @see android.webkit.WebView#goForward()
+     */
+    public void goForward() {
+        mContentViewCore.goForward();
+
+        suppressInterceptionForThisNavigation();
+    }
+
+    /**
+     * @see android.webkit.WebView#canGoBackOrForward(int)
+     */
+    public boolean canGoBackOrForward(int steps) {
+        return mContentViewCore.canGoToOffset(steps);
+    }
+
+    /**
+     * @see android.webkit.WebView#goBackOrForward(int)
+     */
+    public void goBackOrForward(int steps) {
+        mContentViewCore.goToOffset(steps);
+
+        suppressInterceptionForThisNavigation();
+    }
+
+    /**
      * @see android.webkit.WebView#pauseTimers()
      */
+    // TODO(kristianm): Remove
     public void pauseTimers() {
-        mContentViewCore.onActivityPause();
+        ContentViewStatics.setWebKitSharedTimersSuspended(true);
     }
 
     /**
      * @see android.webkit.WebView#resumeTimers()
      */
+    // TODO(kristianm): Remove
     public void resumeTimers() {
-        mContentViewCore.onActivityResume();
+        ContentViewStatics.setWebKitSharedTimersSuspended(false);
     }
 
     /**
@@ -566,6 +702,27 @@ public class AwContents {
      */
     public boolean isPaused() {
         return mIsPaused;
+    }
+
+    /**
+     * @see android.webkit.WebView#onCreateInputConnection(EditorInfo)
+     */
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        return mContentViewCore.onCreateInputConnection(outAttrs);
+    }
+
+    /**
+     * @see android.webkit.WebView#onKeyUp(int, KeyEvent)
+     */
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        return mContentViewCore.onKeyUp(keyCode, event);
+    }
+
+    /**
+     * @see android.webkit.WebView#dispatchKeyEvent(KeyEvent)
+     */
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return mContentViewCore.dispatchKeyEvent(event);
     }
 
     /**
@@ -614,6 +771,27 @@ public class AwContents {
         return null;
     }
 
+    /**
+     * @see ContentViewCore#getNavigationHistory()
+     */
+    public NavigationHistory getNavigationHistory() {
+        return mContentViewCore.getNavigationHistory();
+    }
+
+    /**
+     * @see android.webkit.WebView#getTitle()
+     */
+    public String getTitle() {
+        return mContentViewCore.getTitle();
+    }
+
+    /**
+     * @see android.webkit.WebView#clearHistory()
+     */
+    public void clearHistory() {
+        mContentViewCore.clearHistory();
+    }
+
     public String[] getHttpAuthUsernamePassword(String host, String realm) {
         return HttpAuthDatabase.getInstance(mContentViewCore.getContext())
                 .getHttpAuthUsernamePassword(host, realm);
@@ -631,6 +809,13 @@ public class AwContents {
     public SslCertificate getCertificate() {
         if (mNativeAwContents == 0) return null;
         return SslUtil.getCertificateFromDerBytes(nativeGetCertificate(mNativeAwContents));
+    }
+
+    /**
+     * @see android.webkit.WebView#clearSslPreferences()
+     */
+    public void clearSslPreferences() {
+        mContentViewCore.clearSslPreferences();
     }
 
     /**
@@ -680,7 +865,63 @@ public class AwContents {
      * the screen density factor. See CTS WebViewTest.testSetInitialScale.
      */
     public float getScale() {
-        return (float)(getContentViewCore().getScale() * mDIPScale);
+        return (float)(mContentViewCore.getScale() * mDIPScale);
+    }
+
+    /**
+     * @see android.webkit.WebView#flingScroll(int, int)
+     */
+    public void flingScroll(int vx, int vy) {
+        mContentViewCore.flingScroll(vx, vy);
+    }
+
+    /**
+     * @see android.webkit.WebView#pageUp(boolean)
+     */
+    public boolean pageUp(boolean top) {
+        return mContentViewCore.pageUp(top);
+    }
+
+    /**
+     * @see android.webkit.WebView#pageDown(boolean)
+     */
+    public boolean pageDown(boolean bottom) {
+        return mContentViewCore.pageDown(bottom);
+    }
+
+    /**
+     * @see android.webkit.WebView#canZoomIn()
+     */
+    public boolean canZoomIn() {
+        return mContentViewCore.canZoomIn();
+    }
+
+    /**
+     * @see android.webkit.WebView#canZoomOut()
+     */
+    public boolean canZoomOut() {
+        return mContentViewCore.canZoomOut();
+    }
+
+    /**
+     * @see android.webkit.WebView#zoomIn()
+     */
+    public boolean zoomIn() {
+        return mContentViewCore.zoomIn();
+    }
+
+    /**
+     * @see android.webkit.WebView#zoomOut()
+     */
+    public boolean zoomOut() {
+        return mContentViewCore.zoomOut();
+    }
+
+    /**
+     * @see android.webkit.WebView#invokeZoomPicker()
+     */
+    public void invokeZoomPicker() {
+        mContentViewCore.invokeZoomPicker();
     }
 
     //--------------------------------------------------------------------------------------------
@@ -843,6 +1084,42 @@ public class AwContents {
         return result;
     }
 
+    /**
+     * @see ContentViewCore#addPossiblyUnsafeJavascriptInterface(Object, String, Class)
+     */
+    public void addPossiblyUnsafeJavascriptInterface(Object object, String name,
+            Class<? extends Annotation> requiredAnnotation) {
+        mContentViewCore.addPossiblyUnsafeJavascriptInterface(object, name, requiredAnnotation);
+    }
+
+    /**
+     * @see android.webkit.WebView#removeJavascriptInterface(String)
+     */
+    public void removeJavascriptInterface(String interfaceName) {
+        mContentViewCore.removeJavascriptInterface(interfaceName);
+    }
+
+    /**
+     * @see android.webkit.WebView#onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo)
+     */
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        mContentViewCore.onInitializeAccessibilityNodeInfo(info);
+    }
+
+    /**
+     * @see android.webkit.WebView#onInitializeAccessibilityEvent(AccessibilityEvent)
+     */
+    public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
+        mContentViewCore.onInitializeAccessibilityEvent(event);
+    }
+
+    /**
+     * @see android.webkit.WebView#performAccessibilityAction(int, Bundle)
+     */
+    public boolean performAccessibilityAction(int action, Bundle arguments) {
+        return mContentViewCore.performAccessibilityAction(action, arguments);
+    }
+
     //--------------------------------------------------------------------------------------------
     //  Methods called from native via JNI
     //--------------------------------------------------------------------------------------------
@@ -878,11 +1155,6 @@ public class AwContents {
     }
 
     private class AwGeolocationCallback implements GeolocationPermissions.Callback {
-        private final AwGeolocationPermissions mGeolocationPermissions;
-
-        private AwGeolocationCallback(AwGeolocationPermissions geolocationPermissions) {
-            mGeolocationPermissions = geolocationPermissions;
-        }
 
         @Override
         public void invoke(final String origin, final boolean allow, final boolean retain) {
@@ -891,9 +1163,9 @@ public class AwContents {
                 public void run() {
                     if (retain) {
                         if (allow) {
-                            mGeolocationPermissions.allow(origin);
+                            mBrowserContext.getGeolocationPermissions().allow(origin);
                         } else {
-                            mGeolocationPermissions.deny(origin);
+                            mBrowserContext.getGeolocationPermissions().deny(origin);
                         }
                     }
                     nativeInvokeGeolocationCallback(mNativeAwContents, allow, origin);
@@ -904,7 +1176,7 @@ public class AwContents {
 
     @CalledByNative
     private void onGeolocationPermissionsShowPrompt(String origin) {
-        AwGeolocationPermissions permissions = AwGeolocationPermissions.getInstance();
+        AwGeolocationPermissions permissions = mBrowserContext.getGeolocationPermissions();
         // Reject if geoloaction is disabled, or the origin has a retained deny
         if (!mSettings.getGeolocationEnabled()) {
             nativeInvokeGeolocationCallback(mNativeAwContents, false, origin);
@@ -917,7 +1189,7 @@ public class AwContents {
             return;
         }
         mContentsClient.onGeolocationPermissionsShowPrompt(
-                origin, new AwGeolocationCallback(permissions));
+                origin, new AwGeolocationCallback());
     }
 
     @CalledByNative
@@ -955,6 +1227,13 @@ public class AwContents {
     @CalledByNative
     private boolean performLongClick() {
         return mContainerView.performLongClick();
+    }
+
+    @CalledByNative
+    private int[] getLocationOnScreen() {
+        int[] result = new int[2];
+        mContainerView.getLocationOnScreen(result);
+        return result;
     }
 
     // -------------------------------------------------------------------------------------------
@@ -1055,7 +1334,6 @@ public class AwContents {
     private native void nativeAddVisitedLinks(int nativeAwContents, String[] visitedLinks);
 
     private native void nativeSetScrollForHWFrame(int nativeAwContents, int scrollX, int scrollY);
-    private native int nativeFindAllSync(int nativeAwContents, String searchString);
     private native void nativeFindAllAsync(int nativeAwContents, String searchString);
     private native void nativeFindNext(int nativeAwContents, boolean forward);
     private native void nativeClearMatches(int nativeAwContents);

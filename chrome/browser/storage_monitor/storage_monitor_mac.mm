@@ -4,7 +4,7 @@
 
 #include "chrome/browser/storage_monitor/storage_monitor_mac.h"
 
-#include "chrome/browser/storage_monitor/media_device_notifications_utils.h"
+#include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chrome {
@@ -41,6 +41,44 @@ void GetDiskInfoAndUpdate(const scoped_refptr<StorageMonitorMac>& monitor,
                  monitor,
                  dict,
                  update_type));
+}
+
+struct EjectDiskOptions {
+  std::string bsd_name;
+  base::Callback<void(StorageMonitor::EjectStatus)> callback;
+  base::mac::ScopedCFTypeRef<DADiskRef> disk;
+};
+
+void PostEjectCallback(DADiskRef disk,
+                       DADissenterRef dissenter,
+                       void* context) {
+  scoped_ptr<EjectDiskOptions> options_deleter(
+      static_cast<EjectDiskOptions*>(context));
+  if (dissenter) {
+    options_deleter->callback.Run(StorageMonitor::EJECT_IN_USE);
+    return;
+  }
+
+  options_deleter->callback.Run(StorageMonitor::EJECT_OK);
+}
+
+void PostUnmountCallback(DADiskRef disk,
+                         DADissenterRef dissenter,
+                         void* context) {
+  scoped_ptr<EjectDiskOptions> options_deleter(
+      static_cast<EjectDiskOptions*>(context));
+  if (dissenter) {
+    options_deleter->callback.Run(StorageMonitor::EJECT_IN_USE);
+    return;
+  }
+
+  DADiskEject(options_deleter->disk.get(), kDADiskEjectOptionDefault,
+              PostEjectCallback, options_deleter.release());
+}
+
+void EjectDisk(EjectDiskOptions* options) {
+  DADiskUnmount(options->disk.get(), kDADiskUnmountOptionWhole,
+                PostUnmountCallback, options);
 }
 
 }  // namespace
@@ -100,7 +138,7 @@ void StorageMonitorMac::UpdateDisk(const DiskInfoMac& info,
     MediaStorageUtil::RecordDeviceInfoHistogram(true, info.device_id(),
                                                 info.device_name());
     if (ShouldPostNotificationForDisk(info)) {
-      string16 display_name = GetDisplayNameForDevice(
+      string16 display_name = MediaStorageUtil::GetDisplayNameForDevice(
           info.total_size_in_bytes(), info.device_name());
       receiver()->ProcessAttach(StorageInfo(
           info.device_id(), display_name, info.mount_point().value()));
@@ -134,6 +172,47 @@ uint64 StorageMonitorMac::GetStorageSize(const std::string& location) const {
   if (!FindDiskWithMountPoint(base::FilePath(location), &info))
     return 0;
   return info.total_size_in_bytes();
+}
+
+void StorageMonitorMac::EjectDevice(
+      const std::string& device_id,
+      base::Callback<void(EjectStatus)> callback) {
+  std::string bsd_name;
+  for (std::map<std::string, DiskInfoMac>::iterator
+      it = disk_info_map_.begin(); it != disk_info_map_.end(); ++it) {
+    if (it->second.device_id() == device_id) {
+      bsd_name = it->first;
+      disk_info_map_.erase(it);
+      break;
+    }
+  }
+
+  if (bsd_name.empty()) {
+    callback.Run(EJECT_NO_SUCH_DEVICE);
+    return;
+  }
+
+  receiver()->ProcessDetach(device_id);
+
+  base::mac::ScopedCFTypeRef<DADiskRef> disk(
+      DADiskCreateFromBSDName(NULL, session_, bsd_name.c_str()));
+  if (!disk.get()) {
+    callback.Run(StorageMonitor::EJECT_FAILURE);
+    return;
+  }
+  // Get the reference to the full disk for ejecting.
+  disk.reset(DADiskCopyWholeDisk(disk));
+  if (!disk.get()) {
+    callback.Run(StorageMonitor::EJECT_FAILURE);
+    return;
+  }
+
+  EjectDiskOptions* options = new EjectDiskOptions;
+  options->bsd_name = bsd_name;
+  options->callback = callback;
+  options->disk.reset(disk.release());
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+                                   base::Bind(EjectDisk, options));
 }
 
 // static

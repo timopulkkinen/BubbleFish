@@ -30,7 +30,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -83,6 +82,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
@@ -673,6 +673,17 @@ void BrowserWindowGtk::Close() {
   // To help catch bugs in any event handlers that might get fired during the
   // destruction, set window_ to NULL before any handlers will run.
   window_ = NULL;
+  // Avoid use-after-free in any code that runs after Close() and forgets to
+  // check window_.
+  window_container_ = NULL;
+  window_vbox_ = NULL;
+  render_area_vbox_ = NULL;
+  render_area_floating_container_ = NULL;
+  render_area_event_box_ = NULL;
+  toolbar_border_ = NULL;
+  contents_vsplit_ = NULL;
+  contents_hsplit_ = NULL;
+
   window_has_shown_ = false;
   titlebar_->set_window(NULL);
 
@@ -829,7 +840,10 @@ void BrowserWindowGtk::EnterFullscreen(
 void BrowserWindowGtk::UpdateFullscreenExitBubbleContent(
      const GURL& url,
       FullscreenExitBubbleType bubble_type) {
-  if (bubble_type == FEB_TYPE_NONE) {
+  if (!window_) {
+    // Don't create a fullscreen bubble for a closing window.
+    return;
+  } else if (bubble_type == FEB_TYPE_NONE) {
    fullscreen_exit_bubble_.reset();
   } else if (fullscreen_exit_bubble_.get()) {
    fullscreen_exit_bubble_->UpdateContent(url, bubble_type);

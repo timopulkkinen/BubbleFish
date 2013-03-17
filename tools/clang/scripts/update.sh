@@ -8,7 +8,7 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=174965
+CLANG_REVISION=176256
 # ASan Mac builders are pinned to this revision, see http://crbug.com/170629.
 CLANG_ASAN_MAC_REVISION=170392
 
@@ -91,8 +91,12 @@ function on_asan_mac_host {
     return 1
   fi
   HOST="$(hostname -s)"
-  # Chrome Mac ASan Builder.
+  # Old (10.6) Chrome Mac ASan Builder. Kept here till we fully migrate to 10.8
   if [[ "${HOST}" == "vm633-m1" ]]; then
+    return 0
+  fi
+  # 10.8 Chrome Mac ASan Builder.
+  if [[ "${HOST}" == "vm672-m1" ]]; then
     return 0
   fi
   # Chrome Mac ASan LKGR.
@@ -350,7 +354,7 @@ cd -
 if [[ -n "${with_android}" ]]; then
   # Make a standalone Android toolchain.
   ${ANDROID_NDK_DIR}/build/tools/make-standalone-toolchain.sh \
-      --platform=android-9 \
+      --platform=android-14 \
       --install-dir="${LLVM_BUILD_DIR}/android-toolchain"
 
   # Fixup mismatching version numbers in android-ndk-r8b.

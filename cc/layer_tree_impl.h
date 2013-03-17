@@ -34,6 +34,7 @@ class OutputSurface;
 class PaintTimeCounter;
 class Proxy;
 class ResourceProvider;
+class ScrollbarLayerImpl;
 class TileManager;
 struct RendererCapabilities;
 
@@ -74,19 +75,19 @@ class CC_EXPORT LayerTreeImpl {
   // trivial accessors in a followup patch.
   const LayerTreeDebugState& debug_state() const;
   float device_scale_factor() const;
-  const gfx::Size& device_viewport_size() const;
-  const gfx::Size& layout_viewport_size() const;
+  gfx::Size device_viewport_size() const;
+  gfx::Size layout_viewport_size() const;
   std::string layer_tree_as_text() const;
   DebugRectHistory* debug_rect_history() const;
   scoped_ptr<base::Value> AsValue() const;
 
   // Other public methods
   // ---------------------------------------------------------------------------
-  LayerImpl* RootLayer() const { return root_layer_.get(); }
+  LayerImpl* root_layer() const { return root_layer_.get(); }
   void SetRootLayer(scoped_ptr<LayerImpl>);
   scoped_ptr<LayerImpl> DetachLayerTree();
 
-  void pushPropertiesTo(LayerTreeImpl*);
+  void PushPropertiesTo(LayerTreeImpl*);
 
   int source_frame_number() const { return source_frame_number_; }
   void set_source_frame_number(int frame_number) {
@@ -98,8 +99,9 @@ class CC_EXPORT LayerTreeImpl {
     hud_layer_ = layer_impl;
   }
 
-  LayerImpl* RootScrollLayer();
-  LayerImpl* CurrentlyScrollingLayer();
+  LayerImpl* RootScrollLayer() const;
+  LayerImpl* RootClipLayer() const;
+  LayerImpl* CurrentlyScrollingLayer() const;
   void set_currently_scrolling_layer(LayerImpl* layer) {
     currently_scrolling_layer_ = layer;
   }
@@ -190,8 +192,25 @@ class CC_EXPORT LayerTreeImpl {
   // Useful for debug assertions, probably shouldn't be used for anything else.
   Proxy* proxy() const;
 
+  void SetPinchZoomHorizontalLayerId(int layer_id);
+  void SetPinchZoomVerticalLayerId(int layer_id);
+
+  void DidBeginScroll();
+  void DidUpdateScroll();
+  void DidEndScroll();
+
 protected:
   LayerTreeImpl(LayerTreeHostImpl* layer_tree_host_impl);
+
+  void UpdateSolidColorScrollbars();
+
+  // Hide existence of pinch-zoom scrollbars.
+  void UpdatePinchZoomScrollbars();
+  void FadeInPinchZoomScrollbars();
+  void FadeOutPinchZoomScrollbars();
+  ScrollbarLayerImpl* PinchZoomScrollbarHorizontal();
+  ScrollbarLayerImpl* PinchZoomScrollbarVertical();
+  bool HasPinchZoomScrollbars() const;
 
   LayerTreeHostImpl* layer_tree_host_impl_;
   int source_frame_number_;
@@ -201,6 +220,9 @@ protected:
   LayerImpl* currently_scrolling_layer_;
   SkColor background_color_;
   bool has_transparent_background_;
+
+  int pinch_zoom_scrollbar_horizontal_layer_id_;
+  int pinch_zoom_scrollbar_vertical_layer_id_;
 
   float page_scale_factor_;
   float page_scale_delta_;

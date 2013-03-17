@@ -6,19 +6,11 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "content/public/renderer/render_view.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-
-namespace {
-
-// Prefix for a thumbnail URL.
-const char kThumbnailUrlPrefix[] = "chrome-search://thumb/";
-
-// Prefix for a thumbnail URL.
-const char kFaviconUrlPrefix[] = "chrome-search://favicon/";
-
-}
 
 SearchBox::SearchBox(content::RenderView* render_view)
     : content::RenderViewObserver(render_view),
@@ -31,8 +23,7 @@ SearchBox::SearchBox(content::RenderView* render_view)
       last_results_base_(0),
       is_key_capture_enabled_(false),
       display_instant_results_(false),
-      omnibox_font_size_(0),
-      last_restricted_id_(0) {
+      omnibox_font_size_(0) {
 }
 
 SearchBox::~SearchBox() {
@@ -51,12 +42,19 @@ void SearchBox::SetSuggestions(
       render_view()->GetRoutingID(), render_view()->GetPageId(), suggestions));
 }
 
-void SearchBox::ShowInstantOverlay(InstantShownReason reason,
-                                   int height,
-                                   InstantSizeUnits units) {
+void SearchBox::ClearQuery() {
+  query_.clear();
+}
+
+void SearchBox::ShowInstantOverlay(int height, InstantSizeUnits units) {
   render_view()->Send(new ChromeViewHostMsg_ShowInstantOverlay(
-      render_view()->GetRoutingID(), render_view()->GetPageId(), reason,
-      height, units));
+      render_view()->GetRoutingID(), render_view()->GetPageId(), height,
+      units));
+}
+
+void SearchBox::FocusOmnibox() {
+  render_view()->Send(new ChromeViewHostMsg_FocusOmnibox(
+      render_view()->GetRoutingID(), render_view()->GetPageId()));
 }
 
 void SearchBox::StartCapturingKeyStrokes() {
@@ -77,20 +75,19 @@ void SearchBox::NavigateToURL(const GURL& url,
       url, transition, disposition));
 }
 
-void SearchBox::DeleteMostVisitedItem(int restrict_id) {
-  string16 url = RestrictedIdToURL(restrict_id);
-  render_view()->Send(new ChromeViewHostMsg_InstantDeleteMostVisitedItem(
-      render_view()->GetRoutingID(), GURL(url)));
+void SearchBox::DeleteMostVisitedItem(uint64 most_visited_item_id) {
+  render_view()->Send(new ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem(
+      render_view()->GetRoutingID(), most_visited_item_id));
 }
 
-void SearchBox::UndoMostVisitedDeletion(int restrict_id) {
-  string16 url = RestrictedIdToURL(restrict_id);
-  render_view()->Send(new ChromeViewHostMsg_InstantUndoMostVisitedDeletion(
-      render_view()->GetRoutingID(), GURL(url)));
+void SearchBox::UndoMostVisitedDeletion(uint64 most_visited_item_id) {
+  render_view()->Send(new ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion(
+      render_view()->GetRoutingID(), most_visited_item_id));
 }
 
 void SearchBox::UndoAllMostVisitedDeletions() {
-  render_view()->Send(new ChromeViewHostMsg_InstantUndoAllMostVisitedDeletions(
+  render_view()->Send(
+      new ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions(
       render_view()->GetRoutingID()));
 }
 
@@ -117,11 +114,13 @@ const std::vector<InstantAutocompleteResult>&
 }
 
 const InstantAutocompleteResult* SearchBox::GetAutocompleteResultWithId(
-    size_t restricted_id) const {
-  if (restricted_id < last_results_base_ ||
-      restricted_id >= last_results_base_ + last_autocomplete_results_.size())
+    size_t autocomplete_result_id) const {
+  if (autocomplete_result_id < last_results_base_ ||
+      autocomplete_result_id >=
+          last_results_base_ + last_autocomplete_results_.size())
     return NULL;
-  return &last_autocomplete_results_[restricted_id - last_results_base_];
+  return &last_autocomplete_results_[
+      autocomplete_result_id - last_results_base_];
 }
 
 const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() {
@@ -152,7 +151,10 @@ bool SearchBox::OnMessageReceived(const IPC::Message& message) {
                         OnThemeChanged)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFontInformation,
                         OnFontInformationReceived)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_InstantMostVisitedItemsChanged,
+    IPC_MESSAGE_HANDLER(
+        ChromeViewMsg_SearchBoxGrantChromeSearchAccessFromOrigin,
+        OnGrantChromeSearchAccessFromOrigin)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
                         OnMostVisitedChanged)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -286,6 +288,31 @@ void SearchBox::OnThemeChanged(const ThemeBackgroundInfo& theme_info) {
   }
 }
 
+void SearchBox::OnFontInformationReceived(const string16& omnibox_font,
+                                          size_t omnibox_font_size) {
+  omnibox_font_ = omnibox_font;
+  omnibox_font_size_ = omnibox_font_size;
+}
+
+void SearchBox::OnGrantChromeSearchAccessFromOrigin(const GURL& origin_url) {
+  string16 chrome_search_scheme(ASCIIToUTF16(chrome::kChromeSearchScheme));
+  WebKit::WebSecurityPolicy::addOriginAccessWhitelistEntry(
+      origin_url,
+      chrome_search_scheme,
+      ASCIIToUTF16(chrome::kChromeUIFaviconHost),
+      false);
+  WebKit::WebSecurityPolicy::addOriginAccessWhitelistEntry(
+      origin_url,
+      chrome_search_scheme,
+      ASCIIToUTF16(chrome::kChromeUIThemeHost),
+      false);
+  WebKit::WebSecurityPolicy::addOriginAccessWhitelistEntry(
+      origin_url,
+      chrome_search_scheme,
+      ASCIIToUTF16(chrome::kChromeUIThumbnailHost),
+      false);
+}
+
 double SearchBox::GetZoom() const {
   WebKit::WebView* web_view = render_view()->GetWebView();
   if (web_view) {
@@ -294,12 +321,6 @@ double SearchBox::GetZoom() const {
       return zoom;
   }
   return 1.0;
-}
-
-void SearchBox::OnFontInformationReceived(const string16& omnibox_font,
-                                          size_t omnibox_font_size) {
-  omnibox_font_ = omnibox_font;
-  omnibox_font_size_ = omnibox_font_size;
 }
 
 void SearchBox::Reset() {
@@ -321,7 +342,7 @@ void SearchBox::Reset() {
 }
 
 void SearchBox::OnMostVisitedChanged(
-    const std::vector<MostVisitedItem>& items) {
+    const std::vector<InstantMostVisitedItem>& items) {
   most_visited_items_ = items;
 
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
@@ -330,35 +351,7 @@ void SearchBox::OnMostVisitedChanged(
   }
 }
 
-const std::vector<MostVisitedItem>& SearchBox::GetMostVisitedItems() {
+const std::vector<InstantMostVisitedItem>&
+SearchBox::GetMostVisitedItems() const {
   return most_visited_items_;
-}
-
-int SearchBox::UrlToRestrictedId(string16 url) {
-  if (url_to_restricted_id_map_[url])
-    return url_to_restricted_id_map_[url];
-
-  last_restricted_id_++;
-  url_to_restricted_id_map_[url] = last_restricted_id_;
-  restricted_id_to_url_map_[last_restricted_id_] = url;
-
-  return last_restricted_id_;
-}
-
-string16 SearchBox::RestrictedIdToURL(int id) {
-  return restricted_id_to_url_map_[id];
-}
-
-string16 SearchBox::GenerateThumbnailUrl(int id) {
-  std::ostringstream ostr;
-  ostr << kThumbnailUrlPrefix << id;
-  GURL url = GURL(ostr.str());
-  return UTF8ToUTF16(url.spec());
-}
-
-string16 SearchBox::GenerateFaviconUrl(int id) {
-  std::ostringstream ostr;
-  ostr << kFaviconUrlPrefix << id;
-  GURL url = GURL(ostr.str());
-  return UTF8ToUTF16(url.spec());
 }

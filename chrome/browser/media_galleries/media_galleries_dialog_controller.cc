@@ -4,6 +4,7 @@
 
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 
+#include "base/i18n/time_formatting.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
@@ -11,7 +12,7 @@
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/storage_monitor/media_storage_util.h"
-#include "chrome/browser/storage_monitor/storage_monitor.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -30,7 +31,7 @@ bool IsAttachedDevice(const std::string& device_id) {
   if (!MediaStorageUtil::IsRemovableDevice(device_id))
     return false;
 
-  std::vector<StorageMonitor::StorageInfo> removable_storages =
+  std::vector<StorageInfo> removable_storages =
       StorageMonitor::GetInstance()->GetAttachedStorage();
   for (size_t i = 0; i < removable_storages.size(); ++i) {
     if (removable_storages[i].device_id == device_id)
@@ -77,6 +78,17 @@ MediaGalleriesDialogController::~MediaGalleriesDialogController() {
     select_folder_dialog_->ListenerDestroyed();
 }
 
+string16 ConstructGalleryNameFromMetadata(
+    const string16& vendor_name,
+    const string16& model_name,
+    uint64 size_in_bytes) {
+  return MediaStorageUtil::GetDisplayNameForDevice(
+      size_in_bytes,
+      MediaStorageUtil::GetFullProductName(UTF16ToUTF8(vendor_name),
+                                           UTF16ToUTF8(model_name)));
+
+}
+
 // static
 string16 MediaGalleriesDialogController::GetGalleryDisplayName(
     const MediaGalleryPrefInfo& gallery) {
@@ -90,21 +102,67 @@ string16 MediaGalleriesDialogController::GetGalleryDisplayName(
 }
 
 // static
+string16 MediaGalleriesDialogController::GetGalleryDisplayNameNoAttachment(
+    const MediaGalleryPrefInfo& gallery) {
+  string16 name = gallery.display_name;
+  if (name.empty())
+    name = gallery.volume_label;
+  if (name.empty()) {
+    name = ConstructGalleryNameFromMetadata(
+        gallery.vendor_name, gallery.model_name, gallery.total_size_in_bytes);
+  }
+
+  return name;
+}
+
+// static
 string16 MediaGalleriesDialogController::GetGalleryTooltip(
     const MediaGalleryPrefInfo& gallery) {
   return gallery.AbsolutePath().LossyDisplayName();
 }
 
+// static
+bool MediaGalleriesDialogController::GetGalleryAttached(
+    const MediaGalleryPrefInfo& gallery) {
+  return !MediaStorageUtil::IsRemovableDevice(gallery.device_id) ||
+         IsAttachedDevice(gallery.device_id);
+}
+
+// static
+string16 MediaGalleriesDialogController::GetGalleryAdditionalDetails(
+    const MediaGalleryPrefInfo& gallery) {
+  string16 attached;
+  if (MediaStorageUtil::IsRemovableDevice(gallery.device_id)) {
+    if (IsAttachedDevice(gallery.device_id)) {
+      attached = l10n_util::GetStringUTF16(
+          IDS_MEDIA_GALLERIES_DIALOG_DEVICE_ATTACHED);
+    } else if (!gallery.last_attach_time.is_null()) {
+      attached = l10n_util::GetStringFUTF16(
+          IDS_MEDIA_GALLERIES_LAST_ATTACHED,
+          base::TimeFormatShortDateNumeric(gallery.last_attach_time));
+    } else {
+      attached = l10n_util::GetStringUTF16(
+          IDS_MEDIA_GALLERIES_DIALOG_DEVICE_NOT_ATTACHED);
+    }
+  }
+
+  // TODO(gbillock): This is a placeholder. Need to actually get the
+  // right text here.
+  return attached;
+}
+
 string16 MediaGalleriesDialogController::GetHeader() const {
-  std::string extension_name(extension_ ? extension_->name() : "");
-  return l10n_util::GetStringFUTF16(IDS_MEDIA_GALLERIES_DIALOG_HEADER,
-                                    UTF8ToUTF16(extension_name));
+  return l10n_util::GetStringUTF16(IDS_MEDIA_GALLERIES_DIALOG_HEADER);
 }
 
 string16 MediaGalleriesDialogController::GetSubtext() const {
   std::string extension_name(extension_ ? extension_->name() : "");
   return l10n_util::GetStringFUTF16(IDS_MEDIA_GALLERIES_DIALOG_SUBTEXT,
                                     UTF8ToUTF16(extension_name));
+}
+
+string16 MediaGalleriesDialogController::GetUnattachedLocationsHeader() const {
+  return l10n_util::GetStringUTF16(IDS_MEDIA_GALLERIES_UNATTACHED_LOCATIONS);
 }
 
 bool MediaGalleriesDialogController::HasPermittedGalleries() const {
@@ -114,6 +172,16 @@ bool MediaGalleriesDialogController::HasPermittedGalleries() const {
       return true;
   }
   return false;
+}
+
+const MediaGalleriesDialogController::KnownGalleryPermissions&
+    MediaGalleriesDialogController::permissions() const {
+  return known_galleries_;
+}
+
+const MediaGalleriesDialogController::NewGalleryPermissions&
+    MediaGalleriesDialogController::new_permissions() const {
+  return new_galleries_;
 }
 
 void MediaGalleriesDialogController::OnAddFolderClicked() {
@@ -172,11 +240,6 @@ void MediaGalleriesDialogController::DialogFinished(bool accepted) {
   delete this;
 }
 
-const MediaGalleriesDialogController::KnownGalleryPermissions&
-MediaGalleriesDialogController::permissions() const {
-  return known_galleries_;
-}
-
 content::WebContents* MediaGalleriesDialogController::web_contents() {
   return web_contents_;
 }
@@ -215,12 +278,12 @@ void MediaGalleriesDialogController::FileSelected(const base::FilePath& path,
 }
 
 void MediaGalleriesDialogController::OnRemovableStorageAttached(
-    const StorageMonitor::StorageInfo& info) {
+    const StorageInfo& info) {
   UpdateGalleriesOnDeviceEvent(info.device_id);
 }
 
 void MediaGalleriesDialogController::OnRemovableStorageDetached(
-    const StorageMonitor::StorageInfo& info) {
+    const StorageInfo& info) {
   UpdateGalleriesOnDeviceEvent(info.device_id);
 }
 

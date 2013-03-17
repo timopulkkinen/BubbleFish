@@ -114,7 +114,6 @@ class PasswordStoreWinTest : public testing::Test {
     login_db_.reset(new LoginDatabase());
     ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
         FILE_PATH_LITERAL("login_test"))));
-
     wds_ = new WebDataService();
     ASSERT_TRUE(wds_->Init(temp_dir_.path()));
   }

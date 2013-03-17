@@ -13,14 +13,18 @@
 #include "base/time.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
+
+namespace WebKit {
+class WebVideoFrame;
+}
 
 namespace webkit_media {
 
 class StreamTextureFactory;
 class StreamTextureProxy;
 class WebMediaPlayerManagerAndroid;
+class WebVideoFrameImpl;
 
 // An abstract class that serves as the common base class for implementing
 // WebKit::WebMediaPlayer on Android.
@@ -30,6 +34,9 @@ class WebMediaPlayerAndroid
  public:
   // Resource loading.
   virtual void load(const WebKit::WebURL& url, CORSMode cors_mode);
+  virtual void load(const WebKit::WebURL& url,
+                    WebKit::WebMediaSource* media_source,
+                    CORSMode cors_mode);
   virtual void cancelLoad();
 
   // Playback controls.
@@ -186,7 +193,7 @@ class WebMediaPlayerAndroid
   WebKit::WebSize natural_size_;
 
   // The video frame object used for renderering by WebKit.
-  scoped_ptr<WebKit::WebVideoFrame> video_frame_;
+  scoped_ptr<WebVideoFrameImpl> web_video_frame_;
 
   // Message loop for main renderer thread.
   MessageLoop* main_loop_;

@@ -19,28 +19,29 @@ DelegatedRendererLayer::DelegatedRendererLayer()
 
 DelegatedRendererLayer::~DelegatedRendererLayer() {}
 
-scoped_ptr<LayerImpl> DelegatedRendererLayer::createLayerImpl(
+scoped_ptr<LayerImpl> DelegatedRendererLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
   return DelegatedRendererLayerImpl::Create(
-      tree_impl, m_layerId).PassAs<LayerImpl>();
+      tree_impl, layer_id_).PassAs<LayerImpl>();
 }
 
-bool DelegatedRendererLayer::drawsContent() const {
-  return !frame_size_.IsEmpty();
+bool DelegatedRendererLayer::DrawsContent() const {
+  return Layer::DrawsContent() && !frame_size_.IsEmpty();
 }
 
-void DelegatedRendererLayer::pushPropertiesTo(LayerImpl* impl) {
-  Layer::pushPropertiesTo(impl);
+void DelegatedRendererLayer::PushPropertiesTo(LayerImpl* impl) {
+  Layer::PushPropertiesTo(impl);
 
   DelegatedRendererLayerImpl* delegated_impl =
       static_cast<DelegatedRendererLayerImpl*>(impl);
 
   delegated_impl->SetDisplaySize(display_size_);
 
-  if (!frame_data_)
-    return;
-
-  if (frame_size_.IsEmpty()) {
+  if (!frame_data_) {
+    delegated_impl->SetFrameData(scoped_ptr<DelegatedFrameData>(),
+                                 gfx::Rect(),
+                                 &unused_resources_for_child_compositor_);
+  } else if (frame_size_.IsEmpty()) {
     scoped_ptr<DelegatedFrameData> empty_frame(new DelegatedFrameData);
     delegated_impl->SetFrameData(empty_frame.Pass(),
                                  gfx::Rect(),
@@ -58,7 +59,7 @@ void DelegatedRendererLayer::SetDisplaySize(gfx::Size size) {
   if (display_size_ == size)
     return;
   display_size_ = size;
-  setNeedsCommit();
+  SetNeedsCommit();
 }
 
 void DelegatedRendererLayer::SetFrameData(
@@ -75,10 +76,20 @@ void DelegatedRendererLayer::SetFrameData(
     RenderPass* root_pass = frame_data_->render_pass_list.back();
     damage_in_frame_.Union(root_pass->damage_rect);
     frame_size_ = root_pass->output_rect.size();
+
+    // TODO(danakj): This could be optimized to only add resources to the
+    // frame_data_ if they are actually used in the frame. For now, it will
+    // cause the parent (this layer) to hold onto some resources it doesn't
+    // need to for an extra frame.
+    for (size_t i = 0; i < unused_resources_for_child_compositor_.size(); ++i) {
+      frame_data_->resource_list.push_back(
+          unused_resources_for_child_compositor_[i]);
+    }
+    unused_resources_for_child_compositor_.clear();
   } else {
     frame_size_ = gfx::Size();
   }
-  setNeedsCommit();
+  SetNeedsCommit();
 }
 
 void DelegatedRendererLayer::TakeUnusedResourcesForChildCompositor(

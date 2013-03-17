@@ -634,9 +634,9 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::Initialize(
     GLint stencil_bits = 0;
     getIntegerv(GL_STENCIL_BITS, &stencil_bits);
     attributes_.stencil = stencil_bits > 0;
-    GLint samples = 0;
-    getIntegerv(GL_SAMPLES, &samples);
-    attributes_.antialias = samples > 0;
+    GLint sample_buffers = 0;
+    getIntegerv(GL_SAMPLE_BUFFERS, &sample_buffers);
+    attributes_.antialias = sample_buffers > 0;
   }
   makeContextCurrent();
 
@@ -1687,5 +1687,7 @@ DELEGATE_TO_GL_2(produceTextureCHROMIUM, ProduceTextureCHROMIUM,
 DELEGATE_TO_GL_2(consumeTextureCHROMIUM, ConsumeTextureCHROMIUM,
                  WGC3Denum, const WGC3Dbyte*)
 
+DELEGATE_TO_GL_2(drawBuffersEXT, DrawBuffersEXT,
+                 WGC3Dsizei, const WGC3Denum*)
 }  // namespace gpu
 }  // namespace webkit

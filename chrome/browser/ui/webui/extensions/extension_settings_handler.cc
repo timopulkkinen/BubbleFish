@@ -32,7 +32,8 @@
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -40,7 +41,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/browser/ui/webui/managed_user_passphrase_dialog.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -53,6 +53,7 @@
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -71,10 +72,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#endif
 
 using content::RenderViewHost;
 using content::WebContents;
@@ -358,6 +355,16 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
 }
 
+void ExtensionSettingsHandler::RenderViewDeleted(
+    content::RenderViewHost* render_view_host) {
+  deleting_rvh_ = render_view_host;
+  Profile* source_profile = Profile::FromBrowserContext(
+      render_view_host->GetSiteInstance()->GetBrowserContext());
+  if (!Profile::FromWebUI(web_ui())->IsSameProfile(source_profile))
+    return;
+  MaybeUpdateAfterNotification();
+}
+
 void ExtensionSettingsHandler::NavigateToPendingEntry(const GURL& url,
     content::NavigationController::ReloadType reload_type) {
   if (reload_type != content::NavigationController::NO_RELOAD)
@@ -454,9 +461,6 @@ void ExtensionSettingsHandler::Observe(
     //
     // Doing it this way gets everything but causes the page to be rendered
     // more than we need. It doesn't seem to result in any noticeable flicker.
-    case content::NOTIFICATION_RENDER_VIEW_HOST_DELETED:
-      deleting_rvh_ = content::Source<RenderViewHost>(source).ptr();
-      // Fall through.
     case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED:
       source_profile = Profile::FromBrowserContext(
           content::Source<RenderViewHost>(source)->GetSiteInstance()->
@@ -547,8 +551,11 @@ void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
 }
 
 void ExtensionSettingsHandler::PassphraseDialogCallback(bool success) {
-  if (success)
-    HandleRequestExtensionsData(NULL);
+  if (!success)
+    return;
+  Profile* profile = Profile::FromWebUI(web_ui());
+  ManagedUserServiceFactory::GetForProfile(profile)->SetElevated(true);
+  HandleRequestExtensionsData(NULL);
 }
 
 void ExtensionSettingsHandler::ManagedUserSetElevated(const ListValue* args) {
@@ -556,15 +563,15 @@ void ExtensionSettingsHandler::ManagedUserSetElevated(const ListValue* args) {
       Profile::FromWebUI(web_ui()));
   bool elevated;
   CHECK(args->GetBoolean(0, &elevated));
-  if (!service->IsElevated() && elevated) {
-    new ManagedUserPassphraseDialog(
+  if (elevated) {
+    service->RequestAuthorization(
         web_ui()->GetWebContents(),
         base::Bind(&ExtensionSettingsHandler::PassphraseDialogCallback,
                    base::Unretained(this)));
-    return;
+  } else {
+    service->SetElevated(false);
+    HandleRequestExtensionsData(NULL);
   }
-  service->SetElevated(elevated);
-  HandleRequestExtensionsData(NULL);
 }
 
 void ExtensionSettingsHandler::HandleRequestExtensionsData(
@@ -621,7 +628,7 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
       (!is_managed || is_elevated) &&
       profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
   results.SetBoolean("profileIsManaged", is_managed);
-  results.SetBoolean("profileIsElevated", service->IsElevated());
+  results.SetBoolean("profileIsElevated", is_elevated);
   results.SetBoolean("developerMode", developer_mode);
 
   // Check to see if we have any wiped out extensions.
@@ -930,9 +937,6 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  content::NOTIFICATION_RENDER_VIEW_HOST_CREATED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this,
-                 content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,

@@ -37,9 +37,12 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
                void(const GURL& origin, const SyncStatusCallback& callback));
   MOCK_METHOD2(UnregisterOriginForTrackingChanges,
                void(const GURL& origin, const SyncStatusCallback& callback));
-  MOCK_METHOD2(ProcessRemoteChange,
-               void(RemoteChangeProcessor* processor,
-                    const SyncFileCallback& callback));
+  MOCK_METHOD2(DeleteOriginDirectory,
+               void(const GURL& origin, const SyncStatusCallback& callback));
+  MOCK_METHOD1(ProcessRemoteChange,
+               void(const SyncFileCallback& callback));
+  MOCK_METHOD1(SetRemoteChangeProcessor,
+               void(RemoteChangeProcessor* processor));
   MOCK_METHOD0(GetLocalChangeProcessor, LocalChangeProcessor*());
   MOCK_METHOD1(IsConflicting, bool(const fileapi::FileSystemURL& url));
   MOCK_METHOD2(GetRemoteFileMetadata,
@@ -49,6 +52,10 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
                      RemoteServiceState());
   MOCK_CONST_METHOD0(GetServiceName, const char*());
   MOCK_METHOD1(SetSyncEnabled, void(bool));
+  MOCK_METHOD1(SetConflictResolutionPolicy,
+               SyncStatusCode(ConflictResolutionPolicy));
+  MOCK_CONST_METHOD0(GetConflictResolutionPolicy,
+                     ConflictResolutionPolicy());
 
   // Send notifications to the observers.
   // Can be used in the mock implementation.
@@ -86,11 +93,15 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
       const GURL& origin, const SyncStatusCallback& callback);
   void UnregisterOriginForTrackingChangesStub(
       const GURL& origin, const SyncStatusCallback& callback);
-  void ProcessRemoteChangeStub(
-      RemoteChangeProcessor* processor, const SyncFileCallback& callback);
+  void DeleteOriginDirectoryStub(
+      const GURL& origin, const SyncStatusCallback& callback);
+  void ProcessRemoteChangeStub(const SyncFileCallback& callback);
   void GetRemoteFileMetadataStub(
       const fileapi::FileSystemURL& url,
       const SyncFileMetadataCallback& callback);
+  SyncStatusCode SetConflictResolutionPolicyStub(
+      ConflictResolutionPolicy policy);
+  ConflictResolutionPolicy GetConflictResolutionPolicyStub() const;
 
   OriginToURLSetMap conflict_file_urls_;
   FileMetadataMap conflict_file_metadata_;
@@ -100,6 +111,8 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
 
   ObserverList<Observer> service_observers_;
   ObserverList<FileStatusObserver> file_status_observers_;
+
+  ConflictResolutionPolicy conflict_resolution_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRemoteFileSyncService);
 };

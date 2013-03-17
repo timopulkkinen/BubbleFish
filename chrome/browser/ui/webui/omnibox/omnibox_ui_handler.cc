@@ -17,8 +17,8 @@
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/ui/search/search.h"
 #include "content/public/browser/web_ui.h"
 
 OmniboxUIHandler::OmniboxUIHandler(Profile* profile): profile_(profile) {
@@ -174,7 +174,7 @@ void OmniboxUIHandler::StartOmniboxQuery(const base::ListValue* input) {
 
 void OmniboxUIHandler::ResetController() {
   controller_.reset(new AutocompleteController(profile_, this,
-      chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
+      chrome::search::IsInstantExtendedAPIEnabled() ?
           AutocompleteClassifier::kInstantExtendedOmniboxProviders :
           AutocompleteClassifier::kDefaultOmniboxProviders));
 }

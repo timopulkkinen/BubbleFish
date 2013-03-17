@@ -37,7 +37,7 @@ class EncodingMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
  private:
   void Build();
@@ -94,7 +94,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual bool GetIconForCommandId(int command_id,
                                    gfx::Image* icon) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
@@ -148,7 +148,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   // |new_menu| should be set to true.
   void CreateZoomMenu(bool new_menu);
 
-  void OnZoomLevelChanged(const std::string& host);
+  void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change);
 
   // Models for the special menu items with buttons.
   scoped_ptr<ui::ButtonMenuItemModel> edit_menu_item_model_;

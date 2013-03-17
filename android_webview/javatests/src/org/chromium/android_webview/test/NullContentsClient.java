@@ -5,6 +5,7 @@
 package org.chromium.android_webview.test;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Picture;
 import android.net.http.SslError;
 import android.os.Message;
@@ -149,11 +150,28 @@ class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void onReceivedTouchIconUrl(String url, boolean precomposed) {
+    }
+
+    @Override
+    public void onReceivedIcon(Bitmap bitmap) {
+    }
+
+    @Override
     public void onShowCustomView(View view,
            int requestedOrientation, WebChromeClient.CustomViewCallback callback) {
     }
 
     @Override
+    public void onHideCustomView() {
+    }
+
+    @Override
     public void onScaleChangedScaled(float oldScale, float newScale) {
+    }
+
+    @Override
+    protected View getVideoLoadingProgressView() {
+        return null;
     }
 }

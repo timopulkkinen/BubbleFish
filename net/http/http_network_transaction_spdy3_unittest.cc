@@ -31,9 +31,6 @@
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/request_priority.h"
-#include "net/base/ssl_cert_request_info.h"
-#include "net/base/ssl_config_service_defaults.h"
-#include "net/base/ssl_info.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/base/upload_bytes_element_reader.h"
@@ -60,6 +57,9 @@
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_test_util_spdy3.h"
+#include "net/ssl/ssl_cert_request_info.h"
+#include "net/ssl/ssl_config_service_defaults.h"
+#include "net/ssl/ssl_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -105,7 +105,7 @@ std::vector<std::string> MakeNextProtos(const char* a, ...) {
 // SpdyNextProtos returns a vector of NPN protocol strings for negotiating
 // SPDY.
 std::vector<std::string> SpdyNextProtos() {
-  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", NULL);
+  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", "spdy/3.1", NULL);
 }
 
 int GetIdleSocketCountInTransportSocketPool(net::HttpNetworkSession* session) {
@@ -9558,7 +9558,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
   HttpStreamFactory::set_use_alternate_protocols(true);
   HttpStreamFactory::SetNextProtos(
       MakeNextProtos(
-          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy", NULL));
+          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy/3.1", "spdy", NULL));
 
   SpdySessionDependencies session_deps(
       ProxyService::CreateFixedFromPacResult("PROXY myproxy:70"));

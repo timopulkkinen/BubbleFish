@@ -227,6 +227,11 @@ class CrxInstaller
   // Runs on the UI thread. Callback from RequirementsChecker.
   void OnRequirementsChecked(std::vector<std::string> requirement_errors);
 
+#if defined(ENABLE_MANAGED_USERS)
+  // Runs on the UI thread. Callback from the managed user passphrase dialog.
+  void OnAuthorizationResult(bool success);
+#endif
+
   // Runs on the UI thread. Confirms with the user (via ExtensionInstallPrompt)
   // that it is OK to install this extension.
   void ConfirmInstall();
@@ -281,7 +286,7 @@ class CrxInstaller
   // A parsed copy of the expected manifest, before any transformations like
   // localization have taken place. If |approved_| is true, then the
   // extension's manifest must match this for the install to proceed.
-  scoped_ptr<base::DictionaryValue> expected_manifest_;
+  scoped_ptr<Manifest> expected_manifest_;
 
   // If non-NULL, contains the expected version of the extension we're
   // installing.  Important for external sources, where claiming the wrong
@@ -315,7 +320,7 @@ class CrxInstaller
 
   // A parsed copy of the unmodified original manifest, before any
   // transformations like localization have taken place.
-  scoped_ptr<base::DictionaryValue> original_manifest_;
+  scoped_ptr<Manifest> original_manifest_;
 
   // If non-empty, contains the current version of the extension we're
   // installing (for upgrades).
@@ -377,9 +382,6 @@ class CrxInstaller
   // there was an error; if there was an error that rejects installation we
   // still consider the installation 'handled'.
   bool did_handle_successfully_;
-
-  // Whether we should record an oauth2 grant upon successful install.
-  bool record_oauth2_grant_;
 
   // Whether we should produce an error if the manifest declares requirements
   // that are not met. If false and there is an unmet requirement, the install

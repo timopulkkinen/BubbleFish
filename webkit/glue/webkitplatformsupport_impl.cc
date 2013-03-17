@@ -10,7 +10,6 @@
 
 #include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/memory/discardable_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -33,12 +32,12 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebDiscardableMemory.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGestureCurve.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebPluginListBuilder.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginListBuilder.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "ui/base/layout.h"
 #include "webkit/base/file_path_string_conversions.h"
@@ -451,6 +450,21 @@ void WebKitPlatformSupportImpl::histogramEnumeration(
 const unsigned char* WebKitPlatformSupportImpl::getTraceCategoryEnabledFlag(
     const char* category_name) {
   return TRACE_EVENT_API_GET_CATEGORY_ENABLED(category_name);
+}
+
+long* WebKitPlatformSupportImpl::getTraceSamplingState(
+    const unsigned thread_bucket) {
+  switch(thread_bucket) {
+  case 0:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(0));
+  case 1:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(1));
+  case 2:
+    return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(2));
+  default:
+    NOTREACHED() << "Unknown thread bucket type.";
+  }
+  return NULL;
 }
 
 void WebKitPlatformSupportImpl::addTraceEvent(

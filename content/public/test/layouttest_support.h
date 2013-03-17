@@ -9,6 +9,7 @@
 
 namespace WebKit {
 class WebGamepads;
+struct WebSize;
 }
 
 namespace WebTestRunner {
@@ -40,8 +41,8 @@ int GetLocalSessionHistoryLength(RenderView* render_view);
 
 void SetAllowOSMesaImageTransportForTesting();
 
-// Do not require a user gesture for focus change events.
-void DoNotRequireUserGestureForFocusChanges();
+// Suppress sending focus events from the renderer to the browser.
+void DoNotSendFocusEvents();
 
 // Sync the current session history to the browser process.
 void SyncNavigationState(RenderView* render_view);
@@ -50,6 +51,17 @@ void SyncNavigationState(RenderView* render_view);
 // the state of the renderer, and does not sync the focus to the browser
 // process.
 void SetFocusAndActivate(RenderView* render_view, bool enable);
+
+// When WebKit requests a size change, immediately report the new sizes back to
+// WebKit instead of waiting for the browser to acknowledge the new size.
+void EnableShortCircuitSizeUpdates();
+
+// Changes the window rect of the given render view.
+void ForceResizeRenderView(RenderView* render_view,
+                           const WebKit::WebSize& new_size);
+
+// Never display error pages when a navigation fails.
+void DisableNavigationErrorPages();
 
 }  // namespace content
 

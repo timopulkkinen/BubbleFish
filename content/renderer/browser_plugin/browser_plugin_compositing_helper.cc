@@ -4,14 +4,15 @@
 
 #include "content/renderer/browser_plugin/browser_plugin_compositing_helper.h"
 
+#include "cc/context_provider.h"
 #include "cc/solid_color_layer.h"
 #include "cc/texture_layer.h"
 #include "content/common/browser_plugin/browser_plugin_messages.h"
+#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
 #include "content/renderer/render_thread_impl.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSharedGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "ui/gfx/size_conversions.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
@@ -39,15 +40,15 @@ BrowserPluginCompositingHelper::~BrowserPluginCompositingHelper() {
 
 void BrowserPluginCompositingHelper::EnableCompositing(bool enable) {
   if (enable && !texture_layer_) {
-    texture_layer_ = cc::TextureLayer::createForMailbox();
-    texture_layer_->setIsDrawable(true);
-    texture_layer_->setContentsOpaque(true);
+    texture_layer_ = cc::TextureLayer::CreateForMailbox();
+    texture_layer_->SetIsDrawable(true);
+    texture_layer_->SetContentsOpaque(true);
 
-    background_layer_ = cc::SolidColorLayer::create();
-    background_layer_->setMasksToBounds(true);
-    background_layer_->setBackgroundColor(
+    background_layer_ = cc::SolidColorLayer::Create();
+    background_layer_->SetMasksToBounds(true);
+    background_layer_->SetBackgroundColor(
         SkColorSetARGBInline(255, 255, 255, 255));
-    background_layer_->addChild(texture_layer_);
+    background_layer_->AddChild(texture_layer_);
     web_layer_.reset(new WebKit::WebLayerImpl(background_layer_));
   }
 
@@ -67,10 +68,12 @@ void BrowserPluginCompositingHelper::FreeMailboxMemory(
   if (mailbox_name.empty())
     return;
 
-  WebKit::WebGraphicsContext3D *context =
-     WebKit::WebSharedGraphicsContext3D::mainThreadContext();
-  if (!context)
+  scoped_refptr<cc::ContextProvider> context_provider =
+      RenderThreadImpl::current()->OffscreenContextProviderForMainThread();
+  if (!context_provider)
     return;
+
+  WebKit::WebGraphicsContext3D *context = context_provider->Context3d();
   // When a buffer is released from the compositor, we also get a
   // sync point that specifies when in the command buffer
   // it's safe to use it again.
@@ -195,7 +198,7 @@ void BrowserPluginCompositingHelper::OnBuffersSwapped(
     // it by the device scale factor.
     gfx::Size device_scale_adjusted_size = gfx::ToFlooredSize(
         gfx::ScaleSize(buffer_size_, 1.0f / device_scale_factor));
-    texture_layer_->setBounds(device_scale_adjusted_size);
+    texture_layer_->SetBounds(device_scale_adjusted_size);
   }
 
   bool current_mailbox_valid = !mailbox_name.empty();
@@ -213,14 +216,15 @@ void BrowserPluginCompositingHelper::OnBuffersSwapped(
                           gpu_route_id,
                           gpu_host_id);
   }
-  texture_layer_->setTextureMailbox(cc::TextureMailbox(mailbox_name,
+  texture_layer_->SetTextureMailbox(cc::TextureMailbox(mailbox_name,
                                                        callback));
+  texture_layer_->SetNeedsDisplay();
   last_mailbox_valid_ = current_mailbox_valid;
 }
 
 void BrowserPluginCompositingHelper::UpdateVisibility(bool visible) {
   if (texture_layer_)
-    texture_layer_->setIsDrawable(visible);
+    texture_layer_->SetIsDrawable(visible);
 }
 
 }  // namespace content

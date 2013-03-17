@@ -117,6 +117,9 @@ namespace extension_misc {
   // The extension id of the Office Viewer dev extension.
   extern const char kQuickOfficeDevExtensionId[];
 
+  // The extension id used for testing streamsPrivate
+  extern const char kStreamsPrivateTestExtensionId[];
+
   // The extension id of the Web Store component application.
   extern const char kWebStoreAppId[];
 
@@ -260,10 +263,6 @@ namespace extension_misc {
 
   // The path part of the file system url used for media file systems.
   extern const char kMediaFileSystemPathPart[];
-
-  // Error indicating that the app notifications API is not accessible by split
-  // mode extensions in incognito windows.
-  extern const char kAppNotificationsIncognitoError[];
 
   // NOTE: If you change this list, you should also change kExtensionIconSizes
   // in cc file.

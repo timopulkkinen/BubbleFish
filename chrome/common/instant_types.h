@@ -33,18 +33,27 @@ enum InstantSuggestionType {
   INSTANT_SUGGESTION_URL,
 };
 
-// A wrapper to hold Instant suggested text and its metadata such as the type
-// of the suggestion and what completion behavior should be applied to it.
+// A wrapper to hold Instant suggested text and its metadata.
 struct InstantSuggestion {
   InstantSuggestion();
   InstantSuggestion(const string16& text,
                     InstantCompleteBehavior behavior,
-                    InstantSuggestionType type);
+                    InstantSuggestionType type,
+                    const string16& query);
   ~InstantSuggestion();
 
+  // Full suggested text.
   string16 text;
+
+  // Completion behavior for the suggestion.
   InstantCompleteBehavior behavior;
+
+  // Is this a search or a URL suggestion?
   InstantSuggestionType type;
+
+  // Query for which this suggestion was generated. May be set to empty string
+  // if unknown.
+  string16 query;
 };
 
 // Omnibox dropdown matches provided by the native autocomplete providers.
@@ -79,29 +88,6 @@ enum InstantSizeUnits {
 
   // As a percentage of the height or width of the containing (parent) view.
   INSTANT_SIZE_PERCENT,
-};
-
-// What the Instant page contains when it requests to be shown.
-// TODO(jered): Delete this.
-enum InstantShownReason {
-  // Contents are not specified; the page wants to be shown unconditionally.
-  // This is a stopgap to display in unexpected situations, and should not
-  // normally be used.
-  INSTANT_SHOWN_NOT_SPECIFIED,
-
-  // Custom content on the NTP, e.g. a custom logo.
-  INSTANT_SHOWN_CUSTOM_NTP_CONTENT,
-
-  // Query suggestions and search results relevant when the user is typing in
-  // the omnibox.
-  INSTANT_SHOWN_QUERY_SUGGESTIONS,
-
-  // ZeroSuggest suggestions relevant when the user has focused in the omnibox,
-  // but not yet typed anything.
-  INSTANT_SHOWN_ZERO_SUGGESTIONS,
-
-  // Search results in response to the user clicking a query suggestion.
-  INSTANT_SHOWN_CLICKED_QUERY_SUGGESTION,
 };
 
 // The alignment of the theme background image.
@@ -144,10 +130,6 @@ struct ThemeBackgroundInfo {
   // is valid.
   ThemeBackgroundImageAlignment image_vertical_alignment;
 
-  // The theme background image top offset is only valid if
-  // |image_vertical_alignment| is |THEME_BKGRND_IMAGE_ALIGN_TOP|.
-  int image_top_offset;
-
   // The theme background image tiling is only valid if |theme_id| is valid.
   ThemeBackgroundImageTiling image_tiling;
 
@@ -156,12 +138,17 @@ struct ThemeBackgroundInfo {
   uint16 image_height;
 };
 
-// A most visited item.
-struct MostVisitedItem {
-  // URL of the most visited page.
+struct InstantMostVisitedItem {
+  InstantMostVisitedItem() : most_visited_item_id(0) {}
+
+  // A private identifier used on the browser side when retrieving assets.
+  uint64 most_visited_item_id;
+
+  // The URL of the Most Visited item.
   GURL url;
 
-  // Title of the most visited page.
+  // The title of the Most Visited page.  May be empty, in which case the |url|
+  // is used as the title.
   string16 title;
 };
 

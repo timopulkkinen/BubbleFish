@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_CONTROLLER_IMPL_H_
 #define CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_CONTROLLER_IMPL_H_
 
+#include <map>
 #include <vector>
 
 #include "base/callback.h"
@@ -12,21 +13,21 @@
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/time.h"
-#include "chrome/browser/autofill/autofill_manager_delegate.h"
-#include "chrome/browser/autofill/autofill_metrics.h"
-#include "chrome/browser/autofill/autofill_popup_delegate.h"
-#include "chrome/browser/autofill/field_types.h"
-#include "chrome/browser/autofill/form_structure.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/autofill/personal_data_manager_observer.h"
-#include "chrome/browser/autofill/wallet/required_action.h"
-#include "chrome/browser/autofill/wallet/wallet_client.h"
-#include "chrome/browser/autofill/wallet/wallet_client_observer.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/browser/ui/autofill/country_combobox_model.h"
+#include "components/autofill/browser/autofill_manager_delegate.h"
+#include "components/autofill/browser/autofill_metrics.h"
+#include "components/autofill/browser/autofill_popup_delegate.h"
+#include "components/autofill/browser/field_types.h"
+#include "components/autofill/browser/form_structure.h"
+#include "components/autofill/browser/personal_data_manager.h"
+#include "components/autofill/browser/personal_data_manager_observer.h"
+#include "components/autofill/browser/wallet/required_action.h"
+#include "components/autofill/browser/wallet/wallet_client.h"
+#include "components/autofill/browser/wallet/wallet_client_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/ssl_status.h"
@@ -58,7 +59,7 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
                                      public AutofillPopupDelegate,
                                      public content::NotificationObserver,
                                      public SuggestionsMenuModelDelegate,
-                                     public wallet::WalletClientObserver,
+                                     public wallet::WalletClientDelegate,
                                      public PersonalDataManagerObserver,
                                      public AccountChooserModelDelegate {
  public:
@@ -116,6 +117,8 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
                                   const string16& user_input) const OVERRIDE;
   virtual bool InputIsValid(AutofillFieldType type, const string16& value)
       OVERRIDE;
+  virtual std::vector<AutofillFieldType> InputsAreValid(
+      const DetailOutputMap& inputs) OVERRIDE;
   virtual void UserEditedOrActivatedInput(const DetailInput* input,
                                           DialogSection section,
                                           gfx::NativeView parent_view,
@@ -153,7 +156,9 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   virtual void SuggestionItemSelected(const SuggestionsMenuModel& model)
       OVERRIDE;
 
-  // wallet::WalletClientObserver implementation.
+  // wallet::WalletClientDelegate implementation.
+  virtual const AutofillMetrics& GetMetricLogger() const OVERRIDE;
+  virtual DialogType GetDialogType() const OVERRIDE;
   virtual void OnDidAcceptLegalDocuments() OVERRIDE;
   virtual void OnDidAuthenticateInstrument(bool success) OVERRIDE;
   virtual void OnDidGetFullWallet(
@@ -174,7 +179,8 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   virtual void OnDidUpdateInstrument(
       const std::string& instrument_id,
       const std::vector<wallet::RequiredAction>& required_actions) OVERRIDE;
-  virtual void OnWalletError() OVERRIDE;
+  virtual void OnWalletError(
+      wallet::WalletClient::ErrorType error_type) OVERRIDE;
   virtual void OnMalformedResponse() OVERRIDE;
   virtual void OnNetworkError(int response_code) OVERRIDE;
 
@@ -189,19 +195,18 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
  protected:
   // Exposed for testing.
   AutofillDialogView* view() { return view_.get(); }
+  virtual AutofillDialogView* CreateView();
+
+  // Returns the PersonalDataManager for |profile_|.
+  virtual PersonalDataManager* GetManager();
+
+  // Call to disable communication to Online Wallet for this dialog.
+  // Exposed for testing.
+  void DisableWallet();
 
  private:
   // Returns whether Wallet is the current data source.
   bool IsPayingWithWallet() const;
-
-  // Refresh wallet items immediately if there's no refresh currently in
-  // progress, otherwise wait until the current refresh completes.
-  void ScheduleRefreshWalletItems();
-
-  // Called when any type of request to Online Wallet completes. |success| is
-  // true when there was no network error, the response wasn't malformed, and no
-  // Wallet error occurred.
-  void WalletRequestCompleted(bool success);
 
   // Whether or not the current request wants credit info back.
   bool RequestingCreditCardInfo() const;
@@ -233,7 +238,7 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   // |view_|.
   void FillOutputForSection(DialogSection section);
   // As above, but uses |compare| to determine whether a DetailInput matches
-  // a field.
+  // a field. Saves any new Autofill data to the PersonalDataManager.
   void FillOutputForSectionWithComparator(DialogSection section,
                                           const InputFieldComparator& compare);
 
@@ -265,9 +270,6 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
       std::vector<string16>* popup_labels,
       std::vector<string16>* popup_icons);
 
-  // Returns the PersonalDataManager for |profile_|.
-  PersonalDataManager* GetManager();
-
   // Like RequestedFieldsForSection, but returns a pointer.
   DetailInputs* MutableRequestedFieldsForSection(DialogSection section);
 
@@ -279,8 +281,30 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   void LoadRiskFingerprintData();
   void OnDidLoadRiskFingerprintData(scoped_ptr<risk::Fingerprint> fingerprint);
 
+  // Whether the user has chosen to enter all new data in |section|. This
+  // happens via choosing "Add a new X..." from a section's suggestion menu.
+  bool IsManuallyEditingSection(DialogSection section);
+
   // Whether the billing section should be used to fill in the shipping details.
-  bool UseBillingForShipping();
+  bool ShouldUseBillingForShipping();
+
+  // Whether the user wishes to save information locally to Autofill.
+  bool ShouldSaveDetailsLocally();
+
+  // Start the submit proccess to interact with Online Wallet (might do various
+  // things like accept documents, save details, update details, respond to
+  // required actions, etc.).
+  void SubmitWithWallet();
+
+  // Gets a full wallet from Online Wallet so the user can purchase something.
+  // This information is decoded to reveal a fronting (proxy) card.
+  void GetFullWallet();
+
+  // Called when there's nothing left to accept, update, save, or authenticate
+  // in order to fill |form_structure_| and pass data back to the invoking page.
+  void FinishSubmit();
+
+  AutofillMetrics::DialogInitialUserStateMetric GetInitialUserState() const;
 
   // The |profile| for |contents_|.
   Profile* const profile_;
@@ -310,12 +334,13 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   // A client to talk to the Online Wallet API.
   wallet::WalletClient wallet_client_;
 
-  // Whether another refresh for WalletItems should be started when the current
-  // one is done.
-  bool refresh_wallet_items_queued_;
-
-  // The most recently received WalletItems retrieved via |wallet_client_|.
+  // Recently received items retrieved via |wallet_client_|.
   scoped_ptr<wallet::WalletItems> wallet_items_;
+  scoped_ptr<wallet::FullWallet> full_wallet_;
+
+  // Used to remember the state of Wallet comboboxes when Submit was clicked.
+  std::string active_instrument_id_;
+  std::string active_address_id_;
 
   // The fields for billing and shipping which the page has actually requested.
   DetailInputs requested_email_fields_;
@@ -364,8 +389,10 @@ class AutofillDialogControllerImpl : public AutofillDialogController,
   const AutofillMetrics& metric_logger_;
   base::Time dialog_shown_timestamp_;
   base::Time autocheckout_started_timestamp_;
+  AutofillMetrics::DialogInitialUserStateMetric initial_user_state_;
 
-  DialogType dialog_type_;
+  // Whether this is an Autocheckout or a requestAutocomplete dialog.
+  const DialogType dialog_type_;
 
   // True if the termination action was a submit.
   bool did_submit_;

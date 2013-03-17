@@ -11,6 +11,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
@@ -92,6 +94,10 @@ void BookmarkContextMenuController::BuildMenu() {
 
   AddSeparator();
   AddItem(IDC_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
+  if (chrome::search::IsInstantExtendedAPIEnabled()) {
+    AddCheckboxItem(IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT,
+                    IDS_BOOKMARK_BAR_SHOW_APPS_SHORTCUT);
+  }
   AddCheckboxItem(IDC_BOOKMARK_BAR_ALWAYS_SHOW, IDS_SHOW_BOOKMARK_BAR);
 }
 
@@ -108,7 +114,7 @@ void BookmarkContextMenuController::AddCheckboxItem(int id,
   menu_model_->AddCheckItemWithStringId(id, localization_id);
 }
 
-void BookmarkContextMenuController::ExecuteCommand(int id) {
+void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
   if (delegate_)
     delegate_->WillExecuteCommand();
 
@@ -205,6 +211,14 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
       chrome::ToggleBookmarkBarWhenVisible(profile_);
       break;
 
+    case IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT: {
+      PrefService* prefs = profile_->GetPrefs();
+      prefs->SetBoolean(
+          prefs::kShowAppsShortcutInBookmarkBar,
+          !prefs->GetBoolean(prefs::kShowAppsShortcutInBookmarkBar));
+      break;
+    }
+
     case IDC_BOOKMARK_MANAGER: {
       content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
       if (selection_.size() != 1)
@@ -217,7 +231,6 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
         chrome::ShowBookmarkManager(browser_);
       break;
     }
-
 
     case IDC_CUT:
       bookmark_utils::CopyToClipboard(model_, selection_, true);
@@ -247,13 +260,16 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
 }
 
 bool BookmarkContextMenuController::IsCommandIdChecked(int command_id) const {
-  DCHECK(command_id == IDC_BOOKMARK_BAR_ALWAYS_SHOW);
-  PrefService* prefs = PrefServiceFromBrowserContext(profile_);
-  return prefs->GetBoolean(prefs::kShowBookmarkBar);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
+  if (command_id == IDC_BOOKMARK_BAR_ALWAYS_SHOW)
+    return prefs->GetBoolean(prefs::kShowBookmarkBar);
+
+  DCHECK_EQ(IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT, command_id);
+  return prefs->GetBoolean(prefs::kShowAppsShortcutInBookmarkBar);
 }
 
 bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
-  PrefService* prefs = PrefServiceFromBrowserContext(profile_);
+  PrefService* prefs = components::UserPrefs::Get(profile_);
 
   bool is_root_node = selection_.size() == 1 &&
                       selection_[0]->parent() == model_->root_node();
@@ -291,6 +307,9 @@ bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
 
     case IDC_BOOKMARK_BAR_ALWAYS_SHOW:
       return !prefs->IsManagedPreference(prefs::kShowBookmarkBar);
+
+    case IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT:
+      return !prefs->IsManagedPreference(prefs::kShowAppsShortcutInBookmarkBar);
 
     case IDC_COPY:
     case IDC_CUT:

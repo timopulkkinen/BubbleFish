@@ -12,8 +12,8 @@ using cc::SolidColorLayer;
 namespace WebKit {
 
 WebSolidColorLayerImpl::WebSolidColorLayerImpl()
-    : layer_(new WebLayerImpl(SolidColorLayer::create())) {
-  layer_->layer()->setIsDrawable(true);
+    : layer_(new WebLayerImpl(SolidColorLayer::Create())) {
+  layer_->layer()->SetIsDrawable(true);
 }
 
 WebSolidColorLayerImpl::~WebSolidColorLayerImpl() {}

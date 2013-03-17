@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/devtools/protocol_http_request.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
@@ -31,7 +32,6 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -58,7 +58,11 @@ using content::WebUIMessageHandler;
 using content::WorkerService;
 using content::WorkerServiceObserver;
 
+namespace {
+
 static const char kDataFile[] = "targets-data.json";
+static const char kAdbQuery[] = "adb-query/";
+static const char kLocalXhr[] = "local-xhr/";
 
 static const char kExtensionTargetType[]  = "extension";
 static const char kPageTargetType[]  = "page";
@@ -75,8 +79,6 @@ static const char kUrlField[]  = "url";
 static const char kNameField[]  = "name";
 static const char kFaviconUrlField[] = "favicon_url";
 static const char kPidField[]  = "pid";
-
-namespace {
 
 DictionaryValue* BuildTargetDescriptor(
     const std::string& target_type,
@@ -104,7 +106,8 @@ bool HasClientHost(RenderViewHost* rvh) {
   if (!DevToolsAgentHost::HasFor(rvh))
     return false;
 
-  scoped_refptr<DevToolsAgentHost> agent(DevToolsAgentHost::GetFor(rvh));
+  scoped_refptr<DevToolsAgentHost> agent(
+      DevToolsAgentHost::GetOrCreateFor(rvh));
   return !!DevToolsManager::GetInstance()->GetDevToolsClientHostFor(agent);
 }
 
@@ -169,41 +172,22 @@ void SendDescriptors(
   callback.Run(base::RefCountedString::TakeString(&json_string));
 }
 
-bool HandleRequestCallback(
+bool HandleDataRequestCallback(
     const std::string& path,
     const content::WebUIDataSource::GotDataCallback& callback) {
-  if (path != kDataFile)
-    return false;
-
   std::set<RenderViewHost*> tab_rvhs;
   for (TabContentsIterator it; !it.done(); it.Next())
     tab_rvhs.insert(it->GetRenderViewHost());
 
   scoped_ptr<ListValue> rvh_list(new ListValue());
 
-  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
-       !it.IsAtEnd(); it.Advance()) {
-    RenderProcessHost* render_process_host = it.GetCurrentValue();
-    DCHECK(render_process_host);
+  std::vector<RenderViewHost*> rvh_vector =
+      DevToolsAgentHost::GetValidRenderViewHosts();
 
-    // Ignore processes that don't have a connection, such as crashed tabs.
-    if (!render_process_host->HasConnection())
-      continue;
-
-    RenderProcessHost::RenderWidgetHostsIterator rwit(
-        render_process_host->GetRenderWidgetHostsIterator());
-    for (; !rwit.IsAtEnd(); rwit.Advance()) {
-      const RenderWidgetHost* widget = rwit.GetCurrentValue();
-      DCHECK(widget);
-      if (!widget || !widget->IsRenderView())
-        continue;
-
-      RenderViewHost* rvh =
-          RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
-
-      bool is_tab = tab_rvhs.find(rvh) != tab_rvhs.end();
-      rvh_list->Append(BuildTargetDescriptor(rvh, is_tab));
-    }
+  for (std::vector<RenderViewHost*>::iterator it(rvh_vector.begin());
+       it != rvh_vector.end(); it++) {
+    bool is_tab = tab_rvhs.find(*it) != tab_rvhs.end();
+    rvh_list->Append(BuildTargetDescriptor(*it, is_tab));
   }
 
   BrowserThread::PostTask(
@@ -211,16 +195,6 @@ bool HandleRequestCallback(
       FROM_HERE,
       base::Bind(&SendDescriptors, base::Owned(rvh_list.release()), callback));
   return true;
-}
-
-content::WebUIDataSource* CreateInspectUIHTMLSource() {
-  content::WebUIDataSource* source =
-      content::WebUIDataSource::Create(chrome::kChromeUIInspectHost);
-  source->AddResourcePath("inspect.css", IDR_INSPECT_CSS);
-  source->AddResourcePath("inspect.js", IDR_INSPECT_JS);
-  source->SetDefaultResource(IDR_INSPECT_HTML);
-  source->SetRequestFilter(base::Bind(&HandleRequestCallback));
-  return source;
 }
 
 class InspectMessageHandler : public WebUIMessageHandler {
@@ -358,10 +332,12 @@ class InspectUI::WorkerCreationDestructionListener
 
 InspectUI::InspectUI(content::WebUI* web_ui)
     : WebUIController(web_ui),
-      observer_(new WorkerCreationDestructionListener(this)) {
+      observer_(new WorkerCreationDestructionListener(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   web_ui->AddMessageHandler(new InspectMessageHandler());
 
   Profile* profile = Profile::FromWebUI(web_ui);
+  adb_bridge_ = DevToolsAdbBridge::Start();
   content::WebUIDataSource::Add(profile, CreateInspectUIHTMLSource());
 
   registrar_.Add(this,
@@ -383,6 +359,16 @@ void InspectUI::RefreshUI() {
   web_ui()->CallJavascriptFunction("populateLists");
 }
 
+// static
+bool InspectUI::WeakHandleRequestCallback(
+    const base::WeakPtr<InspectUI>& inspect_ui,
+    const std::string& path,
+    const content::WebUIDataSource::GotDataCallback& callback) {
+  if (!inspect_ui.get())
+    return false;
+  return inspect_ui->HandleRequestCallback(path, callback);
+}
+
 void InspectUI::Observe(int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
@@ -396,7 +382,65 @@ void InspectUI::StopListeningNotifications()
 {
   if (!observer_)
     return;
+  if (adb_bridge_) {
+    adb_bridge_->Stop();
+    adb_bridge_ = NULL;
+  }
   observer_->InspectUIDestroyed();
   observer_ = NULL;
   registrar_.RemoveAll();
+}
+
+content::WebUIDataSource* InspectUI::CreateInspectUIHTMLSource() {
+  content::WebUIDataSource* source =
+      content::WebUIDataSource::Create(chrome::kChromeUIInspectHost);
+  source->AddResourcePath("inspect.css", IDR_INSPECT_CSS);
+  source->AddResourcePath("inspect.js", IDR_INSPECT_JS);
+  source->SetDefaultResource(IDR_INSPECT_HTML);
+  source->SetRequestFilter(base::Bind(&InspectUI::WeakHandleRequestCallback,
+                                      weak_factory_.GetWeakPtr()));
+  return source;
+}
+
+bool InspectUI::HandleRequestCallback(
+    const std::string& path,
+    const content::WebUIDataSource::GotDataCallback& callback) {
+  if (path == kDataFile)
+    return HandleDataRequestCallback(path, callback);
+  if (path.find(kAdbQuery) == 0)
+    return HandleAdbQueryCallback(path, callback);
+  if (path.find(kLocalXhr) == 0)
+    return HandleLocalXhrCallback(path, callback);
+  return false;
+}
+
+bool InspectUI::HandleAdbQueryCallback(
+    const std::string& path,
+    const content::WebUIDataSource::GotDataCallback& callback) {
+  std::string query = path.substr(strlen(kAdbQuery));
+  adb_bridge_->Query(query, base::Bind(&InspectUI::RespondOnUIThread,
+                                       weak_factory_.GetWeakPtr(), callback));
+  return true;
+}
+
+bool InspectUI::HandleLocalXhrCallback(
+    const std::string& path,
+    const content::WebUIDataSource::GotDataCallback& callback) {
+  std::string url = "http://localhost:" + path.substr(strlen(kLocalXhr));
+  new ProtocolHttpRequest(Profile::FromWebUI(web_ui()), url,
+      base::Bind(&InspectUI::RespondOnUIThread,
+                 weak_factory_.GetWeakPtr(), callback));
+  return true;
+}
+
+void InspectUI::RespondOnUIThread(
+    const content::WebUIDataSource::GotDataCallback& callback,
+    const std::string& error,
+    const std::string& data) {
+  ListValue result;
+  result.AppendString(error);
+  result.AppendString(data);
+  std::string json_string;
+  base::JSONWriter::Write(&result, &json_string);
+  callback.Run(base::RefCountedString::TakeString(&json_string));
 }

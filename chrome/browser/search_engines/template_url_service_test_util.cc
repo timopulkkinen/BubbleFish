@@ -230,6 +230,7 @@ void TemplateURLServiceTestUtil::ChangeModelToLoadState() {
   model()->ChangeToLoadedState();
   // Initialize the web data service so that the database gets updated with
   // any changes made.
+
   model()->service_ = WebDataServiceFactory::GetForProfile(
       profile_.get(), Profile::EXPLICIT_ACCESS);
 }

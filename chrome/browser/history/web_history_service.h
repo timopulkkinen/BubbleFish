@@ -58,8 +58,16 @@ class WebHistoryService : public ProfileKeyedService {
       const QueryOptions& options,
       const QueryWebHistoryCallback& callback);
 
-  // Deletes all visits to the given set of URLs between |begin_time| and
-  // |end_time|.
+  // Removes all visits to specified URLs in specific time ranges.
+  // This is the of equivalent HistoryService::ExpireHistory().
+  // The caller takes ownership of the returned Request. If it is destroyed, the
+  // request is cancelled.
+  scoped_ptr<Request> ExpireHistory(
+      const std::vector<ExpireHistoryArgs>& expire_list,
+      const ExpireWebHistoryCallback& callback);
+
+  // Removes all visits to specified URLs in the given time range.
+  // This is the of equivalent HistoryService::ExpireHistoryBetween().
   scoped_ptr<Request> ExpireHistoryBetween(
       const std::set<GURL>& restrict_urls,
       base::Time begin_time,

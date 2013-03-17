@@ -17,6 +17,7 @@
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/google_apis/operation_registry.h"
+#include "chrome/browser/google_apis/task_util.h"
 #include "chrome/browser/google_apis/test_server/http_request.h"
 #include "chrome/browser/google_apis/test_server/http_response.h"
 #include "chrome/browser/google_apis/test_server/http_server.h"
@@ -35,17 +36,6 @@ namespace {
 const char kTestGDataAuthToken[] = "testtoken";
 const char kTestUserAgent[] = "test-user-agent";
 const char kTestETag[] = "test_etag";
-
-// Copies the result from ResumeUploadCallback and quit the message loop.
-void CopyResultFromUploadRangeCallbackAndQuit(
-    UploadRangeResponse* out_response,
-    scoped_ptr<ResourceEntry>* out_new_entry,
-    const UploadRangeResponse& response,
-    scoped_ptr<ResourceEntry> new_entry) {
-  *out_response = response;
-  *out_new_entry = new_entry.Pass();
-  MessageLoop::current()->Quit();
-}
 
 class GDataWapiOperationsTest : public testing::Test {
  public:
@@ -108,40 +98,40 @@ class GDataWapiOperationsTest : public testing::Test {
       // TODO(satorux): we should generate valid JSON data for the newly
       // copied document but for now, just return "file_entry.json"
       return test_util::CreateHttpResponseFromFile(
-          test_util::GetTestFilePath("gdata/file_entry.json"));
+          test_util::GetTestFilePath("chromeos/gdata/file_entry.json"));
     }
 
     if (!test_util::RemovePrefix(absolute_url.path(),
-                                 "/feeds/default/private/full/",
+                                 "/feeds/default/private/full",
                                  &remaining_path)) {
       return scoped_ptr<test_server::HttpResponse>();
     }
 
-    if (remaining_path == "-/mine") {
+    if (remaining_path.empty()) {
       // Process the default feed.
       return test_util::CreateHttpResponseFromFile(
-          test_util::GetTestFilePath("gdata/root_feed.json"));
+          test_util::GetTestFilePath("chromeos/gdata/root_feed.json"));
     } else {
       // Process a feed for a single resource ID.
       const std::string resource_id = net::UnescapeURLComponent(
-          remaining_path, net::UnescapeRule::URL_SPECIAL_CHARS);
+          remaining_path.substr(1), net::UnescapeRule::URL_SPECIAL_CHARS);
       if (resource_id == "file:2_file_resource_id") {
         // Check if this is an authorization request for an app.
         if (request.method == test_server::METHOD_PUT &&
             request.content.find("<docs:authorizedApp>") != std::string::npos) {
           return test_util::CreateHttpResponseFromFile(
-              test_util::GetTestFilePath("gdata/basic_feed.json"));
+              test_util::GetTestFilePath("chromeos/gdata/basic_feed.json"));
         }
 
         return test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("gdata/file_entry.json"));
+            test_util::GetTestFilePath("chromeos/gdata/file_entry.json"));
       } else if (resource_id == "folder:root/contents" &&
                  request.method == test_server::METHOD_POST) {
         // This is a request for creating a directory in the root directory.
         // TODO(satorux): we should generate valid JSON data for the newly
         // created directory but for now, just return "directory_entry.json"
         return test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("gdata/directory_entry.json"));
+            test_util::GetTestFilePath("chromeos/gdata/directory_entry.json"));
       } else if (resource_id ==
                  "folder:root/contents/file:2_file_resource_id" &&
                  request.method == test_server::METHOD_DELETE) {
@@ -150,7 +140,7 @@ class GDataWapiOperationsTest : public testing::Test {
         // copy it. For now, just return a random file, as the contents don't
         // matter.
         return test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("gdata/testfile.txt"));
+            test_util::GetTestFilePath("chromeos/gdata/testfile.txt"));
       }
     }
 
@@ -168,7 +158,8 @@ class GDataWapiOperationsTest : public testing::Test {
 
     scoped_ptr<test_server::HttpResponse> result(
         test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("gdata/account_metadata.json")));
+            test_util::GetTestFilePath(
+                "chromeos/gdata/account_metadata.json")));
     if (absolute_url.query().find("include-installed-apps=true") ==
         string::npos) {
       // Exclude the list of installed apps.
@@ -254,7 +245,7 @@ class GDataWapiOperationsTest : public testing::Test {
     // file, but for now, just return file_entry.json.
     scoped_ptr<test_server::HttpResponse> response =
         test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("gdata/file_entry.json"));
+            test_util::GetTestFilePath("chromeos/gdata/file_entry.json"));
     // response.code() is set to SUCCESS. Change it to CREATED if it's a new
     // file.
     if (absolute_url.path() == "/upload_new_file")
@@ -346,11 +337,12 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_DefaultFeed) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/-/mine?v=3&alt=json&showfolders=true"
-            "&max-results=500&include-installed-apps=true",
+  EXPECT_EQ("/feeds/default/private/full?v=3&alt=json&showroot=true&"
+            "showfolders=true&include-shared=true&max-results=500&"
+            "include-installed-apps=true",
             http_request_.relative_url);
   EXPECT_TRUE(test_util::VerifyJsonData(
-      test_util::GetTestFilePath("gdata/root_feed.json"),
+      test_util::GetTestFilePath("chromeos/gdata/root_feed.json"),
       result_data.get()));
 }
 
@@ -362,7 +354,7 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_ValidFeed) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      test_server_.GetURL("/files/gdata/root_feed.json"),
+      test_server_.GetURL("/files/chromeos/gdata/root_feed.json"),
       0,  // start changestamp
       "",  // search string
       false,  // shared with me
@@ -376,11 +368,12 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_ValidFeed) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/gdata/root_feed.json?v=3&alt=json&showfolders=true"
-            "&max-results=500&include-installed-apps=true",
+  EXPECT_EQ("/files/chromeos/gdata/root_feed.json?v=3&alt=json&showroot=true&"
+            "showfolders=true&include-shared=true&max-results=500"
+            "&include-installed-apps=true",
             http_request_.relative_url);
   EXPECT_TRUE(test_util::VerifyJsonData(
-      test_util::GetTestFilePath("gdata/root_feed.json"),
+      test_util::GetTestFilePath("chromeos/gdata/root_feed.json"),
       result_data.get()));
 }
 
@@ -394,7 +387,7 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_InvalidFeed) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      test_server_.GetURL("/files/gdata/testfile.txt"),
+      test_server_.GetURL("/files/chromeos/gdata/testfile.txt"),
       0,  // start changestamp
       "",  // search string
       false,  // shared with me
@@ -408,8 +401,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_InvalidFeed) {
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/gdata/testfile.txt?v=3&alt=json&showfolders=true"
-            "&max-results=500&include-installed-apps=true",
+  EXPECT_EQ("/files/chromeos/gdata/testfile.txt?v=3&alt=json&showroot=true&"
+            "showfolders=true&include-shared=true&max-results=500&"
+            "include-installed-apps=true",
             http_request_.relative_url);
   EXPECT_FALSE(result_data);
 }
@@ -433,10 +427,10 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_ValidResourceId) {
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
   EXPECT_EQ("/feeds/default/private/full/file%3A2_file_resource_id"
-            "?v=3&alt=json",
+            "?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_TRUE(test_util::VerifyJsonData(
-      test_util::GetTestFilePath("gdata/file_entry.json"),
+      test_util::GetTestFilePath("chromeos/gdata/file_entry.json"),
       result_data.get()));
 }
 
@@ -458,7 +452,8 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_InvalidResourceId) {
 
   EXPECT_EQ(HTTP_NOT_FOUND, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/%3Cinvalid%3E?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/%3Cinvalid%3E?v=3&alt=json"
+            "&showroot=true",
             http_request_.relative_url);
   ASSERT_FALSE(result_data);
 }
@@ -480,12 +475,13 @@ TEST_F(GDataWapiOperationsTest, GetAccountMetadataOperation) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/feeds/metadata/default?v=3&alt=json&include-installed-apps=true",
+  EXPECT_EQ("/feeds/metadata/default?v=3&alt=json&showroot=true"
+            "&include-installed-apps=true",
             http_request_.relative_url);
 
   scoped_ptr<AccountMetadata> expected(
       AccountMetadata::CreateFrom(
-          *test_util::LoadJSONFile("gdata/account_metadata.json")));
+          *test_util::LoadJSONFile("chromeos/gdata/account_metadata.json")));
 
   ASSERT_TRUE(result_data.get());
   EXPECT_EQ(expected->largest_changestamp(),
@@ -518,12 +514,12 @@ TEST_F(GDataWapiOperationsTest,
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/feeds/metadata/default?v=3&alt=json",
+  EXPECT_EQ("/feeds/metadata/default?v=3&alt=json&showroot=true",
             http_request_.relative_url);
 
   scoped_ptr<AccountMetadata> expected(
       AccountMetadata::CreateFrom(
-          *test_util::LoadJSONFile("gdata/account_metadata.json")));
+          *test_util::LoadJSONFile("chromeos/gdata/account_metadata.json")));
 
   ASSERT_TRUE(result_data.get());
   EXPECT_EQ(expected->largest_changestamp(),
@@ -556,7 +552,8 @@ TEST_F(GDataWapiOperationsTest, DeleteResourceOperation) {
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
   EXPECT_EQ(
-      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json"
+      "&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
 }
@@ -580,7 +577,8 @@ TEST_F(GDataWapiOperationsTest, DeleteResourceOperationWithETag) {
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
   EXPECT_EQ(
-      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json"
+      "&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("etag", http_request_.headers["If-Match"]);
 }
@@ -606,7 +604,8 @@ TEST_F(GDataWapiOperationsTest, CreateDirectoryOperation) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_POST, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json"
+            "&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
 
@@ -641,7 +640,7 @@ TEST_F(GDataWapiOperationsTest, CopyHostedDocumentOperation) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_POST, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
 
@@ -674,7 +673,8 @@ TEST_F(GDataWapiOperationsTest, RenameResourceOperation) {
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
   EXPECT_EQ(
-      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json"
+      "&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
@@ -708,7 +708,8 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_ValidFeed) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/file:2_file_resource_id?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/file:2_file_resource_id?v=3&alt=json"
+            "&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
@@ -733,7 +734,7 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_InvalidFeed) {
       base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data),
-      test_server_.GetURL("/files/gdata/testfile.txt"),
+      test_server_.GetURL("/files/chromeos/gdata/testfile.txt"),
       "APP_ID");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
@@ -742,7 +743,7 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_InvalidFeed) {
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
-  EXPECT_EQ("/files/gdata/testfile.txt?v=3&alt=json",
+  EXPECT_EQ("/files/chromeos/gdata/testfile.txt?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
@@ -776,7 +777,8 @@ TEST_F(GDataWapiOperationsTest, AddResourceToDirectoryOperation) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_POST, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json"
+            "&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
 
@@ -811,7 +813,7 @@ TEST_F(GDataWapiOperationsTest, RemoveResourceFromDirectoryOperation) {
   // DELETE method should be used, without the body content.
   EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
   EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents/"
-            "file%3A2_file_resource_id?v=3&alt=json",
+            "file%3A2_file_resource_id?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
   EXPECT_FALSE(http_request_.has_content);
@@ -850,7 +852,7 @@ TEST_F(GDataWapiOperationsTest, UploadNewFile) {
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ(
       "/feeds/upload/create-session/default/private/full/folder%3Aid/contents"
-      "?convert=false&v=3&alt=json",
+      "?convert=false&v=3&alt=json&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("text/plain", http_request_.headers["X-Upload-Content-Type"]);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
@@ -874,9 +876,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewFile) {
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                 &response,
-                 &new_entry),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&response, &new_entry)),
       UPLOAD_NEW_FILE,
       base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
       upload_url,
@@ -951,7 +953,7 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ(
       "/feeds/upload/create-session/default/private/full/folder%3Aid/contents"
-      "?convert=false&v=3&alt=json",
+      "?convert=false&v=3&alt=json&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("text/plain", http_request_.headers["X-Upload-Content-Type"]);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
@@ -978,9 +980,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
         new GetUploadStatusOperation(
             &operation_registry_,
             request_context_getter_.get(),
-            base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                       &response,
-                       &new_entry),
+            CreateComposedCallback(
+                base::Bind(&test_util::RunAndQuit),
+                test_util::CreateCopyResultCallback(&response, &new_entry)),
             UPLOAD_NEW_FILE,
             base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
             upload_url,
@@ -1028,9 +1030,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
     ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
         &operation_registry_,
         request_context_getter_.get(),
-        base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                   &response,
-                   &new_entry),
+        CreateComposedCallback(
+            base::Bind(&test_util::RunAndQuit),
+            test_util::CreateCopyResultCallback(&response, &new_entry)),
         UPLOAD_NEW_FILE,
         base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
         upload_url,
@@ -1080,9 +1082,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
         new GetUploadStatusOperation(
             &operation_registry_,
             request_context_getter_.get(),
-            base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                       &response,
-                       &new_entry),
+            CreateComposedCallback(
+                base::Bind(&test_util::RunAndQuit),
+                test_util::CreateCopyResultCallback(&response, &new_entry)),
             UPLOAD_NEW_FILE,
             base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
             upload_url,
@@ -1148,7 +1150,7 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ(
       "/feeds/upload/create-session/default/private/full/folder%3Aid/contents"
-      "?convert=false&v=3&alt=json",
+      "?convert=false&v=3&alt=json&showroot=true",
       http_request_.relative_url);
   EXPECT_EQ("text/plain", http_request_.headers["X-Upload-Content-Type"]);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
@@ -1172,9 +1174,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                 &response,
-                 &new_entry),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&response, &new_entry)),
       UPLOAD_NEW_FILE,
       base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
       upload_url,
@@ -1240,7 +1242,7 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ("/feeds/upload/create-session/default/private/full/file%3Afoo"
-            "?convert=false&v=3&alt=json",
+            "?convert=false&v=3&alt=json&showroot=true",
             http_request_.relative_url);
   // Even though the body is empty, the content type should be set to
   // "text/plain".
@@ -1263,9 +1265,9 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                 &response,
-                 &new_entry),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&response, &new_entry)),
       UPLOAD_EXISTING_FILE,
       base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
       upload_url,
@@ -1333,7 +1335,7 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETag) {
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ("/feeds/upload/create-session/default/private/full/file%3Afoo"
-            "?convert=false&v=3&alt=json",
+            "?convert=false&v=3&alt=json&showroot=true",
             http_request_.relative_url);
   // Even though the body is empty, the content type should be set to
   // "text/plain".
@@ -1356,9 +1358,9 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETag) {
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
-                 &response,
-                 &new_entry),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&response, &new_entry)),
       UPLOAD_EXISTING_FILE,
       base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
       upload_url,
@@ -1425,7 +1427,7 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETagConflict) {
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
   // convert=false should be passed as files should be uploaded as-is.
   EXPECT_EQ("/feeds/upload/create-session/default/private/full/file%3Afoo"
-            "?convert=false&v=3&alt=json",
+            "?convert=false&v=3&alt=json&showroot=true",
             http_request_.relative_url);
   // Even though the body is empty, the content type should be set to
   // "text/plain".

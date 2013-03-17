@@ -31,6 +31,7 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/audio/audio_parameters.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_log_event.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -666,6 +667,11 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
 
   // The accessibility mode of the renderer.
   IPC_STRUCT_MEMBER(AccessibilityMode, accessibility_mode)
+
+  // Specifies whether partially swapping composited buffers is
+  // allowed for a renderer. Partial swaps will be used if they are both
+  // allowed and supported.
+  IPC_STRUCT_MEMBER(bool, allow_partial_swap)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_PostMessage_Params)
@@ -1059,7 +1065,9 @@ IPC_MESSAGE_ROUTED2(ViewMsg_SetZoomLevelForLoadingURL,
 
 // Set the zoom level for a particular url, so all render views
 // displaying this url can update their zoom levels to match.
-IPC_MESSAGE_CONTROL2(ViewMsg_SetZoomLevelForCurrentURL,
+// If scheme is empty, then only host is used for matching.
+IPC_MESSAGE_CONTROL3(ViewMsg_SetZoomLevelForCurrentURL,
+                     std::string /* scheme */,
                      std::string /* host */,
                      double /* zoom_level */)
 
@@ -1305,6 +1313,10 @@ IPC_MESSAGE_ROUTED3(ViewMsg_WindowSnapshotCompleted,
                     gfx::Size /* size */,
                     std::vector<unsigned char> /* png */)
 
+// Tells the renderer to suspend/resume the webkit timers.
+IPC_MESSAGE_CONTROL1(ViewMsg_SetWebKitSharedTimersSuspended,
+                     bool /* suspend */)
+
 #if defined(OS_ANDROID)
 // Sent when the user clicks on the find result bar to activate a find result.
 // The point (x,y) is in fractions of the content document's width and height.
@@ -1325,21 +1337,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_ActivateNearestFindResult,
 // final_update set to true).
 IPC_MESSAGE_ROUTED1(ViewMsg_FindMatchRects,
                     int /* current_version */)
-
-// Sent when the user wants to search for all occurrences of a word or find
-// the next result in a synchronous way. This method forces the UI thread in
-// the browser to wait for the renderer to reply, therefore blocking the UI.
-//
-// This functionality is required for compatibility with the legacy Android
-// WebView API. As this goes strongly against the Chromium design guidelines,
-// don't use this as inspiration.
-//
-IPC_SYNC_MESSAGE_ROUTED3_2(ViewMsg_SynchronousFind,
-                           int /* request_id */,
-                           string16 /* search_string */,
-                           WebKit::WebFindOptions /* options */,
-                           int /* match_count */,
-                           int /* active_ordinal */)
 
 // External popup menus.
 IPC_MESSAGE_ROUTED2(ViewMsg_SelectPopupMenuItems,
@@ -1421,12 +1418,10 @@ IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_CreateFullscreenWidget,
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GenerateRoutingID,
                             int /* routing_id */)
 
-// Asks the browser for the default audio hardware buffer-size.
-IPC_SYNC_MESSAGE_CONTROL0_4(ViewHostMsg_GetAudioHardwareConfig,
-                            int /* output_buffer_size */,
-                            int /* output_sample_rate */,
-                            int /* input_sample_rate */,
-                            media::ChannelLayout /* input_channel_layout */)
+// Asks the browser for the default audio hardware configuration.
+IPC_SYNC_MESSAGE_CONTROL0_2(ViewHostMsg_GetAudioHardwareConfig,
+                            media::AudioParameters /* input parameters */,
+                            media::AudioParameters /* output parameters */)
 
 // Asks the browser for CPU usage of the renderer process in percents.
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetCPUUsage,

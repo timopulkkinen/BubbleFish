@@ -9,7 +9,6 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/accessibility/invert_bubble_prefs.h"
-#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/bookmarks/bookmark_prompt_prefs.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -33,6 +32,8 @@
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
+#include "chrome/browser/gpu/gpu_mode_manager.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
@@ -52,7 +53,6 @@
 #include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
@@ -72,7 +72,6 @@
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
@@ -90,6 +89,8 @@
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/browser/autofill_manager.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/render_process_host.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -122,13 +123,13 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
+#include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
+#include "chrome/browser/chromeos/policy/device_status_collector.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
-#include "chrome/browser/policy/auto_enrollment_client.h"
-#include "chrome/browser/policy/device_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/policy/device_status_collector.h"
 #else
 #include "chrome/browser/extensions/default_apps.h"
 #endif
@@ -183,6 +184,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   FlagsUI::RegisterPrefs(registry);
   geolocation::RegisterPrefs(registry);
   GLStringManager::RegisterPrefs(registry);
+  GpuModeManager::RegisterPrefs(registry);
   IntranetRedirectDetector::RegisterPrefs(registry);
   IOThread::RegisterPrefs(registry);
   KeywordEditorController::RegisterPrefs(registry);
@@ -262,8 +264,8 @@ void RegisterUserPrefs(PrefRegistrySyncable* registry) {
   AutofillManager::RegisterUserPrefs(registry);
   BookmarkPromptPrefs::RegisterUserPrefs(registry);
   bookmark_utils::RegisterUserPrefs(registry);
-  BrowserInstantController::RegisterUserPrefs(registry);
   browser_sync::SyncPrefs::RegisterUserPrefs(registry);
+  chrome::search::RegisterUserPrefs(registry);
   ChromeContentBrowserClient::RegisterUserPrefs(registry);
   ChromeDownloadManagerDelegate::RegisterUserPrefs(registry);
   ChromeVersionService::RegisterUserPrefs(registry);
@@ -345,6 +347,7 @@ void RegisterUserPrefs(PrefRegistrySyncable* registry) {
   chromeos::OAuth2LoginManager::RegisterUserPrefs(registry);
   chromeos::Preferences::RegisterUserPrefs(registry);
   chromeos::ProxyConfigServiceImpl::RegisterUserPrefs(registry);
+  FlagsUI::RegisterUserPrefs(registry);
 #endif
 
 #if defined(OS_WIN)

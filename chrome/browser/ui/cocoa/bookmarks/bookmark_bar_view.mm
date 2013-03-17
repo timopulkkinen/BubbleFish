@@ -10,6 +10,7 @@
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_context_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_folder_target.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -97,11 +98,11 @@ using content::UserMetricsAction;
   return NO;
 }
 
--(NSTextField*)noItemTextfield {
+-(BookmarkBarTextField*)noItemTextfield {
   return noItemTextfield_;
 }
 
--(NSButton*)importBookmarksButton {
+-(BookmarkBarImportButton*)importBookmarksButton {
   return importBookmarksButton_;
 }
 
@@ -264,6 +265,10 @@ using content::UserMetricsAction;
   return NO;
 }
 
+- (NSMenu*)menu {
+  return [[controller_ menuController] menuForBookmarkNode:NULL];
+}
+
 - (void)setController:(id)controller {
   controller_ = controller;
 }
@@ -273,3 +278,27 @@ using content::UserMetricsAction;
 }
 
 @end  // @implementation BookmarkBarView
+
+@implementation BookmarkBarTextField
+
+- (NSMenu*)menu {
+  return [barView_ menu];
+}
+
+@end  // @implementation BookmarkBarTextField
+
+@implementation BookmarkBarImportButton
+
+- (NSMenu*)menu {
+  return [barView_ menu];
+}
+
+@end  // @implementation BookmarkBarImportButton
+
+@implementation BookmarkBarItemContainer
+
+- (NSMenu*)menu {
+  return [barView_ menu];
+}
+
+@end  // @implementation BookmarkBarItemContainer

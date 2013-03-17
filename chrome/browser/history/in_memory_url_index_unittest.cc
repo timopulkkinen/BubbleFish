@@ -495,9 +495,6 @@ TEST_F(InMemoryURLIndexTest, Retrieval) {
 }
 
 TEST_F(InMemoryURLIndexTest, CursorPositionRetrieval) {
-  base::AutoReset<bool> use_cursor_position(
-      &GetPrivateData()->use_cursor_position_, true);
-
   // See if a very specific term with no cursor gives an empty result.
   ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
       ASCIIToUTF16("DrudReport"), string16::npos);
@@ -944,6 +941,10 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   EXPECT_FALSE(private_data.history_info_map_.empty());
   EXPECT_FALSE(private_data.word_starts_map_.empty());
 
+  // Make sure the data we have was built from history.  (Version 0
+  // means rebuilt from history.)
+  EXPECT_EQ(0, private_data.restored_cache_version_);
+
   // Capture the current private data for later comparison to restored data.
   scoped_refptr<URLIndexPrivateData> old_data(private_data.Duplicate());
 
@@ -973,6 +974,11 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   EXPECT_TRUE(restore_observer.succeeded());
 
   URLIndexPrivateData& new_data(*GetPrivateData());
+
+  // Make sure the data we have was reloaded from cache.  (Version 0
+  // means rebuilt from history; anything else means restored from
+  // a cache version.)
+  EXPECT_GT(new_data.restored_cache_version_, 0);
 
   // Compare the captured and restored for equality.
   ExpectPrivateDataEqual(*old_data, new_data);

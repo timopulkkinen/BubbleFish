@@ -23,7 +23,7 @@ const int kPixelDistanceToRecord = 8000;
 
 namespace cc {
 
-PicturePile::PicturePile() : num_raster_threads_(0) {
+PicturePile::PicturePile() {
 }
 
 PicturePile::~PicturePile() {
@@ -111,8 +111,8 @@ void PicturePile::Update(
 }
 
 class FullyContainedPredicate {
-public:
-  FullyContainedPredicate(gfx::Rect rect) : layer_rect_(rect) { }
+ public:
+  FullyContainedPredicate(gfx::Rect rect) : layer_rect_(rect) {}
   bool operator()(const scoped_refptr<Picture>& picture) {
     return layer_rect_.Contains(picture->LayerRect());
   }
@@ -153,14 +153,6 @@ void PicturePile::InvalidateRect(
                                     pred),
                      picture_list.end());
   picture_list.push_back(Picture::Create(picture_rect));
-}
-
-
-void PicturePile::PushPropertiesTo(PicturePileImpl* other) {
-  // TODO(enne): Don't create clones or push anything if nothing has changed
-  // on this layer this frame.
-  PicturePileBase::PushPropertiesTo(other);
-  other->CloneForDrawing(num_raster_threads_);
 }
 
 }  // namespace cc

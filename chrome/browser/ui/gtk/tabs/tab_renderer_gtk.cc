@@ -699,9 +699,9 @@ void TabRendererGtk::UpdateFaviconOverlay(WebContents* contents) {
         data_.capture_state == PROJECTING ?
             IDR_TAB_CAPTURE_GLOW : IDR_TAB_RECORDING);
 
-    int icon_size = gfx::kFaviconSize;
-    if (data_.capture_state == PROJECTING)
-      icon_size *= kProjectingGlowResizeScale;
+    int icon_size = data_.capture_state == PROJECTING ?
+        gfx::kFaviconSize * kProjectingGlowResizeScale :
+        recording.ToImageSkia()->width();
 
     GdkPixbuf* pixbuf = data_.favicon.isNull() ?
         gfx::GdkPixbufFromSkBitmap(*recording.ToSkBitmap()) :
@@ -955,6 +955,44 @@ void TabRendererGtk::PaintIcon(GtkWidget* widget, cairo_t* cr) {
                     favicon_bounds_.x(),
                     favicon_bounds_.y() + favicon_hiding_offset_);
       cairo_paint(cr);
+    } else if (data_.capture_state == RECORDING) {
+      // Add mask around the recording overlay image (red dot).
+      gfx::CairoCachedSurface* tab_bg;
+      if (IsActive()) {
+        tab_bg = theme_service_->GetImageNamed(IDR_THEME_TOOLBAR).ToCairo();
+      } else {
+        int theme_id = data_.incognito ?
+          IDR_THEME_TAB_BACKGROUND_INCOGNITO : IDR_THEME_TAB_BACKGROUND;
+        tab_bg = theme_service_->GetImageNamed(theme_id).ToCairo();
+      }
+      tab_bg->SetSource(cr, widget, -background_offset_x_, 0);
+      cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
+
+      gfx::CairoCachedSurface* recording_mask =
+          theme_service_->GetImageNamed(IDR_TAB_RECORDING_MASK).ToCairo();
+      int offset_from_right = data_.cairo_overlay.Width() +
+          (recording_mask->Width() - data_.cairo_overlay.Width()) / 2;
+      int favicon_x = favicon_bounds_.x() + favicon_bounds_.width() -
+          offset_from_right;
+      int offset_from_bottom = data_.cairo_overlay.Height() +
+          (recording_mask->Height() - data_.cairo_overlay.Height()) / 2;
+      int favicon_y = favicon_bounds_.y() + favicon_hiding_offset_ +
+          favicon_bounds_.height() - offset_from_bottom;
+      recording_mask->MaskSource(cr, widget, favicon_x, favicon_y);
+
+      if (!IsActive()) {
+        double throb_value = GetThrobValue();
+        if (throb_value > 0) {
+          cairo_push_group(cr);
+          gfx::CairoCachedSurface* active_bg =
+              theme_service_->GetImageNamed(IDR_THEME_TOOLBAR).ToCairo();
+          active_bg->SetSource(cr, widget, -background_offset_x_, 0);
+          cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
+          recording_mask->MaskSource(cr, widget, favicon_x, favicon_y);
+          cairo_pop_group_to_source(cr);
+          cairo_paint_with_alpha(cr, throb_value);
+        }
+      }
     }
 
     int favicon_x = favicon_bounds_.x();
@@ -962,6 +1000,9 @@ void TabRendererGtk::PaintIcon(GtkWidget* widget, cairo_t* cr) {
     if (data_.capture_state == PROJECTING) {
       favicon_x -= favicon_bounds_.width() * kProjectingGlowShiftScale;
       favicon_y -= favicon_bounds_.height() * kProjectingGlowShiftScale;
+    } else if (data_.capture_state == RECORDING) {
+      favicon_x += favicon_bounds_.width() - data_.cairo_overlay.Width();
+      favicon_y += favicon_bounds_.height() - data_.cairo_overlay.Height();
     }
 
     data_.cairo_overlay.SetSource(cr, widget, favicon_x, favicon_y);

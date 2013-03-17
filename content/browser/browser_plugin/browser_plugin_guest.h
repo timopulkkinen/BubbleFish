@@ -25,12 +25,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/id_map.h"
+#include "base/memory/weak_ptr.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
 #include "content/common/browser_plugin/browser_plugin_message_enums.h"
 #include "content/port/common/input_event_ack_state.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
@@ -58,6 +60,7 @@ namespace content {
 
 class BrowserPluginHostFactory;
 class BrowserPluginEmbedder;
+class BrowserPluginGuestManager;
 class RenderProcessHost;
 class RenderWidgetHostView;
 struct MediaStreamRequest;
@@ -71,31 +74,29 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                                           public WebContentsDelegate,
                                           public WebContentsObserver {
  public:
+  typedef base::Callback<void(bool)> GeolocationCallback;
   virtual ~BrowserPluginGuest();
 
   static BrowserPluginGuest* Create(
       int instance_id,
-      WebContentsImpl* embedder_web_contents,
       WebContentsImpl* web_contents,
       const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   // Overrides factory for testing. Default (NULL) value indicates regular
   // (non-test) environment.
   static void set_factory_for_testing(BrowserPluginHostFactory* factory) {
-    content::BrowserPluginGuest::factory_ = factory;
+    BrowserPluginGuest::factory_ = factory;
   }
 
   bool OnMessageReceivedFromEmbedder(const IPC::Message& message);
 
-  void Initialize(const BrowserPluginHostMsg_CreateGuest_Params& params);
+  void Initialize(WebContentsImpl* embedder_web_contents,
+                  const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   void set_guest_hang_timeout_for_testing(const base::TimeDelta& timeout) {
     guest_hang_timeout_ = timeout;
   }
 
-  void set_embedder_web_contents(WebContentsImpl* web_contents) {
-    embedder_web_contents_ = web_contents;
-  }
   WebContentsImpl* embedder_web_contents() const {
     return embedder_web_contents_;
   }
@@ -154,11 +155,11 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   virtual bool ShouldFocusPageAfterCrash() OVERRIDE;
   virtual void RequestMediaAccessPermission(
       WebContents* web_contents,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE;
+      const MediaStreamRequest& request,
+      const MediaResponseCallback& callback) OVERRIDE;
 
   // Exposes the protected web_contents() from WebContentsObserver.
-  WebContents* GetWebContents();
+  WebContentsImpl* GetWebContents();
 
   // Kill the guest process.
   void Terminate();
@@ -175,6 +176,15 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   // messages for testing.
   virtual void SendMessageToEmbedder(IPC::Message* msg);
 
+  // Requests geolocation permission through embedder js api.
+  void AskEmbedderForGeolocationPermission(int bridge_id,
+                                           const GURL& requesting_frame,
+                                           GeolocationCallback callback);
+  // Cancels pending geolocation request.
+  void CancelGeolocationRequest(int bridge_id);
+  // Embedder sets permission to allow or deny geolocation request.
+  void SetGeolocationPermission(int request_id, bool allowed);
+
   // Returns the identifier that uniquely identifies a browser plugin guest
   // within an embedder.
   int instance_id() const { return instance_id_; }
@@ -186,16 +196,20 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                                        const std::string& mailbox_name,
                                        uint32 sync_point);
 
+  // Returns whether BrowserPluginGuest is interested in receiving the given
+  // |message|.
+  static bool ShouldForwardToBrowserPluginGuest(const IPC::Message& message);
+
  private:
-  typedef std::pair<content::MediaStreamRequest, content::MediaResponseCallback>
+  typedef std::pair<MediaStreamRequest, MediaResponseCallback>
       MediaStreamRequestAndCallbackPair;
   typedef std::map<int, MediaStreamRequestAndCallbackPair>
       MediaStreamRequestsMap;
 
+  class EmbedderRenderViewHostObserver;
   friend class TestBrowserPluginGuest;
 
   BrowserPluginGuest(int instance_id,
-                     WebContentsImpl* embedder_web_contents,
                      WebContentsImpl* web_contents,
                      const BrowserPluginHostMsg_CreateGuest_Params& params);
 
@@ -328,11 +342,22 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                          const std::string& name);
   void OnUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
 
+  // Helpers for |OnRespondPermission|.
+  void OnRespondPermissionGeolocation(int request_id, bool should_allow);
+  void OnRespondPermissionMedia(int request_id, bool should_allow);
+
+  // Weak pointer used to ask GeolocationPermissionContext about geolocation
+  // permission.
+  base::WeakPtrFactory<BrowserPluginGuest> weak_ptr_factory_;
+
   // Static factory instance (always NULL for non-test).
-  static content::BrowserPluginHostFactory* factory_;
+  static BrowserPluginHostFactory* factory_;
 
   NotificationRegistrar notification_registrar_;
+  scoped_ptr<EmbedderRenderViewHostObserver> embedder_rvh_observer_;
   WebContentsImpl* embedder_web_contents_;
+  typedef std::map<int, GeolocationCallback> GeolocationRequestsMap;
+  GeolocationRequestsMap geolocation_request_callback_map_;
   // An identifier that uniquely identifies a browser plugin guest within an
   // embedder.
   int instance_id_;
@@ -347,17 +372,17 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   base::TimeDelta guest_hang_timeout_;
   bool focused_;
   bool mouse_locked_;
+  bool pending_lock_request_;
   bool guest_visible_;
   bool embedder_visible_;
   std::string name_;
   bool auto_size_enabled_;
   gfx::Size max_auto_size_;
   gfx::Size min_auto_size_;
-  bool destroy_called_;
 
-  // A counter to generate unique request id for a media access request.
+  // A counter to generate a unique request id for a permission request.
   // We only need the ids to be unique for a given BrowserPluginGuest.
-  int current_media_access_request_id_;
+  int next_permission_request_id_;
   // A map to store WebContents's media request object and callback.
   // We need to store these because we need a roundtrip to the embedder to know
   // if we allow or disallow the request. The key of the map is unique only for

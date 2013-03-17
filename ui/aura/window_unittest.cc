@@ -33,6 +33,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
@@ -465,7 +466,6 @@ TEST_F(WindowTest, MoveCursorToWithComplexTransform) {
   transform.Translate(10.0, 20.0);
   transform.Rotate(10.0);
   transform.Scale(0.3, 0.5);
-
   root->SetTransform(root_transform);
   w1->SetTransform(transform);
   w11->SetTransform(transform);
@@ -1614,7 +1614,8 @@ TEST_F(WindowTest, OwnedProperty) {
 
 TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
   // We cannot short-circuit animations in this test.
-  ui::LayerAnimator::set_disable_animations_for_test(false);
+  ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
 
   scoped_ptr<Window> w1(
       CreateTestWindowWithBounds(gfx::Rect(0, 0, 100, 100), root_window()));
@@ -2510,7 +2511,8 @@ TEST_F(WindowTest, DelegateNotifiedAsBoundsChange) {
   BoundsChangeDelegate delegate;
 
   // We cannot short-circuit animations in this test.
-  ui::LayerAnimator::set_disable_animations_for_test(false);
+  ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
 
   scoped_ptr<Window> window(
       CreateTestWindowWithDelegate(&delegate, 1,
@@ -2544,7 +2546,8 @@ TEST_F(WindowTest, DelegateNotifiedAsBoundsChangeInHiddenLayer) {
   BoundsChangeDelegate delegate;
 
   // We cannot short-circuit animations in this test.
-  ui::LayerAnimator::set_disable_animations_for_test(false);
+  ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
 
   scoped_ptr<Window> window(
       CreateTestWindowWithDelegate(&delegate, 1,

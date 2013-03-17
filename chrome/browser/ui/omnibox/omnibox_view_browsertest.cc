@@ -9,6 +9,8 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -48,6 +50,10 @@
 
 #if defined(USE_AURA)
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
 using base::Time;
@@ -1544,6 +1550,36 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
 
 #endif  // defined(TOOLKIT_GTK) || defined(USE_AURA)
 
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DoesNotUpdateAutocompleteOnBlur) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
+  ASSERT_TRUE(popup_model);
+
+  // Input something to trigger inline autocomplete.
+  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kInlineAutocompleteTextKeys));
+  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+  ASSERT_TRUE(popup_model->IsOpen());
+  size_t start, end;
+  omnibox_view->GetSelectionBounds(&start, &end);
+  EXPECT_TRUE(start != end);
+  string16 old_autocomplete_text =
+      omnibox_view->model()->autocomplete_controller()->input().text();
+
+  // Unfocus the omnibox. This should clear the text field selection and
+  // close the popup, but should not run autocomplete.
+  // Note: GTK preserves the selection when the omnibox is unfocused.
+  ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
+  ASSERT_FALSE(popup_model->IsOpen());
+  omnibox_view->GetSelectionBounds(&start, &end);
+#if !defined(TOOLKIT_GTK)
+  EXPECT_TRUE(start == end);
+#endif
+
+  EXPECT_EQ(old_autocomplete_text,
+      omnibox_view->model()->autocomplete_controller()->input().text());
+}
+
 #if defined(TOOLKIT_GTK)
 // See http://crbug.com/63860
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PrimarySelection) {
@@ -1675,7 +1711,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
   ASSERT_NE(static_cast<OmniboxEditModel*>(NULL), edit_model);
   edit_model->UpdatePermanentText(ASCIIToUTF16("http://www.google.com/"));
 
-  // Location bar must have focus to receive Ctrl-C.
+  // Location bar must have focus.
   chrome::FocusLocationBar(browser());
   ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
 
@@ -1685,11 +1721,12 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
   EXPECT_TRUE(omnibox_view->IsSelectAll());
   ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
   clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_C, kCtrlOrCmdMask));
+  EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_COPY));
+  EXPECT_EQ(ASCIIToUTF16(target_url), omnibox_view->GetText());
   EXPECT_TRUE(clipboard->IsFormatAvailable(
       ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
 
-  // MAC is the only platform which doesn't write html.
+  // The Mac is the only platform which doesn't write html.
 #if !defined(OS_MACOSX)
   EXPECT_TRUE(clipboard->IsFormatAvailable(
       ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
@@ -1703,4 +1740,195 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
   EXPECT_EQ(target_url, url);
   EXPECT_EQ(ASCIIToUTF16(target_url), title);
 #endif
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutURLToClipboard) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  const char* target_url = "http://www.google.com/calendar";
+  omnibox_view->SetUserText(ASCIIToUTF16(target_url));
+
+  // Set permanent text thus making sure that omnibox treats 'google.com'
+  // as URL (not as ordinary user input).
+  OmniboxEditModel* edit_model = omnibox_view->model();
+  ASSERT_NE(static_cast<OmniboxEditModel*>(NULL), edit_model);
+  edit_model->UpdatePermanentText(ASCIIToUTF16("http://www.google.com/"));
+
+  // Location bar must have focus.
+  chrome::FocusLocationBar(browser());
+  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+
+  // Select full URL and cut it. General text and html should be available
+  // in the clipboard.
+  omnibox_view->SelectAll(true);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
+  EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_CUT));
+  EXPECT_EQ(string16(), omnibox_view->GetText());
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+
+  // The Mac is the only platform which doesn't write html.
+#if !defined(OS_MACOSX)
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
+#endif
+
+  // These platforms should read bookmark format.
+#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_MACOSX)
+  string16 title;
+  std::string url;
+  clipboard->ReadBookmark(&title, &url);
+  EXPECT_EQ(target_url, url);
+  EXPECT_EQ(ASCIIToUTF16(target_url), title);
+#endif
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyTextToClipboard) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  const char* target_text = "foo";
+  omnibox_view->SetUserText(ASCIIToUTF16(target_text));
+
+  // Location bar must have focus.
+  chrome::FocusLocationBar(browser());
+  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+
+  // Select full text and copy it to the clipboard.
+  omnibox_view->SelectAll(true);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
+  EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_COPY));
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
+  EXPECT_EQ(ASCIIToUTF16(target_text), omnibox_view->GetText());
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutTextToClipboard) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  const char* target_text = "foo";
+  omnibox_view->SetUserText(ASCIIToUTF16(target_text));
+
+  // Location bar must have focus.
+  chrome::FocusLocationBar(browser());
+  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+
+  // Select full text and cut it to the clipboard.
+  omnibox_view->SelectAll(true);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
+  EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_CUT));
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
+  EXPECT_EQ(string16(), omnibox_view->GetText());
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, IncognitoCopyURLToClipboard) {
+  EXPECT_FALSE(browser()->profile()->IsOffTheRecord());
+  Browser* browser_incognito = CreateIncognitoBrowser();
+  ui_test_utils::NavigateToURL(browser_incognito,
+                               GURL(chrome::kChromeUIVersionURL));
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser_incognito));
+
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxViewForBrowser(browser_incognito,
+                                                   &omnibox_view));
+  const char* target_url = "http://www.google.com/calendar";
+  omnibox_view->SetUserText(ASCIIToUTF16(target_url));
+
+  // Set permanent text thus making sure that omnibox treats 'google.com'
+  // as URL (not as ordinary user input).
+  OmniboxEditModel* edit_model = omnibox_view->model();
+  ASSERT_NE(static_cast<OmniboxEditModel*>(NULL), edit_model);
+  edit_model->UpdatePermanentText(ASCIIToUTF16("http://www.google.com/"));
+
+  // Location bar must have focus to receive Ctrl-C.
+  chrome::FocusLocationBar(browser_incognito);
+  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser_incognito, VIEW_ID_OMNIBOX));
+
+  // Select full URL and copy it to clipboard.
+  omnibox_view->SelectAll(true);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
+  EXPECT_TRUE(chrome::ExecuteCommand(browser_incognito, IDC_COPY));
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+
+  // The Mac is the only platform which doesn't write html.
+#if !defined(OS_MACOSX)
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
+#endif
+
+  // Close incognito window. No more text in the clipboard.
+  content::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser_incognito));
+  chrome::CloseWindow(browser_incognito);
+
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself, which frees the Browser object
+  // which fires this event.
+  AutoreleasePool()->Recycle();
+#endif
+
+  signal.Wait();
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, IncognitoCopyTextToClipboard) {
+  EXPECT_FALSE(browser()->profile()->IsOffTheRecord());
+  Browser* browser_incognito = CreateIncognitoBrowser();
+  ui_test_utils::NavigateToURL(browser_incognito,
+                               GURL(chrome::kChromeUIVersionURL));
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser_incognito));
+
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxViewForBrowser(browser_incognito,
+                                                   &omnibox_view));
+  const char* target_url = "http://www.google.com/calendar";
+  omnibox_view->SetUserText(ASCIIToUTF16(target_url));
+
+  // Location bar must have focus to receive Ctrl-C.
+  chrome::FocusLocationBar(browser_incognito);
+  ASSERT_TRUE(ui_test_utils::IsViewFocused(browser_incognito, VIEW_ID_OMNIBOX));
+
+  // Select full URL and copy it to clipboard.
+  omnibox_view->SelectAll(true);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  clipboard->Clear(ui::Clipboard::BUFFER_STANDARD);
+  EXPECT_TRUE(chrome::ExecuteCommand(browser_incognito, IDC_COPY));
+  EXPECT_TRUE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetHtmlFormatType(), ui::Clipboard::BUFFER_STANDARD));
+
+  // Close incognito window. No more text in the clipboard.
+  content::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser_incognito));
+  chrome::CloseWindow(browser_incognito);
+
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself, which frees the Browser object
+  // which fires this event.
+  AutoreleasePool()->Recycle();
+#endif
+
+  signal.Wait();
+  EXPECT_FALSE(clipboard->IsFormatAvailable(
+      ui::Clipboard::GetPlainTextFormatType(), ui::Clipboard::BUFFER_STANDARD));
 }

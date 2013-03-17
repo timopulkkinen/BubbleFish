@@ -27,15 +27,15 @@ FakeLayerUpdater::Resource::~Resource()
 {
 }
 
-void FakeLayerUpdater::Resource::update(ResourceUpdateQueue& queue, const gfx::Rect&, const gfx::Vector2d&, bool partialUpdate, RenderingStats*)
+void FakeLayerUpdater::Resource::Update(ResourceUpdateQueue* queue, gfx::Rect sourceRect, gfx::Vector2d destOffset, bool partialUpdate, RenderingStats* stats)
 {
     const gfx::Rect rect(0, 0, 10, 10);
     ResourceUpdate upload = ResourceUpdate::Create(
         texture(), &m_bitmap, rect, rect, gfx::Vector2d());
     if (partialUpdate)
-        queue.appendPartialUpload(upload);
+        queue->appendPartialUpload(upload);
     else
-        queue.appendFullUpload(upload);
+        queue->appendFullUpload(upload);
 
     m_layer->update();
 }
@@ -50,16 +50,16 @@ FakeLayerUpdater::~FakeLayerUpdater()
 {
 }
 
-void FakeLayerUpdater::prepareToUpdate(const gfx::Rect& contentRect, const gfx::Size&, float, float, gfx::Rect& resultingOpaqueRect, RenderingStats*)
+void FakeLayerUpdater::PrepareToUpdate(gfx::Rect contentRect, gfx::Size, float, float, gfx::Rect* resultingOpaqueRect, RenderingStats*)
 {
     m_prepareCount++;
     m_lastUpdateRect = contentRect;
     if (!m_rectToInvalidate.IsEmpty()) {
-        m_layer->invalidateContentRect(m_rectToInvalidate);
+        m_layer->InvalidateContentRect(m_rectToInvalidate);
         m_rectToInvalidate = gfx::Rect();
         m_layer = NULL;
     }
-    resultingOpaqueRect = m_opaquePaintRect;
+    *resultingOpaqueRect = m_opaquePaintRect;
 }
 
 void FakeLayerUpdater::setRectToInvalidate(const gfx::Rect& rect, FakeTiledLayer* layer)
@@ -68,7 +68,7 @@ void FakeLayerUpdater::setRectToInvalidate(const gfx::Rect& rect, FakeTiledLayer
     m_layer = layer;
 }
 
-scoped_ptr<LayerUpdater::Resource> FakeLayerUpdater::createResource(PrioritizedResourceManager* manager)
+scoped_ptr<LayerUpdater::Resource> FakeLayerUpdater::CreateResource(PrioritizedResourceManager* manager)
 {
     return scoped_ptr<LayerUpdater::Resource>(new Resource(this, PrioritizedResource::create(manager)));
 }
@@ -87,10 +87,10 @@ FakeTiledLayer::FakeTiledLayer(PrioritizedResourceManager* resourceManager)
     , m_fakeUpdater(make_scoped_refptr(new FakeLayerUpdater))
     , m_resourceManager(resourceManager)
 {
-    setTileSize(tileSize());
-    setTextureFormat(GL_RGBA);
-    setBorderTexelOption(LayerTilingData::NoBorderTexels);
-    setIsDrawable(true); // So that we don't get false positives if any of these tests expect to return false from drawsContent() for other reasons.
+    SetTileSize(tileSize());
+    SetTextureFormat(GL_RGBA);
+    SetBorderTexelOption(LayerTilingData::NoBorderTexels);
+    SetIsDrawable(true); // So that we don't get false positives if any of these tests expect to return false from DrawsContent() for other reasons.
 }
 
 FakeTiledLayerWithScaledBounds::FakeTiledLayerWithScaledBounds(PrioritizedResourceManager* resourceManager)
@@ -106,45 +106,45 @@ FakeTiledLayer::~FakeTiledLayer()
 {
 }
 
-void FakeTiledLayer::setNeedsDisplayRect(const gfx::RectF& rect)
+void FakeTiledLayer::SetNeedsDisplayRect(const gfx::RectF& rect)
 {
     m_lastNeedsDisplayRect = rect;
-    TiledLayer::setNeedsDisplayRect(rect);
+    TiledLayer::SetNeedsDisplayRect(rect);
 }
 
-void FakeTiledLayer::setTexturePriorities(const PriorityCalculator& calculator)
+void FakeTiledLayer::SetTexturePriorities(const PriorityCalculator& calculator)
 {
     // Ensure there is always a target render surface available. If none has been
     // set (the layer is an orphan for the test), then just set a surface on itself.
-    bool missingTargetRenderSurface = !renderTarget();
+    bool missingTargetRenderSurface = !render_target();
 
     if (missingTargetRenderSurface)
-        createRenderSurface();
+        CreateRenderSurface();
 
-    TiledLayer::setTexturePriorities(calculator);
+    TiledLayer::SetTexturePriorities(calculator);
 
     if (missingTargetRenderSurface) {
-        clearRenderSurface();
-        drawProperties().render_target = 0;
+        ClearRenderSurface();
+        draw_properties().render_target = 0;
     }
 }
 
-cc::PrioritizedResourceManager* FakeTiledLayer::resourceManager() const
+cc::PrioritizedResourceManager* FakeTiledLayer::ResourceManager() const
 {
     return m_resourceManager;
 }
 
-void FakeTiledLayer::updateContentsScale(float idealContentsScale)
+void FakeTiledLayer::updateContentsScale(float ideal_contents_scale)
 {
-    calculateContentsScale(
-        idealContentsScale,
+    CalculateContentsScale(
+        ideal_contents_scale,
         false,  // animating_transform_to_screen
-        &drawProperties().contents_scale_x,
-        &drawProperties().contents_scale_y,
-        &drawProperties().content_bounds);
+        &draw_properties().contents_scale_x,
+        &draw_properties().contents_scale_y,
+        &draw_properties().content_bounds);
 }
 
-cc::LayerUpdater* FakeTiledLayer::updater() const
+cc::LayerUpdater* FakeTiledLayer::Updater() const
 {
     return m_fakeUpdater.get();
 }
@@ -152,18 +152,18 @@ cc::LayerUpdater* FakeTiledLayer::updater() const
 void FakeTiledLayerWithScaledBounds::setContentBounds(const gfx::Size& contentBounds)
 {
     m_forcedContentBounds = contentBounds;
-    drawProperties().content_bounds = m_forcedContentBounds;
+    draw_properties().content_bounds = m_forcedContentBounds;
 }
 
-void FakeTiledLayerWithScaledBounds::calculateContentsScale(
-    float idealContentsScale,
-    bool animatingTransformToScreen,
-    float* contentsScaleX,
-    float* contentsScaleY,
+void FakeTiledLayerWithScaledBounds::CalculateContentsScale(
+    float ideal_contents_scale,
+    bool animating_transform_to_screen,
+    float* contents_scale_x,
+    float* contents_scale_y,
     gfx::Size* contentBounds)
 {
-    *contentsScaleX = static_cast<float>(m_forcedContentBounds.width()) / bounds().width();
-    *contentsScaleY = static_cast<float>(m_forcedContentBounds.height()) / bounds().height();
+    *contents_scale_x = static_cast<float>(m_forcedContentBounds.width()) / bounds().width();
+    *contents_scale_y = static_cast<float>(m_forcedContentBounds.height()) / bounds().height();
     *contentBounds = m_forcedContentBounds;
 }
 

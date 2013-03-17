@@ -26,55 +26,55 @@ static bool usingPictureLayer() {
 WebContentLayerImpl::WebContentLayerImpl(WebContentLayerClient* client)
     : client_(client) {
   if (usingPictureLayer())
-    layer_ = make_scoped_ptr(new WebLayerImpl(PictureLayer::create(this)));
+    layer_ = make_scoped_ptr(new WebLayerImpl(PictureLayer::Create(this)));
   else
-    layer_ = make_scoped_ptr(new WebLayerImpl(ContentLayer::create(this)));
-  layer_->layer()->setIsDrawable(true);
+    layer_ = make_scoped_ptr(new WebLayerImpl(ContentLayer::Create(this)));
+  layer_->layer()->SetIsDrawable(true);
 }
 
 WebContentLayerImpl::~WebContentLayerImpl() {
   if (usingPictureLayer())
-    static_cast<PictureLayer*>(layer_->layer())->clearClient();
+    static_cast<PictureLayer*>(layer_->layer())->ClearClient();
   else
-    static_cast<ContentLayer*>(layer_->layer())->clearClient();
+    static_cast<ContentLayer*>(layer_->layer())->ClearClient();
 }
 
 WebLayer* WebContentLayerImpl::layer() { return layer_.get(); }
 
 void WebContentLayerImpl::setDoubleSided(bool double_sided) {
-  layer_->layer()->setDoubleSided(double_sided);
+  layer_->layer()->SetDoubleSided(double_sided);
 }
 
 void WebContentLayerImpl::setBoundsContainPageScale(
     bool bounds_contain_page_scale) {
-  return layer_->layer()->setBoundsContainPageScale(bounds_contain_page_scale);
+  return layer_->layer()->SetBoundsContainPageScale(bounds_contain_page_scale);
 }
 
 bool WebContentLayerImpl::boundsContainPageScale() const {
-  return layer_->layer()->boundsContainPageScale();
+  return layer_->layer()->bounds_contain_page_scale();
 }
 
 void WebContentLayerImpl::setAutomaticallyComputeRasterScale(bool automatic) {
-  layer_->layer()->setAutomaticallyComputeRasterScale(automatic);
+  layer_->layer()->SetAutomaticallyComputeRasterScale(automatic);
 }
 
 // TODO(alokp): Remove this function from WebContentLayer API.
 void WebContentLayerImpl::setUseLCDText(bool enable) {}
 
 void WebContentLayerImpl::setDrawCheckerboardForMissingTiles(bool enable) {
-  layer_->layer()->setDrawCheckerboardForMissingTiles(enable);
+  layer_->layer()->SetDrawCheckerboardForMissingTiles(enable);
 }
 
-void WebContentLayerImpl::paintContents(SkCanvas* canvas,
-                                        const gfx::Rect& clip,
-                                        gfx::RectF& opaque) {
+void WebContentLayerImpl::PaintContents(SkCanvas* canvas,
+                                        gfx::Rect clip,
+                                        gfx::RectF* opaque) {
   if (!client_)
     return;
 
   WebFloatRect web_opaque;
   client_->paintContents(
-      canvas, clip, layer_->layer()->canUseLCDText(), web_opaque);
-  opaque = web_opaque;
+      canvas, clip, layer_->layer()->can_use_lcd_text(), web_opaque);
+  *opaque = web_opaque;
 }
 
 }  // namespace WebKit

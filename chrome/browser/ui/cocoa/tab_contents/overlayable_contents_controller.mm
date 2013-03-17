@@ -71,7 +71,8 @@
   // Remove any old overlay contents before showing the new one.
   if (overlayContents_) {
     [overlayContents_->GetView()->GetNativeView() removeFromSuperview];
-    overlayContents_->WasHidden();
+    if (overlayContents_ != overlay)
+      overlayContents_->WasHidden();
   }
 
   overlayContents_ = overlay;
@@ -164,7 +165,10 @@
 
   NSRect activeFrame = bounds;
   activeFrame.size.height -= activeContainerOffset_;
-  [activeContainer_ setFrame:activeFrame];
+  if (!NSEqualRects(activeFrame, [activeContainer_ frame])) {
+    [[activeContainer_ window] disableScreenUpdatesUntilFlush];
+    [activeContainer_ setFrame:activeFrame];
+  }
 }
 
 - (CGFloat)overlayHeightInPixels {

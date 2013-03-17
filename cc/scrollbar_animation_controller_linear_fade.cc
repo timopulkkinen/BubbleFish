@@ -20,7 +20,6 @@ ScrollbarAnimationControllerLinearFade::ScrollbarAnimationControllerLinearFade(L
     , m_pinchGestureInEffect(false)
     , m_fadeoutDelay(fadeoutDelay)
     , m_fadeoutLength(fadeoutLength)
-    , m_currentTimeForTesting(0)
 {
 }
 
@@ -31,7 +30,7 @@ ScrollbarAnimationControllerLinearFade::~ScrollbarAnimationControllerLinearFade(
 bool ScrollbarAnimationControllerLinearFade::animate(base::TimeTicks now)
 {
     float opacity = opacityAtTime(now);
-    m_scrollLayer->setScrollbarOpacity(opacity);
+    m_scrollLayer->SetScrollbarOpacity(opacity);
     return opacity;
 }
 

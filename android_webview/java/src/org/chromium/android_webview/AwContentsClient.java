@@ -252,14 +252,11 @@ public abstract class AwContentsClient extends ContentViewClient {
 
     public abstract void onGeolocationPermissionsHidePrompt();
 
-    // TODO(mnaganov): Make final after updating the glue layer.
-    public /*final*/ void onScaleChanged(float oldScale, float newScale) {
+    public final void onScaleChanged(float oldScale, float newScale) {
         onScaleChangedScaled((float)(oldScale * mDIPScale), (float)(newScale * mDIPScale));
     }
 
-    // TODO(mnaganov): Make abstract after updating the glue layer.
-    public /*abstract*/ void onScaleChangedScaled(float oldScale, float newScale) {
-    }
+    public abstract void onScaleChangedScaled(float oldScale, float newScale);
 
     protected abstract void handleJsAlert(String url, String message, JsResultReceiver receiver);
 
@@ -275,27 +272,13 @@ public abstract class AwContentsClient extends ContentViewClient {
 
     protected abstract void onCloseWindow();
 
-    // TODO(acleung): Make abstract when landed in Android
-    public void onReceivedTouchIconUrl(String url, boolean precomposed) { }
+    public abstract void onReceivedTouchIconUrl(String url, boolean precomposed);
 
-    // TODO(acleung): Make abstract when landed in Android
-    public void onReceivedIcon(Bitmap bitmap) { }
+    public abstract void onReceivedIcon(Bitmap bitmap);
 
     protected abstract void onRequestFocus();
 
-    //--------------------------------------------------------------------------------------------
-    //                              Other WebView-specific methods
-    //--------------------------------------------------------------------------------------------
-    //
-
-    public abstract void onFindResultReceived(int activeMatchOrdinal, int numberOfMatches,
-            boolean isDoneCounting);
-
-    /**
-     * Called whenever there is a new content picture available.
-     * @param picture New picture.
-     */
-    public abstract void onNewPicture(Picture picture);
+    protected abstract View getVideoLoadingProgressView();
 
     public abstract void onPageStarted(String url);
 
@@ -305,6 +288,24 @@ public abstract class AwContentsClient extends ContentViewClient {
 
     public abstract void onShowCustomView(View view,
            int requestedOrientation, WebChromeClient.CustomViewCallback callback);
+
+    // TODO (michaelbai): This method should be abstract, having empty body here
+    // makes the merge to the Android easy.
+    public void onHideCustomView() {
+    }
+
+    //--------------------------------------------------------------------------------------------
+    //                              Other WebView-specific methods
+    //--------------------------------------------------------------------------------------------
+    //
+    public abstract void onFindResultReceived(int activeMatchOrdinal, int numberOfMatches,
+            boolean isDoneCounting);
+
+    /**
+     * Called whenever there is a new content picture available.
+     * @param picture New picture.
+     */
+    public abstract void onNewPicture(Picture picture);
 
     //--------------------------------------------------------------------------------------------
     //             Stuff that we ignore since it only makes sense for Chrome browser

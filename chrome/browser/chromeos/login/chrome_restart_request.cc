@@ -22,6 +22,7 @@
 #include "cc/switches.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -72,20 +73,21 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableAcceleratedOverflowScroll,
       ::switches::kDisableAcceleratedPlugins,
       ::switches::kDisableAcceleratedVideoDecode,
+      ::switches::kDisableBrowserPluginCompositing,
       ::switches::kDisableEncryptedMedia,
       ::switches::kDisableForceCompositingMode,
+      ::switches::kDisableGpuShaderDiskCache,
       ::switches::kDisableGpuWatchdog,
       ::switches::kDisableLoginAnimations,
-      ::switches::kDisableNonuniformGpuMemPolicy,
       ::switches::kDisableOobeAnimation,
       ::switches::kDisablePanelFitting,
       ::switches::kDisableThreadedCompositing,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
       ::switches::kEnableAcceleratedOverflowScroll,
-      ::switches::kEnableBrowserPluginCompositing,
       ::switches::kEnableCompositingForFixedPosition,
       ::switches::kEnableGestureTapHighlight,
+      ::switches::kDisableGestureTapHighlight,
       ::switches::kEnableLogging,
       ::switches::kEnablePinch,
       ::switches::kEnableViewport,
@@ -108,9 +110,9 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kTouchDevices,
       ::switches::kTouchEvents,
       ::switches::kTouchOptimizedUI,
-      ::switches::kOldCheckboxStyle,
       ::switches::kUIEnablePartialSwap,
       ::switches::kUIEnableThreadedCompositing,
+      ::switches::kUIMaxFramesPending,
       ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
       ::switches::kUseCras,
@@ -118,11 +120,14 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kUseGL,
       ::switches::kUserDataDir,
       ::switches::kUseExynosVda,
+      ::switches::kV,
       ash::switches::kAshTouchHud,
       ash::switches::kAuraLegacyPowerButton,
-      ash::switches::kAshEnableNewNetworkStatusArea,
+      ash::switches::kAshDisableNewNetworkStatusArea,
       cc::switches::kDisableThreadedAnimation,
       cc::switches::kEnablePartialSwap,
+      cc::switches::kDisableImplSidePainting,
+      cc::switches::kEnableImplSidePainting,
       chromeos::switches::kDbusStub,
       gfx::switches::kEnableBrowserTextSubpixelPositioning,
       gfx::switches::kEnableWebkitTextSubpixelPositioning,
@@ -154,6 +159,15 @@ std::string DeriveCommandLine(const GURL& start_url,
         ::switches::kRegisterPepperPlugins,
         base_command_line.GetSwitchValueNative(
             ::switches::kRegisterPepperPlugins).c_str());
+  }
+
+  // TODO(zelidrag): Remove this hack that get us around compositing bug from
+  // http://crbug.com/179256 once that bug is resolved.
+  if (command_line->HasSwitch(::switches::kForceAppMode)) {
+    std::string switch_to_remove("--");
+    switch_to_remove.append(cc::switches::kEnablePartialSwap);
+    cmd_line_str = cmd_line_str.replace(cmd_line_str.find(switch_to_remove),
+                                        switch_to_remove.length(), "");
   }
 
   return cmd_line_str;
@@ -228,11 +242,10 @@ void ChromeRestartRequest::Start() {
   // Post a task to local state task runner thus it occurs last on the task
   // queue, so it would be executed after committing pending write on that
   // thread.
-  base::FilePath local_state_path;
-  CHECK(PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path));
   scoped_refptr<base::SequencedTaskRunner> local_state_task_runner =
-      JsonPrefStore::GetTaskRunnerForFile(local_state_path,
-                                          BrowserThread::GetBlockingPool());
+      JsonPrefStore::GetTaskRunnerForFile(
+          base::FilePath(chrome::kLocalStorePoolName),
+          BrowserThread::GetBlockingPool());
   local_state_task_runner->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&EnsureLocalStateIsWritten),

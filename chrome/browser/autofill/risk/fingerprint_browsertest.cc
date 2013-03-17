@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/autofill/risk/fingerprint.h"
+#include "components/autofill/browser/risk/fingerprint.h"
 
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/port.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_service.h"
-#include "chrome/browser/autofill/risk/proto/fingerprint.pb.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/autofill/browser/risk/proto/fingerprint.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebScreenInfo.h"
@@ -127,11 +123,6 @@ class AutofillRiskFingerprintTest : public InProcessBrowserTest {
 #endif
 // Test that getting a fingerprint works on some basic level.
 IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, MAYBE_GetFingerprint) {
-  TestingPrefServiceSimple prefs;
-  prefs.registry()->RegisterStringPref(prefs::kDefaultCharset, kCharset);
-  prefs.registry()->RegisterStringPref(prefs::kAcceptLanguages,
-                                       kAcceptLanguages);
-
   WebKit::WebScreenInfo screen_info;
   screen_info.depth = kScreenColorDepth;
   screen_info.rect = WebKit::WebRect(kScreenBounds);
@@ -140,7 +131,8 @@ IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, MAYBE_GetFingerprint) {
   // TODO(isherman): Investigating http://crbug.com/174296
   LOG(WARNING) << "Loading fingerprint.";
   internal::GetFingerprintInternal(
-      kGaiaId, kWindowBounds, kContentBounds, screen_info, prefs,
+      kGaiaId, kWindowBounds, kContentBounds, screen_info,
+      "25.0.0.123", kCharset, kAcceptLanguages, base::Time::Now(),
       base::Bind(&AutofillRiskFingerprintTest::GetFingerprintTestCallback,
                  base::Unretained(this)));
 

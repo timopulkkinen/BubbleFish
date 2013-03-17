@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/image_transport_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
@@ -33,6 +34,10 @@
 
 namespace aura {
 class WindowTracker;
+}
+
+namespace cc {
+class DelegatedFrameData;
 }
 
 namespace gfx {
@@ -62,6 +67,7 @@ class RenderWidgetHostViewAura
       public aura::client::ActivationChangeObserver,
       public aura::client::FocusChangeObserver,
       public ImageTransportFactoryObserver,
+      public BrowserAccessibilityDelegate,
       public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
  public:
   // Used to notify whenever the paint-content of the view changes.
@@ -177,7 +183,7 @@ class RenderWidgetHostViewAura
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
   virtual void OnSwapCompositorFrame(
-      const cc::CompositorFrame& frame) OVERRIDE;
+      scoped_ptr<cc::CompositorFrame> frame) OVERRIDE;
 
   // Overridden from ui::TextInputClient:
   virtual void SetCompositionText(
@@ -291,10 +297,23 @@ class RenderWidgetHostViewAura
   // Overridden from ImageTransportFactoryObserver:
   virtual void OnLostResources() OVERRIDE;
 
+  // Overridden from BrowserAccessibilityDelegate:
+  virtual void SetAccessibilityFocus(int acc_obj_id) OVERRIDE;
+  virtual void AccessibilityDoDefaultAction(int acc_obj_id) OVERRIDE;
+  virtual void AccessibilityScrollToMakeVisible(
+      int acc_obj_id, gfx::Rect subfocus) OVERRIDE;
+  virtual void AccessibilityScrollToPoint(
+      int acc_obj_id, gfx::Point point) OVERRIDE;
+  virtual void AccessibilitySetTextSelection(
+      int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
+  virtual gfx::Point GetLastTouchEventLocation() const OVERRIDE;
+  virtual void FatalAccessibilityTreeError() OVERRIDE;
+
   virtual ~RenderWidgetHostViewAura();
 
   void UpdateCursorIfOverSelf();
-  bool ShouldSkipFrame(const gfx::Size& size);
+  bool ShouldSkipFrame(gfx::Size size_in_dip);
+  void CheckResizeLocks(gfx::Size size_in_dip);
   void UpdateExternalTexture();
   ui::InputMethod* GetInputMethod() const;
 
@@ -367,6 +386,13 @@ class RenderWidgetHostViewAura
       const BufferPresentedCallback& ack_callback,
       const scoped_refptr<ui::Texture>& texture_to_return);
 
+  void SwapDelegatedFrame(
+      scoped_ptr<cc::DelegatedFrameData> frame,
+      float device_scale_factor);
+  void SendDelegatedFrameAck();
+
+  BrowserAccessibilityManager* GetOrCreateBrowserAccessibilityManager();
+
 #if defined(OS_WIN)
   // Sets the cutout rects from transient windows. These are rectangles that
   // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
@@ -430,9 +456,6 @@ class RenderWidgetHostViewAura
 
   // Current tooltip text.
   string16 tooltip_;
-
-  // The scale factor of the display the renderer is currently on.
-  float device_scale_factor_;
 
   std::vector<base::Closure> on_compositing_did_commit_callbacks_;
 

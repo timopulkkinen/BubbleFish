@@ -598,8 +598,8 @@ TEST_F(NativeTextfieldViewsTest, PasswordTest) {
   SetClipboardText("foo");
   SendKeyEvent(ui::VKEY_C, false, true);
   SendKeyEvent(ui::VKEY_X, false, true);
-  ExecuteCommand(IDS_APP_COPY);
-  ExecuteCommand(IDS_APP_CUT);
+  ExecuteCommand(IDS_APP_COPY, 0);
+  ExecuteCommand(IDS_APP_CUT, 0);
   EXPECT_STR_EQ("foo", string16(GetClipboardText()));
   EXPECT_STR_EQ("my password", textfield_->text());
 }
@@ -1216,6 +1216,15 @@ TEST_F(NativeTextfieldViewsTest, TextInputClientTest) {
   EXPECT_EQ(8U, textfield_->GetCursorPosition());
   EXPECT_EQ(1, on_before_user_action_);
   EXPECT_EQ(1, on_after_user_action_);
+
+  // On{Before,After}UserAction should be called by whatever user action
+  // triggers clearing or setting a selection if appropriate.
+  on_before_user_action_ = on_after_user_action_ = 0;
+  textfield_->clear();
+  textfield_->ClearSelection();
+  textfield_->SelectAll(false);
+  EXPECT_EQ(0, on_before_user_action_);
+  EXPECT_EQ(0, on_after_user_action_);
 
   input_method_->Clear();
   textfield_->SetReadOnly(true);

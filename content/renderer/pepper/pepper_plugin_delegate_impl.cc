@@ -23,6 +23,7 @@
 #include "content/common/child_thread.h"
 #include "content/common/fileapi/file_system_dispatcher.h"
 #include "content/common/fileapi/file_system_messages.h"
+#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/pepper_messages.h"
 #include "content/common/pepper_plugin_registry.h"
@@ -831,7 +832,7 @@ webkit::ppapi::PluginDelegate::PlatformContext3D*
   const webkit_glue::WebPreferences& prefs = render_view_->webkit_preferences();
   if (!prefs.accelerated_compositing_for_plugins_enabled)
     return NULL;
-  return new PlatformContext3DImpl(this);
+  return new PlatformContext3DImpl;
 #else
   return NULL;
 #endif
@@ -839,7 +840,8 @@ webkit::ppapi::PluginDelegate::PlatformContext3D*
 
 void PepperPluginDelegateImpl::ReparentContext(
     webkit::ppapi::PluginDelegate::PlatformContext3D* context) {
-  static_cast<PlatformContext3DImpl*>(context)->SetParentContext(this);
+  static_cast<PlatformContext3DImpl*>(context)->
+      SetParentAndCreateBackingTextureIfNeeded();
 }
 
 webkit::ppapi::PluginDelegate::PlatformVideoCapture*
@@ -1570,19 +1572,6 @@ int PepperPluginDelegateImpl::GetSessionID(PP_DeviceType_Dev type,
 #else
   return 0;
 #endif
-}
-
-WebGraphicsContext3DCommandBufferImpl*
-PepperPluginDelegateImpl::GetParentContextForPlatformContext3D() {
-  WebGraphicsContext3DCommandBufferImpl* context =
-      static_cast<WebGraphicsContext3DCommandBufferImpl*>(
-          render_view_->webview()->sharedGraphicsContext3D());
-  if (!context)
-    return NULL;
-  if (!context->makeContextCurrent() || context->isContextLost())
-    return NULL;
-
-  return context;
 }
 
 MouseLockDispatcher::LockTarget*

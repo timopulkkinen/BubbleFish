@@ -36,12 +36,12 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #if defined(TOOLKIT_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
@@ -122,6 +122,10 @@ void InitLogging() {
     // http://blogs.msdn.com/oldnewthing/archive/2004/07/27/198410.aspx
     UINT existing_flags = SetErrorMode(new_flags);
     SetErrorMode(existing_flags | new_flags);
+
+    // Don't pop up dialog on assertion failure, log to stdout instead.
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDOUT);
   }
 #endif
 
@@ -524,18 +528,6 @@ WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
   return NULL;
 }
 
-static WebKit::WebLayerTreeView* CreateLayerTreeView(
-    LayerTreeViewType type,
-    DRTLayerTreeViewClient* client,
-    scoped_ptr<cc::Thread> compositor_thread) {
-  scoped_ptr<WebKit::WebLayerTreeViewImplForTesting> view(
-      new WebKit::WebLayerTreeViewImplForTesting(type, client));
-
-  if (!view->initialize(compositor_thread.Pass()))
-    return NULL;
-  return view.release();
-}
-
 WebKit::WebLayerTreeView* CreateLayerTreeView(
     LayerTreeViewType type,
     DRTLayerTreeViewClient* client,
@@ -545,29 +537,13 @@ WebKit::WebLayerTreeView* CreateLayerTreeView(
     compositor_thread = cc::ThreadImpl::createForDifferentThread(
         static_cast<webkit_glue::WebThreadImpl*>(thread)->
         message_loop()->message_loop_proxy());
-  return CreateLayerTreeView(type, client, compositor_thread.Pass());
-}
 
-// DEPRECATED. TODO(jamesr): Remove these three after fixing WebKit callers.
-static WebKit::WebLayerTreeView* CreateLayerTreeView(
-    LayerTreeViewType type,
-    DRTLayerTreeViewClient* client) {
-  scoped_ptr<cc::Thread> compositor_thread;
+  scoped_ptr<WebKit::WebLayerTreeViewImplForTesting> view(
+      new WebKit::WebLayerTreeViewImplForTesting(type, client));
 
-  webkit::WebCompositorSupportImpl* compositor_support_impl =
-      test_environment->webkit_platform_support()->compositor_support_impl();
-  if (compositor_support_impl->compositor_thread_message_loop_proxy())
-    compositor_thread = cc::ThreadImpl::createForDifferentThread(
-        compositor_support_impl->compositor_thread_message_loop_proxy());
-  return CreateLayerTreeView(type, client, compositor_thread.Pass());
-}
-WebKit::WebLayerTreeView* CreateLayerTreeViewSoftware(
-    DRTLayerTreeViewClient* client) {
-  return CreateLayerTreeView(SOFTWARE_CONTEXT, client);
-}
-WebKit::WebLayerTreeView* CreateLayerTreeView3d(
-    DRTLayerTreeViewClient* client) {
-  return CreateLayerTreeView(MESA_CONTEXT, client);
+  if (!view->initialize(compositor_thread.Pass()))
+    return NULL;
+  return view.release();
 }
 
 void SetThreadedCompositorEnabled(bool enabled) {

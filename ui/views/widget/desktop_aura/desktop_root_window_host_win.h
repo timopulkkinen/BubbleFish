@@ -12,7 +12,6 @@
 
 namespace aura {
 namespace client {
-class DefaultCaptureClient;
 class FocusClient;
 class ScreenPositionClient;
 }
@@ -20,6 +19,7 @@ class ScreenPositionClient;
 
 namespace views {
 class DesktopActivationClient;
+class DesktopCaptureClient;
 class DesktopCursorClient;
 class DesktopDispatcherClient;
 class DesktopDragDropClientWin;
@@ -89,9 +89,6 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
                               const gfx::ImageSkia& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const string16& name) OVERRIDE;
-  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
-  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
   virtual void FlashFrame(bool flash_frame) OVERRIDE;
   virtual void OnNativeWidgetFocus() OVERRIDE;
@@ -106,6 +103,8 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
+  virtual void SetInsets(const gfx::Insets& insets) OVERRIDE;
   virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
@@ -152,6 +151,7 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   virtual void ResetWindowControls() OVERRIDE;
   virtual void PaintLayeredWindow(gfx::Canvas* canvas) OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
+  virtual bool ShouldHandleSystemCommands() const OVERRIDE;
   virtual InputMethod* GetInputMethod() OVERRIDE;
   virtual void HandleAppDeactivated() OVERRIDE;
   virtual void HandleActivationChanged(bool active) OVERRIDE;
@@ -187,7 +187,6 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
                                          HKL input_language_id) OVERRIDE;
   virtual bool HandlePaintAccelerated(const gfx::Rect& invalid_rect) OVERRIDE;
   virtual void HandlePaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void HandleScreenReaderDetected() OVERRIDE;
   virtual bool HandleTooltipNotify(int w_param,
                                    NMHDR* l_param,
                                    LRESULT* l_result) OVERRIDE;
@@ -211,7 +210,7 @@ class VIEWS_EXPORT DesktopRootWindowHostWin
   aura::RootWindow* root_window_;
 
   scoped_ptr<HWNDMessageHandler> message_handler_;
-  scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
+  scoped_ptr<DesktopCaptureClient> capture_client_;
   scoped_ptr<DesktopDispatcherClient> dispatcher_client_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
   // Depends on focus_manager_.

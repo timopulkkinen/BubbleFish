@@ -11,7 +11,9 @@
 #include "base/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/devtools/browser_list_tabcontents_provider.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
@@ -22,12 +24,14 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_client_host.h"
+#include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -36,6 +40,7 @@
 #include "content/public/browser/worker_service.h"
 #include "content/public/browser/worker_service_observer.h"
 #include "content/public/test/browser_test_utils.h"
+#include "net/base/tcp_listen_socket.h"
 #include "net/test/test_server.h"
 
 using content::BrowserThread;
@@ -151,7 +156,7 @@ class DevToolsSanityTest : public InProcessBrowserTest {
     // first.
     Browser* browser = window_->browser();
     scoped_refptr<DevToolsAgentHost> agent(
-        DevToolsAgentHost::GetFor(inspected_rvh_));
+        DevToolsAgentHost::GetOrCreateFor(inspected_rvh_));
     devtools_manager->UnregisterDevToolsClientHostFor(agent);
 
     // Wait only when DevToolsWindow has a browser. For docked DevTools, this
@@ -504,6 +509,25 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleOnNavigateBack) {
   RunTest("testConsoleOnNavigateBack", kNavigateBackTestPage);
 }
 
+
+// Tests that external navigation from inspector page is always handled by
+// DevToolsWindow and results in inspected page navigation.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDevToolsExternalNavigation) {
+  OpenDevToolsWindow(kDebuggerTestPage);
+  GURL url = test_server()->GetURL(kNavigateBackTestPage);
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
+  ASSERT_TRUE(content::ExecuteScript(
+      window_->web_contents(),
+      std::string("window.location = \"") + url.spec() + "\""));
+  observer.Wait();
+
+  ASSERT_TRUE(window_->web_contents()->GetURL().
+                  SchemeIs(chrome::kChromeDevToolsScheme));
+  ASSERT_EQ(GetInspectedTab()->GetURL(), url);
+}
+
 // Tests that inspector will reattach to inspected page when it is reloaded
 // after a crash. See http://crbug.com/101952
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestReattachAfterCrash) {
@@ -574,20 +598,91 @@ IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
   CloseDevToolsWindow();
 }
 
-// Tests DevToolsAgentHost::AddMessageToConsole.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestAddMessageToConsole) {
-  OpenDevToolsWindow("about:blank");
-  DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
-  scoped_refptr<DevToolsAgentHost> agent_host(
-      DevToolsAgentHost::GetFor(inspected_rvh_));
-  devtools_manager->AddMessageToConsole(agent_host,
-                                        content::CONSOLE_MESSAGE_LEVEL_LOG,
-                                        "log");
-  devtools_manager->AddMessageToConsole(agent_host,
-                                        content::CONSOLE_MESSAGE_LEVEL_ERROR,
-                                        "error");
-  RunTestFunction(window_, "checkLogAndErrorMessages");
-  CloseDevToolsWindow();
+class DevToolsAgentHostTest : public InProcessBrowserTest {};
+
+// Tests DevToolsAgentHost retention by its target.
+IN_PROC_BROWSER_TEST_F(DevToolsAgentHostTest, TestAgentHostReleased) {
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  RenderViewHost* rvh = browser()->tab_strip_model()->GetWebContentsAt(0)->
+      GetRenderViewHost();
+  DevToolsAgentHost* agent_raw = DevToolsAgentHost::GetOrCreateFor(rvh);
+  const std::string agent_id = agent_raw->GetId();
+  ASSERT_EQ(agent_raw, DevToolsAgentHost::GetForId(agent_id)) <<
+      "DevToolsAgentHost cannot be found by id";
+  browser()->tab_strip_model()->
+      CloseWebContentsAt(0, TabStripModel::CLOSE_NONE);
+  ASSERT_FALSE(DevToolsAgentHost::GetForId(agent_id)) <<
+      "DevToolsAgentHost is not released when the tab is closed";
+}
+
+class DISABLED_RemoteDebuggingTest : public ExtensionBrowserTest {
+
+  class ResultCatcher : public content::NotificationObserver {
+   public:
+    ResultCatcher()
+        : notification_(chrome::NOTIFICATION_CHROME_END) {
+      registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_PASSED,
+                     content::NotificationService::AllSources());
+      registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_FAILED,
+                     content::NotificationService::AllSources());
+    }
+
+    virtual ~ResultCatcher() {
+    }
+
+    // Pumps the UI loop until a notification is received that an API test
+    // succeeded or failed. Returns true if the test succeeded, false otherwise.
+    bool GetNextResult() {
+      if (!received())
+        content::RunMessageLoop();
+
+      if (!received())
+        NOTREACHED();
+
+      return notification_ == chrome::NOTIFICATION_EXTENSION_TEST_PASSED;
+    }
+
+   private:
+    virtual void Observe(int type,
+                         const content::NotificationSource& source,
+                         const content::NotificationDetails& details) OVERRIDE {
+      if (received())
+        return;
+      notification_ = static_cast<chrome::NotificationType>(type);
+      MessageLoopForUI::current()->Quit();
+    }
+
+    content::NotificationRegistrar registrar_;
+
+    chrome::NotificationType notification_;
+
+    bool received() { return notification_ != chrome::NOTIFICATION_CHROME_END; }
+  };
+
+ protected:
+
+  bool RunExtensionTest(const std::string& directory) {
+    content::DevToolsHttpHandler* devtools_http_handler_ =
+        content::DevToolsHttpHandler::Start(
+            new net::TCPListenSocketFactory("127.0.0.1", 9222),
+            "",
+            new BrowserListTabContentsProvider(
+                profile(), chrome::HOST_DESKTOP_TYPE_NATIVE));
+
+    base::FilePath test_data_path;
+    PathService::Get(chrome::DIR_TEST_DATA, &test_data_path);
+    LoadExtension(
+        test_data_path.AppendASCII("devtools").AppendASCII(directory));
+
+    ResultCatcher catcher;
+    bool result = catcher.GetNextResult();
+    devtools_http_handler_->Stop();
+    return result;
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(DISABLED_RemoteDebuggingTest, TargetList) {
+  ASSERT_TRUE(RunExtensionTest("target_list"));
 }
 
 }  // namespace

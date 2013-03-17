@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/string16.h"
-#include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "components/autofill/browser/field_types.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
@@ -105,6 +105,11 @@ class AutofillDialogController {
   // Decides whether input of |value| is valid for a field of type |type|.
   virtual bool InputIsValid(AutofillFieldType type,
                             const string16& value) = 0;
+
+  // Decides whether the combination of all |inputs| is valid, returns a
+  // vector of all invalid fields.
+  virtual std::vector<AutofillFieldType> InputsAreValid(
+      const DetailOutputMap& inputs) = 0;
 
   // Called when the user changes the contents of a text field or activates it
   // (by focusing and then clicking it). |was_edit| is true when the function

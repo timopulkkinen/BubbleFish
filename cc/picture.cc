@@ -100,7 +100,7 @@ void Picture::Record(ContentLayerClient* painter,
   base::TimeTicks begin_paint_time;
   if (stats)
     begin_paint_time = base::TimeTicks::Now();
-  painter->paintContents(canvas, layer_rect_, opaque_layer_rect);
+  painter->PaintContents(canvas, layer_rect_, &opaque_layer_rect);
   if (stats) {
     stats->totalPaintTime += base::TimeTicks::Now() - begin_paint_time;
     stats->totalPixelsPainted +=
@@ -128,19 +128,6 @@ void Picture::Raster(
   canvas->translate(layer_rect_.x(), layer_rect_.y());
   canvas->drawPicture(*picture_);
   canvas->restore();
-}
-
-bool Picture::IsCheapInRect(const gfx::Rect& layer_rect) const {
-  TRACE_EVENT0("cc", "Picture::IsCheapInRect");
-
-  SkBitmap emptyBitmap;
-  emptyBitmap.setConfig(SkBitmap::kNo_Config, layer_rect.width(),
-                        layer_rect.height());
-  skia::AnalysisDevice device(emptyBitmap);
-  skia::AnalysisCanvas canvas(&device);
-
-  canvas.drawPicture(*picture_);
-  return canvas.isCheap();
 }
 
 void Picture::GatherPixelRefs(const gfx::Rect& layer_rect,

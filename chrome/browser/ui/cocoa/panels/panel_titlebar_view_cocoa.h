@@ -8,9 +8,8 @@
 #import <Cocoa/Cocoa.h>
 
 #import "chrome/browser/ui/cocoa/panels/mouse_drag_controller.h"
-#import "chrome/browser/ui/cocoa/tracking_area.h"
+#import "ui/base/cocoa/tracking_area.h"
 
-@class CrTrackingArea;
 @class HoverImageButton;
 @class MouseDragController;
 @class PanelWindowControllerCocoa;
@@ -58,13 +57,13 @@
   IBOutlet NSView* overlay_;
   NSButton* closeButton_;  // Created explicitly, not from NIB. Weak, destroyed
                            // when view is destroyed, as a subview.
-  ScopedCrTrackingArea closeButtonTrackingArea_;
+  ui::ScopedCrTrackingArea closeButtonTrackingArea_;
   BOOL isDrawingAttention_;
 
   // "Glint" animation is used in "Draw Attention" mode.
   scoped_nsobject<RepaintAnimation> glintAnimation_;
   scoped_nsobject<NSTimer> glintAnimationTimer_;
-  double glintInterval_;
+  int glintCounter_;
 
   // Drag support.
   scoped_nsobject<MouseDragController> dragController_;

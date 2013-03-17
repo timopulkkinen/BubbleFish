@@ -35,13 +35,12 @@ struct ShowDesktopNotificationHostMsgParams;
 }
 
 namespace gfx {
-class ImageSkia;
+class Image;
 }
 
 // The DesktopNotificationService is an object, owned by the Profile,
 // which provides the creation of desktop "toasts" to web pages and workers.
-class DesktopNotificationService : public content::NotificationObserver,
-                                   public ProfileKeyedService {
+class DesktopNotificationService : public ProfileKeyedService {
  public:
   enum DesktopNotificationSource {
     PageNotification,
@@ -83,11 +82,6 @@ class DesktopNotificationService : public content::NotificationObserver,
   void GrantPermission(const GURL& origin);
   void DenyPermission(const GURL& origin);
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // Creates a data:xxxx URL which contains the full HTML for a notification
   // using supplied icon, title, and text, run through a template which contains
   // the standard formatting for notifications.
@@ -115,11 +109,11 @@ class DesktopNotificationService : public content::NotificationObserver,
                                      NotificationDelegate* delegate,
                                      Profile* profile);
 
-  // Same as above, but takes a gfx::ImageSkia for the icon instead.
+  // Same as above, but takes a gfx::Image for the icon instead.
   static std::string AddIconNotification(const GURL& origin_url,
                                          const string16& title,
                                          const string16& message,
-                                         const gfx::ImageSkia& icon,
+                                         const gfx::Image& icon,
                                          const string16& replace_id,
                                          NotificationDelegate* delegate,
                                          Profile* profile);
@@ -161,9 +155,6 @@ class DesktopNotificationService : public content::NotificationObserver,
   void SetExtensionEnabled(const std::string& id, bool enabled);
 
  private:
-  void StartObserving();
-  void StopObserving();
-
   // Takes a notification object and shows it in the UI.
   void ShowNotification(const Notification& notification);
 
@@ -186,8 +177,6 @@ class DesktopNotificationService : public content::NotificationObserver,
   // Non-owned pointer to the notification manager which manages the
   // UI for desktop toasts.
   NotificationUIManager* ui_manager_;
-
-  content::NotificationRegistrar notification_registrar_;
 
   // Prefs listener for disabled_extension_id.
   StringListPrefMember disabled_extension_id_pref_;

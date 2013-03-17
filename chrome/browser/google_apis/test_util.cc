@@ -64,7 +64,6 @@ base::FilePath GetTestFilePath(const std::string& relative_path) {
   path = path.AppendASCII("chrome")
              .AppendASCII("test")
              .AppendASCII("data")
-             .AppendASCII("chromeos")
              .Append(base::FilePath::FromUTF8Unsafe(relative_path));
   return path;
 }
@@ -86,6 +85,11 @@ void RunBlockingPoolTask() {
   }
 }
 
+void RunAndQuit(const base::Closure& closure) {
+  closure.Run();
+  MessageLoop::current()->Quit();
+}
+
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
   base::FilePath path = GetTestFilePath(relative_path);
 
@@ -95,11 +99,6 @@ scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
   LOG_IF(WARNING, !value.get()) << "Failed to parse " << path.value()
                                 << ": " << error;
   return value.Pass();
-}
-
-void CopyResultsFromEntryActionCallback(GDataErrorCode* error_out,
-                                        GDataErrorCode error_in) {
-  *error_out = error_in;
 }
 
 void CopyResultFromEntryActionCallbackAndQuit(GDataErrorCode* error_out,
@@ -123,15 +122,6 @@ void CopyResultsFromGetDataCallbackAndQuit(GDataErrorCode* error_out,
   *error_out = error_in;
   *value_out = value_in.Pass();
   MessageLoop::current()->Quit();
-}
-
-void CopyResultsFromGetResourceEntryCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceEntry>* resource_entry_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceEntry> resource_entry_in) {
-  resource_entry_out->swap(resource_entry_in);
-  *error_out = error_in;
 }
 
 void CopyResultsFromGetResourceListCallback(

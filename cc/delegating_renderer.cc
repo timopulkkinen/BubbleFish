@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/debug/trace_event.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "cc/checkerboard_draw_quad.h"
 #include "cc/compositor_frame.h"
 #include "cc/compositor_frame_ack.h"
@@ -51,16 +51,16 @@ DelegatingRenderer::DelegatingRenderer(
 }
 
 bool DelegatingRenderer::Initialize() {
-  capabilities_.usingPartialSwap = false;
+  capabilities_.using_partial_swap = false;
   // TODO(danakj): Throttling - we may want to only allow 1 outstanding frame,
   // but the parent compositor may pipeline for us.
   // TODO(danakj): Can we use this in single-thread mode?
-  capabilities_.usingSwapCompleteCallback = true;
-  capabilities_.maxTextureSize = resource_provider_->maxTextureSize();
-  capabilities_.bestTextureFormat = resource_provider_->bestTextureFormat();
-  capabilities_.allowPartialTextureUpdates = false;
+  capabilities_.using_swap_complete_callback = true;
+  capabilities_.max_texture_size = resource_provider_->max_texture_size();
+  capabilities_.best_texture_format = resource_provider_->best_texture_format();
+  capabilities_.allow_partial_texture_updates = false;
 
-  WebGraphicsContext3D* context3d = resource_provider_->graphicsContext3D();
+  WebGraphicsContext3D* context3d = resource_provider_->GraphicsContext3D();
 
   if (!context3d) {
     // Software compositing.
@@ -105,29 +105,29 @@ bool DelegatingRenderer::Initialize() {
   if (hasIOSurface)
     DCHECK(hasARBTextureRect);
 
-  capabilities_.usingAcceleratedPainting =
-      settings().acceleratePainting &&
-      capabilities_.bestTextureFormat == GL_BGRA_EXT &&
+  capabilities_.using_accelerated_painting =
+      Settings().acceleratePainting &&
+      capabilities_.best_texture_format == GL_BGRA_EXT &&
       hasReadBGRA;
 
   // TODO(piman): loop visibility to GPU process?
-  capabilities_.usingSetVisibility = hasSetVisibility;
+  capabilities_.using_set_visibility = hasSetVisibility;
 
   // TODO(danakj): Support GpuMemoryManager.
-  capabilities_.usingGpuMemoryManager = false;
+  capabilities_.using_gpu_memory_manager = false;
 
-  capabilities_.usingEglImage = hasEGLImage;
+  capabilities_.using_egl_image = hasEGLImage;
 
   return true;
 }
 
 DelegatingRenderer::~DelegatingRenderer() {
-  WebGraphicsContext3D* context3d = resource_provider_->graphicsContext3D();
+  WebGraphicsContext3D* context3d = resource_provider_->GraphicsContext3D();
   if (context3d)
     context3d->setContextLostCallback(NULL);
 }
 
-const RendererCapabilities& DelegatingRenderer::capabilities() const {
+const RendererCapabilities& DelegatingRenderer::Capabilities() const {
   return capabilities_;
 }
 
@@ -138,12 +138,12 @@ static ResourceProvider::ResourceId AppendToArray(
   return id;
 }
 
-void DelegatingRenderer::drawFrame(
+void DelegatingRenderer::DrawFrame(
     RenderPassList& render_passes_in_draw_order) {
   TRACE_EVENT0("cc", "DelegatingRenderer::drawFrame");
 
   CompositorFrame out_frame;
-  out_frame.metadata = m_client->makeCompositorFrameMetadata();
+  out_frame.metadata = client_->MakeCompositorFrameMetadata();
 
   out_frame.delegated_frame_data = make_scoped_ptr(new DelegatedFrameData);
 
@@ -160,41 +160,40 @@ void DelegatingRenderer::drawFrame(
   // Move the render passes and resources into the |out_frame|.
   DelegatedFrameData& out_data = *out_frame.delegated_frame_data;
   out_data.render_pass_list.swap(render_passes_in_draw_order);
-  resource_provider_->prepareSendToParent(resources, &out_data.resource_list);
+  resource_provider_->PrepareSendToParent(resources, &out_data.resource_list);
 
   output_surface_->SendFrameToParentCompositor(&out_frame);
 }
 
-bool DelegatingRenderer::swapBuffers() {
+bool DelegatingRenderer::SwapBuffers() {
   return true;
 }
 
-void DelegatingRenderer::getFramebufferPixels(void *pixels,
-                                              const gfx::Rect& rect) {
+void DelegatingRenderer::GetFramebufferPixels(void* pixels, gfx::Rect rect) {
   NOTIMPLEMENTED();
 }
 
-void DelegatingRenderer::receiveCompositorFrameAck(
+void DelegatingRenderer::ReceiveCompositorFrameAck(
     const CompositorFrameAck& ack) {
-  resource_provider_->receiveFromParent(ack.resources);
-  if (m_client->hasImplThread())
-    m_client->onSwapBuffersComplete();
+  resource_provider_->ReceiveFromParent(ack.resources);
+  if (client_->HasImplThread())
+    client_->OnSwapBuffersComplete();
 }
 
 
-bool DelegatingRenderer::isContextLost() {
-  WebGraphicsContext3D* context3d = resource_provider_->graphicsContext3D();
+bool DelegatingRenderer::IsContextLost() {
+  WebGraphicsContext3D* context3d = resource_provider_->GraphicsContext3D();
   if (!context3d)
     return false;
   return context3d->getGraphicsResetStatusARB() != GL_NO_ERROR;
 }
 
-void DelegatingRenderer::setVisible(bool visible) {
+void DelegatingRenderer::SetVisible(bool visible) {
   visible_ = visible;
 }
 
 void DelegatingRenderer::onContextLost() {
-  m_client->didLoseOutputSurface();
+  client_->DidLoseOutputSurface();
 }
 
 }  // namespace cc

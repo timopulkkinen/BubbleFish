@@ -5,6 +5,7 @@
 
 """End to end tests for ChromeDriver."""
 
+import base64
 import ctypes
 import optparse
 import os
@@ -18,20 +19,111 @@ from webelement import WebElement
 
 _THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir, 'pylib'))
+
+_TEST_DATA_DIR = os.path.join(_THIS_DIR, os.pardir, 'data', 'chromedriver')
+
 from common import chrome_paths
 from common import unittest_util
+from common import util
+
+if util.IsLinux():
+  sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir, os.pardir, os.pardir,
+                                  'build', 'android'))
+  from pylib import android_commands
+  from pylib import forwarder
+  from pylib import valgrind_tools
 
 
-class ChromeDriverTest(unittest.TestCase):
+_ANDROID_FILTER = {}
+_ANDROID_FILTER['org.chromium.chrome.testshell'] = [
+    'ChromeDriverTest.testStartStop',
+    'ChromeDriverTest.testLoadUrl',
+    'ChromeDriverTest.testGetCurrentWindowHandle',
+    'ChromeDriverTest.testEvaluateScript',
+    'ChromeDriverTest.testEvaluateScriptWithArgs',
+    'ChromeDriverTest.testEvaluateInvalidScript',
+    'ChromeDriverTest.testExecuteAsyncScript',
+    'ChromeDriverTest.testSwitchToFrame',
+    'ChromeDriverTest.testExecuteInRemovedFrame',
+    'ChromeDriverTest.testGetTitle',
+    'ChromeDriverTest.testGetPageSource',
+    'ChromeDriverTest.testFindElement',
+    'ChromeDriverTest.testFindElements',
+    'ChromeDriverTest.testFindChildElement',
+    'ChromeDriverTest.testFindChildElements',
+    'ChromeDriverTest.testHoverOverElement',
+    'ChromeDriverTest.testClickElement',
+    'ChromeDriverTest.testClearElement',
+    # chromedriver:259
+    #'ChromeDriverTest.testSendKeysToElement',
+    'ChromeDriverTest.testGetCurrentUrl',
+    'ChromeDriverTest.testGoBackAndGoForward',
+    'ChromeDriverTest.testRefresh',
+    'ChromeDriverTest.testMouseMoveTo',
+    'ChromeDriverTest.testMouseClick',
+    'ChromeDriverTest.testMouseButtonDownAndUp',
+    'ChromeDriverTest.testMouseDoubleClick']
+_ANDROID_FILTER['com.google.android.apps.chrome'] = (
+    _ANDROID_FILTER['org.chromium.chrome.testshell'] + [
+    'ChromeDriverTest.testCloseWindow',
+    'ChromeDriverTest.testGetWindowHandles',
+    'ChromeDriverTest.testSwitchToWindow'])
+
+def Skip(func):
+  pass
+
+
+def SkipIf(condition):
+  def _Decorate(func):
+    if not condition:
+      return func
+  return _Decorate
+
+
+class ChromeDriverBaseTest(unittest.TestCase):
+  """Base class for testing chromedriver functionalities."""
+
+  def __init__(self, *args, **kwargs):
+    super(ChromeDriverBaseTest, self).__init__(*args, **kwargs)
+    self._drivers = []
+
+  def tearDown(self):
+    for driver in self._drivers:
+      try:
+        driver.Quit()
+      except chromedriver.ChromeDriverException:
+        pass
+
+  def CreateDriver(self, **kwargs):
+    driver = chromedriver.ChromeDriver(_CHROMEDRIVER_LIB,
+                                       chrome_binary=_CHROME_BINARY,
+                                       android_package=_ANDROID_PACKAGE,
+                                       **kwargs)
+    self._drivers += [driver]
+    return driver
+
+
+class ChromeDriverTest(ChromeDriverBaseTest):
   """End to end tests for ChromeDriver."""
 
   @staticmethod
   def GlobalSetUp():
     ChromeDriverTest._http_server = webserver.WebServer(
         chrome_paths.GetTestData())
+    if _ANDROID_PACKAGE:
+      ChromeDriverTest._adb = android_commands.AndroidCommands()
+      ChromeDriverTest._forwarder = forwarder.Forwarder(ChromeDriverTest._adb,
+                                                        'Debug')
+      host_port = ChromeDriverTest._http_server._server.server_port
+      ChromeDriverTest._forwarder.Run(
+          [(host_port, host_port)], valgrind_tools.BaseTool(), '127.0.0.1')
 
   @staticmethod
   def GlobalTearDown():
+    if _ANDROID_PACKAGE:
+      forwarder.Forwarder.KillDevice(ChromeDriverTest._adb,
+                                     valgrind_tools.BaseTool())
+      ChromeDriverTest._forwarder.Close()
     ChromeDriverTest._http_server.Shutdown()
 
   @staticmethod
@@ -39,13 +131,7 @@ class ChromeDriverTest(unittest.TestCase):
     return ChromeDriverTest._http_server.GetUrl() + file_path
 
   def setUp(self):
-    self._driver = chromedriver.ChromeDriver(
-        _CHROMEDRIVER_LIB,
-        chrome_binary=_CHROME_BINARY,
-        android_package=_ANDROID_PACKAGE)
-
-  def tearDown(self):
-    self._driver.Quit()
+    self._driver = self.CreateDriver()
 
   def testStartStop(self):
     pass
@@ -72,6 +158,8 @@ class ChromeDriverTest(unittest.TestCase):
       time.sleep(0.01)
     return None
 
+  # https://code.google.com/p/chromedriver/issues/detail?id=214
+  @SkipIf(util.IsWindows())
   def testCloseWindow(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
     old_handles = self._driver.GetWindowHandles()
@@ -130,6 +218,19 @@ class ChromeDriverTest(unittest.TestCase):
   def testEvaluateInvalidScript(self):
     self.assertRaises(chromedriver.ChromeDriverException,
                       self._driver.ExecuteScript, '{{{')
+
+  def testExecuteAsyncScript(self):
+    self._driver.SetTimeout('script', 3000)
+    self.assertRaises(
+        chromedriver.ScriptTimeout,
+        self._driver.ExecuteAsyncScript,
+        'var callback = arguments[0];'
+        'setTimeout(function(){callback(1);}, 10000);')
+    self.assertEquals(
+        2,
+        self._driver.ExecuteAsyncScript(
+            'var callback = arguments[0];'
+            'setTimeout(function(){callback(2);}, 300);'))
 
   def testSwitchToFrame(self):
     self._driver.ExecuteScript(
@@ -231,6 +332,15 @@ class ChromeDriverTest(unittest.TestCase):
     div.Click()
     self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
 
+  # TODO(chrisgao): https://code.google.com/p/chromedriver/issues/detail?id=213.
+  @Skip
+  def testClickElementInSubFrame(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/frame_test.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    # Test clicking element in the sub frame.
+    self.testClickElement()
+
   def testClearElement(self):
     text = self._driver.ExecuteScript(
         'document.body.innerHTML = \'<input type="text" value="abc">\';'
@@ -331,9 +441,11 @@ class ChromeDriverTest(unittest.TestCase):
     self._driver.MouseDoubleClick()
     self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
 
+  # TODO(kkania): This test is flaky since it uses setTimeout.
+  # Re-enable once crbug.com/177511 is fixed and we can remove setTimeout.
+  @Skip
   def testAlert(self):
     self.assertFalse(self._driver.IsAlertOpen())
-    # TODO(kkania): Don't use setTimeout once crbug.com/177511 is fixed.
     div = self._driver.ExecuteScript(
         'window.setTimeout('
         '    function() { window.confirmed = confirm(\'HI\'); },'
@@ -345,8 +457,38 @@ class ChromeDriverTest(unittest.TestCase):
     self.assertEquals(False,
                       self._driver.ExecuteScript('return window.confirmed'))
 
+  def testShouldHandleNewWindowLoadingProperly(self):
+    """Tests that ChromeDriver determines loading correctly for new windows."""
+    sync_server = webserver.SyncWebServer()
+    self._http_server.SetDataForPath(
+        '/newwindow',
+        """
+        <html>
+        <body>
+        <a href='%s' target='_blank'>new window/tab</a>
+        </body>
+        </html>""" % sync_server.GetUrl())
+    self._driver.Load(self._http_server.GetUrl() + '/newwindow')
+    old_windows = self._driver.GetWindowHandles()
+    self._driver.FindElement('tagName', 'a').Click()
+    new_window = self._WaitForNewWindow(old_windows)
+    self.assertNotEqual(None, new_window)
 
-class ChromeSwitchesCapabilitiesTest(unittest.TestCase):
+    self.assertFalse(self._driver.IsLoading())
+    self._driver.SwitchToWindow(new_window)
+    self.assertTrue(self._driver.IsLoading())
+    sync_server.RespondWithContent('<html>new window</html>')
+    self._driver.ExecuteScript('return 1')  # Shouldn't hang.
+
+  def testPopups(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    old_handles = self._driver.GetWindowHandles()
+    self._driver.ExecuteScript('window.open("about:blank")')
+    new_window_handle = self._WaitForNewWindow(old_handles)
+    self.assertNotEqual(None, new_window_handle)
+
+
+class ChromeSwitchesCapabilityTest(ChromeDriverBaseTest):
   """Tests that chromedriver properly processes chromeOptions.args capabilities.
 
   Makes sure the switches are passed to Chrome.
@@ -358,11 +500,22 @@ class ChromeSwitchesCapabilitiesTest(unittest.TestCase):
     Unless --dom-automation is specified, window.domAutomationController
     is undefined.
     """
-    driver = chromedriver.ChromeDriver(_CHROMEDRIVER_LIB,
-                                       chrome_binary=_CHROME_BINARY,
-                                       chrome_switches=['dom-automation'])
+    driver = self.CreateDriver(chrome_switches=['dom-automation'])
     result = driver.ExecuteScript('return window.domAutomationController')
     self.assertNotEqual(None, result)
+
+
+class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
+  """Tests that chromedriver properly processes chromeOptions.extensions."""
+
+  def testExtensionsInstall(self):
+    """Checks that chromedriver can take the extensions."""
+    crx_1 = os.path.join(_TEST_DATA_DIR, 'ext_test_1.crx')
+    crx_2 = os.path.join(_TEST_DATA_DIR, 'ext_test_2.crx')
+    crx_1_encoded = base64.b64encode(open(crx_1, 'rb').read())
+    crx_2_encoded = base64.b64encode(open(crx_2, 'rb').read())
+    extensions = [crx_1_encoded, crx_2_encoded]
+    self.CreateDriver(chrome_extensions=extensions)
 
 
 if __name__ == '__main__':
@@ -396,10 +549,14 @@ if __name__ == '__main__':
   global _ANDROID_PACKAGE
   _ANDROID_PACKAGE = options.android_package
 
+  if _ANDROID_PACKAGE and options.filter == '*':
+    android_filter = _ANDROID_FILTER[_ANDROID_PACKAGE]
+    options.filter = ':__main__.'.join([''] + android_filter)
+
   all_tests_suite = unittest.defaultTestLoader.loadTestsFromModule(
       sys.modules[__name__])
   tests = unittest_util.FilterTestSuite(all_tests_suite, options.filter)
   ChromeDriverTest.GlobalSetUp()
-  result = unittest.TextTestRunner().run(tests)
+  result = unittest.TextTestRunner(stream=sys.stdout).run(tests)
   ChromeDriverTest.GlobalTearDown()
   sys.exit(len(result.failures) + len(result.errors))

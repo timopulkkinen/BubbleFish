@@ -11,12 +11,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
+#include "content/shell/shell_test_configuration.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebPreferences.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestDelegate.h"
 #include "v8/include/v8.h"
 
 class SkCanvas;
-struct ShellViewMsg_SetTestConfiguration_Params;
 
 namespace WebKit {
 struct WebRect;
@@ -67,7 +67,6 @@ class WebKitTestRunner : public RenderViewObserver,
   virtual void setDatabaseQuota(int quota);
   virtual void setDeviceScaleFactor(float factor);
   virtual void setFocus(WebTestRunner::WebTestProxyBase* proxy, bool focus);
-  virtual void setFocus(bool focus);
   virtual void setAcceptAllCookies(bool accept);
   virtual std::string pathToLocalResource(const std::string& resource);
   virtual void setLocale(const std::string& locale);
@@ -94,8 +93,7 @@ class WebKitTestRunner : public RenderViewObserver,
 
  private:
   // Message handlers.
-  void OnSetTestConfiguration(
-      const ShellViewMsg_SetTestConfiguration_Params& params);
+  void OnSetTestConfiguration(const ShellTestConfiguration& params);
   void OnSessionHistory(
       const std::vector<int>& routing_ids,
       const std::vector<std::vector<std::string> >& session_histories,
@@ -105,17 +103,13 @@ class WebKitTestRunner : public RenderViewObserver,
   // the TestRunner library and sends them to the browser process.
   void CaptureDump();
 
-  base::FilePath current_working_directory_;
-  base::FilePath temp_path_;
-
   ::WebTestRunner::WebTestProxyBase* proxy_;
+
+  RenderView* focused_view_;
 
   ::WebTestRunner::WebPreferences prefs_;
 
-  bool enable_pixel_dumping_;
-  int layout_test_timeout_;
-  bool allow_external_pages_;
-  std::string expected_pixel_hash_;
+  ShellTestConfiguration test_config_;
 
   std::vector<int> routing_ids_;
   std::vector<std::vector<std::string> > session_histories_;

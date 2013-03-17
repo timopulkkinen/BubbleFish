@@ -30,7 +30,6 @@
           },
         },
       }],
-      
     ],
   },
   'conditions': [
@@ -312,6 +311,7 @@
             'common_aidl',
             'content_common',
             'page_transition_types_java',
+            'result_codes_java',
           ],
           'variables': {
             'java_in_dir': '../content/public/android/java',
@@ -321,7 +321,7 @@
             'java_strings_grd': 'android_content_strings.grd',
           },
           'conditions': [
-            ['android_build_type == 0', {
+            ['android_webview_build == 0', {
               'dependencies': [
                 '../third_party/eyesfree/eyesfree.gyp:eyesfree_java',
                 '../third_party/guava/guava.gyp:guava_javalib',
@@ -343,10 +343,22 @@
           'includes': [ '../build/android/java_cpp_template.gypi' ],
         },
         {
+          'target_name': 'result_codes_java',
+          'type': 'none',
+          'sources': [
+            'public/android/java/src/org/chromium/content/common/ResultCodes.template',
+          ],
+          'variables': {
+            'package_name': 'org/chromium/content/common',
+            'template_deps': ['public/common/result_codes_list.h'],
+          },
+          'includes': [ '../build/android/java_cpp_template.gypi' ],
+        },
+        {
           'target_name': 'surface_texture_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'content',
+            'jni_gen_package': 'content',
             'input_java_class': 'android/graphics/SurfaceTexture.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },
@@ -356,7 +368,7 @@
           'target_name': 'surface_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'content',
+            'jni_gen_package': 'content',
             'input_java_class': 'android/view/Surface.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },
@@ -366,7 +378,7 @@
           'target_name': 'java_set_jni_headers',
           'type': 'none',
           'variables': {
-            'jni_gen_dir': 'content',
+            'jni_gen_package': 'content',
             'input_java_class': 'java/util/HashSet.class',
             'input_jar_file': '<(android_sdk)/android.jar',
           },

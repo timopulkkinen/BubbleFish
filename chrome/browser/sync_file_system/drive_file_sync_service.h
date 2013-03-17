@@ -49,7 +49,11 @@ class DriveFileSyncService
       public base::NonThreadSafe,
       public syncer::InvalidationHandler {
  public:
+  typedef base::Callback<void(SyncStatusCode status,
+                              const std::string& resource_id)>
+      ResourceIdCallback;
   static const char kServiceName[];
+  static ConflictResolutionPolicy kDefaultPolicy;
 
   explicit DriveFileSyncService(Profile* profile);
   virtual ~DriveFileSyncService();
@@ -77,9 +81,12 @@ class DriveFileSyncService
   virtual void UnregisterOriginForTrackingChanges(
       const GURL& origin,
       const SyncStatusCallback& callback) OVERRIDE;
-  virtual void ProcessRemoteChange(
-      RemoteChangeProcessor* processor,
-      const SyncFileCallback& callback) OVERRIDE;
+  virtual void DeleteOriginDirectory(
+      const GURL& origin,
+      const SyncStatusCallback& callback) OVERRIDE;
+  virtual void ProcessRemoteChange(const SyncFileCallback& callback) OVERRIDE;
+  virtual void SetRemoteChangeProcessor(
+      RemoteChangeProcessor* processor) OVERRIDE;
   virtual LocalChangeProcessor* GetLocalChangeProcessor() OVERRIDE;
   virtual bool IsConflicting(const fileapi::FileSystemURL& url) OVERRIDE;
   virtual void GetRemoteFileMetadata(
@@ -88,11 +95,15 @@ class DriveFileSyncService
   virtual RemoteServiceState GetCurrentState() const OVERRIDE;
   virtual const char* GetServiceName() const OVERRIDE;
   virtual void SetSyncEnabled(bool enabled) OVERRIDE;
+  virtual SyncStatusCode SetConflictResolutionPolicy(
+      ConflictResolutionPolicy resolution) OVERRIDE;
+  virtual ConflictResolutionPolicy GetConflictResolutionPolicy() const OVERRIDE;
 
   // LocalChangeProcessor overrides.
   virtual void ApplyLocalChange(
       const FileChange& change,
       const base::FilePath& local_file_path,
+      const SyncFileMetadata& local_file_metadata,
       const fileapi::FileSystemURL& url,
       const SyncStatusCallback& callback) OVERRIDE;
 
@@ -107,9 +118,10 @@ class DriveFileSyncService
       const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
  private:
-  friend class DriveFileSyncServiceTest;
+  friend class DriveFileSyncServiceMockTest;
   friend class DriveFileSyncServiceSyncTest;
   class TaskToken;
+  struct ApplyLocalChangeParam;
   struct ProcessRemoteChangeParam;
 
   enum RemoteSyncType {
@@ -140,6 +152,7 @@ class DriveFileSyncService
     int64 changestamp;
     std::string resource_id;
     std::string md5_checksum;
+    base::Time updated_time;
     RemoteSyncType sync_type;
     fileapi::FileSystemURL url;
     FileChange change;
@@ -149,6 +162,7 @@ class DriveFileSyncService
     RemoteChange(int64 changestamp,
                  const std::string& resource_id,
                  const std::string& md5_checksum,
+                 const base::Time& updated_time,
                  RemoteSyncType sync_type,
                  const fileapi::FileSystemURL& url,
                  const FileChange& change,
@@ -182,10 +196,14 @@ class DriveFileSyncService
     LOCAL_SYNC_OPERATION_UPDATE,
     LOCAL_SYNC_OPERATION_DELETE,
     LOCAL_SYNC_OPERATION_NONE,
+    LOCAL_SYNC_OPERATION_NONE_CONFLICTED,
     LOCAL_SYNC_OPERATION_CONFLICT,
     LOCAL_SYNC_OPERATION_RESOLVE_TO_REMOTE,
     LOCAL_SYNC_OPERATION_FAIL,
   };
+
+  typedef base::Callback<void(const base::Time& time,
+                              SyncStatusCode status)> UpdatedTimeCallback;
 
   DriveFileSyncService(Profile* profile,
                        const base::FilePath& base_dir,
@@ -209,44 +227,48 @@ class DriveFileSyncService
       scoped_ptr<google_apis::ResourceEntry> entry);
 
   // Local synchronization related methods.
+  // Resolves LocalSync operation type. If non-null |param| is given
+  // the method also populates param->has_drive_metadata and
+  // param->drive_metadata fields.
   LocalSyncOperationType ResolveLocalSyncOperationType(
       const FileChange& local_file_change,
-      const fileapi::FileSystemURL& url);
-  void DidApplyLocalChange(
-      scoped_ptr<TaskToken> token,
       const fileapi::FileSystemURL& url,
+      ApplyLocalChangeParam* param);
+  void DidApplyLocalChange(
+      scoped_ptr<ApplyLocalChangeParam> param,
       const google_apis::GDataErrorCode error,
-      const SyncStatusCallback& callback,
       SyncStatusCode status);
   void DidResolveConflictToRemoteChange(
-      scoped_ptr<TaskToken> token,
-      const fileapi::FileSystemURL& url,
-      const std::string& resource_id,
-      const SyncStatusCallback& callback,
+      scoped_ptr<ApplyLocalChangeParam> param,
       SyncStatusCode status);
   void FinalizeLocalSync(
       scoped_ptr<TaskToken> token,
       const SyncStatusCallback& callback,
       SyncStatusCode status);
   void DidUploadNewFileForLocalSync(
-      scoped_ptr<TaskToken> token,
-      const fileapi::FileSystemURL& url,
-      const SyncStatusCallback& callback,
+      scoped_ptr<ApplyLocalChangeParam> param,
       google_apis::GDataErrorCode error,
       const std::string& resource_id,
       const std::string& file_md5);
   void DidUploadExistingFileForLocalSync(
-      scoped_ptr<TaskToken> token,
-      const fileapi::FileSystemURL& url,
-      const SyncStatusCallback& callback,
+      scoped_ptr<ApplyLocalChangeParam> param,
       google_apis::GDataErrorCode error,
       const std::string& resource_id,
       const std::string& file_md5);
   void DidDeleteFileForLocalSync(
-      scoped_ptr<TaskToken> token,
-      const fileapi::FileSystemURL& url,
-      const SyncStatusCallback& callback,
+      scoped_ptr<ApplyLocalChangeParam> param,
       google_apis::GDataErrorCode error);
+  void HandleConflictForLocalSync(
+      scoped_ptr<ApplyLocalChangeParam> param);
+  void ResolveConflictForLocalSync(
+      scoped_ptr<ApplyLocalChangeParam> param,
+      const base::Time& remote_updated_time,
+      SyncStatusCode status);
+  void StartOverLocalSync(
+      scoped_ptr<ApplyLocalChangeParam> param,
+      SyncStatusCode status);
+  void ResolveConflictToRemoteForLocalSync(
+      scoped_ptr<ApplyLocalChangeParam> param);
 
   void DidInitializeMetadataStore(scoped_ptr<TaskToken> token,
                                   SyncStatusCode status,
@@ -254,22 +276,29 @@ class DriveFileSyncService
   void UnregisterInactiveExtensionsIds();
 
   void GetSyncRootDirectory(scoped_ptr<TaskToken> token,
-                            const SyncStatusCallback& callback);
+                            const ResourceIdCallback& callback);
   void DidGetSyncRootDirectory(scoped_ptr<TaskToken> token,
-                               const SyncStatusCallback& callback,
+                               const ResourceIdCallback& callback,
                                google_apis::GDataErrorCode error,
-                               const std::string& resource_id);
+                               const std::string& sync_root_resource_id);
   void DidGetSyncRootForRegisterOrigin(
       const GURL& origin,
       const SyncStatusCallback& callback,
-      SyncStatusCode status);
+      SyncStatusCode status,
+      const std::string& sync_root_resource_id);
   void StartBatchSyncForOrigin(const GURL& origin,
                                const std::string& resource_id);
-  void DidGetDirectoryForOrigin(scoped_ptr<TaskToken> token,
-                                const GURL& origin,
+  void GetDriveDirectoryForOrigin(const GURL& origin,
+                                  const SyncStatusCallback& callback,
+                                  const std::string& sync_root_resource_id);
+  void DidGetDriveDirectoryForOrigin(scoped_ptr<TaskToken> token,
+                                     const GURL& origin,
+                                     const SyncStatusCallback& callback,
+                                     google_apis::GDataErrorCode error,
+                                     const std::string& resource_id);
+  void DidDeleteOriginDirectory(scoped_ptr<TaskToken> token,
                                 const SyncStatusCallback& callback,
-                                google_apis::GDataErrorCode error,
-                                const std::string& resource_id);
+                                google_apis::GDataErrorCode error);
   void DidGetLargestChangeStampForBatchSync(scoped_ptr<TaskToken> token,
                                             const GURL& origin,
                                             const std::string& resource_id,
@@ -321,6 +350,15 @@ class DriveFileSyncService
   void FinalizeRemoteSync(
       scoped_ptr<ProcessRemoteChangeParam> param,
       SyncStatusCode status);
+  void HandleConflictForRemoteSync(
+      scoped_ptr<ProcessRemoteChangeParam> param,
+      const base::Time& remote_updated_time,
+      SyncStatusCode status);
+  void ResolveConflictToLocalForRemoteSync(
+      scoped_ptr<ProcessRemoteChangeParam> param);
+  void StartOverRemoteSync(
+      scoped_ptr<ProcessRemoteChangeParam> param,
+      SyncStatusCode status);
 
   // Returns true if |pending_changes_| was updated.
   bool AppendRemoteChange(const GURL& origin,
@@ -336,9 +374,19 @@ class DriveFileSyncService
                                   const std::string& resource_id,
                                   int64 changestamp,
                                   const std::string& remote_file_md5,
+                                  const base::Time& updated_time,
                                   RemoteSyncType sync_type);
   void RemoveRemoteChange(const fileapi::FileSystemURL& url);
   void MaybeMarkAsIncrementalSyncOrigin(const GURL& origin);
+
+  void MarkConflict(
+      const fileapi::FileSystemURL& url,
+      DriveMetadata* drive_metadata,
+      const SyncStatusCallback& callback);
+  void DidGetRemoteFileMetadataForRemoteUpdatedTime(
+      const UpdatedTimeCallback& callback,
+      SyncStatusCode status,
+      const SyncFileMetadata& metadata);
 
   // This returns false if no change is found for the |url|.
   bool GetPendingChangeForFileSystemURL(const fileapi::FileSystemURL& url,
@@ -437,6 +485,10 @@ class DriveFileSyncService
 
   ObserverList<Observer> service_observers_;
   ObserverList<FileStatusObserver> file_status_observers_;
+
+  RemoteChangeProcessor* remote_change_processor_;
+
+  ConflictResolutionPolicy conflict_resolution_;
 
   // Use WeakPtrFactory instead of SupportsWeakPtr to revoke the weak pointer
   // in |token_|.

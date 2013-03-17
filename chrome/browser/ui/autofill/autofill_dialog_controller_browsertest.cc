@@ -6,14 +6,14 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/form_data.h"
-#include "chrome/common/form_field_data.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/autofill/browser/autofill_metrics.h"
+#include "components/autofill/common/form_data.h"
+#include "components/autofill/common/form_field_data.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,7 +42,7 @@ class MockAutofillMetrics : public AutofillMetrics {
     mutable_this->autocheckout_status_ = status;
   }
 
-  virtual void LogRequestAutocompleteUiDuration(
+  virtual void LogDialogUiDuration(
       const base::TimeDelta& duration,
       DialogType dialog_type,
       DialogDismissalAction dismissal_action) const OVERRIDE {
@@ -82,6 +82,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
                                      metric_logger,
                                      dialog_type,
                                      base::Bind(&MockCallback)) {
+    DisableWallet();
   }
 
   virtual ~TestAutofillDialogController() {}

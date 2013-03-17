@@ -18,43 +18,51 @@ class ContentLayerClient;
 class LayerUpdater;
 
 class CC_EXPORT ContentLayerPainter : public LayerPainter {
-public:
-    static scoped_ptr<ContentLayerPainter> create(ContentLayerClient*);
+ public:
+  static scoped_ptr<ContentLayerPainter> Create(ContentLayerClient* client);
 
-    virtual void paint(SkCanvas*, gfx::Rect contentRect, gfx::RectF& opaque) OVERRIDE;
+  virtual void Paint(SkCanvas* canvas,
+                     gfx::Rect content_rect,
+                     gfx::RectF* opaque) OVERRIDE;
 
-private:
-    explicit ContentLayerPainter(ContentLayerClient*);
+ private:
+  explicit ContentLayerPainter(ContentLayerClient* client);
 
-    ContentLayerClient* m_client;
+  ContentLayerClient* client_;
 
-    DISALLOW_COPY_AND_ASSIGN(ContentLayerPainter);
+  DISALLOW_COPY_AND_ASSIGN(ContentLayerPainter);
 };
 
 // A layer that renders its contents into an SkCanvas.
 class CC_EXPORT ContentLayer : public TiledLayer {
-public:
-    static scoped_refptr<ContentLayer> create(ContentLayerClient*);
+ public:
+  static scoped_refptr<ContentLayer> Create(ContentLayerClient* client);
 
-    void clearClient() { m_client = 0; }
+  void ClearClient() { client_ = NULL; }
 
-    virtual bool drawsContent() const OVERRIDE;
-    virtual void setTexturePriorities(const PriorityCalculator&) OVERRIDE;
-    virtual void update(ResourceUpdateQueue&, const OcclusionTracker*, RenderingStats*) OVERRIDE;
-    virtual bool needMoreUpdates() OVERRIDE;
+  virtual bool DrawsContent() const OVERRIDE;
+  virtual void SetTexturePriorities(const PriorityCalculator& priority_calc)
+      OVERRIDE;
+  virtual void Update(ResourceUpdateQueue* queue,
+                      const OcclusionTracker* occlusion,
+                      RenderingStats* stats) OVERRIDE;
+  virtual bool NeedMoreUpdates() OVERRIDE;
 
-    virtual void setContentsOpaque(bool) OVERRIDE;
+  virtual void SetContentsOpaque(bool contents_opaque) OVERRIDE;
 
-protected:
-    explicit ContentLayer(ContentLayerClient*);
-    virtual ~ContentLayer();
+ protected:
+  explicit ContentLayer(ContentLayerClient* client);
+  virtual ~ContentLayer();
 
-private:
-    virtual LayerUpdater* updater() const OVERRIDE;
-    virtual void createUpdaterIfNeeded() OVERRIDE;
+ private:
+  // TiledLayer implementation.
+  virtual LayerUpdater* Updater() const OVERRIDE;
+  virtual void CreateUpdaterIfNeeded() OVERRIDE;
 
-    ContentLayerClient* m_client;
-    scoped_refptr<LayerUpdater> m_updater;
+  ContentLayerClient* client_;
+  scoped_refptr<LayerUpdater> updater_;
+
+  DISALLOW_COPY_AND_ASSIGN(ContentLayer);
 };
 
 }

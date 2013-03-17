@@ -6,12 +6,18 @@
 
 #include <list>
 
-#include "base/sys_info.h"
 #include "base/values.h"
-#include "chrome/test/chromedriver/chrome.h"
-#include "chrome/test/chromedriver/status.h"
-#include "chrome/test/chromedriver/version.h"
-#include "chrome/test/chromedriver/web_view.h"
+#include "chrome/test/chromedriver/chrome/chrome.h"
+#include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/version.h"
+#include "chrome/test/chromedriver/chrome/web_view.h"
+
+FrameInfo::FrameInfo(const std::string& parent_frame_id,
+                     const std::string& frame_id,
+                     const std::string& chromedriver_frame_id)
+    : parent_frame_id(parent_frame_id),
+      frame_id(frame_id),
+      chromedriver_frame_id(chromedriver_frame_id) {}
 
 Session::Session(const std::string& id)
     : id(id),
@@ -52,12 +58,30 @@ Status Session::GetTargetWindow(WebView** web_view) {
   return Status(kNoSuchWindow, "target window already closed");
 }
 
+void Session::SwitchToTopFrame() {
+  frames.clear();
+}
+
+void Session::SwitchToSubFrame(const std::string& frame_id,
+                               const std::string& chromedriver_frame_id) {
+  std::string parent_frame_id;
+  if (!frames.empty())
+    parent_frame_id = frames.back().frame_id;
+  frames.push_back(FrameInfo(parent_frame_id, frame_id, chromedriver_frame_id));
+}
+
+std::string Session::GetCurrentFrameId() const {
+  if (frames.empty())
+    return "";
+  return frames.back().frame_id;
+}
+
 scoped_ptr<base::DictionaryValue> Session::CreateCapabilities() {
   scoped_ptr<base::DictionaryValue> caps(new base::DictionaryValue());
   caps->SetString("browserName", "chrome");
   caps->SetString("version", chrome->GetVersion());
   caps->SetString("driverVersion", kChromeDriverVersion);
-  caps->SetString("platform", base::SysInfo::OperatingSystemName());
+  caps->SetString("platform", chrome->GetOperatingSystemName());
   caps->SetBoolean("javascriptEnabled", true);
   caps->SetBoolean("takesScreenshot", true);
   caps->SetBoolean("handlesAlerts", true);

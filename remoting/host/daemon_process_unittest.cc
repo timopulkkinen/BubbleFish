@@ -4,6 +4,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/process.h"
 #include "ipc/ipc_message.h"
@@ -26,7 +27,7 @@ namespace remoting {
 namespace {
 
 enum Messages {
-  kMessageCrash = ChromotingDaemonNetworkMsg_Crash::ID,
+  kMessageCrash = ChromotingDaemonMsg_Crash::ID,
   kMessageConfiguration = ChromotingDaemonNetworkMsg_Configuration::ID,
   kMessageConnectTerminal = ChromotingNetworkHostMsg_ConnectTerminal::ID,
   kMessageDisconnectTerminal = ChromotingNetworkHostMsg_DisconnectTerminal::ID,
@@ -54,7 +55,10 @@ class MockDaemonProcess : public DaemonProcess {
   virtual ~MockDaemonProcess();
 
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
-      int terminal_id) OVERRIDE;
+      int terminal_id,
+      const DesktopSessionParams& params,
+      bool virtual_terminal) OVERRIDE;
+
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void SendToNetwork(IPC::Message* message) OVERRIDE;
 
@@ -65,6 +69,7 @@ class MockDaemonProcess : public DaemonProcess {
                bool(int, base::ProcessHandle, IPC::PlatformFileForTransit));
 
   MOCK_METHOD1(DoCreateDesktopSessionPtr, DesktopSession*(int));
+  MOCK_METHOD1(DoCrashNetworkProcess, void(const tracked_objects::Location&));
   MOCK_METHOD0(LaunchNetworkProcess, void());
 
  private:
@@ -89,7 +94,9 @@ MockDaemonProcess::~MockDaemonProcess() {
 }
 
 scoped_ptr<DesktopSession> MockDaemonProcess::DoCreateDesktopSession(
-    int terminal_id) {
+    int terminal_id,
+    const DesktopSessionParams& params,
+    bool virtual_terminal) {
   return scoped_ptr<DesktopSession>(DoCreateDesktopSessionPtr(terminal_id));
 }
 
@@ -119,6 +126,7 @@ class DaemonProcessTest : public testing::Test {
 
   // DaemonProcess mocks
   DesktopSession* DoCreateDesktopSession(int terminal_id);
+  void DoCrashNetworkProcess(const tracked_objects::Location& location);
   void LaunchNetworkProcess();
 
   // Deletes |daemon_process_|.
@@ -163,6 +171,9 @@ void DaemonProcessTest::SetUp() {
   EXPECT_CALL(*daemon_process_, DoCreateDesktopSessionPtr(_))
       .Times(AnyNumber())
       .WillRepeatedly(Invoke(this, &DaemonProcessTest::DoCreateDesktopSession));
+  EXPECT_CALL(*daemon_process_, DoCrashNetworkProcess(_))
+      .Times(AnyNumber())
+      .WillRepeatedly(Invoke(this, &DaemonProcessTest::DoCrashNetworkProcess));
   EXPECT_CALL(*daemon_process_, LaunchNetworkProcess())
       .Times(AnyNumber())
       .WillRepeatedly(Invoke(this, &DaemonProcessTest::LaunchNetworkProcess));
@@ -175,6 +186,14 @@ void DaemonProcessTest::TearDown() {
 
 DesktopSession* DaemonProcessTest::DoCreateDesktopSession(int terminal_id) {
   return new FakeDesktopSession(daemon_process_.get(), terminal_id);
+}
+
+void DaemonProcessTest::DoCrashNetworkProcess(
+    const tracked_objects::Location& location) {
+  daemon_process_->SendToNetwork(
+      new ChromotingDaemonMsg_Crash(location.function_name(),
+                                    location.file_name(),
+                                    location.line_number()));
 }
 
 void DaemonProcessTest::LaunchNetworkProcess() {
@@ -210,9 +229,10 @@ TEST_F(DaemonProcessTest, OpenClose) {
   StartDaemonProcess();
 
   int id = terminal_id_++;
+  DesktopSessionParams params;
 
   EXPECT_TRUE(daemon_process_->OnMessageReceived(
-      ChromotingNetworkHostMsg_ConnectTerminal(id)));
+      ChromotingNetworkHostMsg_ConnectTerminal(id, params, false)));
   EXPECT_EQ(1u, desktop_sessions().size());
   EXPECT_EQ(id, desktop_sessions().front()->id());
 
@@ -230,9 +250,10 @@ TEST_F(DaemonProcessTest, CallCloseDesktopSession) {
   StartDaemonProcess();
 
   int id = terminal_id_++;
+  DesktopSessionParams params;
 
   EXPECT_TRUE(daemon_process_->OnMessageReceived(
-      ChromotingNetworkHostMsg_ConnectTerminal(id)));
+      ChromotingNetworkHostMsg_ConnectTerminal(id, params, false)));
   EXPECT_EQ(1u, desktop_sessions().size());
   EXPECT_EQ(id, desktop_sessions().front()->id());
 
@@ -253,9 +274,10 @@ TEST_F(DaemonProcessTest, DoubleDisconnectTerminal) {
   StartDaemonProcess();
 
   int id = terminal_id_++;
+  DesktopSessionParams params;
 
   EXPECT_TRUE(daemon_process_->OnMessageReceived(
-      ChromotingNetworkHostMsg_ConnectTerminal(id)));
+      ChromotingNetworkHostMsg_ConnectTerminal(id, params, false)));
   EXPECT_EQ(1u, desktop_sessions().size());
   EXPECT_EQ(id, desktop_sessions().front()->id());
 
@@ -304,14 +326,15 @@ TEST_F(DaemonProcessTest, InvalidConnectTerminal) {
   StartDaemonProcess();
 
   int id = terminal_id_++;
+  DesktopSessionParams params;
 
   EXPECT_TRUE(daemon_process_->OnMessageReceived(
-      ChromotingNetworkHostMsg_ConnectTerminal(id)));
+      ChromotingNetworkHostMsg_ConnectTerminal(id, params, false)));
   EXPECT_EQ(1u, desktop_sessions().size());
   EXPECT_EQ(id, desktop_sessions().front()->id());
 
   EXPECT_TRUE(daemon_process_->OnMessageReceived(
-      ChromotingNetworkHostMsg_ConnectTerminal(id)));
+      ChromotingNetworkHostMsg_ConnectTerminal(id, params, false)));
   EXPECT_TRUE(desktop_sessions().empty());
   EXPECT_EQ(0, terminal_id_);
 }

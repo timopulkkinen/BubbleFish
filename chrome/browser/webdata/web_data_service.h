@@ -48,6 +48,10 @@ namespace base {
 class Thread;
 }
 
+namespace content {
+class BrowserContext;
+}
+
 namespace webkit_glue {
 struct WebIntentServiceData;
 }
@@ -103,6 +107,10 @@ class WebDataService
       public AutofillWebData,
       public RefcountedProfileKeyedService {
  public:
+  // Retrieve a WebDataService for the given context.
+  static scoped_refptr<WebDataService> FromBrowserContext(
+      content::BrowserContext* context);
+
   WebDataService();
 
   // WebDataServiceBase implementation.
@@ -288,7 +296,6 @@ class WebDataService
   virtual void UpdateAutofillProfile(const AutofillProfile& profile) OVERRIDE;
   virtual void RemoveAutofillProfile(const std::string& guid) OVERRIDE;
   virtual Handle GetAutofillProfiles(WebDataServiceConsumer* consumer) OVERRIDE;
-  virtual void EmptyMigrationTrash(bool notify_sync) OVERRIDE;
   virtual void AddCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void UpdateCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void RemoveCreditCard(const std::string& guid) OVERRIDE;
@@ -466,7 +473,6 @@ class WebDataService
   void UpdateAutofillProfileImpl(const AutofillProfile& profile);
   void RemoveAutofillProfileImpl(const std::string& guid);
   scoped_ptr<WDTypedResult> GetAutofillProfilesImpl();
-  void EmptyMigrationTrashImpl(bool notify_sync);
   void AddCreditCardImpl(const CreditCard& credit_card);
   void UpdateCreditCardImpl(const CreditCard& credit_card);
   void RemoveCreditCardImpl(const std::string& guid);

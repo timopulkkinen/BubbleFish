@@ -10,7 +10,6 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
-#include "ash/shelf_types.h"
 #include "ash/wm/gestures/shelf_gesture_handler.h"
 #include "base/observer_list.h"
 #include "ui/views/animation/bounds_animator_observer.h"
@@ -69,6 +68,9 @@ class ASH_EXPORT LauncherView : public views::View,
   // Returns the ideal bounds of the specified item, or an empty rect if id
   // isn't know.
   gfx::Rect GetIdealBoundsOfItemIcon(LauncherID id);
+
+  // Repositions the icon for the specified item by the midpoint of the window.
+  void UpdatePanelIconPosition(LauncherID id, const gfx::Point& midpoint);
 
   void AddIconObserver(LauncherIconObserver* observer);
   void RemoveIconObserver(LauncherIconObserver* observer);
@@ -161,11 +163,6 @@ class ASH_EXPORT LauncherView : public views::View,
   // Toggles the overflow menu.
   void ToggleOverflowBubble();
 
-  // Update first launcher button's padding. This method adds padding to the
-  // first button to include the leading inset. It needs to be called once on
-  // button creation and every time when shelf alignment is changed.
-  void UpdateFirstButtonPadding();
-
   // Invoked after the fading out animation for item deletion is ended.
   void OnFadeOutAnimationEnded();
 
@@ -213,8 +210,10 @@ class ASH_EXPORT LauncherView : public views::View,
   // when the menu was shown and false if there were no possible items to
   // choose from. |source| specifies the view which is responsible for showing
   // the menu, and the bubble will point towards it.
+  // The |event_flags| are the flags of the event which triggered this menu.
   bool ShowListMenuForView(const LauncherItem& item,
-                           views::View* source);
+                           views::View* source,
+                           int event_flags);
 
   // Overridden from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
@@ -233,6 +232,10 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void OnBoundsAnimatorProgressed(
       views::BoundsAnimator* animator) OVERRIDE;
   virtual void OnBoundsAnimatorDone(views::BoundsAnimator* animator) OVERRIDE;
+
+  // Returns false if the click which closed the previous menu is the click
+  // which triggered this event.
+  bool IsUsableEvent(const ui::Event& event);
 
   // The model; owned by Launcher.
   LauncherModel* model_;
@@ -298,6 +301,9 @@ class ASH_EXPORT LauncherView : public views::View,
   // Index of the last hidden launcher item. If there are no hidden items this
   // will be equal to last_visible_index_ + 1.
   int last_hidden_index_;
+
+  // The timestamp of the event which closed the last menu - or 0.
+  base::TimeDelta closing_event_time_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

@@ -9,52 +9,63 @@
 #include <string>
 
 #include "base/string16.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
+#include "ui/message_center/notifier_settings.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/widget/widget_delegate.h"
 
-namespace message_center {
+namespace views {
+class ScrollView;
+}
 
-class NotifierSettingsViewDelegate;
+namespace message_center {
 
 // A class to show the list of notifier extensions / URL patterns and allow
 // users to customize the settings.
 class MESSAGE_CENTER_EXPORT NotifierSettingsView
-    : public views::WidgetDelegateView,
+    : public NotifierSettingsDelegate,
+      public views::WidgetDelegateView,
       public views::ButtonListener {
  public:
   // Create a new widget of the notifier settings and returns it. Note that
   // the widget and the view is self-owned. It'll be deleted when it's closed
   // or the chrome's shutdown.
-  static NotifierSettingsView* Create(NotifierSettingsViewDelegate* delegate,
+  static NotifierSettingsView* Create(NotifierSettingsProvider* delegate,
                                       gfx::NativeView context);
 
-  void UpdateIconImage(const std::string& id, const gfx::ImageSkia& icon);
-  void UpdateFavicon(const GURL& url, const gfx::ImageSkia& icon);
+  // Overridden from NotifierSettingsDelegate:
+  virtual void UpdateIconImage(const std::string& id,
+                               const gfx::Image& icon) OVERRIDE;
+  virtual void UpdateFavicon(const GURL& url, const gfx::Image& icon) OVERRIDE;
 
-  void set_delegate(NotifierSettingsViewDelegate* new_delegate) {
+  void set_delegate(NotifierSettingsProvider* new_delegate) {
     delegate_ = new_delegate;
   }
 
  private:
   class NotifierButton;
 
-  NotifierSettingsView(NotifierSettingsViewDelegate* delegate);
+  NotifierSettingsView(NotifierSettingsProvider* delegate);
   virtual ~NotifierSettingsView();
 
-  // views::WidgetDelegate overrides:
-  virtual bool CanResize() const OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  // Overridden from views::WidgetDelegate:
   virtual void WindowClosing() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
-  // views::ButtonListener overrides:
+  // Overridden from views::View:
+  virtual void Layout() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
+
+  // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
 
-  NotifierSettingsViewDelegate* delegate_;
+  views::View* title_entry_;
+  views::ScrollView* scroller_;
+  NotifierSettingsProvider* delegate_;
   std::set<NotifierButton*> buttons_;
 
   DISALLOW_COPY_AND_ASSIGN(NotifierSettingsView);

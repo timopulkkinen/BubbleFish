@@ -13,6 +13,7 @@ if (!chrome.embeddedSearch) {
     //                            Private functions
     // =========================================================================
     native function GetFont();
+    // DEPRECATED. TODO(sreeram): Remove once google.com no longer uses this.
     native function NavigateContentWindow();
 
     function escapeHTML(text) {
@@ -30,7 +31,8 @@ if (!chrome.embeddedSearch) {
     var safeObjects = {};
 
     // Returns the |restrictedText| wrapped in a ShadowDOM.
-    function SafeWrap(restrictedText, width, height, opt_fontSize) {
+    function SafeWrap(restrictedText, width, height, opt_fontSize,
+        opt_direction) {
       var node = document.createElement('div');
       var nodeShadow = safeObjects.createShadowRoot.apply(node);
       nodeShadow.applyAuthorStyles = true;
@@ -43,7 +45,9 @@ if (!chrome.embeddedSearch) {
                   'font-size: ' + opt_fontSize + 'px !important;' : '') +
               'overflow: hidden !important;' +
               'text-overflow: ellipsis !important;' +
-              'white-space: nowrap !important">' +
+              'white-space: nowrap !important"' +
+              (opt_direction ? ' dir="' + opt_direction + '"' : '') +
+              '>' +
             restrictedText +
           '</div>';
       safeObjects.defineProperty(node, 'webkitShadowRoot', { value: null });
@@ -61,6 +65,7 @@ if (!chrome.embeddedSearch) {
     // =========================================================================
     //                           Exported functions
     // =========================================================================
+    // DEPRECATED. TODO(sreeram): Remove once google.com no longer uses this.
     this.navigateContentWindow = function(destination, disposition) {
       return NavigateContentWindow(destination, disposition);
     };
@@ -90,14 +95,16 @@ if (!chrome.embeddedSearch) {
       native function GetDisplayInstantResults();
       native function GetFontSize();
       native function IsKeyCaptureEnabled();
-      native function SetSuggestions();
-      native function SetQuerySuggestion();
-      native function SetQuerySuggestionFromAutocompleteResult();
       native function SetQuery();
       native function SetQueryFromAutocompleteResult();
+      native function SetSuggestion();
+      native function SetSuggestionFromAutocompleteResult();
+      native function SetSuggestions();
       native function ShowOverlay();
+      native function FocusOmnibox();
       native function StartCapturingKeyStrokes();
       native function StopCapturingKeyStrokes();
+      native function NavigateSearchBox();
 
       function SafeWrapSuggestion(restrictedText) {
         return SafeWrap(restrictedText, window.innerWidth - 155, 22);
@@ -233,25 +240,26 @@ if (!chrome.embeddedSearch) {
         SetSuggestions(text);
       };
       this.setAutocompleteText = function(text, behavior) {
-        SetQuerySuggestion(text, behavior);
+        SetSuggestion(text, behavior);
       };
-      this.setRestrictedAutocompleteText = function(resultId) {
-        SetQuerySuggestionFromAutocompleteResult(resultId);
+      this.setRestrictedAutocompleteText = function(autocompleteResultId) {
+        SetSuggestionFromAutocompleteResult(autocompleteResultId);
       };
       this.setValue = function(text, type) {
         SetQuery(text, type);
       };
-      this.setRestrictedValue = function(resultId) {
-        SetQueryFromAutocompleteResult(resultId);
+      // Must access nativeSuggestions before calling setRestrictedValue.
+      this.setRestrictedValue = function(autocompleteResultId) {
+        SetQueryFromAutocompleteResult(autocompleteResultId);
       };
-      // TODO(jered): Remove the deprecated "reason" argument.
-      this.showOverlay = function(reason, height) {
-        ShowOverlay(reason, height);
+      this.showOverlay = function(height) {
+        ShowOverlay(height);
       };
-      // TODO(jered): Remove this when GWS knows about showOverlay().
-      this.show = this.showOverlay;
       this.markDuplicateSuggestions = function(clientSuggestions) {
         return DedupeClientSuggestions(clientSuggestions);
+      };
+      this.focus = function() {
+        FocusOmnibox();
       };
       this.startCapturingKeyStrokes = function() {
         StartCapturingKeyStrokes();
@@ -259,13 +267,15 @@ if (!chrome.embeddedSearch) {
       this.stopCapturingKeyStrokes = function() {
         StopCapturingKeyStrokes();
       };
+      this.navigateContentWindow = function(destination, disposition) {
+        NavigateSearchBox(destination, disposition);
+      }
       this.onchange = null;
       this.onsubmit = null;
       this.oncancel = null;
       this.onresize = null;
       this.onkeypress = null;
       this.onkeycapturechange = null;
-      this.oncontextchange = null;
       this.onmarginchange = null;
       this.onnativesuggestions = null;
 
@@ -291,9 +301,10 @@ if (!chrome.embeddedSearch) {
       native function DeleteMostVisitedItem();
       native function UndoAllMostVisitedDeletions();
       native function UndoMostVisitedDeletion();
+      native function NavigateNewTabPage();
 
-      function SafeWrapMostVisited(restrictedText, width) {
-        return SafeWrap(restrictedText, width, 18, 11);
+      function SafeWrapMostVisited(restrictedText, width, opt_direction) {
+        return SafeWrap(restrictedText, width, 18, 11, opt_direction);
       }
 
       function GetMostVisitedItemsWrapper() {
@@ -301,10 +312,11 @@ if (!chrome.embeddedSearch) {
         for (var i = 0, item; item = mostVisitedItems[i]; ++i) {
           var title = escapeHTML(item.title);
           var domain = escapeHTML(item.domain);
-          item.titleElement = SafeWrapMostVisited(title, 108);
-          item.domainElement = SafeWrapMostVisited(domain, 95);
+          item.titleElement = SafeWrapMostVisited(title, 140, item.direction);
+          item.domainElement = SafeWrapMostVisited(domain, 123);
           delete item.title;
           delete item.domain;
+          delete item.direction;
         }
         return mostVisitedItems;
       }
@@ -315,15 +327,18 @@ if (!chrome.embeddedSearch) {
       this.__defineGetter__('mostVisited', GetMostVisitedItemsWrapper);
       this.__defineGetter__('themeBackgroundInfo', GetThemeBackgroundInfo);
 
-      this.deleteMostVisitedItem = function(restrictId) {
-        DeleteMostVisitedItem(restrictId);
+      this.deleteMostVisitedItem = function(restrictedId) {
+        DeleteMostVisitedItem(restrictedId);
       };
       this.undoAllMostVisitedDeletions = function() {
         UndoAllMostVisitedDeletions();
       };
-      this.undoMostVisitedDeletion = function(restrictId) {
-        UndoMostVisitedDeletion(restrictId);
+      this.undoMostVisitedDeletion = function(restrictedId) {
+        UndoMostVisitedDeletion(restrictedId);
       };
+      this.navigateContentWindow = function(destination, disposition) {
+        NavigateNewTabPage(destination, disposition);
+      }
 
       this.onmostvisitedchange = null;
       this.onthemechange = null;

@@ -27,10 +27,6 @@
     "location": "component",
     "whitelist": "lphgohfeebnhcpiohjndkgbhhkoapkjc" // Apps Debugger
   },
-  "appNotifications": {
-    "channel": "stable",
-    "extension_types": ["packaged_app", "hosted_app"]
-  },
   "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
@@ -261,6 +257,26 @@
       "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
     ]
   },
+  "nativeMessaging": [
+    {
+      "channel": "beta",
+      "extension_types": [
+        "extension", "packaged_app", "platform_app"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension", "packaged_app", "platform_app"
+      ],
+      "whitelist": [
+        "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
+        "kgngmbheleoaphbjbaiobfdepmghbfah",  // Dogfood Chrome Remote Desktop
+        "odkaodonbgfohohmklejpjiejmcipmib",  // QA Chrome Remote Desktop
+        "ojoimpklfciegopdfgeenehpalipignm"   // Chromoting canary
+      ]
+    }
+  ],
   "networkingPrivate": {
     "channel": "dev",
     "extension_types": ["extension", "packaged_app"],
@@ -271,6 +287,9 @@
     ]
   },
   "notifications": {
+    // Note that the chrome.notifications API is currently restricted
+    // to dev channel, extension/platform_app. This isn't done through
+    // this file, but rather on a method-by-method basis.
     "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
@@ -319,8 +338,7 @@
   // values to verify restrictions.
   "runtime": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app", "platform_app"],
-    "min_manifest_version": 2
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "screensaver": {
     "channel": "stable",
@@ -333,6 +351,15 @@
   "sessionRestore": {
     "channel": "dev",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "streamsPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "whitelist": [
+      "oickdpebdnfbgkcaoklfcdhjniefkcji",  // browser_tests
+      "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // QuickOffice
+      "ionpfmkccalenbmnddpbmocokhaknphg"   // QuickOffice Dev
+    ]
   },
   "socket": {
     "channel": "stable",

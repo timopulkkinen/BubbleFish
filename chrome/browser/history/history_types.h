@@ -461,7 +461,10 @@ struct QueryOptions {
     // Omit visits for which there is a more recent visit to the same URL on
     // the same day. Each URL will appear no more than once per day, where the
     // day is defined by the local timezone.
-    REMOVE_DUPLICATES_PER_DAY
+    REMOVE_DUPLICATES_PER_DAY,
+
+    // Return all visits without deduping.
+    KEEP_ALL_DUPLICATES
   };
 
   // Allows the caller to specify how duplicate URLs in the result set should
@@ -816,6 +819,19 @@ class VisitDatabaseObserver {
  public:
   virtual ~VisitDatabaseObserver();
   virtual void OnAddVisit(const BriefVisitInfo& info) = 0;
+};
+
+struct ExpireHistoryArgs {
+  ExpireHistoryArgs();
+  ~ExpireHistoryArgs();
+
+  // Sets |begin_time| and |end_time| to the beginning and end of the day (in
+  // local time) on which |time| occurs.
+  void SetTimeRangeForOneDay(base::Time time);
+
+  std::set<GURL> urls;
+  base::Time begin_time;
+  base::Time end_time;
 };
 
 }  // namespace history

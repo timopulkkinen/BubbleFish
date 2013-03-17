@@ -41,6 +41,7 @@
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/browser_main.h"
 #include "content/browser/browser_main_loop.h"
+#include "content/browser/browser_plugin/browser_plugin_geolocation_permission_context.h"
 #include "content/browser/browser_plugin/browser_plugin_message_filter.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/device_orientation/orientation_message_filter.h"
@@ -52,6 +53,7 @@
 #include "content/browser/geolocation/geolocation_dispatcher_host.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/gpu/shader_disk_cache.h"
 #include "content/browser/histogram_message_filter.h"
 #include "content/browser/hyphenator/hyphenator_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
@@ -135,6 +137,17 @@ extern bool g_exited_main_message_loop;
 static const char* kSiteProcessMapKeyName = "content_site_process_map";
 
 namespace content {
+namespace {
+
+void CacheShaderInfo(int32 id, base::FilePath path) {
+  ShaderCacheFactory::GetInstance()->SetCacheInfo(id, path);
+}
+
+void RemoveShaderInfo(int32 id) {
+  ShaderCacheFactory::GetInstance()->RemoveCacheInfo(id);
+}
+
+}  // namespace
 
 // This class creates the IO thread for the renderer when running in
 // single-process mode.  It's not used in multi-process mode.
@@ -354,6 +367,13 @@ RenderProcessHostImpl::RenderProcessHostImpl(
   g_all_hosts.Get().set_check_on_null_data(true);
   // Initialize |child_process_activity_time_| to a reasonable value.
   mark_child_process_activity_time();
+
+  if (!GetBrowserContext()->IsOffTheRecord()) {
+    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                            base::Bind(&CacheShaderInfo, GetID(),
+                                       GetBrowserContext()->GetPath()));
+  }
+
   // Note: When we create the RenderProcessHostImpl, it's technically
   //       backgrounded, because it has no visible listeners.  But the process
   //       doesn't actually exist yet, so we'll Background it later, after
@@ -373,6 +393,9 @@ RenderProcessHostImpl::~RenderProcessHostImpl() {
 
   ClearTransportDIBCache();
   UnregisterHost(GetID());
+
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&RemoveShaderInfo, GetID()));
 }
 
 void RenderProcessHostImpl::EnableSendQueue() {
@@ -487,13 +510,9 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   MediaInternals* media_internals = MediaInternals::GetInstance();;
   // Add BrowserPluginMessageFilter to ensure it gets the first stab at messages
   // from guests.
-  if (IsGuest()) {
-    scoped_refptr<BrowserPluginMessageFilter> bp_message_filter(
-        new BrowserPluginMessageFilter(
-            GetID(),
-            GetBrowserContext()));
-    channel_->AddFilter(bp_message_filter);
-  }
+  scoped_refptr<BrowserPluginMessageFilter> bp_message_filter(
+      new BrowserPluginMessageFilter(GetID(), IsGuest()));
+  channel_->AddFilter(bp_message_filter);
 
   scoped_refptr<RenderMessageFilter> render_message_filter(
       new RenderMessageFilter(
@@ -541,8 +560,13 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       new IndexedDBDispatcherHost(
           GetID(),
           storage_partition_impl_->GetIndexedDBContext()));
-  channel_->AddFilter(GeolocationDispatcherHost::New(
-      GetID(), browser_context->GetGeolocationPermissionContext()));
+  if (IsGuest()) {
+    channel_->AddFilter(GeolocationDispatcherHost::New(
+        GetID(), new BrowserPluginGeolocationPermissionContext()));
+  } else {
+    channel_->AddFilter(GeolocationDispatcherHost::New(
+        GetID(), browser_context->GetGeolocationPermissionContext()));
+  }
   gpu_message_filter_ = new GpuMessageFilter(GetID(), widget_helper_.get());
   channel_->AddFilter(gpu_message_filter_);
 #if defined(ENABLE_WEBRTC)
@@ -760,17 +784,14 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kDisableSpeechInput,
 #if defined(OS_ANDROID)
     switches::kEnableWebAudio,
-    switches::kEnableWebRTC,
+    switches::kDisableWebRTC,
 #else
     switches::kDisableWebAudio,
 #endif
-    switches::kEnableWebAudioInput,
     switches::kDisableWebSockets,
     switches::kDomAutomationController,
     switches::kEnableAccessibilityLogging,
-    switches::kEnableBrowserPluginCompositing,
     switches::kEnableBrowserPluginForAllViewTypes,
-    switches::kEnableBrowserPluginPointerLock,
     switches::kEnableDCHECK,
     switches::kEnableDelegatedRenderer,
     switches::kDisableEncryptedMedia,
@@ -829,13 +850,11 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kLoggingLevel,
     switches::kMemoryMetrics,
 #if defined(OS_ANDROID)
-    switches::kMediaPlayerInRenderProcess,
     switches::kNetworkCountryIso,
     switches::kDisableGestureRequirementForMediaPlayback,
 #endif
     switches::kNoReferrers,
     switches::kNoSandbox,
-    switches::kOldCheckboxStyle,
     switches::kPpapiInProcess,
     switches::kRegisterPepperPlugins,
     switches::kRendererAssertTest,
@@ -866,6 +885,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     cc::switches::kEnableImplSidePainting,
     cc::switches::kEnablePartialSwap,
     cc::switches::kEnablePerTilePainting,
+    cc::switches::kEnablePredictionBenchmarking,
     cc::switches::kEnableRightAlignedScheduling,
     cc::switches::kEnableTopControlsPositionCalculation,
     cc::switches::kLowResolutionContentsScaleFactor,
@@ -883,6 +903,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     cc::switches::kTraceAllRenderedFrames,
     cc::switches::kTraceOverdraw,
     cc::switches::kUseCheapnessEstimator,
+    cc::switches::kUseColorEstimator,
     cc::switches::kCompositeToMailbox,
   };
   renderer_cmd->CopySwitchesFrom(browser_cmd, kSwitchNames,

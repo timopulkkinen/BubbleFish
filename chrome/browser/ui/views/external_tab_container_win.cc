@@ -249,8 +249,6 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   registrar_.Add(this,
                  content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
                  content::Source<WebContents>(existing_contents));
-  registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
-                 content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED,
                  content::NotificationService::AllSources());
 
@@ -402,7 +400,7 @@ bool ExternalTabContainerWin::ExecuteContextMenuCommand(int command) {
     }
   }
 
-  external_context_menu_->ExecuteCommand(command);
+  external_context_menu_->ExecuteCommand(command, 0);
   return true;
 }
 
@@ -864,6 +862,12 @@ bool ExternalTabContainerWin::RequestPpapiBrokerPermission(
   return true;
 }
 
+void ExternalTabContainerWin::RenderViewDeleted(
+    content::RenderViewHost* render_view_host) {
+  if (load_requests_via_automation_)
+    UnregisterRenderViewHost(render_view_host);
+}
+
 bool ExternalTabContainerWin::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExternalTabContainerWin, message)
@@ -955,13 +959,6 @@ void ExternalTabContainerWin::Observe(
       if (load_requests_via_automation_) {
         RenderViewHost* rvh = content::Details<RenderViewHost>(details).ptr();
         RegisterRenderViewHostForAutomation(rvh, false);
-      }
-      break;
-    }
-    case content::NOTIFICATION_RENDER_VIEW_HOST_DELETED: {
-      if (load_requests_via_automation_) {
-        RenderViewHost* rvh = content::Source<RenderViewHost>(source).ptr();
-        UnregisterRenderViewHost(rvh);
       }
       break;
     }

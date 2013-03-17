@@ -873,7 +873,8 @@ ui::MenuModel* ChromeLauncherControllerPerBrowser::CreateContextMenu(
 
 ash::LauncherMenuModel*
 ChromeLauncherControllerPerBrowser::CreateApplicationMenu(
-    const ash::LauncherItem& item) {
+    const ash::LauncherItem& item,
+    int event_flags) {
   // Not used by this launcher type.
   return NULL;
 }
@@ -1209,8 +1210,8 @@ void ChromeLauncherControllerPerBrowser::SetShelfAutoHideBehaviorFromPrefs() {
 }
 
 void ChromeLauncherControllerPerBrowser::SetShelfAlignmentFromPrefs() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowLauncherAlignmentMenu))
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kHideLauncherAlignmentMenu))
     return;
 
   ash::Shell::RootWindowList root_windows;

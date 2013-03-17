@@ -15,13 +15,13 @@ namespace cc {
 // Maintains a history of paint times for each frame
 class PaintTimeCounter {
  public:
-  static scoped_ptr<PaintTimeCounter> create();
+  static scoped_ptr<PaintTimeCounter> Create();
 
   size_t HistorySize() const { return ring_buffer_.BufferSize(); }
 
   struct Entry {
     Entry()
-        : commit_number(0) { }
+        : commit_number(0) {}
 
     int commit_number;
     base::TimeDelta paint_time;
@@ -44,7 +44,7 @@ class PaintTimeCounter {
 
   void ClearHistory();
 
-  typedef RingBuffer<Entry, 90> RingBufferType;
+  typedef RingBuffer<Entry, 200> RingBufferType;
   RingBufferType::Iterator Begin() const { return ring_buffer_.Begin(); }
   RingBufferType::Iterator End() const { return ring_buffer_.End(); }
 

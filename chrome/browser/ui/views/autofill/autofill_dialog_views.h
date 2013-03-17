@@ -7,6 +7,7 @@
 
 #include <map>
 
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "ui/views/controls/button/button.h"
@@ -76,7 +77,7 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual bool UseBillingForShipping() OVERRIDE;
   virtual bool SaveDetailsInWallet() OVERRIDE;
   virtual bool SaveDetailsLocally() OVERRIDE;
-  virtual const content::NavigationController& ShowSignIn() OVERRIDE;
+  virtual const content::NavigationController* ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;
   virtual void UpdateProgressBar(double value) OVERRIDE;
   virtual void ModelChanged() OVERRIDE;
@@ -156,7 +157,8 @@ class AutofillDialogViews : public AutofillDialogView,
   // A View which displays the currently selected account and lets the user
   // switch accounts.
   class AccountChooser : public views::View,
-                         public views::LinkListener {
+                         public views::LinkListener,
+                         public base::SupportsWeakPtr<AccountChooser> {
    public:
     explicit AccountChooser(AutofillDialogController* controller);
     virtual ~AccountChooser();
@@ -199,27 +201,35 @@ class AutofillDialogViews : public AutofillDialogView,
     NotificationArea();
     virtual ~NotificationArea();
 
-    views::Checkbox* checkbox() { return checkbox_; }
-
-    void set_arrow_centering_anchor(views::View* arrow_centering_anchor) {
+    void set_arrow_centering_anchor(
+        const base::WeakPtr<views::View>& arrow_centering_anchor) {
       arrow_centering_anchor_ = arrow_centering_anchor;
     }
 
-    void SetNotification(const DialogNotification& notification);
+    // Displays the given notifications.
+    void SetNotifications(const std::vector<DialogNotification>& notifications);
+
+    // Returns true if the checkbox exists and is checked. Currently, the
+    // notification area only supports showing a checkbox on the topmost
+    // notification.
+    bool CheckboxIsChecked() const;
 
     // views::View implementation.
     virtual std::string GetClassName() const OVERRIDE;
     virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
    private:
-    views::View* container_;
-    views::Checkbox* checkbox_;
-    views::Label* label_;
+    // Utility function for determining whether an arrow should be drawn
+    // pointing at |arrow_centering_anchor_|.
+    bool HasArrow();
 
-    // If |notification_.HasArrow()| is true, the arrow should point at this.
-    views::View* arrow_centering_anchor_;  // weak.
+    // The currently showing checkbox, or NULL if none exists.
+    views::Checkbox* checkbox_;  // weak
 
-    DialogNotification notification_;
+    // If HasArrow() is true, the arrow should point at this.
+    base::WeakPtr<views::View> arrow_centering_anchor_;
+
+    std::vector<DialogNotification> notifications_;
 
     DISALLOW_COPY_AND_ASSIGN(NotificationArea);
   };
@@ -236,10 +246,15 @@ class AutofillDialogViews : public AutofillDialogView,
                      views::Button* proxy_button);
     virtual ~SectionContainer();
 
+    // Sets the visual appearance of the section to active (considered active
+    // when showing the menu or hovered by the mouse cursor).
+    void SetActive(bool active);
+
     // Sets whether mouse events should be forwarded to |proxy_button_|.
     void SetForwardMouseEvents(bool forward);
 
     // views::View implementation.
+    virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
     virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
     virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
     virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
@@ -424,6 +439,9 @@ class AutofillDialogViews : public AutofillDialogView,
 
   // View to host everything that isn't related to sign-in.
   views::View* main_container_;
+
+  // View to host details sections.
+  views::View* details_container_;
 
   // The "Extra view" is on the same row as the dialog buttons.
   views::View* button_strip_extra_view_;

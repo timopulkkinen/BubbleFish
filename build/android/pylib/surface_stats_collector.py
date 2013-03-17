@@ -17,26 +17,28 @@ _SURFACE_TEXTURE_TIMESTAMP_RE = '\d+'
 
 
 class SurfaceStatsCollector(object):
-  """Collects surface stats for a window from the output of SurfaceFlinger.
+  """Collects surface stats for a SurfaceView from the output of SurfaceFlinger.
 
   Args:
-    adb: the adb coonection to use.
-    window_package: Package name of the window.
-    window_activity: Activity name of the window.
+    adb: the adb connection to use.
   """
-  def __init__(self, adb, window_package, window_activity, trace_tag):
+  class Result(object):
+    def __init__(self, name, value, unit):
+      self.name = name
+      self.value = value
+      self.unit = unit
+
+  def __init__(self, adb):
     self._adb = adb
-    self._window_package = window_package
-    self._window_activity = window_activity
-    self._trace_tag = trace_tag
     self._collector_thread = None
     self._use_legacy_method = False
     self._surface_before = None
     self._get_data_event = None
     self._data_queue = None
     self._stop_event = None
+    self._results = []
 
-  def __enter__(self):
+  def Start(self):
     assert not self._collector_thread
 
     if self._ClearSurfaceFlingerLatencyData():
@@ -49,14 +51,17 @@ class SurfaceStatsCollector(object):
       self._use_legacy_method = True
       self._surface_before = self._GetSurfaceStatsLegacy()
 
-  def __exit__(self, *args):
-    self._PrintPerfResults()
+  def Stop(self):
+    self._StorePerfResults()
     if self._collector_thread:
       self._stop_event.set()
       self._collector_thread.join()
       self._collector_thread = None
 
-  def _PrintPerfResults(self):
+  def GetResults(self):
+    return self._results
+
+  def _StorePerfResults(self):
     if self._use_legacy_method:
       surface_after = self._GetSurfaceStatsLegacy()
       td = surface_after['timestamp'] - self._surface_before['timestamp']
@@ -78,19 +83,14 @@ class SurfaceStatsCollector(object):
           jitter_count = jitter_count + 1
         last_latency = latency
 
-      perf_tests_helper.PrintPerfResult(
-          'surface_latencies', 'surface_latencies' + self._trace_tag,
-          latencies, '')
-      perf_tests_helper.PrintPerfResult(
-          'peak_jitter', 'peak_jitter' + self._trace_tag, [max(latencies)], '')
-      perf_tests_helper.PrintPerfResult(
-          'jitter_percent', 'jitter_percent' + self._trace_tag,
-          [jitter_count * 100.0 / frame_count], 'percent')
-
-    print 'SurfaceMonitorTime: %fsecs' % seconds
-    perf_tests_helper.PrintPerfResult(
-        'avg_surface_fps', 'avg_surface_fps' + self._trace_tag,
-        [int(round(frame_count / seconds))], 'fps')
+      self._results.append(SurfaceStatsCollector.Result(
+          'surface_latencies', latencies, ''))
+      self._results.append(SurfaceStatsCollector.Result(
+          'peak_jitter', [max(latencies)], ''))
+      self._results.append(SurfaceStatsCollector.Result(
+          'jitter_percent', [jitter_count * 100.0 / frame_count], 'percent'))
+    self._results.append(SurfaceStatsCollector.Result(
+          'avg_surface_fps', [int(round(frame_count / seconds))], 'fps'))
 
   def _CollectorThread(self):
     last_timestamp = 0
@@ -151,8 +151,7 @@ class SurfaceStatsCollector(object):
     # The command returns nothing if it is supported, otherwise returns many
     # lines of result just like 'dumpsys SurfaceFlinger'.
     results = self._adb.RunShellCommand(
-        'dumpsys SurfaceFlinger --latency-clear %s/%s' %
-        (self._window_package, self._window_activity))
+        'dumpsys SurfaceFlinger --latency-clear SurfaceView')
     return not len(results)
 
   def _GetSurfaceFlingerLatencyData(self, previous_timestamp, latencies):
@@ -196,9 +195,12 @@ class SurfaceStatsCollector(object):
     # (each time the number above changes, we have a "jank").
     # If this happens a lot during an animation, the animation appears
     # janky, even if it runs at 60 fps in average.
+    #
+    # We use the special "SurfaceView" window name because the statistics for
+    # the activity's main window are not updated when the main web content is
+    # composited into a SurfaceView.
     results = self._adb.RunShellCommand(
-        'dumpsys SurfaceFlinger --latency %s/%s' %
-        (self._window_package, self._window_activity), log_result=True)
+        'dumpsys SurfaceFlinger --latency SurfaceView', log_result=True)
     if not len(results):
       return (None, None)
 

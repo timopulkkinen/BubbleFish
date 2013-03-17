@@ -323,6 +323,10 @@ const char kWebKitPluginsEnabled[] = "webkit.webprefs.plugins_enabled";
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const char kShowBookmarkBar[] = "bookmark_bar.show_on_all_tabs";
 
+// Boolean which specifies whether the apps shortcut is visible on the bookmark
+// bar.
+const char kShowAppsShortcutInBookmarkBar[] = "bookmark_bar.show_apps_shortcut";
+
 // Boolean which specifies the ids of the bookmark nodes that are expanded in
 // the bookmark editor.
 const char kBookmarkEditorExpandedNodes[] = "bookmark_editor.expanded_nodes";
@@ -335,9 +339,6 @@ const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
 // in clear text.
 const char kPasswordManagerAllowShowPasswords[] =
     "profile.password_manager_allow_show_passwords";
-
-// Boolean that is true when password generation is enabled.
-const char kPasswordGenerationEnabled[] = "password_generation.enabled";
 
 // Booleans identifying whether normal and reverse auto-logins are enabled.
 const char kAutologinEnabled[] = "autologin.enabled";
@@ -1095,20 +1096,6 @@ const char kPerHostZoomLevels[] = "profile.per_host_zoom_levels";
 // the autofill dialog's account chooser and set explicitly on dialog submission
 // (but not cancel). If this isn't set, the dialog assumes it's the first run.
 const char kAutofillDialogPayWithoutWallet[] = "autofill.pay_without_wallet";
-
-// Boolean that is true if Autofill is enabled and allowed to save profile data.
-const char kAutofillEnabled[] = "autofill.enabled";
-
-// Boolean that is true when auxiliary Autofill profiles are enabled.
-// Currently applies to Address Book "me" card on Mac.  False on Win and Linux.
-const char kAutofillAuxiliaryProfilesEnabled[] =
-    "autofill.auxiliary_profiles_enabled";
-
-// Double that indicates positive (for matched forms) upload rate.
-const char kAutofillPositiveUploadRate[] = "autofill.positive_upload_rate";
-
-// Double that indicates negative (for not matched forms) upload rate.
-const char kAutofillNegativeUploadRate[] = "autofill.negative_upload_rate";
 
 // Modifying bookmarks is completely disabled when this is set to false.
 const char kEditBookmarksEnabled[] = "bookmarks.editing_enabled";
@@ -2158,6 +2145,10 @@ const char kUserRemovedLoginItem[] = "background_mode.user_removed_login_item";
 
 // Set to true if background mode is enabled on this browser.
 const char kBackgroundModeEnabled[] = "background_mode.enabled";
+
+// Set to true if hardware acceleration mode is enabled on this browser.
+const char kHardwareAccelerationModeEnabled[] =
+  "hardware_acceleration_mode.enabled";
 
 // List of protocol handlers.
 const char kRegisteredProtocolHandlers[] =

@@ -55,6 +55,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_navigator.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/frame_navigate_params.h"
@@ -232,12 +233,17 @@ SyncPromoUI::Source GetSigninSource(const GURL& url, GURL* continue_url) {
 
   // Find the final continue URL for this sign in.  In some cases, Gaia can
   // continue to itself, with the original continue URL buried under a couple
-  // of layers of indirection.  Peel those layers away.
-  GURL local_continue_url = url;
-  do {
-    local_continue_url =
+  // of layers of indirection.  Peel those layers away.  The final destination
+  // can also be "IsGaiaSignonRealm" so stop if we get to the end (but be sure
+  // we always extract at least one "continue" value).
+  GURL local_continue_url = SyncPromoUI::GetNextPageURLForSyncPromoURL(url);
+  while (gaia::IsGaiaSignonRealm(local_continue_url.GetOrigin())) {
+    GURL next_continue_url =
         SyncPromoUI::GetNextPageURLForSyncPromoURL(local_continue_url);
-  } while (gaia::IsGaiaSignonRealm(local_continue_url.GetOrigin()));
+    if (!next_continue_url.is_valid())
+      break;
+    local_continue_url = next_continue_url;
+  }
 
   if (continue_url && local_continue_url.is_valid()) {
     DCHECK(!continue_url->is_valid() || *continue_url == local_continue_url);
@@ -610,6 +616,16 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
     if (!manager)
       return false;
 
+    // Only allow the dedicated signin process to sign the user into
+    // Chrome without intervention, because it doesn't load any untrusted
+    // pages.  In the interstitial case, since chrome will display a modal
+    // dialog, we don't need to make this check.
+    if (can_offer_for == CAN_OFFER_FOR_ALL &&
+        !manager->IsSigninProcess(
+            web_contents->GetRenderProcessHost()->GetID())) {
+      return false;
+    }
+
     // If the signin manager already has an authenticated name, then this is a
     // re-auth scenario.  Make sure the email just signed in corresponds to the
     // the one sign in manager expects.
@@ -851,7 +867,7 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
 
     // If this is an explicit sign in (i.e., first run, NTP, menu,settings)
     // then force the auto accept type to explicit.
-    source = GetSigninSource(request->original_url(), &continue_url);
+    source = GetSigninSource(request->url(), &continue_url);
     if (source != SyncPromoUI::SOURCE_UNKNOWN)
       auto_accept = AUTO_ACCEPT_EXPLICIT;
   }
@@ -904,6 +920,10 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
 
   if (auto_accept != AUTO_ACCEPT_NONE) {
     helper->auto_accept_ = auto_accept;
+  }
+
+  if (source != SyncPromoUI::SOURCE_UNKNOWN &&
+      helper->source_ == SyncPromoUI::SOURCE_UNKNOWN) {
     helper->source_ = source;
   }
 
@@ -1055,8 +1075,7 @@ void OneClickSigninHelper::DidStopLoading(
   // if the user has continued.
   GURL::Replacements replacements;
   replacements.ClearQuery();
-  const bool continue_url_match_accept = (
-      auto_accept_ == AUTO_ACCEPT_EXPLICIT &&
+  const bool continue_url_match = (
       continue_url_.is_valid() &&
       url.ReplaceComponents(replacements) ==
         continue_url_.ReplaceComponents(replacements));
@@ -1064,7 +1083,7 @@ void OneClickSigninHelper::DidStopLoading(
   // If there is no valid email or password yet, there is nothing to do.
   if (email_.empty() || password_.empty()) {
     VLOG(1) << "OneClickSigninHelper::DidStopLoading: nothing to do";
-    if (continue_url_match_accept)
+    if (continue_url_match && auto_accept_ == AUTO_ACCEPT_EXPLICIT)
       RedirectToSignin();
     std::string unused_value;
     if (net::GetValueForKeyInQuery(url, "ntp", &unused_value)) {
@@ -1085,7 +1104,7 @@ void OneClickSigninHelper::DidStopLoading(
   bool force_same_tab_navigation = false;
 
   if (SyncPromoUI::UseWebBasedSigninFlow()) {
-    if (IsValidGaiaSigninRedirectOrResponseURL(url))
+    if (!continue_url_match && IsValidGaiaSigninRedirectOrResponseURL(url))
       return;
 
     // During an explicit sign in, if the user has not yet reached the final
@@ -1099,7 +1118,7 @@ void OneClickSigninHelper::DidStopLoading(
     // the continue URL go by.
     if (auto_accept_ == AUTO_ACCEPT_EXPLICIT) {
       DCHECK(source_ != SyncPromoUI::SOURCE_UNKNOWN);
-      if (!continue_url_match_accept) {
+      if (!continue_url_match) {
         VLOG(1) << "OneClickSigninHelper::DidStopLoading: invalid url='"
                 << url.spec()
                 << "' expected continue url=" << continue_url_;
@@ -1227,7 +1246,8 @@ void OneClickSigninHelper::DidStopLoading(
       if (source_ != SyncPromoUI::SOURCE_SETTINGS &&
           source_ != SyncPromoUI::SOURCE_WEBSTORE_INSTALL) {
         signin_tracker_.reset(new SigninTracker(profile, this));
-        RedirectToNTP(true);
+        // Show the NTP, but don't show the signed-in bubble yet.
+        RedirectToNTP(false);
       }
       break;
     }
@@ -1297,5 +1317,7 @@ void OneClickSigninHelper::SigninFailed(const GoogleServiceAuthError& error) {
 }
 
 void OneClickSigninHelper::SigninSuccess() {
+  // Signed in now, so show the signed-in bubble.
+  RedirectToNTP(true);
   signin_tracker_.reset();
 }

@@ -92,7 +92,6 @@
         'window.cc',
         'window.h',
         'window_delegate.h',
-        'window_observer.cc',
         'window_observer.h',
         'window_tracker.cc',
         'window_tracker.h',
@@ -104,7 +103,7 @@
             ['exclude', 'client/dispatcher_client.h'],
           ],
         }],
-        ['OS=="linux"', {
+        ['use_x11==1', {
           'link_settings': {
             'libraries': [
               '-lX11',

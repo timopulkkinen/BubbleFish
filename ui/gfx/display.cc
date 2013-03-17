@@ -9,8 +9,8 @@
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "ui/base/ui_base_switches.h"
-#include "ui/base/win/dpi.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/point_conversions.h"
 #include "ui/gfx/point_f.h"
 #include "ui/gfx/size_conversions.h"
 
@@ -35,6 +35,7 @@ float GetForcedDeviceScaleFactorImpl() {
 
 const int64 kInvalidDisplayIDForCompileTimeInit = -1;
 int64 internal_display_id_ = kInvalidDisplayIDForCompileTimeInit;
+
 }  // namespace
 
 const int64 Display::kInvalidDisplayID = kInvalidDisplayIDForCompileTimeInit;
@@ -63,19 +64,22 @@ int64 Display::GetID(uint16 manufacturer_id,
 
 Display::Display()
     : id_(kInvalidDisplayID),
-      device_scale_factor_(GetForcedDeviceScaleFactor()) {
+      device_scale_factor_(GetForcedDeviceScaleFactor()),
+      rotation_(ROTATE_0) {
 }
 
 Display::Display(int64 id)
     : id_(id),
-      device_scale_factor_(GetForcedDeviceScaleFactor()) {
+      device_scale_factor_(GetForcedDeviceScaleFactor()),
+      rotation_(ROTATE_0) {
 }
 
 Display::Display(int64 id, const gfx::Rect& bounds)
     : id_(id),
       bounds_(bounds),
       work_area_(bounds),
-      device_scale_factor_(GetForcedDeviceScaleFactor()) {
+      device_scale_factor_(GetForcedDeviceScaleFactor()),
+      rotation_(ROTATE_0) {
 #if defined(USE_AURA)
   SetScaleAndBounds(device_scale_factor_, bounds);
 #endif
@@ -104,8 +108,11 @@ void Display::SetScaleAndBounds(
     device_scale_factor_ = device_scale_factor;
   }
   device_scale_factor_ = std::max(1.0f, device_scale_factor_);
-  bounds_ = gfx::Rect(gfx::ToFlooredSize(
-      gfx::ScaleSize(bounds_in_pixel.size(), 1.0f / device_scale_factor_)));
+  bounds_ = gfx::Rect(
+      gfx::ToFlooredPoint(gfx::ScalePoint(bounds_in_pixel.origin(),
+                                          1.0f / device_scale_factor_)),
+      gfx::ToFlooredSize(gfx::ScaleSize(bounds_in_pixel.size(),
+                                        1.0f / device_scale_factor_)));
   UpdateWorkAreaFromInsets(insets);
 }
 

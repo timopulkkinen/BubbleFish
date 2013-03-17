@@ -283,11 +283,8 @@ class DBusServices {
     chromeos::GeolocationHandler::Initialize();
     chromeos::NetworkStateHandler::Initialize();
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
-      chromeos::NetworkConfigurationHandler::Initialize();
-      chromeos::ManagedNetworkConfigurationHandler::Initialize();
-    }
+    chromeos::NetworkConfigurationHandler::Initialize();
+    chromeos::ManagedNetworkConfigurationHandler::Initialize();
 
     // Initialize the network change notifier for Chrome OS. The network
     // change notifier starts to monitor changes from the power manager and
@@ -314,9 +311,11 @@ class DBusServices {
     DeviceSettingsService::Get()->Initialize(
         DBusThreadManager::Get()->GetSessionManagerClient(),
         OwnerKeyUtil::Create());
+    chromeos::ConnectivityStateHelper::Initialize();
   }
 
   ~DBusServices() {
+    chromeos::ConnectivityStateHelper::Shutdown();
     // CrosLibrary is shut down before DBusThreadManager even though it
     // is initialized first becuase some of its libraries depend on DBus
     // clients.
@@ -325,13 +324,9 @@ class DBusServices {
     if (cros_initialized_ && CrosLibrary::Get())
       CrosLibrary::Shutdown();
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            chromeos::switches::kEnableNewNetworkConfigurationHandlers)) {
-      chromeos::ManagedNetworkConfigurationHandler::Shutdown();
-      chromeos::NetworkConfigurationHandler::Shutdown();
-    }
+    chromeos::ManagedNetworkConfigurationHandler::Shutdown();
+    chromeos::NetworkConfigurationHandler::Shutdown();
 
-    chromeos::ConnectivityStateHelper::Shutdown();
     chromeos::NetworkStateHandler::Shutdown();
     chromeos::GeolocationHandler::Shutdown();
     chromeos::network_event_log::Shutdown();
@@ -440,9 +435,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 // Threads are initialized between MainMessageLoopStart and MainMessageLoopRun.
 // about_flags settings are applied in ChromeBrowserMainParts::PreCreateThreads.
 void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
-  // Must be called after about_flags settings are applied (see note above).
-  chromeos::ConnectivityStateHelper::Initialize();
-
   AudioHandler::Initialize();
   imageburner::BurnManager::Initialize();
 
@@ -857,6 +849,7 @@ void ChromeBrowserMainPartsChromeos::KioskAppLaunchCallback(bool success) {
     return;
 
   // If failed to launch, go back to login screen.
+  LOG(ERROR) << "Failed to launch kiosk app. Fall back to login screen";
   OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
 
   // TODO(xiyuan): Show error message.

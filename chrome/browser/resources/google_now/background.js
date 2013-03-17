@@ -22,16 +22,17 @@
 // TODO(vadimt): Gather UMAs.
 // TODO(vadimt): Honor the flag the enables Google Now integration.
 // TODO(vadimt): Figure out the final values of the constants.
-// TODO(vadimt): Report errors to the user.
+// TODO(vadimt): Report internal and server errors. Collect UMAs on errors where
+// appropriate. Also consider logging errors or throwing exceptions.
 
-// TODO(vadimt): Figure out the server name. Use it in the manifest and for
 // TODO(vadimt): Consider processing errors for all storage.set calls.
+// TODO(vadimt): Figure out the server name. Use it in the manifest and for
 // NOTIFICATION_CARDS_URL. Meanwhile, to use the feature, you need to manually
-// edit NOTIFICATION_CARDS_URL before building Chrome.
+// set the server name via local storage.
 /**
  * URL to retrieve notification cards.
  */
-var NOTIFICATION_CARDS_URL = '';
+var NOTIFICATION_CARDS_URL = localStorage['server_url'];
 
 /**
  * Standard response code for successful HTTP requests. This is the only success
@@ -61,31 +62,14 @@ var storage = chrome.storage.local;
  *     notification's set of URLs.
  */
 function createNotification(card, notificationsUrlInfo) {
-  var notificationId = card.notificationId;
-
-  // Fill the information about button actions for the notification. This is a
-  // map from the clicked area name to URL to open when the area is clicked. Any
-  // of the fields may be defined or undefined.
-  var actionUrls = {
-    message: card.messageUrl,
-    button0: card.buttonOneUrl,
-    button1: card.buttonTwoUrl
-  };
-
-  // TODO(vadimt): Reorganize server response to avoid deleting fields.
-  delete card.notificationId;
-  delete card.messageUrl;
-  delete card.buttonOneUrl;
-  delete card.buttonTwoUrl;
-
   // Create a notification or quietly update if it already exists.
   // TODO(vadimt): Implement non-quiet updates.
-  chrome.experimental.notification.create(
-      notificationId,
-      card,
+  chrome.notifications.create(
+      card.notificationId,
+      card.notification,
       function(assignedNotificationId) {});
 
-  notificationsUrlInfo[notificationId] = actionUrls;
+  notificationsUrlInfo[card.notificationId] = card.actionUrls;
 }
 
 /**
@@ -125,7 +109,7 @@ function parseAndShowNotificationCards(response) {
     // Delete notifications that didn't receive an update.
     for (var notificationId in items.activeNotifications)
       if (!items.activeNotifications[notificationId].hasUpdate) {
-        chrome.experimental.notification.delete(
+        chrome.notifications.clear(
             notificationId,
             function(wasDeleted) {});
     }
@@ -222,21 +206,30 @@ function updateNotificationsCards() {
 /**
  * Opens URL corresponding to the clicked part of the notification.
  * @param {string} notificationId Unique identifier of the notification.
- * @param {string} area Name of the notification's clicked area.
+ * @param {function(Object): string} selector Function that extracts the url for
+ *     the clicked area from the button action URLs info.
  */
-function onNotificationClicked(notificationId, area) {
+function onNotificationClicked(notificationId, selector) {
   storage.get('activeNotifications', function(items) {
-    var notificationActions = items.activeNotifications[notificationId] || {};
-    if (area in notificationActions) {
-      // Open URL specified for the clicked area.
-      // TODO(vadimt): Figure out whether to open link in a new tab etc.
-      chrome.windows.create({url: notificationActions[area]});
+    var actionUrls = items.activeNotifications[notificationId];
+    if (typeof actionUrls != 'object') {
+      // TODO(vadimt): report an error.
+      return;
     }
+
+    var url = selector(actionUrls);
+
+    if (typeof url != 'string') {
+      // TODO(vadimt): report an error.
+      return;
+    }
+
+    chrome.tabs.create({url: url});
   });
 }
 
 /**
- * Callback for chrome.experimental.notification.onClosed event.
+ * Callback for chrome.notifications.onClosed event.
  * @param {string} notificationId Unique identifier of the notification.
  * @param {boolean} byUser Whether the notification was closed by the user.
  */
@@ -296,14 +289,21 @@ chrome.alarms.onAlarm.addListener(function(alarm) {
   updateNotificationsCards();
 });
 
-chrome.experimental.notification.onClicked.addListener(
+chrome.notifications.onClicked.addListener(
     function(notificationId) {
-      onNotificationClicked(notificationId, 'message');
+      onNotificationClicked(notificationId, function(actionUrls) {
+        return actionUrls.messageUrl;
+      });
     });
 
-chrome.experimental.notification.onButtonClicked.addListener(
+chrome.notifications.onButtonClicked.addListener(
     function(notificationId, buttonIndex) {
-      onNotificationClicked(notificationId, 'button' + buttonIndex);
+      onNotificationClicked(notificationId, function(actionUrls) {
+        if (!Array.isArray(actionUrls.buttonUrls))
+          return undefined;
+
+        return actionUrls.buttonUrls[buttonIndex];
+      });
     });
 
-chrome.experimental.notification.onClosed.addListener(onNotificationClosed);
+chrome.notifications.onClosed.addListener(onNotificationClosed);

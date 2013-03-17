@@ -19,7 +19,6 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_object_proxy.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -283,7 +283,7 @@ std::string DesktopNotificationService::AddIconNotification(
     const GURL& origin_url,
     const string16& title,
     const string16& message,
-    const gfx::ImageSkia& icon,
+    const gfx::Image& icon,
     const string16& replace_id,
     NotificationDelegate* delegate,
     Profile* profile) {
@@ -296,8 +296,8 @@ std::string DesktopNotificationService::AddIconNotification(
   return notification.notification_id();
 #else
   GURL icon_url;
-  if (!icon.isNull())
-    icon_url = GURL(webui::GetBitmapDataUrl(*icon.bitmap()));
+  if (!icon.IsEmpty())
+    icon_url = GURL(webui::GetBitmapDataUrl(*icon.ToSkBitmap()));
   return AddNotification(
       origin_url, title, message, icon_url, replace_id, delegate, profile);
 #endif
@@ -314,20 +314,6 @@ DesktopNotificationService::DesktopNotificationService(
     NotificationUIManager* ui_manager)
     : profile_(profile),
       ui_manager_(ui_manager) {
-  StartObserving();
-}
-
-DesktopNotificationService::~DesktopNotificationService() {
-  StopObserving();
-}
-
-void DesktopNotificationService::StartObserving() {
-  if (!profile_->IsOffTheRecord()) {
-    notification_registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                                content::Source<Profile>(profile_));
-  }
-  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              content::Source<Profile>(profile_));
 #if defined(ENABLE_MESSAGE_CENTER)
   OnDisabledExtensionIdsChanged();
   disabled_extension_id_pref_.Init(
@@ -339,8 +325,7 @@ void DesktopNotificationService::StartObserving() {
 #endif
 }
 
-void DesktopNotificationService::StopObserving() {
-  notification_registrar_.RemoveAll();
+DesktopNotificationService::~DesktopNotificationService() {
 #if defined(ENABLE_MESSAGE_CENTER)
   disabled_extension_id_pref_.Destroy();
 #endif
@@ -366,34 +351,6 @@ void DesktopNotificationService::DenyPermission(const GURL& origin) {
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
       NO_RESOURCE_IDENTIFIER,
       CONTENT_SETTING_BLOCK);
-}
-
-void DesktopNotificationService::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  // This may get called during shutdown, so don't use GetUIManager() here,
-  // and don't do anything if ui_manager_ hasn't already been set.
-  if (!ui_manager_)
-    return;
-
-  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
-    // Remove all notifications currently shown or queued by the extension
-    // which was unloaded.
-    const extensions::Extension* extension =
-        content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
-    if (extension &&
-        g_browser_process && g_browser_process->notification_ui_manager()) {
-      g_browser_process->notification_ui_manager()->
-          CancelAllBySourceOrigin(extension->url());
-    }
-  } else if (type == chrome::NOTIFICATION_PROFILE_DESTROYED) {
-    if (g_browser_process && g_browser_process->notification_ui_manager()) {
-      g_browser_process->notification_ui_manager()->
-          CancelAllByProfile(profile_);
-    }
-    StopObserving();
-  }
 }
 
 ContentSetting DesktopNotificationService::GetDefaultContentSetting(

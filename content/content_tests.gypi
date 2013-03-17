@@ -24,8 +24,6 @@
         '..',
       ],
       'sources': [
-        'public/test/accessibility_test_utils_win.cc',
-        'public/test/accessibility_test_utils_win.h',
         'public/test/browser_test.h',
         'public/test/browser_test_base.cc',
         'public/test/browser_test_base.h',
@@ -196,12 +194,10 @@
             'test/webrtc_audio_device_test.h',
           ],
           'dependencies': [
-            '../third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
+            '../third_party/libjingle/libjingle.gyp:libpeerconnection',
             '../third_party/webrtc/modules/modules.gyp:audio_device',
             '../third_party/webrtc/modules/modules.gyp:video_capture_module',
-            '../third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-            '../third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
-            '../third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core'],
+          ],
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -311,6 +307,7 @@
         'browser/renderer_host/media/media_stream_dispatcher_host_unittest.cc',
         'browser/renderer_host/media/media_stream_manager_unittest.cc',
         'browser/renderer_host/media/media_stream_ui_controller_unittest.cc',
+        'browser/renderer_host/media/video_capture_buffer_pool_unittest.cc',
         'browser/renderer_host/media/video_capture_controller_unittest.cc',
         'browser/renderer_host/media/video_capture_host_unittest.cc',
         'browser/renderer_host/media/video_capture_manager_unittest.cc',
@@ -337,6 +334,8 @@
         'browser/speech/speech_recognizer_unittest.cc',
         'browser/ssl/ssl_host_state_unittest.cc',
         'browser/storage_partition_impl_map_unittest.cc',
+        'browser/streams/stream_unittest.cc',
+        'browser/streams/stream_url_request_job_unittest.cc',
         'browser/system_message_window_win_unittest.cc',
         'browser/tracing/trace_subscriber_stdio_unittest.cc',
         'browser/web_contents/navigation_controller_impl_unittest.cc',
@@ -372,10 +371,12 @@
         'renderer/active_notification_tracker_unittest.cc',
         'renderer/android/email_detector_unittest.cc',
         'renderer/android/phone_number_detector_unittest.cc',
+        'renderer/bmp_image_decoder_unittest.cc',
         'renderer/date_time_formatter_unittest.cc',
         'renderer/disambiguation_popup_helper_unittest.cc',
         'renderer/gpu/input_event_filter_unittest.cc',
         'renderer/hyphenator/hyphenator_unittest.cc',
+        'renderer/ico_image_decoder_unittest.cc',
         'renderer/media/audio_message_filter_unittest.cc',
         'renderer/media/audio_renderer_mixer_manager_unittest.cc',
         'renderer/media/video_capture_impl_unittest.cc',
@@ -387,6 +388,8 @@
         'renderer/v8_value_converter_impl_unittest.cc',
         'test/gpu/gpu_test_config_unittest.cc',
         'test/gpu/gpu_test_expectations_parser_unittest.cc',
+        'test/image_decoder_test.cc',
+        'test/image_decoder_test.h',
         'test/run_all_unittests.cc',
         '../webkit/appcache/manifest_parser_unittest.cc',
         '../webkit/appcache/appcache_unittest.cc',
@@ -563,11 +566,8 @@
             'renderer/media/webrtc_audio_device_unittest.cc',
           ],
           'dependencies': [
-            '../third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
+            '../third_party/libjingle/libjingle.gyp:libpeerconnection',
             '../third_party/webrtc/modules/modules.gyp:video_capture_module',
-            '../third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-            '../third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
-            '../third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core',
           ]
         }],
         # TODO(jrg): remove the OS=="android" section?
@@ -695,10 +695,6 @@
             'browser/accessibility/accessibility_win_browsertest.cc',
             'browser/accessibility/cross_platform_accessibility_browsertest.cc',
             'browser/accessibility/dump_accessibility_tree_browsertest.cc',
-            'browser/accessibility/dump_accessibility_tree_helper.cc',
-            'browser/accessibility/dump_accessibility_tree_helper.h',
-            'browser/accessibility/dump_accessibility_tree_helper_mac.mm',
-            'browser/accessibility/dump_accessibility_tree_helper_win.cc',
             'browser/appcache/appcache_browsertest.cc',
             'browser/bookmarklet_browsertest.cc',
             'browser/browser_plugin/browser_plugin_host_browsertest.cc',
@@ -706,6 +702,8 @@
             'browser/browser_plugin/test_browser_plugin_embedder.h',
             'browser/browser_plugin/test_browser_plugin_guest.cc',
             'browser/browser_plugin/test_browser_plugin_guest.h',
+            'browser/browser_plugin/test_browser_plugin_guest_manager.cc',
+            'browser/browser_plugin/test_browser_plugin_guest_manager.h',
             'browser/child_process_security_policy_browsertest.cc',
             'browser/database_browsertest.cc',
             'browser/device_orientation/device_orientation_browsertest.cc',
@@ -827,13 +825,11 @@
             ['OS=="linux"', {
               'sources!': [
                 'browser/accessibility/dump_accessibility_tree_browsertest.cc',
-                'browser/accessibility/dump_accessibility_tree_helper.cc',
               ],
             }],
             ['OS=="android"', {
               'sources!': [
                 'browser/accessibility/dump_accessibility_tree_browsertest.cc',
-                'browser/accessibility/dump_accessibility_tree_helper.cc',
                 # These are included via dependency on content_common and hence
                 # we get multiple definition errors in a shared library build.
                 # Other builds need it as the symbols are not exported.
@@ -861,8 +857,6 @@
               'sources!': [
                 'browser/accessibility/accessibility_win_browsertest.cc',
                 'browser/accessibility/dump_accessibility_tree_browsertest.cc',
-                'browser/accessibility/dump_accessibility_tree_helper_win.cc',
-                'browser/accessibility/dump_accessibility_tree_helper.cc',
                 'browser/plugin_browsertest.cc',
               ],
             }],

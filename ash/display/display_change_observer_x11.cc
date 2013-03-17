@@ -48,10 +48,6 @@ XRRModeInfo* FindMode(XRRScreenResources* screen_resources, XID current_mode) {
   return NULL;
 }
 
-bool CompareDisplayY(const DisplayInfo& lhs, const DisplayInfo& rhs) {
-  return lhs.bounds_in_pixel().y() < rhs.bounds_in_pixel().y();
-}
-
 // A list of bogus sizes in mm that X detects and should be ignored.
 // See crbug.com/136533.
 const unsigned long kInvalidDisplaySizeList[][2] = {
@@ -119,9 +115,10 @@ DisplayChangeObserverX11::DisplayChangeObserverX11()
         std::string(output_info->name));
     XRRFreeOutputInfo(output_info);
     if (is_internal) {
-      // No need to check the return value of |GetDisplayID()| as
-      // the default value is |gfx::Display::kInvalidDisplayID| anyway.
-      gfx::Display::SetInternalDisplayId(GetDisplayId(output, output_index));
+      int64 id = GetDisplayId(output, output_index);
+      // Fallback to output index. crbug.com/180100
+      gfx::Display::SetInternalDisplayId(
+          id == gfx::Display::kInvalidDisplayID ? output_index : id);
       break;
     }
   }
@@ -144,7 +141,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
   }
 
   std::vector<DisplayInfo> displays;
-  std::set<int> y_coords;
   std::set<int64> ids;
   for (int output_index = 0; output_index < screen_resources->noutput;
        output_index++) {
@@ -167,9 +163,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
                    << output_index;
       continue;
     }
-    // Mirrored monitors have the same y coordinates.
-    if (y_coords.find(crtc_info->y) != y_coords.end())
-      continue;
 
     float device_scale_factor = 1.0f;
     if (!ShouldIgnoreSize(output_info) &&
@@ -203,8 +196,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
     displays.push_back(DisplayInfo(id, name, has_overscan));
     displays.back().set_device_scale_factor(device_scale_factor);
     displays.back().SetBounds(display_bounds);
-
-    y_coords.insert(crtc_info->y);
   }
 
   // Free all allocated resources.
@@ -213,10 +204,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
     XRRFreeCrtcInfo(iter->second);
   }
   XRRFreeScreenResources(screen_resources);
-
-  // PowerManager lays out the outputs vertically. Sort them by Y
-  // coordinates.
-  std::sort(displays.begin(), displays.end(), CompareDisplayY);
 
   // DisplayManager can be null during the boot.
   Shell::GetInstance()->display_manager()->OnNativeDisplaysChanged(displays);

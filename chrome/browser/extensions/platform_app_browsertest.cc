@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -31,6 +30,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -280,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
   // Execute the menu item
   ExtensionTestMessageListener onclicked_listener("onClicked fired for id1",
                                                   false);
-  menu->ExecuteCommand(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST);
+  menu->ExecuteCommand(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST, 0);
 
   ASSERT_TRUE(onclicked_listener.WaitUntilSatisfied());
 }

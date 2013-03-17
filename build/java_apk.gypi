@@ -85,19 +85,21 @@
       'rule_name': 'copy_and_strip_native_libraries',
       'extension': 'so',
       'variables': {
-        'stripped_library_path': '<(PRODUCT_DIR)/<(_target_name)/libs/<(android_app_abi)/<(RULE_INPUT_ROOT).so',
+        'apk_libraries_dir': '<(PRODUCT_DIR)/<(_target_name)/libs/<(android_app_abi)',
+        'stripped_library_path': '<(apk_libraries_dir)/<(RULE_INPUT_ROOT).so',
       },
+      'inputs': [
+        '<(DEPTH)/build/android/strip_library_for_apk.py',
+      ],
       'outputs': [
         '<(stripped_library_path)',
       ],
-      # There is no way to do 2 actions for each source library in gyp. So to
-      # both strip the library and create the link in <(link_dir) a separate
-      # script is required.
       'action': [
-        '<(DEPTH)/build/android/prepare_library_for_apk',
-        '<(android_strip)',
+        'python', '<(DEPTH)/build/android/strip_library_for_apk.py',
+        '--android-strip=<(android_strip)',
+        '--android-strip-arg=--strip-unneeded',
+        '--stripped-libraries-dir=<(apk_libraries_dir)',
         '<(RULE_INPUT_PATH)',
-        '<(stripped_library_path)',
       ],
     },
   ],
@@ -139,7 +141,7 @@
         '<(java_in_dir)/AndroidManifest.xml',
         '<(DEPTH)/build/android/ant/chromium-apk.xml',
         '<(DEPTH)/build/android/ant/common.xml',
-        '<(DEPTH)/build/android/ant/sdk-targets.xml',
+        '<(DEPTH)/build/android/ant/apk-build.xml',
         # If there is a separate find for additional_src_dirs, it will find the
         # wrong .java files when additional_src_dirs is empty.
         '>!@(find >(java_in_dir) >(additional_src_dirs) -name "*.java")',
@@ -200,6 +202,11 @@
         '-DAPP_MANIFEST_VERSION_CODE=<(app_manifest_version_code)',
         '-DPROGUARD_FLAGS=>(proguard_flags)',
         '-DPROGUARD_ENABLED=>(proguard_enabled)',
+
+        # Add list of inputs to the command line, so if inputs change
+        # (e.g. if a Java file is removed), the command will be re-run.
+        # TODO(newt): remove this once crbug.com/177552 is fixed in ninja.
+        '-DTHIS_IS_IGNORED=>(_inputs)',
 
         '-Dbasedir=<(java_in_dir)',
         '-buildfile',

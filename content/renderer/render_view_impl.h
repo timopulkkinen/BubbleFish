@@ -203,7 +203,6 @@ class CONTENT_EXPORT RenderViewImpl
       public RenderView,
       NON_EXPORTED_BASE(public webkit::npapi::WebPluginPageDelegate),
       NON_EXPORTED_BASE(public webkit_media::WebMediaPlayerDelegate),
-      NON_EXPORTED_BASE(public WebGraphicsContext3DSwapBuffersClient),
       public base::SupportsWeakPtr<RenderViewImpl> {
  public:
   // Creates a new RenderView. If this is a blocked popup or as a new tab,
@@ -223,7 +222,8 @@ class CONTENT_EXPORT RenderViewImpl
       bool swapped_out,
       int32 next_page_id,
       const WebKit::WebScreenInfo& screen_info,
-      AccessibilityMode accessibility_mode);
+      AccessibilityMode accessibility_mode,
+      bool allow_partial_swap);
 
   // Used by content_layouttest_support to hook into the creation of
   // RenderViewImpls.
@@ -238,14 +238,6 @@ class CONTENT_EXPORT RenderViewImpl
 
   // May return NULL when the view is closing.
   WebKit::WebView* webview() const;
-
-  // WebGraphicsContext3DSwapBuffersClient implementation.
-
-  // Called by a GraphicsContext associated with this view when swapbuffers
-  // is posted, completes or is aborted.
-  virtual void OnViewContextSwapBuffersPosted() OVERRIDE;
-  virtual void OnViewContextSwapBuffersComplete() OVERRIDE;
-  virtual void OnViewContextSwapBuffersAborted() OVERRIDE;
 
   int history_list_offset() const { return history_list_offset_; }
 
@@ -809,9 +801,8 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void OnSetFocus(bool enable) OVERRIDE;
   virtual void OnWasHidden() OVERRIDE;
   virtual void OnWasShown(bool needs_repainting) OVERRIDE;
-  virtual bool SupportsAsynchronousSwapBuffers() OVERRIDE;
+  virtual GURL GetURLForGraphicsContext3D() OVERRIDE;
   virtual bool ForceCompositingModeEnabled() OVERRIDE;
-  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface() OVERRIDE;
   virtual void OnImeSetComposition(
       const string16& text,
       const std::vector<WebKit::WebCompositionUnderline>& underlines,
@@ -830,6 +821,7 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void InstrumentDidBeginFrame() OVERRIDE;
   virtual void InstrumentDidCancelFrame() OVERRIDE;
   virtual void InstrumentWillComposite() OVERRIDE;
+  virtual bool AllowPartialSwap() const OVERRIDE;
 
  protected:
   explicit RenderViewImpl(RenderViewImplParams* params);
@@ -1065,10 +1057,6 @@ class CONTENT_EXPORT RenderViewImpl
   void OnFindMatchRects(int current_version);
   void OnSelectPopupMenuItems(bool canceled,
                               const std::vector<int>& selected_indices);
-  void OnSynchronousFind(int request_id,
-                         const string16& search_string,
-                         const WebKit::WebFindOptions& options,
-                         IPC::Message* reply_msg);
   void OnUndoScrollFocusedEditableNodeIntoRect();
   void OnEnableHidingTopControls(bool enable);
 #elif defined(OS_MACOSX)
@@ -1098,9 +1086,6 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Check whether the preferred size has changed.
   void CheckPreferredSize();
-
-  WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
-      const WebKit::WebGraphicsContext3D::Attributes& attributes);
 
   // This method walks the entire frame tree for this RenderView and sends an
   // update to the browser process as described in the
@@ -1140,11 +1125,6 @@ class CONTENT_EXPORT RenderViewImpl
   // doesn't have a frame at the specified size, the first is returned.
   bool DownloadFavicon(int id, const GURL& image_url, int image_size);
 
-  // Starts a new find-in-page search or looks for the next match.
-  void Find(int request_id,
-            const string16& search_text,
-            const WebKit::WebFindOptions& options);
-
   GURL GetAlternateErrorPageURL(const GURL& failed_url,
                                 ErrorPageType error_type);
 
@@ -1177,13 +1157,9 @@ class CONTENT_EXPORT RenderViewImpl
   // saved in OnNavigate().
   NavigationState* CreateNavigationStateFromPending();
 
-  // Processes the command-line flags --enable-viewport and
-  // --enable-fixed-layout[=w,h].
+  // Processes the command-line flags --enable-viewport,
+  // --enable-fixed-layout[=w,h] and --enable-pinch.
   void ProcessViewLayoutFlags(const CommandLine& command_line);
-
-  // Processes the command-line flags --enable-pinch and
-  // --enable-pinch-in-compositor
-  void ProcessAcceleratedPinchZoomFlags(const CommandLine& command_line);
 
 #if defined(OS_ANDROID)
   // Launch an Android content intent with the given URL.
@@ -1208,9 +1184,6 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Starts nav_state_sync_timer_ if it isn't already running.
   void StartNavStateSyncTimerIfNecessary();
-
-  // Stops the current find-in-page search.
-  void StopFinding(StopFindAction action);
 
   // Dispatches the current state of selection on the webpage to the browser if
   // it has changed.
@@ -1500,14 +1473,6 @@ class CONTENT_EXPORT RenderViewImpl
   // created in the renderer process.
   scoped_ptr<webkit_media::MediaPlayerBridgeManagerImpl> media_bridge_manager_;
 
-  // Holds the message used to return find results to the browser during
-  // synchronous find-in-page requests. Only non-null during these requests.
-  scoped_ptr<IPC::Message> synchronous_find_reply_message_;
-
-  // The active find-in-page match ordinal during synchronous requests.
-  // Needed to be remembered across WebKit callbacks.
-  int synchronous_find_active_match_ordinal_;
-
   // A date/time picker object for date and time related input elements.
   scoped_ptr<RendererDateTimePicker> date_time_picker_client_;
 #endif
@@ -1569,6 +1534,8 @@ class CONTENT_EXPORT RenderViewImpl
   typedef std::map<int, WindowSnapshotCallback>
       PendingSnapshotMap;
   PendingSnapshotMap pending_snapshots_;
+
+  bool allow_partial_swap_;
 
   // Plugins -------------------------------------------------------------------
 

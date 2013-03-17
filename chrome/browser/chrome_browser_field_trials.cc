@@ -14,10 +14,10 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/auto_launch_trial.h"
-#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/gpu/chrome_gpu_util.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
+#include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
@@ -32,7 +32,6 @@
 
 #if defined(OS_WIN)
 #include "net/socket/tcp_client_socket_win.h"
-#include "ui/base/win/dpi.h"  // For DisableNewTabFieldTrialIfNecesssary.
 #endif  // defined(OS_WIN)
 
 namespace {
@@ -60,6 +59,7 @@ ChromeBrowserFieldTrials::~ChromeBrowserFieldTrials() {
 void ChromeBrowserFieldTrials::SetupFieldTrials(
     const base::Time& install_time) {
   chrome_variations::SetupUniformityFieldTrials(install_time);
+  SetUpSimpleCacheFieldTrial();
 #if !defined(OS_ANDROID)
   SetupDesktopFieldTrials();
 #endif  // defined(OS_ANDROID)
@@ -71,8 +71,7 @@ void ChromeBrowserFieldTrials::SetupDesktopFieldTrials() {
   WarmConnectionFieldTrial();
   AutoLaunchChromeFieldTrial();
   gpu_util::InitializeCompositingFieldTrial();
-  AutocompleteFieldTrial::ActivateStaticTrials();
-  DisableNewTabFieldTrialIfNecesssary();
+  OmniboxFieldTrial::ActivateStaticTrials();
   SetUpInfiniteCacheFieldTrial();
   SetUpCacheSensitivityAnalysisFieldTrial();
   DisableShowProfileSwitcherTrialIfNecessary();
@@ -165,22 +164,6 @@ void ChromeBrowserFieldTrials::AutoLaunchChromeFieldTrial() {
   }
 }
 
-void ChromeBrowserFieldTrials::DisableNewTabFieldTrialIfNecesssary() {
-  // The new tab button field trial will get created in variations_service.cc
-  // through the variations server. However, since there are no HiDPI assets
-  // for it, disable it for non-desktop layouts.
-  base::FieldTrial* trial = base::FieldTrialList::Find("NewTabButton");
-  if (trial) {
-    bool using_hidpi_assets = false;
-#if defined(ENABLE_HIDPI) && defined(OS_WIN)
-    // Mirrors logic in resource_bundle_win.cc.
-    using_hidpi_assets = ui::GetDPIScale() > 1.5;
-#endif
-    if (ui::GetDisplayLayout() != ui::LAYOUT_DESKTOP || using_hidpi_assets)
-      trial->Disable();
-  }
-}
-
 void ChromeBrowserFieldTrials::SetUpInfiniteCacheFieldTrial() {
   const base::FieldTrial::Probability kDivisor = 100;
 
@@ -196,10 +179,49 @@ void ChromeBrowserFieldTrials::SetUpInfiniteCacheFieldTrial() {
 
 void ChromeBrowserFieldTrials::DisableShowProfileSwitcherTrialIfNecessary() {
   // This trial is created by the VariationsService, but it needs to be disabled
-  // if multi-profiles isn't enabled.
+  // if multi-profiles isn't enabled or if browser frame avatar menu is
+  // always hidden (Chrome OS).
+  bool avatar_menu_always_hidden = false;
+#if defined(OS_CHROMEOS)
+  avatar_menu_always_hidden = true;
+#endif
   base::FieldTrial* trial = base::FieldTrialList::Find("ShowProfileSwitcher");
-  if (trial && !ProfileManager::IsMultipleProfilesEnabled())
+  if (trial && (!ProfileManager::IsMultipleProfilesEnabled() ||
+                avatar_menu_always_hidden)) {
     trial->Disable();
+  }
+}
+
+// Sets up the experiment. The actual cache backend choice is made in the net/
+// internals by looking at the experiment state.
+void ChromeBrowserFieldTrials::SetUpSimpleCacheFieldTrial() {
+  if (parsed_command_line_.HasSwitch(switches::kUseSimpleCacheBackend)) {
+    const std::string opt_value = parsed_command_line_.GetSwitchValueASCII(
+        switches::kUseSimpleCacheBackend);
+    if (LowerCaseEqualsASCII(opt_value, "off")) {
+      // This is the default.
+      return;
+    }
+    const base::FieldTrial::Probability kDivisor = 100;
+    scoped_refptr<base::FieldTrial> trial(
+        base::FieldTrialList::FactoryGetFieldTrial("SimpleCacheTrial", kDivisor,
+                                                   "No", 2013, 12, 31, NULL));
+    trial->UseOneTimeRandomization();
+    if (LowerCaseEqualsASCII(opt_value, "on")) {
+      trial->AppendGroup("Yes", 100);
+      return;
+    }
+#if defined(OS_ANDROID)
+    if (LowerCaseEqualsASCII(opt_value, "experiment")) {
+      // TODO(pasko): Make this the default on Android when the simple cache
+      // adds a few more necessary features. Also adjust the probability.
+      const base::FieldTrial::Probability kSimpleCacheProbability = 1;
+      trial->AppendGroup("Yes", kSimpleCacheProbability);
+      trial->AppendGroup("Control", kSimpleCacheProbability);
+      trial->group();
+    }
+#endif
+  }
 }
 
 void ChromeBrowserFieldTrials::SetUpCacheSensitivityAnalysisFieldTrial() {
@@ -253,5 +275,5 @@ void ChromeBrowserFieldTrials::InstantiateDynamicTrials() {
   base::FieldTrialList::FindValue("InstantChannel");
   base::FieldTrialList::FindValue("Test0PercentDefault");
   // Activate the autocomplete dynamic field trials.
-  AutocompleteFieldTrial::ActivateDynamicTrials();
+  OmniboxFieldTrial::ActivateDynamicTrials();
 }

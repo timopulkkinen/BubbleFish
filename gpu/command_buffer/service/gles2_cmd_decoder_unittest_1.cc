@@ -27,6 +27,11 @@ using ::testing::StrEq;
 namespace gpu {
 namespace gles2 {
 
+namespace {
+void ShaderCacheCb(const std::string& key, const std::string& shader) {
+}
+}  // namespace
+
 class GLES2DecoderTest1 : public GLES2DecoderTestBase {
  public:
   GLES2DecoderTest1() { }
@@ -149,6 +154,12 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::FramebufferTexture2D, 0>(
 
 template <>
 void GLES2DecoderTestBase::SpecializedSetup<
+    cmds::GetBufferParameteriv, 0>(bool /* valid */) {
+  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
+};
+
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<
     cmds::GetFramebufferAttachmentParameteriv, 0>(bool /* valid */) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
@@ -230,8 +241,8 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramInfoLog, 0>(
       GetProgramiv(kServiceProgramId, GL_ACTIVE_UNIFORM_MAX_LENGTH, _))
       .WillOnce(SetArgumentPointee<2>(0));
 
-  Program* info = GetProgram(client_program_id_);
-  ASSERT_TRUE(info != NULL);
+  Program* program = GetProgram(client_program_id_);
+  ASSERT_TRUE(program != NULL);
 
   cmds::AttachShader attach_cmd;
   attach_cmd.Init(client_program_id_, kClientVertexShaderId);
@@ -240,7 +251,7 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramInfoLog, 0>(
   attach_cmd.Init(client_program_id_, kClientFragmentShaderId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
 
-  info->Link(NULL, NULL, NULL, NULL);
+  program->Link(NULL, NULL, NULL, NULL, base::Bind(&ShaderCacheCb));
 };
 
 template <>

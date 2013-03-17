@@ -7,6 +7,7 @@
 # a bit.
 import unittest
 import socket
+import sys
 
 from telemetry.core import util
 from telemetry.core.chrome import cros_browser_backend
@@ -54,7 +55,7 @@ class CrOSInterfaceTest(unittest.TestCase):
     cri = cros_interface.CrOSInterface(
       remote,
       options_for_unittests.GetCopy().cros_ssh_identity)
-    cri.GetCmdOutput(['rm', '-rf', '/tmp/testPushContents'])
+    cri.RunCmdOnDevice(['rm', '-rf', '/tmp/testPushContents'])
     cri.PushContents('hello world', '/tmp/testPushContents')
     contents = cri.GetFileContents('/tmp/testPushContents')
     self.assertEquals(contents, 'hello world')
@@ -65,6 +66,15 @@ class CrOSInterfaceTest(unittest.TestCase):
     cri = cros_interface.CrOSInterface(
       remote,
       options_for_unittests.GetCopy().cros_ssh_identity)
+    self.assertTrue(cri.FileExistsOnDevice('/proc/cpuinfo'))
+    self.assertTrue(cri.FileExistsOnDevice('/etc/passwd'))
+    self.assertFalse(cri.FileExistsOnDevice('/etc/sdlfsdjflskfjsflj'))
+
+  def testExistsLocal(self):
+    if not sys.platform.startswith('linux'):
+      return
+
+    cri = cros_interface.CrOSInterface()
     self.assertTrue(cri.FileExistsOnDevice('/proc/cpuinfo'))
     self.assertTrue(cri.FileExistsOnDevice('/etc/passwd'))
     self.assertFalse(cri.FileExistsOnDevice('/etc/sdlfsdjflskfjsflj'))
@@ -111,6 +121,12 @@ class CrOSInterfaceTest(unittest.TestCase):
       options_for_unittests.GetCopy().cros_ssh_identity)
 
     self.assertTrue(cri.IsServiceRunning('openssh-server'))
+
+  def testIsServiceRunningLocal(self):
+    if not sys.platform.startswith('linux'):
+      return
+    cri = cros_interface.CrOSInterface()
+    self.assertTrue(cri.IsServiceRunning('dbus'))
 
   @run_tests.RequiresBrowserOfType('cros-chrome')
   def testGetRemotePortAndIsHTTPServerRunningOnPort(self):

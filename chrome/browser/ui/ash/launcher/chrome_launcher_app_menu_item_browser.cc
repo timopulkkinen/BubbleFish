@@ -9,14 +9,16 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 
 ChromeLauncherAppMenuItemBrowser::ChromeLauncherAppMenuItemBrowser(
     const string16 title,
     const gfx::Image* icon,
-    Browser* browser)
-    : ChromeLauncherAppMenuItem(title, icon),
+    Browser* browser,
+    bool has_leading_separator)
+    : ChromeLauncherAppMenuItem(title, icon, has_leading_separator),
       browser_(browser) {
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_CLOSING,
@@ -31,10 +33,15 @@ bool ChromeLauncherAppMenuItemBrowser::IsEnabled() const {
   return true;
 }
 
-void ChromeLauncherAppMenuItemBrowser::Execute() {
+void ChromeLauncherAppMenuItemBrowser::Execute(int event_flags) {
   if (browser_) {
-    browser_->window()->Show();
-    ash::wm::ActivateWindow(browser_->window()->GetNativeWindow());
+    if (event_flags & (ui::EF_SHIFT_DOWN | ui::EF_MIDDLE_MOUSE_BUTTON)) {
+      TabStripModel* tab_strip = browser_->tab_strip_model();
+      tab_strip->CloseAllTabs();
+    } else {
+      browser_->window()->Show();
+      ash::wm::ActivateWindow(browser_->window()->GetNativeWindow());
+    }
   }
 }
 

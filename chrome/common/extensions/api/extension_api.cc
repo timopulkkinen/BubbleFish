@@ -159,21 +159,18 @@ void MaybePrefixFieldWithNamespace(const std::string& schema_namespace,
 // |schema_namespace| if they do not already specify a namespace.
 void PrefixRefsWithNamespace(const std::string& schema_namespace,
                              Value* value) {
-  if (value->IsType(Value::TYPE_LIST)) {
-    ListValue* list;
-    CHECK(value->GetAsList(&list));
+  ListValue* list = NULL;
+  DictionaryValue* dict = NULL;
+  if (value->GetAsList(&list)) {
     for (ListValue::iterator i = list->begin(); i != list->end(); ++i) {
       PrefixRefsWithNamespace(schema_namespace, *i);
     }
-  } else if (value->IsType(Value::TYPE_DICTIONARY)) {
-    DictionaryValue* dict;
-    CHECK(value->GetAsDictionary(&dict));
+  } else if (value->GetAsDictionary(&dict)) {
     MaybePrefixFieldWithNamespace(schema_namespace, dict, "$ref");
-    for (DictionaryValue::key_iterator i = dict->begin_keys();
-        i != dict->end_keys(); ++i) {
-      Value* next_value;
-      CHECK(dict->GetWithoutPathExpansion(*i, &next_value));
-      PrefixRefsWithNamespace(schema_namespace, next_value);
+    for (DictionaryValue::Iterator i(*dict); !i.IsAtEnd(); i.Advance()) {
+      Value* value = NULL;
+      CHECK(dict->GetWithoutPathExpansion(i.key(), &value));
+      PrefixRefsWithNamespace(schema_namespace, value);
     }
   }
 }
@@ -186,10 +183,10 @@ void PrefixTypesWithNamespace(const std::string& schema_namespace,
     return;
 
   // Add the namespace to all of the types defined in this schema
-  ListValue *types;
+  ListValue *types = NULL;
   CHECK(schema->GetList("types", &types));
   for (size_t i = 0; i < types->GetSize(); ++i) {
-    DictionaryValue *type;
+    DictionaryValue *type = NULL;
     CHECK(types->GetDictionary(i, &type));
     MaybePrefixFieldWithNamespace(schema_namespace, type, "id");
     MaybePrefixFieldWithNamespace(schema_namespace, type, "customBindings");
@@ -382,6 +379,8 @@ void ExtensionAPI::InitDefaultConfiguration() {
       IDR_EXTENSION_API_JSON_PROXY));
   RegisterSchema("scriptBadge", ReadFromResource(
       IDR_EXTENSION_API_JSON_SCRIPTBADGE));
+  RegisterSchema("streamsPrivate", ReadFromResource(
+      IDR_EXTENSION_API_JSON_STREAMSPRIVATE));
   RegisterSchema("ttsEngine", ReadFromResource(
       IDR_EXTENSION_API_JSON_TTSENGINE));
   RegisterSchema("tts", ReadFromResource(
@@ -543,7 +542,7 @@ void RemoveDisallowedAPIs(const Extension& extension,
 
 }  // namespace
 
-scoped_ptr<std::set<std::string> > ExtensionAPI::GetAPIsForContext(
+std::set<std::string> ExtensionAPI::GetAPIsForContext(
     Feature::Context context, const Extension* extension, const GURL& url) {
   // We're forced to load all schemas now because we need to know the metadata
   // about every API -- and the metadata is stored in the schemas themselves.
@@ -601,17 +600,28 @@ scoped_ptr<std::set<std::string> > ExtensionAPI::GetAPIsForContext(
 
   // Filter out all non-API features and remove the feature type part of the
   // name.
-  scoped_ptr<std::set<std::string> > result(new std::set<std::string>());
+  std::set<std::string> result;
   for (std::set<std::string>::iterator iter = temp_result.begin();
        iter != temp_result.end(); ++iter) {
     std::string feature_type;
     std::string feature_name;
     SplitDependencyName(*iter, &feature_type, &feature_name);
     if (feature_type == "api")
-      result->insert(feature_name);
+      result.insert(feature_name);
   }
 
-  return result.Pass();
+  return result;
+}
+
+std::set<std::string> ExtensionAPI::GetAllAPINames() {
+  std::set<std::string> result;
+  for (SchemaMap::iterator i = schemas_.begin(); i != schemas_.end(); ++i)
+    result.insert(i->first);
+  for (UnloadedSchemaMap::iterator i = unloaded_schemas_.begin();
+       i != unloaded_schemas_.end(); ++i) {
+    result.insert(i->first);
+  }
+  return result;
 }
 
 Feature* ExtensionAPI::GetFeature(const std::string& full_name) {

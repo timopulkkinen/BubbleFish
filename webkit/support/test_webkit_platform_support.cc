@@ -21,6 +21,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebStorageArea.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
@@ -29,7 +30,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "v8/include/v8.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/compositor_bindings/web_compositor_support_impl.h"
@@ -395,9 +395,7 @@ TestWebKitPlatformSupport::sharedOffscreenGraphicsContext3D() {
   main_thread_contexts_ =
       webkit::gpu::TestContextProviderFactory::GetInstance()->
           OffscreenContextProviderForMainThread();
-  if (!main_thread_contexts_->InitializeOnMainThread())
-    return NULL;
-  if (!main_thread_contexts_->BindToCurrentThread())
+  if (!main_thread_contexts_)
     return NULL;
   return main_thread_contexts_->Context3d();
 }
@@ -511,19 +509,6 @@ TestWebKitPlatformSupport::createRTCPeerConnectionHandler(
 
   return webkit_glue::WebKitPlatformSupportImpl::createRTCPeerConnectionHandler(
       client);
-}
-
-bool TestWebKitPlatformSupport::canHyphenate(const WebKit::WebString& locale) {
-  return hyphenator()->canHyphenate(locale);
-}
-
-size_t TestWebKitPlatformSupport::computeLastHyphenLocation(
-    const char16* characters,
-    size_t length,
-    size_t before_index,
-    const WebKit::WebString& locale) {
-  return hyphenator()->computeLastHyphenLocation(
-      characters, length, before_index, locale);
 }
 
 WebKit::WebGestureCurve* TestWebKitPlatformSupport::createFlingAnimationCurve(

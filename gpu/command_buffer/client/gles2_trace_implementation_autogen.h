@@ -331,9 +331,12 @@ virtual void AsyncTexImage2DCHROMIUM(
     GLenum target, GLint level, GLint internalformat, GLsizei width,
     GLsizei height, GLint border, GLenum format, GLenum type,
     const void* pixels) OVERRIDE;
+virtual void WaitAsyncTexImage2DCHROMIUM(GLenum target) OVERRIDE;
 virtual void DiscardFramebufferEXT(
     GLenum target, GLsizei count, const GLenum* attachments) OVERRIDE;
 virtual void LoseContextCHROMIUM(GLenum current, GLenum other) OVERRIDE;
+virtual GLuint InsertSyncPointCHROMIUM() OVERRIDE;
 virtual void WaitSyncPointCHROMIUM(GLuint sync_point) OVERRIDE;
+virtual void DrawBuffersEXT(GLsizei count, const GLenum* bufs) OVERRIDE;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_TRACE_IMPLEMENTATION_AUTOGEN_H_
 

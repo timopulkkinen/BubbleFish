@@ -134,6 +134,8 @@
         '../third_party/skia/include/utils/SkNWayCanvas.h',
         '../third_party/skia/src/utils/SkNWayCanvas.cpp',
         '../third_party/skia/src/utils/SkPictureUtils.cpp',
+        '../third_party/skia/src/utils/SkRTConf.cpp',
+        '../third_party/skia/include/utils/SkRTConf.h',
         '../third_party/skia/include/pdf/SkPDFDevice.h',
         '../third_party/skia/include/pdf/SkPDFDocument.h',
 
@@ -182,6 +184,8 @@
         'ext/skia_sandbox_support_win.h',
         'ext/skia_sandbox_support_win.cc',
         'ext/skia_trace_shim.h',
+        'ext/skia_utils_base.cc',
+        'ext/skia_utils_base.h',
         'ext/skia_utils_ios.mm',
         'ext/skia_utils_ios.h',
         'ext/skia_utils_mac.mm',
@@ -232,9 +236,6 @@
         # SkGraphics::Init().
         'SK_ALLOW_STATIC_GLOBAL_INITIALIZERS=0',
 
-        'SK_DISABLE_BLUR_ROUNDING',
-        'SK_IGNORE_SUBPIXEL_AXIS_ALIGN_FIX',
-
         # Disable this check because it is too strict for some Chromium-specific
         # subclasses of SkPixelRef. See bug: crbug.com/171776.
         'SK_DISABLE_PIXELREF_LOCKCOUNT_BALANCE_CHECK',
@@ -278,7 +279,14 @@
             'SK_GAMMA_CONTRAST=0.2',
           ],
         }],
-        ['OS == "android" or OS == "win"', {
+        ['OS == "android"', {
+          'defines': [
+            'SK_GAMMA_APPLY_TO_A8',
+            'SK_GAMMA_EXPONENT=1.4',
+            'SK_GAMMA_CONTRAST=0.0',
+          ],
+        }],
+        ['OS == "win"', {
           'defines': [
             'SK_GAMMA_SRGB',
             'SK_GAMMA_CONTRAST=0.5',
@@ -366,8 +374,11 @@
             '-Wno-unused-function',
           ],
           'sources': [
-            'ext/SkFontHost_fontconfig.cpp',
-            'ext/SkFontHost_fontconfig_direct.cpp',
+            '../third_party/skia/src/ports/SkFontHost_fontconfig.cpp',
+            '../third_party/skia/src/ports/SkFontConfigInterface_direct.cpp',
+          ],
+          'sources!': [
+            '../third_party/skia/src/ports/SkFontHost_tables.cpp',
           ],
           'defines': [
 #            'SK_USE_COLOR_LUMINANCE',
@@ -426,7 +437,7 @@
                 'ext/vector_platform_device_skia.cc',
               ],
             }],
-            [ '_toolset == "target" and android_build_type == 0', {
+            [ '_toolset == "target" and android_webview_build == 0', {
               'defines': [
                 'HAVE_ENDIAN_H',
               ],
@@ -475,6 +486,8 @@
         [ 'OS == "mac"', {
           'defines': [
             'SK_BUILD_FOR_MAC',
+            'SK_USE_MAC_CORE_TEXT',
+#           'SK_USE_COLOR_LUMINANCE',
           ],
           'include_dirs': [
             '../third_party/skia/include/utils/mac',
@@ -491,20 +504,6 @@
             # The mac's fonthost implements the table methods natively,
             # so no need for these generic versions.
             '../third_party/skia/src/ports/SkFontHost_tables.cpp',
-          ],
-          'conditions': [
-             [ 'use_skia == 0', {
-               'sources/': [
-                 ['exclude', '/pdf/'],
-                 ['exclude', 'ext/vector_platform_device_skia\\.(cc|h)'],
-               ],
-            },
-            { # use_skia
-              'defines': [
-                'SK_USE_MAC_CORE_TEXT',
-#                'SK_USE_COLOR_LUMINANCE',
-              ],
-            }],
           ],
         }],
         [ 'OS == "win"', {
@@ -601,7 +600,7 @@
               'SK_BUILD_FOR_ANDROID_NDK',
             ],
             'conditions': [
-              [ '_toolset == "target" and android_build_type == 0', {
+              [ '_toolset == "target" and android_webview_build == 0', {
                 'defines': [
                   'HAVE_ENDIAN_H',
                 ],

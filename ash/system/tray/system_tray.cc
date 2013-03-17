@@ -5,6 +5,7 @@
 #include "ash/system/tray/system_tray.h"
 
 #include "ash/ash_switches.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell/panel_window.h"
 #include "ash/shell_window_ids.h"
@@ -32,7 +33,6 @@
 #include "ash/system/tray_update.h"
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/tray_user.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/timer.h"
@@ -270,6 +270,10 @@ bool SystemTray::HasSystemBubble() const {
   return system_bubble_.get() != NULL;
 }
 
+bool SystemTray::HasNotificationBubble() const {
+  return notification_bubble_.get() != NULL;
+}
+
 internal::SystemTrayBubble* SystemTray::GetSystemBubble() {
   if (!system_bubble_.get())
     return NULL;
@@ -290,10 +294,17 @@ bool SystemTray::IsMouseInNotificationBubble() const {
       Shell::GetScreen()->GetCursorScreenPoint());
 }
 
-bool SystemTray::CloseBubbleForTest() const {
+bool SystemTray::CloseSystemBubbleForTest() const {
   if (!system_bubble_.get())
     return false;
   system_bubble_->bubble()->Close();
+  return true;
+}
+
+bool SystemTray::CloseNotificationBubbleForTest() const {
+  if (!notification_bubble_.get())
+    return false;
+  notification_bubble_->bubble()->Close();
   return true;
 }
 
@@ -364,7 +375,6 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
                                            kTrayPopupMinWidth,
                                            kTrayPopupMaxWidth);
     init_params.can_activate = can_activate;
-    init_params.close_on_deactivate = false;
     if (detailed) {
       // This is the case where a volume control or brightness control bubble
       // is created.

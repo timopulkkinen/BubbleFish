@@ -99,7 +99,7 @@ void GetDownloadFilePath(
   base::FilePath directory(g_download_directory_for_tests ?
                      *g_download_directory_for_tests : download_directory);
 
-#if defined (OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   // Do not use drive for extension downloads.
   if (drive::util::IsUnderDriveMountPoint(directory))
     directory = download_util::GetDefaultDownloadDirectory();
@@ -151,8 +151,7 @@ WebstoreInstaller::Approval::Approval()
     : profile(NULL),
       use_app_installed_bubble(false),
       skip_post_install_ui(false),
-      skip_install_dialog(false),
-      record_oauth2_grant(false) {
+      skip_install_dialog(false) {
 }
 
 scoped_ptr<WebstoreInstaller::Approval>
@@ -170,7 +169,9 @@ WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
   scoped_ptr<Approval> result(new Approval());
   result->extension_id = extension_id;
   result->profile = profile;
-  result->parsed_manifest = parsed_manifest.Pass();
+  result->manifest = scoped_ptr<Manifest>(
+      new Manifest(Manifest::INVALID_LOCATION,
+                   scoped_ptr<DictionaryValue>(parsed_manifest->DeepCopy())));
   result->skip_install_dialog = true;
   return result.Pass();
 }
@@ -256,7 +257,7 @@ void WebstoreInstaller::Observe(int type,
         return;
 
       // TODO(rdevlin.cronin): Continue removing std::string errors and
-      // replacing with string16
+      // replacing with string16. See crbug.com/71980.
       const string16* error = content::Details<const string16>(details).ptr();
       const std::string utf8_error = UTF16ToUTF8(*error);
       if (download_url_ == crx_installer->original_download_url())

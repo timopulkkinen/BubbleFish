@@ -35,6 +35,7 @@
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
+#include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/intranet_redirect_detector.h"
@@ -92,10 +93,6 @@
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
-
-#if defined(ENABLE_MESSAGE_CENTER) && defined(USE_ASH)
-#include "ash/shell.h"
-#endif
 
 #if defined(ENABLE_MESSAGE_CENTER)
 #include "ui/message_center/message_center.h"
@@ -159,9 +156,6 @@ BrowserProcessImpl::BrowserProcessImpl(
       created_local_state_(false),
       created_icon_manager_(false),
       created_notification_ui_manager_(false),
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-      created_message_center_(false),
-#endif
       created_safe_browsing_service_(false),
       module_ref_count_(0),
       did_start_(false),
@@ -183,6 +177,8 @@ BrowserProcessImpl::BrowserProcessImpl(
       extensions::kExtensionScheme);
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kExtensionResourceScheme);
+  ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
+      chrome::kChromeSearchScheme);
 
 #if defined(OS_MACOSX)
   InitIdleMonitor();
@@ -191,6 +187,10 @@ BrowserProcessImpl::BrowserProcessImpl(
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
 
   ExtensionRendererState::GetInstance()->Init();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Initialize();
+#endif
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -246,6 +246,10 @@ void BrowserProcessImpl::StartTearDown() {
 #endif
 
   ExtensionRendererState::GetInstance()->Shutdown();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Shutdown();
+#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
@@ -461,13 +465,7 @@ NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
 #if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* BrowserProcessImpl::message_center() {
   DCHECK(CalledOnValidThread());
-#if defined(USE_ASH)
-  return ash::Shell::GetInstance()->message_center();
-#else
-  if (!created_message_center_)
-    CreateMessageCenter();
-  return message_center_.get();
-#endif
+  return message_center::MessageCenter::Get();
 }
 #endif
 
@@ -507,6 +505,13 @@ GLStringManager* BrowserProcessImpl::gl_string_manager() {
   if (!gl_string_manager_.get())
     gl_string_manager_.reset(new GLStringManager());
   return gl_string_manager_.get();
+}
+
+GpuModeManager* BrowserProcessImpl::gpu_mode_manager() {
+  DCHECK(CalledOnValidThread());
+  if (!gpu_mode_manager_.get())
+    gpu_mode_manager_.reset(new GpuModeManager());
+  return gpu_mode_manager_.get();
 }
 
 RenderWidgetSnapshotTaker* BrowserProcessImpl::GetRenderWidgetSnapshotTaker() {
@@ -913,14 +918,6 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
   created_notification_ui_manager_ = true;
 #endif
 }
-
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-void BrowserProcessImpl::CreateMessageCenter() {
-  DCHECK(message_center_.get() == NULL);
-  message_center_.reset(new message_center::MessageCenter());
-  created_message_center_ = true;
-}
-#endif
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {
   DCHECK(background_mode_manager_.get() == NULL);

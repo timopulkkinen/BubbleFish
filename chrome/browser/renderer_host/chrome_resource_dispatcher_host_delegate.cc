@@ -13,6 +13,7 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
 #include "chrome/browser/download/download_util.h"
+#include "chrome/browser/extensions/api/streams_private/streams_resource_throttle.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/google/google_util.h"
@@ -40,8 +41,8 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "net/base/load_flags.h"
-#include "net/base/ssl_config_service.h"
 #include "net/http/http_response_headers.h"
+#include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request.h"
 
 #if defined(ENABLE_MANAGED_USERS)
@@ -59,7 +60,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/extensions/file_browser_resource_throttle.h"
 #include "chrome/browser/chromeos/login/merge_session_throttle.h"
 // TODO(oshima): Enable this for other platforms.
 #include "chrome/browser/renderer_host/offline_resource_throttle.h"
@@ -119,12 +119,19 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
       return false;
   }
 
-  // Abort any prerenders that spawn requests that use invalid HTTP methods.
-  if (prerender_tracker_->IsPrerenderingOnIOThread(child_id, route_id) &&
-      !prerender::PrerenderManager::IsValidHttpMethod(method)) {
-    prerender_tracker_->TryCancelOnIOThread(
-        child_id, route_id, prerender::FINAL_STATUS_INVALID_HTTP_METHOD);
-    return false;
+  // Abort any prerenders that spawn requests that use invalid HTTP methods
+  // or invalid schemes.
+  if (prerender_tracker_->IsPrerenderingOnIOThread(child_id, route_id)) {
+    if (!prerender::PrerenderManager::IsValidHttpMethod(method)) {
+      prerender_tracker_->TryCancelOnIOThread(
+          child_id, route_id, prerender::FINAL_STATUS_INVALID_HTTP_METHOD);
+      return false;
+    }
+    if (!prerender::PrerenderManager::DoesURLHaveValidScheme(url)) {
+      prerender_tracker_->TryCancelOnIOThread(
+          child_id, route_id, prerender::FINAL_STATUS_UNSUPPORTED_SCHEME);
+      return false;
+    }
   }
 
   return true;
@@ -221,15 +228,15 @@ void ChromeResourceDispatcherHostDelegate::DownloadStarting(
 
   // If it's from the web, we don't trust it, so we push the throttle on.
   if (is_content_initiated) {
-#if defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID)
     if (!must_download) {
       ProfileIOData* io_data =
           ProfileIOData::FromResourceContext(resource_context);
-      throttles->push_back(FileBrowserResourceThrottle::Create(
+      throttles->push_back(StreamsResourceThrottle::Create(
           child_id, route_id, request, io_data->is_incognito(),
           io_data->GetExtensionInfoMap()));
     }
-#endif  // defined(OS_CHROMEOS)
+#endif
 
     throttles->push_back(new DownloadResourceThrottle(
         download_request_limiter_, child_id, route_id, request_id,
@@ -304,6 +311,13 @@ bool ChromeResourceDispatcherHostDelegate::HandleExternalProtocol(
   // protocols.
   return false;
 #else
+
+  if (prerender_tracker_->IsPrerenderingOnIOThread(child_id, route_id)) {
+    prerender_tracker_->TryCancel(
+        child_id, route_id, prerender::FINAL_STATUS_UNSUPPORTED_SCHEME);
+    return false;
+  }
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ExternalProtocolHandler::LaunchUrl, url, child_id, route_id));
@@ -457,5 +471,15 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
   if (io_data->resource_prefetch_predictor_observer()) {
     io_data->resource_prefetch_predictor_observer()->OnRequestRedirected(
         redirect_url, request);
+  }
+
+  int child_id, route_id;
+  if (!prerender::PrerenderManager::DoesURLHaveValidScheme(redirect_url) &&
+      ResourceRequestInfo::ForRequest(request)->GetAssociatedRenderView(
+          &child_id, &route_id) &&
+      prerender_tracker_->IsPrerenderingOnIOThread(child_id, route_id)) {
+    prerender_tracker_->TryCancel(
+        child_id, route_id, prerender::FINAL_STATUS_UNSUPPORTED_SCHEME);
+    request->Cancel();
   }
 }

@@ -54,6 +54,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/ash_resources.h"
+#include "grit/ash_strings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -918,11 +919,7 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
       cros_->FindCellularNetworkByPath(service_path);
   if (!cellular)
     return;
-
-  web_ui()->GetWebContents()->OpenURL(content::OpenURLParams(
-      cellular->GetAccountInfoUrl(), content::Referrer(),
-      NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false));
+  ash::Shell::GetInstance()->delegate()->OpenMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {

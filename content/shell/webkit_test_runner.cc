@@ -29,6 +29,7 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
@@ -45,6 +46,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTestingSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTask.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestInterfaces.h"
@@ -65,11 +67,13 @@ using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebGamepads;
 using WebKit::WebHistoryItem;
+using WebKit::WebPoint;
 using WebKit::WebRect;
 using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebURLError;
+using WebKit::WebTestingSupport;
 using WebKit::WebVector;
 using WebKit::WebView;
 using WebTestRunner::WebPreferences;
@@ -80,8 +84,6 @@ using WebTestRunner::WebTestProxyBase;
 namespace content {
 
 namespace {
-
-int kDefaultLayoutTestTimeoutMs = 30 * 1000;
 
 void InvokeTaskHelper(void* context) {
   WebTask* task = reinterpret_cast<WebTask*>(context);
@@ -126,15 +128,42 @@ class SyncNavigationStateVisitor : public RenderViewVisitor {
   DISALLOW_COPY_AND_ASSIGN(SyncNavigationStateVisitor);
 };
 
+class ProxyToRenderViewVisitor : public RenderViewVisitor {
+ public:
+  explicit ProxyToRenderViewVisitor(WebTestProxyBase* proxy)
+      : proxy_(proxy),
+        render_view_(NULL) {
+  }
+  virtual ~ProxyToRenderViewVisitor() {}
+
+  RenderView* render_view() const { return render_view_; }
+
+  virtual bool Visit(RenderView* render_view) OVERRIDE {
+    WebKitTestRunner* test_runner = WebKitTestRunner::Get(render_view);
+    if (!test_runner) {
+      NOTREACHED();
+      return true;
+    }
+    if (test_runner->proxy() == proxy_) {
+      render_view_ = render_view;
+      return false;
+    }
+    return true;
+  }
+ private:
+  WebTestProxyBase* proxy_;
+  RenderView* render_view_;
+
+  DISALLOW_COPY_AND_ASSIGN(ProxyToRenderViewVisitor);
+};
+
 }  // namespace
 
 WebKitTestRunner::WebKitTestRunner(RenderView* render_view)
     : RenderViewObserver(render_view),
       RenderViewObserverTracker<WebKitTestRunner>(render_view),
       proxy_(NULL),
-      enable_pixel_dumping_(true),
-      layout_test_timeout_(kDefaultLayoutTestTimeoutMs),
-      allow_external_pages_(false),
+      focused_view_(NULL),
       is_main_window_(false) {
 }
 
@@ -183,8 +212,9 @@ WebString WebKitTestRunner::registerIsolatedFileSystem(
 }
 
 long long WebKitTestRunner::getCurrentTimeInMillisecond() {
-    return base::TimeTicks::Now().ToInternalValue() /
-        base::Time::kMicrosecondsPerMillisecond;
+  return base::TimeDelta(base::Time::Now() -
+                         base::Time::UnixEpoch()).ToInternalValue() /
+         base::Time::kMicrosecondsPerMillisecond;
 }
 
 WebString WebKitTestRunner::getAbsoluteWebStringFromUTF8Path(
@@ -196,7 +226,7 @@ WebString WebKitTestRunner::getAbsoluteWebStringFromUTF8Path(
 #endif
   if (!path.IsAbsolute()) {
     GURL base_url =
-        net::FilePathToFileURL(current_working_directory_.Append(
+        net::FilePathToFileURL(test_config_.current_working_directory.Append(
             FILE_PATH_LITERAL("foo")));
     net::FileURLToFilePath(base_url.Resolve(utf8_path), &path);
   }
@@ -284,8 +314,7 @@ std::string WebKitTestRunner::makeURLErrorDescription(
 }
 
 void WebKitTestRunner::setClientWindowRect(const WebRect& rect) {
-  Send(new ShellViewHostMsg_SetClientWindowRect(
-      routing_id(), gfx::Rect(rect)));
+  ForceResizeRenderView(render_view(), WebSize(rect.width, rect.height));
 }
 
 void WebKitTestRunner::showDevTools() {
@@ -316,13 +345,30 @@ void WebKitTestRunner::setDeviceScaleFactor(float factor) {
 }
 
 void WebKitTestRunner::setFocus(WebTestProxyBase* proxy, bool focus) {
-  // TODO(jochen): Implement once it's possible to synchronously set the focus
-  // from the renderer.
-}
+  ProxyToRenderViewVisitor visitor(proxy);
+  RenderView::ForEach(&visitor);
+  if (!visitor.render_view()) {
+    NOTREACHED();
+    return;
+  }
 
-void WebKitTestRunner::setFocus(bool focus) {
-  // TODO(jochen): Remove once the new WebKit API is rolled.
-  SetFocusAndActivate(render_view(), focus);
+  // Check whether the focused view was closed meanwhile.
+  if (!WebKitTestRunner::Get(focused_view_))
+    focused_view_ = NULL;
+
+  if (focus) {
+    if (focused_view_ != visitor.render_view()) {
+      if (focused_view_)
+        SetFocusAndActivate(focused_view_, false);
+      SetFocusAndActivate(visitor.render_view(), true);
+      focused_view_ = visitor.render_view();
+    }
+  } else {
+    if (focused_view_ == visitor.render_view()) {
+      SetFocusAndActivate(visitor.render_view(), false);
+      focused_view_ = NULL;
+    }
+  }
 }
 
 void WebKitTestRunner::setAcceptAllCookies(bool accept) {
@@ -333,7 +379,7 @@ std::string WebKitTestRunner::pathToLocalResource(const std::string& resource) {
 #if defined(OS_WIN)
   if (resource.find("/tmp/") == 0) {
     // We want a temp file.
-    GURL base_url = net::FilePathToFileURL(temp_path_);
+    GURL base_url = net::FilePathToFileURL(test_config_.temp_path);
     return base_url.Resolve(resource.substr(strlen("/tmp/"))).spec();
   }
 #endif
@@ -381,7 +427,7 @@ bool WebKitTestRunner::isBeingDebugged() {
 }
 
 int WebKitTestRunner::layoutTestTimeout() {
-  return layout_test_timeout_;
+  return test_config_.layout_test_timeout;
 }
 
 void WebKitTestRunner::closeRemainingWindows() {
@@ -407,7 +453,7 @@ void WebKitTestRunner::loadURLForFrame(const WebURL& url,
 }
 
 bool WebKitTestRunner::allowExternalPages() {
-  return allow_external_pages_;
+  return test_config_.allow_external_pages;
 }
 
 void WebKitTestRunner::captureHistoryForWindow(
@@ -443,7 +489,8 @@ void WebKitTestRunner::captureHistoryForWindow(
 // RenderViewObserver  --------------------------------------------------------
 
 void WebKitTestRunner::DidClearWindowObject(WebFrame* frame) {
-  ShellRenderProcessObserver::GetInstance()->BindTestRunnersToWindow(frame);
+  WebTestingSupport::injectInternalsObject(frame);
+  ShellRenderProcessObserver::GetInstance()->test_interfaces()->bindTo(frame);
 }
 
 bool WebKitTestRunner::OnMessageReceived(const IPC::Message& message) {
@@ -464,13 +511,22 @@ void WebKitTestRunner::Reset() {
   // The proxy_ is always non-NULL, it is set right after construction.
   proxy_->reset();
   prefs_.reset();
-  enable_pixel_dumping_ = true;
-  layout_test_timeout_ = kDefaultLayoutTestTimeoutMs;
-  allow_external_pages_ = false;
-  expected_pixel_hash_ = std::string();
   routing_ids_.clear();
   session_histories_.clear();
   current_entry_indexes_.clear();
+
+  render_view()->ClearEditCommands();
+  render_view()->GetWebView()->mainFrame()->setName(WebString());
+  render_view()->GetWebView()->mainFrame()->clearOpener();
+  render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
+  render_view()->GetWebView()->enableFixedLayoutMode(false);
+  render_view()->GetWebView()->setFixedLayoutSize(WebSize(0, 0));
+
+  // Resetting the internals object also overrides the WebPreferences, so we
+  // have to sync them to WebKit again.
+  WebTestingSupport::resetInternalsObject(
+      render_view()->GetWebView()->mainFrame());
+  render_view()->SetWebkitPreferences(render_view()->GetWebkitPreferences());
 }
 
 // Private methods  -----------------------------------------------------------
@@ -494,7 +550,7 @@ void WebKitTestRunner::CaptureDump() {
   Send(
       new ShellViewHostMsg_TextDump(routing_id(), proxy()->captureTree(false)));
 
-  if (enable_pixel_dumping_ &&
+  if (test_config_.enable_pixel_dumping &&
       interfaces->testRunner()->shouldGeneratePixelResults()) {
     SkBitmap snapshot;
     CopyCanvasToBitmap(proxy()->capturePixels(), &snapshot);
@@ -520,7 +576,7 @@ void WebKitTestRunner::CaptureDump() {
 #endif
     std::string actual_pixel_hash = base::MD5DigestToBase16(digest);
 
-    if (actual_pixel_hash == expected_pixel_hash_) {
+    if (actual_pixel_hash == test_config_.expected_pixel_hash) {
       SkBitmap empty_image;
       Send(new ShellViewHostMsg_ImageDump(
           routing_id(), actual_pixel_hash, empty_image));
@@ -534,19 +590,17 @@ void WebKitTestRunner::CaptureDump() {
 }
 
 void WebKitTestRunner::OnSetTestConfiguration(
-    const ShellViewMsg_SetTestConfiguration_Params& params) {
-  current_working_directory_ = params.current_working_directory;
-  temp_path_ = params.temp_path;
-  enable_pixel_dumping_ = params.enable_pixel_dumping;
-  layout_test_timeout_ = params.layout_test_timeout;
-  allow_external_pages_ = params.allow_external_pages;
-  expected_pixel_hash_ = params.expected_pixel_hash;
+    const ShellTestConfiguration& params) {
+  test_config_ = params;
   is_main_window_ = true;
+
+  setFocus(proxy_, true);
 
   WebTestInterfaces* interfaces =
       ShellRenderProcessObserver::GetInstance()->test_interfaces();
   interfaces->setTestIsRunning(true);
-  interfaces->configureForTestWithURL(params.test_url, enable_pixel_dumping_);
+  interfaces->configureForTestWithURL(params.test_url,
+                                      params.enable_pixel_dumping);
 }
 
 void WebKitTestRunner::OnSessionHistory(

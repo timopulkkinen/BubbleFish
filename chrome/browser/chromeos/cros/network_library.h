@@ -21,7 +21,6 @@
 #include "chromeos/network/network_ip_config.h"
 #include "chromeos/network/network_util.h"
 #include "chromeos/network/onc/onc_constants.h"
-#include "googleurl/src/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -563,9 +562,7 @@ class Network {
   }
   void set_name(const std::string& name) { name_ = name; }
   void set_mode(ConnectionMode mode) { mode_ = mode; }
-  void set_connecting() {
-    state_ = STATE_CONNECT_REQUESTED;
-  }
+  void set_connecting();
   void set_is_behind_portal_for_testing(bool value) {
     is_behind_portal_for_testing_ = value;
   }
@@ -910,8 +907,6 @@ class CellularNetwork : public WirelessNetwork {
   // Returns whether the network needs to be activated.
   bool NeedsActivation() const;
 
-  // Return a URL for account info page.
-  GURL GetAccountInfoUrl() const;
   // Return a string representation of network technology.
   std::string GetNetworkTechnologyString() const;
   // Return a string representation of activation state.

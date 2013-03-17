@@ -16,6 +16,7 @@
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/shell.h"
+#include "ui/base/win/touch_input.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/icon_util.h"
@@ -287,10 +288,6 @@ bool ProcessChildWindowMessage(UINT message,
 }
 
 #endif
-
-// A custom MSAA object id used to determine if a screen reader is actively
-// listening for MSAA events.
-const int kCustomObjectID = 1;
 
 // The thickness of an auto-hide taskbar in pixels.
 const int kAutoHideTaskbarThicknessPx = 2;
@@ -737,71 +734,6 @@ void HWNDMessageHandler::SetVisibilityChangedAnimationsEnabled(bool enabled) {
 
 void HWNDMessageHandler::SetTitle(const string16& title) {
   SetWindowText(hwnd(), title.c_str());
-  SetAccessibleName(title);
-}
-
-void HWNDMessageHandler::SetAccessibleName(const string16& name) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr))
-    hr = pAccPropServices->SetHwndPropStr(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                          PROPID_ACC_NAME, name.c_str());
-#endif
-}
-
-void HWNDMessageHandler::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr)) {
-    VARIANT var;
-    if (role) {
-      var.vt = VT_I4;
-      var.lVal = NativeViewAccessibilityWin::MSAARole(role);
-      hr = pAccPropServices->SetHwndProp(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                         PROPID_ACC_ROLE, var);
-    }
-  }
-#endif
-}
-
-void HWNDMessageHandler::SetAccessibleState(
-    ui::AccessibilityTypes::State state) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
-  HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
-      IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr)) {
-    VARIANT var;
-    if (state) {
-      var.vt = VT_I4;
-      var.lVal = NativeViewAccessibilityWin::MSAAState(state);
-      hr = pAccPropServices->SetHwndProp(hwnd(), OBJID_CLIENT, CHILDID_SELF,
-                                         PROPID_ACC_STATE, var);
-    }
-  }
-#endif
-}
-
-void HWNDMessageHandler::SendNativeAccessibilityEvent(
-    int id,
-    ui::AccessibilityTypes::Event event_type) {
-  // TODO(beng): figure out vis-a-vis aura.
-#if !defined(USE_AURA)
-  // Now call the Windows-specific method to notify MSAA clients of this
-  // event.  The widget gives us a temporary unique child ID to associate
-  // with this view so that clients can call get_accChild in
-  // NativeViewAccessibilityWin to retrieve the IAccessible associated
-  // with this view.
-  ::NotifyWinEvent(NativeViewAccessibilityWin::MSAAEvent(event_type), hwnd(),
-                   OBJID_CLIENT, id);
-#endif
 }
 
 void HWNDMessageHandler::SetCursor(HCURSOR cursor) {
@@ -1285,9 +1217,6 @@ LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
 
   fullscreen_handler_->set_hwnd(hwnd());
 
-  // Attempt to detect screen readers by sending an event with our custom id.
-  NotifyWinEvent(EVENT_SYSTEM_ALERT, hwnd(), kCustomObjectID, CHILDID_SELF);
-
   // This message initializes the window so that focus border are shown for
   // windows.
   SendMessage(hwnd(),
@@ -1412,15 +1341,6 @@ LRESULT HWNDMessageHandler::OnGetObject(UINT message,
     // Create a reference that MSAA will marshall to the client.
     reference_result = LresultFromObject(IID_IAccessible, w_param,
         static_cast<IAccessible*>(root.Detach()));
-  }
-
-  if (kCustomObjectID == l_param) {
-    // An MSAA client requested our custom id. Assume that we have detected an
-    // active windows screen reader.
-    delegate_->HandleScreenReaderDetected();
-
-    // Return with failure.
-    return static_cast<LRESULT>(0L);
   }
 
   return reference_result;
@@ -1897,12 +1817,21 @@ LRESULT HWNDMessageHandler::OnReflectedMessage(UINT message,
 LRESULT HWNDMessageHandler::OnSetCursor(UINT message,
                                         WPARAM w_param,
                                         LPARAM l_param) {
-  // Using ScopedRedrawLock here frequently allows content behind this window to
-  // paint in front of this window, causing glaring rendering artifacts.
-  // If omitting ScopedRedrawLock here triggers caption rendering artifacts via
-  // DefWindowProc message handling, we'll need to find a better solution.
-  SetMsgHandled(FALSE);
-  return 0;
+  LRESULT result = 0;
+  // Use a ScopedRedrawLock to avoid weird non-client painting for windows with
+  // custom frames when glass is not enabled. Otherwise, default handling is
+  // sufficient and does not produce the weird non-client painting artifacts.
+  if (delegate_->IsUsingCustomFrame() && !ui::win::IsAeroGlassEnabled() &&
+      LOWORD(l_param) >= HTLEFT && LOWORD(l_param) <= HTBOTTOMRIGHT) {
+    // Prevent classic theme custom frame artifacts on these WM_SETCUROR calls.
+    result = DefWindowProcWithRedrawLock(message, w_param, l_param);
+    // Invalidate the window to paint over any outdated window regions asap, as
+    // using a RedrawLock for WM_SETCURSOR may show content through this window.
+    InvalidateRect(hwnd(), NULL, FALSE);
+  } else {
+    SetMsgHandled(FALSE);
+  }
+  return result;
 }
 
 void HWNDMessageHandler::OnSetFocus(HWND last_focused_window) {
@@ -1946,7 +1875,7 @@ void HWNDMessageHandler::OnSize(UINT param, const CSize& size) {
 
 void HWNDMessageHandler::OnSysCommand(UINT notification_code,
                                       const CPoint& point) {
-  if (!delegate_->IsWidgetWindow())
+  if (!delegate_->ShouldHandleSystemCommands())
     return;
 
   // Windows uses the 4 lower order bits of |notification_code| for type-
@@ -2006,8 +1935,9 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
                                          LPARAM l_param) {
   int num_points = LOWORD(w_param);
   scoped_ptr<TOUCHINPUT[]> input(new TOUCHINPUT[num_points]);
-  if (GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(l_param),
-                        num_points, input.get(), sizeof(TOUCHINPUT))) {
+  if (ui::GetTouchInputInfoWrapper(reinterpret_cast<HTOUCHINPUT>(l_param),
+                                   num_points, input.get(),
+                                   sizeof(TOUCHINPUT))) {
     for (int i = 0; i < num_points; ++i) {
       ui::EventType touch_event_type = ui::ET_UNKNOWN;
 

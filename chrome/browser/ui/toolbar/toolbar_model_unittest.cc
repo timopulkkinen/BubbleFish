@@ -11,11 +11,11 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/instant/instant_service.h"
 #include "chrome/browser/instant/instant_service_factory.h"
+#include "chrome/browser/instant/search.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -178,7 +178,7 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
     const std::string kInstantExtendedPrefix(
         "https://google.com/search?espv=1&q=");
 
-    chrome::search::EnableQueryExtractionForTesting();
+    chrome::search::EnableInstantExtendedAPIForTesting();
 
     ResetDefaultTemplateURL();
     AddTab(browser(), GURL(chrome::kAboutBlankURL));
@@ -230,7 +230,7 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
 
 // Test that we don't replace any URLs when the query extraction is disabled.
 TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionDisabled) {
-  ASSERT_FALSE(chrome::search::IsQueryExtractionEnabled(profile()))
+  ASSERT_FALSE(chrome::search::IsQueryExtractionEnabled())
       << "This test expects query extraction to be disabled.";
 
   ResetDefaultTemplateURL();
@@ -247,7 +247,7 @@ TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionDisabled) {
 
 // Test that we replace URLs when the query extraction API is enabled.
 TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionEnabled) {
-  chrome::search::EnableQueryExtractionForTesting();
+  chrome::search::EnableInstantExtendedAPIForTesting();
 
   ResetDefaultTemplateURL();
   AddTab(browser(), GURL(chrome::kAboutBlankURL));

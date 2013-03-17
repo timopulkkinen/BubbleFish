@@ -4,8 +4,6 @@
 
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 
-#include <set>
-
 #if defined(OS_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
 #endif  // OS_MACOSX
@@ -16,7 +14,6 @@
 #include "base/file_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/string16.h"
 #include "base/string_piece.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
@@ -39,7 +36,6 @@
 #include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
-#include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #endif
 
@@ -87,46 +83,6 @@ enum BlockStatusHistogram {
   BLOCK_STATUS_MAX
 };
 
-#if defined(OS_WIN)
-bool GetInstalledProgramDisplayNames(std::set<string16>* display_names) {
-  base::win::RegKey key;
-
-  if (FAILED(key.Open(
-      HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))) {
-    return false;
-  }
-
-  if (FAILED(key.OpenKey(L"Microsoft", KEY_READ | KEY_WOW64_64KEY)))
-    return false;
-
-  if (FAILED(key.OpenKey(L"Windows", KEY_READ | KEY_WOW64_64KEY)))
-    return false;
-
-  if (FAILED(key.OpenKey(L"CurrentVersion", KEY_READ | KEY_WOW64_64KEY)))
-    return false;
-
-  if (FAILED(key.OpenKey(L"Uninstall", KEY_READ | KEY_WOW64_64KEY)))
-    return false;
-
-  for (base::win::RegistryKeyIterator key_it(key.Handle(), NULL);
-       key_it.Valid();
-       ++key_it) {
-    base::win::RegKey sub_key;
-    if (FAILED(sub_key.Open(
-        key.Handle(), key_it.Name(), KEY_READ | KEY_WOW64_64KEY))) {
-      continue;
-    }
-
-    string16 display_name;
-    if (FAILED(sub_key.ReadValue(L"DisplayName", &display_name)))
-      continue;
-
-    display_names->insert(display_name);
-  }
-
-  return true;
-}
-#endif
 }  // namespace anonymous
 
 // static
@@ -248,22 +204,6 @@ void GpuDataManagerImpl::AddObserver(GpuDataManagerObserver* observer) {
 
 void GpuDataManagerImpl::RemoveObserver(GpuDataManagerObserver* observer) {
   observer_list_->RemoveObserver(observer);
-}
-
-void GpuDataManagerImpl::SetWindowCount(uint32 count) {
-  {
-    base::AutoLock auto_lock(gpu_info_lock_);
-    window_count_ = count;
-  }
-  GpuProcessHost::SendOnIO(
-      GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
-      CAUSE_FOR_GPU_LAUNCH_NO_LAUNCH,
-      new GpuMsg_SetVideoMemoryWindowCount(count));
-}
-
-uint32 GpuDataManagerImpl::GetWindowCount() const {
-  base::AutoLock auto_lock(gpu_info_lock_);
-  return window_count_;
 }
 
 void GpuDataManagerImpl::UnblockDomainFrom3DAPIs(const GURL& url) {
@@ -481,13 +421,14 @@ void GpuDataManagerImpl::AppendGpuCommandLine(
                                    swiftshader_path);
 
 #if defined(OS_WIN)
-  // DisplayLink drivers cause a hang when running in the GPU process sandbox.
-  std::set<string16> installed_display_names;
-  if (GetInstalledProgramDisplayNames(&installed_display_names)) {
-    if (installed_display_names.find(L"DisplayLink Core Software") !=
-        installed_display_names.end()) {
-      command_line->AppendSwitch(switches::kReduceGpuSandbox);
-    }
+  // DisplayLink 7.1 and earlier can cause the GPU process to crash on startup.
+  // http://crbug.com/177611
+  // Thinkpad USB Port Replicator driver causes GPU process to crash when the
+  // sandbox is enabled. http://crbug.com/181665.
+  if ((gpu_info_.display_link_version.IsValid()
+      && gpu_info_.display_link_version.IsOlderThan("7.2")) ||
+      gpu_info_.lenovo_dcute) {
+    command_line->AppendSwitch(switches::kReduceGpuSandbox);
   }
 #endif
 
@@ -542,7 +483,7 @@ GpuSwitchingOption GpuDataManagerImpl::GetGpuSwitchingOption() const {
   return gpu_switching_;
 }
 
-void GpuDataManagerImpl::BlacklistCard() {
+void GpuDataManagerImpl::DisableHardwareAcceleration() {
   card_blacklisted_ = true;
 
   blacklisted_features_ = GPU_FEATURE_TYPE_ALL;
@@ -572,6 +513,19 @@ void GpuDataManagerImpl::AddLogMessage(
   dict->SetString("header", header);
   dict->SetString("message", message);
   log_messages_.Append(dict);
+}
+
+void GpuDataManagerImpl::ProcessCrashed(base::TerminationStatus exit_code) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(BrowserThread::UI,
+                            FROM_HERE,
+                            base::Bind(&GpuDataManagerImpl::ProcessCrashed,
+                                       base::Unretained(this),
+                                       exit_code));
+    return;
+  }
+  observer_list_->Notify(&GpuDataManagerObserver::OnGpuProcessCrashed,
+                         exit_code);
 }
 
 base::ListValue* GpuDataManagerImpl::GetLogMessages() const {
@@ -654,7 +608,7 @@ GpuDataManagerImpl::GpuDataManagerImpl()
     command_line->AppendSwitch(switches::kDisableAcceleratedLayers);
   }
   if (command_line->HasSwitch(switches::kDisableGpu))
-    BlacklistCard();
+    DisableHardwareAcceleration();
   if (command_line->HasSwitch(switches::kGpuSwitching)) {
     std::string option_string = command_line->GetSwitchValueASCII(
         switches::kGpuSwitching);

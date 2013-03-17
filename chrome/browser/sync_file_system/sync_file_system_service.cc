@@ -37,81 +37,6 @@ namespace sync_file_system {
 
 namespace {
 
-// Run the given join_callback when all the callbacks created by this runner
-// are run. If any of the callbacks return non-OK state the given join_callback
-// will be dispatched with the non-OK state that comes first.
-class SharedCallbackRunner
-    : public base::RefCountedThreadSafe<SharedCallbackRunner> {
- public:
-  explicit SharedCallbackRunner(const SyncStatusCallback& join_callback)
-      : join_callback_(join_callback),
-        num_shared_callbacks_(0),
-        status_(SYNC_STATUS_OK) {}
-
-  SyncStatusCallback CreateCallback() {
-    ++num_shared_callbacks_;
-    return base::Bind(&SharedCallbackRunner::Done, this);
-  }
-
-  template <typename R>
-  base::Callback<void(SyncStatusCode, const R& in)>
-  CreateAssignAndRunCallback(R* out) {
-    ++num_shared_callbacks_;
-    return base::Bind(&SharedCallbackRunner::AssignAndRun<R>, this, out);
-  }
-
- private:
-  virtual ~SharedCallbackRunner() {}
-  friend class base::RefCountedThreadSafe<SharedCallbackRunner>;
-
-  template <typename R>
-  void AssignAndRun(R* out, SyncStatusCode status, const R& in) {
-    DCHECK(out);
-    DCHECK_GT(num_shared_callbacks_, 0);
-    if (join_callback_.is_null())
-      return;
-    *out = in;
-    Done(status);
-  }
-
-  void Done(SyncStatusCode status) {
-    if (status != SYNC_STATUS_OK && status_ == SYNC_STATUS_OK) {
-      status_ = status;
-    }
-    if (--num_shared_callbacks_ > 0)
-      return;
-    join_callback_.Run(status_);
-    join_callback_.Reset();
-  }
-
-  SyncStatusCallback join_callback_;
-  int num_shared_callbacks_;
-  SyncStatusCode status_;
-};
-
-void VerifyFileSystemURLSetCallback(
-    base::WeakPtr<SyncFileSystemService> service,
-    const GURL& app_origin,
-    const std::string& service_name,
-    const SyncFileSetCallback& callback,
-    SyncStatusCode status,
-    const FileSystemURLSet& urls) {
-  if (!service.get())
-    return;
-
-#ifndef NDEBUG
-  if (status == SYNC_STATUS_OK) {
-    for (FileSystemURLSet::const_iterator iter = urls.begin();
-         iter != urls.end(); ++iter) {
-      DCHECK(iter->origin() == app_origin);
-      DCHECK(iter->filesystem_id() == service_name);
-    }
-  }
-#endif
-
-  callback.Run(status, urls);
-}
-
 SyncEventObserver::SyncServiceState RemoteStateToSyncServiceState(
     RemoteServiceState state) {
   switch (state) {
@@ -221,6 +146,16 @@ void SyncFileSystemService::RemoveSyncEventObserver(
   observers_.RemoveObserver(observer);
 }
 
+ConflictResolutionPolicy
+SyncFileSystemService::GetConflictResolutionPolicy() const {
+  return remote_file_service_->GetConflictResolutionPolicy();
+}
+
+SyncStatusCode SyncFileSystemService::SetConflictResolutionPolicy(
+    ConflictResolutionPolicy policy) {
+  return remote_file_service_->SetConflictResolutionPolicy(policy);
+}
+
 SyncFileSystemService::SyncFileSystemService(Profile* profile)
     : profile_(profile),
       pending_local_changes_(0),
@@ -243,9 +178,12 @@ void SyncFileSystemService::Initialize(
   remote_file_service_ = remote_file_service.Pass();
 
   local_file_service_->AddChangeObserver(this);
+  local_file_service_->SetLocalChangeProcessor(
+      remote_file_service_->GetLocalChangeProcessor());
 
   remote_file_service_->AddServiceObserver(this);
   remote_file_service_->AddFileStatusObserver(this);
+  remote_file_service_->SetRemoteChangeProcessor(local_file_service_.get());
 
   ProfileSyncServiceBase* profile_sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
@@ -320,7 +258,6 @@ void SyncFileSystemService::MaybeStartRemoteSync() {
   DVLOG(1) << "Calling ProcessRemoteChange";
   remote_sync_running_ = true;
   remote_file_service_->ProcessRemoteChange(
-      local_file_service_.get(),
       base::Bind(&SyncFileSystemService::DidProcessRemoteChange,
                  AsWeakPtr()));
 }
@@ -338,7 +275,6 @@ void SyncFileSystemService::MaybeStartLocalSync() {
   DVLOG(1) << "Calling ProcessLocalChange";
   local_sync_running_ = true;
   local_file_service_->ProcessLocalChange(
-      remote_file_service_->GetLocalChangeProcessor(),
       base::Bind(&SyncFileSystemService::DidProcessLocalChange,
                  AsWeakPtr()));
 }
@@ -514,51 +450,6 @@ void SyncFileSystemService::UpdateSyncEnabledStatus(
         FROM_HERE, base::Bind(&SyncFileSystemService::MaybeStartSync,
                               AsWeakPtr()));
   }
-}
-
-// SyncFileSystemServiceFactory -----------------------------------------------
-
-// static
-SyncFileSystemService* SyncFileSystemServiceFactory::GetForProfile(
-    Profile* profile) {
-  return static_cast<SyncFileSystemService*>(
-      GetInstance()->GetServiceForProfile(profile, true));
-}
-
-// static
-SyncFileSystemServiceFactory* SyncFileSystemServiceFactory::GetInstance() {
-  return Singleton<SyncFileSystemServiceFactory>::get();
-}
-
-void SyncFileSystemServiceFactory::set_mock_remote_file_service(
-    scoped_ptr<RemoteFileSyncService> mock_remote_service) {
-  mock_remote_file_service_ = mock_remote_service.Pass();
-}
-
-SyncFileSystemServiceFactory::SyncFileSystemServiceFactory()
-    : ProfileKeyedServiceFactory("SyncFileSystemService",
-                                 ProfileDependencyManager::GetInstance()) {
-  DependsOn(ProfileSyncServiceFactory::GetInstance());
-}
-
-SyncFileSystemServiceFactory::~SyncFileSystemServiceFactory() {}
-
-ProfileKeyedService* SyncFileSystemServiceFactory::BuildServiceInstanceFor(
-    Profile* profile) const {
-  SyncFileSystemService* service = new SyncFileSystemService(profile);
-
-  scoped_ptr<LocalFileSyncService> local_file_service(
-      new LocalFileSyncService(profile));
-
-  scoped_ptr<RemoteFileSyncService> remote_file_service;
-  if (mock_remote_file_service_)
-    remote_file_service = mock_remote_file_service_.Pass();
-  else
-    remote_file_service.reset(new DriveFileSyncService(profile));
-
-  service->Initialize(local_file_service.Pass(),
-                      remote_file_service.Pass());
-  return service;
 }
 
 }  // namespace sync_file_system

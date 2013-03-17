@@ -443,21 +443,6 @@ int ConvertAuraEventFlagsToWebInputEventModifiers(int aura_event_flags) {
   return web_input_event_modifiers;
 }
 
-// Given the scrolled amount (|scroll|) and the threshold (|threshold|), returns
-// the amount the window should be translated.
-int GetResistedScrollAmount(int scroll, int threshold) {
-  DCHECK_GE(scroll, 0);
-  if (scroll <= threshold)
-    return scroll / 2;
-
-  // Start resisting after the threshold.
-  int resisted = threshold / 2;
-  float extra = scroll - threshold;
-  while ((extra /= 1.3f) > 1.f)
-    resisted += 1;
-  return resisted;
-}
-
 }  // namespace
 
 // ShadowWindow is used to paint shadows around a content window.
@@ -1077,11 +1062,7 @@ gfx::Vector2d WebContentsViewAura::GetTranslationForOverscroll(int delta_x,
   else if (ShouldNavigateBack(controller, current_overscroll_gesture_))
     return gfx::Vector2d(std::min(bounds.width(), delta_x), 0);
 
-  const float threshold = GetOverscrollConfig(
-      OVERSCROLL_CONFIG_HORIZ_RESIST_AFTER);
-  int scroll = GetResistedScrollAmount(abs(delta_x),
-                                       static_cast<int>(threshold));
-  return gfx::Vector2d(delta_x < 0 ? -scroll : scroll, 0);
+  return gfx::Vector2d();
 }
 
 void WebContentsViewAura::PrepareOverscrollNavigationOverlay() {
@@ -1193,7 +1174,7 @@ WebDropData* WebContentsViewAura::GetDropData() const {
 }
 
 gfx::Rect WebContentsViewAura::GetViewBounds() const {
-  return window_->GetBoundsInRootWindow();
+  return window_->GetBoundsInScreen();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1210,7 +1191,8 @@ void WebContentsViewAura::CreateView(
   window_->SetType(aura::client::WINDOW_TYPE_CONTROL);
   window_->SetTransparent(false);
   window_->Init(ui::LAYER_NOT_DRAWN);
-  if (context) {
+  aura::RootWindow* root_window = context ? context->GetRootWindow() : NULL;
+  if (root_window) {
     // There are places where there is no context currently because object
     // hierarchies are built before they're attached to a Widget. (See
     // views::WebView as an example; GetWidget() returns NULL at the point
@@ -1219,9 +1201,10 @@ void WebContentsViewAura::CreateView(
     // It should be OK to not set a default parent since such users will
     // explicitly add this WebContentsViewAura to their tree after they create
     // us.
-    aura::RootWindow* root_window = context->GetRootWindow();
-    window_->SetDefaultParentByRootWindow(
-        root_window, root_window->GetBoundsInScreen());
+    if (root_window) {
+      window_->SetDefaultParentByRootWindow(
+          root_window, root_window->GetBoundsInScreen());
+    }
   }
   window_->layer()->SetMasksToBounds(true);
   window_->SetName("WebContentsViewAura");

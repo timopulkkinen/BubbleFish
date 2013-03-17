@@ -452,8 +452,16 @@ void Widget::SetContentsView(View* view) {
   if (view == GetContentsView())
     return;
   root_view_->SetContentsView(view);
-  if (non_client_view_ != view)
+  if (non_client_view_ != view) {
+    // |non_client_view_| can only be non-NULL here if RequiresNonClientView()
+    // was true when the widget was initialized. Creating widgets with non
+    // client views and then setting the contents view can cause subtle
+    // problems on Windows, where the native widget thinks there is still a
+    // |non_client_view_|. If you get this error, either use a different type
+    // when initializing the widget, or don't call SetContentsView().
+    DCHECK(!non_client_view_);
     non_client_view_ = NULL;
+  }
 }
 
 View* Widget::GetContentsView() {
@@ -688,10 +696,6 @@ bool Widget::IsVisible() const {
   return native_widget_->IsVisible();
 }
 
-bool Widget::IsAccessibleWidget() const {
-  return native_widget_->IsAccessibleWidget();
-}
-
 ui::ThemeProvider* Widget::GetThemeProvider() const {
   const Widget* root_widget = GetTopLevelWidget();
   if (root_widget && root_widget != this) {
@@ -782,12 +786,7 @@ void Widget::UpdateWindowTitle() {
 
   // Update the native frame's text. We do this regardless of whether or not
   // the native frame is being used, since this also updates the taskbar, etc.
-  string16 window_title;
-  if (native_widget_->IsScreenReaderActive()) {
-    window_title = widget_delegate_->GetAccessibleWindowTitle();
-  } else {
-    window_title = widget_delegate_->GetWindowTitle();
-  }
+  string16 window_title = widget_delegate_->GetWindowTitle();
   base::i18n::AdjustStringForLocaleDirection(&window_title);
   native_widget_->SetWindowTitle(window_title);
   non_client_view_->UpdateWindowTitle();
@@ -897,12 +896,9 @@ void Widget::NotifyAccessibilityEvent(
     View* view,
     ui::AccessibilityTypes::Event event_type,
     bool send_native_event) {
-  // Send the notification to the delegate.
-  if (ViewsDelegate::views_delegate)
-    ViewsDelegate::views_delegate->NotifyAccessibilityEvent(view, event_type);
-
-  if (send_native_event)
-    native_widget_->SendNativeAccessibilityEvent(view, event_type);
+  // TODO(dmazzoni): get rid of this method and have clients just use
+  // View::NotifyAccessibilityEvent directly.
+  view->NotifyAccessibilityEvent(event_type, send_native_event);
 }
 
 const NativeWidget* Widget::native_widget() const {
@@ -1016,11 +1012,6 @@ void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
 void Widget::OnNativeWidgetCreated() {
   if (is_top_level())
     focus_manager_.reset(FocusManagerFactory::Create(this));
-
-  native_widget_->SetAccessibleRole(
-      widget_delegate_->GetAccessibleWindowRole());
-  native_widget_->SetAccessibleState(
-      widget_delegate_->GetAccessibleWindowState());
 
   native_widget_->InitModalType(widget_delegate_->GetModalType());
 

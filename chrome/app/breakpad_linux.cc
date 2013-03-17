@@ -212,6 +212,19 @@ void PopulateGUIDAndURLAndDistro(char* guid, size_t* guid_len_param,
     *distro_len_param = distro_len;
 }
 
+void SetClientIdFromCommandLine(const CommandLine& command_line) {
+  // Get the guid and linux distro from the command line switch.
+  std::string switch_value =
+      command_line.GetSwitchValueASCII(switches::kEnableCrashReporter);
+  size_t separator = switch_value.find(",");
+  if (separator != std::string::npos) {
+    child_process_logging::SetClientId(switch_value.substr(0, separator));
+    base::SetLinuxDistro(switch_value.substr(separator + 1));
+  } else {
+    child_process_logging::SetClientId(switch_value);
+  }
+}
+
 // MIME substrings.
 const char g_rn[] = "\r\n";
 const char g_form_data_msg[] = "Content-Disposition: form-data; name=\"";
@@ -596,7 +609,7 @@ void EnableNonBrowserCrashDumping(int minidump_fd) {
   // This will guarantee that the BuildInfo has been initialized and subsequent
   // calls will not require memory allocation.
   base::android::BuildInfo::GetInstance();
-  child_process_logging::SetClientId("Android");
+  SetClientIdFromCommandLine(*CommandLine::ForCurrentProcess());
 
   // On Android, the current sandboxing uses process isolation, in which the
   // child process runs with a different UID. That breaks the normal crash
@@ -1418,6 +1431,17 @@ void InitCrashReporter() {
   if (parsed_command_line.HasSwitch(switches::kDisableBreakpad))
     return;
 
+  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
+  // location to write brekapad crash dumps can be set.
+  const char* alternate_minidump_location = getenv("BREAKPAD_DUMP_LOCATION");
+  if (alternate_minidump_location) {
+    base::FilePath alternate_minidump_location_path(
+        alternate_minidump_location);
+    PathService::Override(
+        chrome::DIR_CRASH_DUMPS,
+        base::FilePath(alternate_minidump_location));
+  }
+
   const std::string process_type =
       parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
   if (process_type.empty()) {
@@ -1439,16 +1463,7 @@ void InitCrashReporter() {
     // simplicity.
     if (!parsed_command_line.HasSwitch(switches::kEnableCrashReporter))
       return;
-    // Get the guid and linux distro from the command line switch.
-    std::string switch_value =
-        parsed_command_line.GetSwitchValueASCII(switches::kEnableCrashReporter);
-    size_t separator = switch_value.find(",");
-    if (separator != std::string::npos) {
-      child_process_logging::SetClientId(switch_value.substr(0, separator));
-      base::SetLinuxDistro(switch_value.substr(separator + 1));
-    } else {
-      child_process_logging::SetClientId(switch_value);
-    }
+    SetClientIdFromCommandLine(parsed_command_line);
     EnableNonBrowserCrashDumping();
     VLOG(1) << "Non Browser crash dumping enabled for: " << process_type;
 #endif  // #if defined(OS_ANDROID)

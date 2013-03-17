@@ -5,10 +5,12 @@
 #ifndef CHROME_BROWSER_UI_AUTOFILL_TAB_AUTOFILL_MANAGER_DELEGATE_H_
 #define CHROME_BROWSER_UI_AUTOFILL_TAB_AUTOFILL_MANAGER_DELEGATE_H_
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/autofill/autofill_manager_delegate.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "components/autofill/browser/autofill_manager_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -22,25 +24,32 @@ class WebContents;
 
 namespace autofill {
 
+class AutocheckoutBubble;
 class AutofillDialogControllerImpl;
 
 // Chrome implementation of AutofillManagerDelegate.
 class TabAutofillManagerDelegate
     : public AutofillManagerDelegate,
+      public ProfileSyncServiceObserver,
       public content::WebContentsUserData<TabAutofillManagerDelegate>,
       public content::WebContentsObserver {
  public:
   virtual ~TabAutofillManagerDelegate();
 
   // AutofillManagerDelegate implementation.
-  virtual InfoBarService* GetInfoBarService() OVERRIDE;
   virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
-  virtual ProfileSyncServiceBase* GetProfileSyncService() OVERRIDE;
   virtual void HideRequestAutocompleteDialog() OVERRIDE;
   virtual bool IsSavingPasswordsEnabled() const OVERRIDE;
+  virtual bool IsPasswordSyncEnabled() const OVERRIDE;
+  virtual void SetSyncStateChangedCallback(
+      const base::Closure& callback) OVERRIDE;
   virtual void OnAutocheckoutError() OVERRIDE;
   virtual void ShowAutofillSettings() OVERRIDE;
+  virtual void ConfirmSaveCreditCard(
+      const AutofillMetrics& metric_logger,
+      const CreditCard& credit_card,
+      const base::Closure& save_card_callback) OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& bounds,
       const content::PasswordForm& form,
@@ -48,7 +57,8 @@ class TabAutofillManagerDelegate
   virtual void ShowAutocheckoutBubble(
       const gfx::RectF& bounds,
       const gfx::NativeView& native_view,
-      const base::Closure& callback) OVERRIDE;
+      const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual void HideAutocheckoutBubble() OVERRIDE;
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
       const GURL& source_url,
@@ -66,6 +76,9 @@ class TabAutofillManagerDelegate
   virtual void HideAutofillPopup() OVERRIDE;
   virtual void UpdateProgressBar(double value) OVERRIDE;
 
+  // ProfileSyncServiceObserver implementation.
+  virtual void OnStateChanged() OVERRIDE;
+
   // content::WebContentsObserver implementation.
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
@@ -75,8 +88,10 @@ class TabAutofillManagerDelegate
   explicit TabAutofillManagerDelegate(content::WebContents* web_contents);
   friend class content::WebContentsUserData<TabAutofillManagerDelegate>;
 
+  base::Closure sync_state_changed_callback_;
   content::WebContents* const web_contents_;
   AutofillDialogControllerImpl* dialog_controller_;  // weak.
+  base::WeakPtr<AutocheckoutBubble> autocheckout_bubble_;
   base::WeakPtr<AutofillPopupControllerImpl> popup_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TabAutofillManagerDelegate);

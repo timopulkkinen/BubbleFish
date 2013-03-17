@@ -29,6 +29,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_gtk.h"
+#include "content/browser/accessibility/browser_accessibility_manager_gtk.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
 #include "content/browser/renderer_host/gtk_im_context_wrapper.h"
 #include "content/browser/renderer_host/gtk_key_bindings_handler.h"
@@ -1571,14 +1572,23 @@ gfx::Point RenderWidgetHostViewGtk::GetLastTouchEventLocation() const {
   return gfx::Point();
 }
 
+void RenderWidgetHostViewGtk::FatalAccessibilityTreeError() {
+  if (host_) {
+    host_->FatalAccessibilityTreeError();
+    SetBrowserAccessibilityManager(NULL);
+  } else {
+    CHECK(FALSE);
+  }
+}
+
 void RenderWidgetHostViewGtk::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!browser_accessibility_manager_.get()) {
     GtkWidget* parent = gtk_widget_get_parent(view_.get());
     browser_accessibility_manager_.reset(
-        BrowserAccessibilityManager::CreateEmptyDocument(
+        new BrowserAccessibilityManagerGtk(
             parent,
-            static_cast<AccessibilityNodeData::State>(0),
+            BrowserAccessibilityManagerGtk::GetEmptyDocument(),
             this));
   }
   browser_accessibility_manager_->OnAccessibilityNotifications(params);
@@ -1588,9 +1598,9 @@ AtkObject* RenderWidgetHostViewGtk::GetAccessible() {
   if (!browser_accessibility_manager_.get()) {
     GtkWidget* parent = gtk_widget_get_parent(view_.get());
     browser_accessibility_manager_.reset(
-        BrowserAccessibilityManager::CreateEmptyDocument(
+        new BrowserAccessibilityManagerGtk(
             parent,
-            static_cast<AccessibilityNodeData::State>(0),
+            BrowserAccessibilityManagerGtk::GetEmptyDocument(),
             this));
   }
   BrowserAccessibilityGtk* root =

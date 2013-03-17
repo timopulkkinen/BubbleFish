@@ -5,11 +5,12 @@
 package org.chromium.content.browser;
 
 import android.content.Context;
-import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
+import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,7 +18,7 @@ import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
 import org.chromium.content.app.LibraryLoader;
-import org.chromium.content.common.CommandLine;
+import org.chromium.content.app.SandboxedProcessService;
 import org.chromium.content.common.ISandboxedProcessCallback;
 import org.chromium.content.common.ISandboxedProcessService;
 
@@ -28,6 +29,10 @@ import org.chromium.content.common.ISandboxedProcessService;
 @JNINamespace("content")
 public class SandboxedProcessLauncher {
     private static String TAG = "SandboxedProcessLauncher";
+
+    private static final int CALLBACK_FOR_UNKNOWN_PROCESS = 0;
+    private static final int CALLBACK_FOR_GPU_PROCESS = 1;
+    private static final int CALLBACK_FOR_RENDERER_PROCESS = 2;
 
     // The upper limit on the number of simultaneous service process instances supported.
     // This must not exceed total number of SandboxedProcessServiceX classes declared in
@@ -52,6 +57,19 @@ public class SandboxedProcessLauncher {
         }
     }
 
+    // Service class for sandboxed process. As the default value it uses
+    // SandboxedProcessService.
+    private static Class<? extends SandboxedProcessService> mServiceClass =
+            SandboxedProcessService.class;
+    private static boolean mConnectionAllocated = false;
+
+    // Sets service class for sandboxed service.
+    public static void setServiceClass(Class<? extends SandboxedProcessService> serviceClass) {
+        // We should guarantee this is called before allocating connection.
+        assert !mConnectionAllocated;
+        mServiceClass = serviceClass;
+    }
+
     private static SandboxedProcessConnection allocateConnection(Context context) {
         SandboxedProcessConnection.DeathCallback deathCallback =
             new SandboxedProcessConnection.DeathCallback() {
@@ -67,7 +85,9 @@ public class SandboxedProcessLauncher {
             }
             int slot = mFreeConnectionIndices.remove(0);
             assert mConnections[slot] == null;
-            mConnections[slot] = new SandboxedProcessConnection(context, slot, deathCallback);
+            mConnections[slot] = new SandboxedProcessConnection(context, slot, deathCallback,
+                    mServiceClass);
+            mConnectionAllocated = true;
             return mConnections[slot];
         }
     }
@@ -206,7 +226,18 @@ public class SandboxedProcessLauncher {
                 nativeOnSandboxedProcessStarted(clientContext, pid);
             }
         };
-        connection.setupConnection(commandLine, filesToBeMapped, createCallback(), onConnect);
+        int callbackType = CALLBACK_FOR_UNKNOWN_PROCESS;
+        List<String> commandLineList = Arrays.asList(commandLine);
+        if (commandLineList.contains("--type=renderer")) {
+            callbackType = CALLBACK_FOR_RENDERER_PROCESS;
+        } else if (commandLineList.contains("--type=gpu-process")) {
+            callbackType = CALLBACK_FOR_GPU_PROCESS;
+        }
+        // TODO(sievers): Revisit this as it doesn't correctly handle the utility process
+        // assert callbackType != CALLBACK_FOR_UNKNOWN_PROCESS;
+
+        connection.setupConnection(
+                commandLine, filesToBeMapped, createCallback(callbackType), onConnect);
     }
 
     /**
@@ -257,28 +288,10 @@ public class SandboxedProcessLauncher {
         connection.unbindHighPriority(false);
     }
 
-    static void establishSurfacePeer(
-            int pid, int type, Surface surface, int primaryID, int secondaryID) {
-        Log.d(TAG, "establishSurfaceTexturePeer: pid = " + pid + ", " +
-              "type = " + type + ", " +
-              "primaryID = " + primaryID + ", " +
-              "secondaryID = " + secondaryID);
-        ISandboxedProcessService service = SandboxedProcessLauncher.getSandboxedService(pid);
-        if (service == null) {
-            Log.e(TAG, "Unable to get SandboxedProcessService from pid.");
-            return;
-        }
-        try {
-            service.setSurface(type, surface, primaryID, secondaryID);
-        } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call setSurface: " + e);
-        }
-    }
-
     /**
      * This implementation is used to receive callbacks from the remote service.
      */
-    private static ISandboxedProcessCallback createCallback() {
+    private static ISandboxedProcessCallback createCallback(final int callbackType) {
         return new ISandboxedProcessCallback.Stub() {
             /**
              * This is called by the remote service regularly to tell us about
@@ -287,19 +300,34 @@ public class SandboxedProcessLauncher {
              * NOT be running in our main thread -- so, to update the UI, we need
              * to use a Handler.
              */
+            @Override
             public void establishSurfacePeer(
-                    int pid, int type, Surface surface, int primaryID, int secondaryID) {
-                SandboxedProcessLauncher.establishSurfacePeer(pid, type, surface,
-                        primaryID, secondaryID);
-                // The SandboxProcessService now holds a reference to the
-                // Surface's resources, so we release our reference to it now to
-                // avoid waiting for the finalizer to get around to it.
-                if (surface != null) {
-                    surface.release();
+                    int pid, Surface surface, int primaryID, int secondaryID) {
+                // Do not allow a malicious renderer to connect to a producer. This is only
+                // used from stream textures managed by the GPU process.
+                if (callbackType != CALLBACK_FOR_GPU_PROCESS) {
+                    Log.e(TAG, "Illegal callback for non-GPU process.");
+                    return;
                 }
+
+                nativeEstablishSurfacePeer(pid, surface, primaryID, secondaryID);
+            }
+
+            @Override
+            public Surface getViewSurface(int surfaceId) {
+                // Do not allow a malicious renderer to get to our view surface.
+                if (callbackType != CALLBACK_FOR_GPU_PROCESS) {
+                    Log.e(TAG, "Illegal callback for non-GPU process.");
+                    return null;
+                }
+
+                return nativeGetViewSurface(surfaceId);
             }
         };
     };
 
     private static native void nativeOnSandboxedProcessStarted(int clientContext, int pid);
+    private static native Surface nativeGetViewSurface(int surfaceId);
+    private static native void nativeEstablishSurfacePeer(
+            int pid, Surface surface, int primaryID, int secondaryID);
 }

@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -19,8 +20,6 @@
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
-#include "net/base/ssl_client_cert_type.h"
-#include "net/base/ssl_config_service.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
@@ -30,6 +29,8 @@
 #include "net/spdy/spdy_io_buffer.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session_pool.h"
+#include "net/ssl/ssl_client_cert_type.h"
+#include "net/ssl/ssl_config_service.h"
 
 namespace net {
 
@@ -47,6 +48,9 @@ const int kMaxConcurrentPushedStreams = 1000;
 // Specifies the number of bytes read synchronously (without yielding) if the
 // data is available.
 const int kMaxReadBytes = 32 * 1024;
+
+// The initial receive window size for both streams and sessions.
+const int32 kDefaultInitialRecvWindowSize = 10 * 1024 * 1024;  // 10MB
 
 class BoundNetLog;
 struct LoadTimingInfo;
@@ -129,7 +133,8 @@ class NET_EXPORT_PRIVATE SpdyStreamRequest {
 
   // Transfers the created stream (guaranteed to not be NULL) to the
   // caller. Must be called at most once after StartRequest() returns
-  // OK or |callback| is called with OK.
+  // OK or |callback| is called with OK. The caller must immediately
+  // set a delegate for the returned stream (except for test code).
   scoped_refptr<SpdyStream> ReleaseStream();
 
  private:
@@ -227,11 +232,13 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
     return host_port_proxy_pair_;
   }
 
-  // Get a pushed stream for a given |url|.
-  // If the server initiates a stream, it might already exist for a given path.
-  // The server might also not have initiated the stream yet, but indicated it
-  // will via X-Associated-Content.  Writes the stream out to |spdy_stream|.
-  // Returns a net error code.
+  // Get a pushed stream for a given |url|.  If the server initiates a
+  // stream, it might already exist for a given path.  The server
+  // might also not have initiated the stream yet, but indicated it
+  // will via X-Associated-Content.  Returns OK if a stream was found
+  // and put into |spdy_stream|, or if one was not found but it is
+  // okay to create a new stream.  Returns an error (not
+  // ERR_IO_PENDING) otherwise.
   int GetPushStream(
       const GURL& url,
       scoped_refptr<SpdyStream>* spdy_stream,
@@ -449,6 +456,8 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   FRIEND_TEST_ALL_PREFIXES(SpdySessionSpdy3Test, IncreaseRecvWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionSpdy3Test, AdjustRecvWindowSize31);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionSpdy3Test, AdjustSendWindowSize31);
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionSpdy3Test,
+                           SessionFlowControlInactiveStream31);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionSpdy3Test, SessionFlowControlEndToEnd31);
 
   typedef std::deque<SpdyStreamRequest*> PendingStreamRequestQueue;
@@ -618,7 +627,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   virtual void OnStreamFrameData(SpdyStreamId stream_id,
                                  const char* data,
                                  size_t len,
-                                 SpdyDataFlags flags) OVERRIDE;
+                                 bool fin) OVERRIDE;
   virtual void OnSetting(
       SpdySettingsIds id, uint8 flags, uint32 value) OVERRIDE;
   virtual void OnWindowUpdate(SpdyStreamId stream_id,

@@ -53,7 +53,7 @@ def GetAllCmdOutput(args, cwd=None, quiet=False):
     logging.debug(' '.join(args) + ' ' + (cwd or ''))
   with open(os.devnull, 'w') as devnull:
     p = subprocess.Popen(args=args, cwd=cwd, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, stdin=devnull, shell=False)
+                         stderr=subprocess.PIPE, stdin=devnull)
     stdout, stderr = p.communicate()
     if not quiet:
       logging.debug(' > stdout=[%s], stderr=[%s]', stdout, stderr)
@@ -132,7 +132,7 @@ class DeviceSideProcess(object):
       # Try to politely shutdown, first.
       if try_sigint_first:
         logging.debug("kill -INT %i" % self._pid)
-        self._cri.GetAllCmdOutput(
+        self._cri.RunCmdOnDevice(
           ['kill', '-INT', str(self._pid)], quiet=True)
         try:
           self.Wait(timeout=0.5)
@@ -141,7 +141,7 @@ class DeviceSideProcess(object):
 
       if self.IsAlive():
         logging.debug("kill -KILL %i" % self._pid)
-        self._cri.GetAllCmdOutput(
+        self._cri.RunCmdOnDevice(
           ['kill', '-KILL', str(self._pid)], quiet=True)
         try:
           self.Wait(timeout=5)
@@ -200,8 +200,14 @@ class KeylessLoginRequiredException(LoginException):
 
 class CrOSInterface(object):
   # pylint: disable=R0923
-  def __init__(self, hostname, ssh_identity = None):
+  def __init__(self, hostname = None, ssh_identity = None):
     self._hostname = hostname
+    # List of ports generated from GetRemotePort() that may not be in use yet.
+    self._reserved_ports = []
+
+    if self.local:
+      return
+
     self._ssh_identity = None
     self._hostfile = tempfile.NamedTemporaryFile()
     self._hostfile.flush()
@@ -211,17 +217,21 @@ class CrOSInterface(object):
                       '-o PreferredAuthentications=publickey',
                       '-o UserKnownHostsFile=%s' % self._hostfile.name]
 
-    # List of ports generated from GetRemotePort() that may not be in use yet.
-    self._reserved_ports = []
-
     if ssh_identity:
       self._ssh_identity = os.path.abspath(os.path.expanduser(ssh_identity))
+
+  @property
+  def local(self):
+    return not self._hostname
 
   @property
   def hostname(self):
     return self._hostname
 
   def FormSSHCommandLine(self, args, extra_ssh_args=None):
+    if self.local:
+      return args
+
     full_args = ['ssh',
                  '-o ForwardX11=no',
                  '-o ForwardX11Trusted=no',
@@ -233,9 +243,6 @@ class CrOSInterface(object):
     full_args.append('root@%s' % self._hostname)
     full_args.extend(args)
     return full_args
-
-  def GetAllCmdOutput(self, args, cwd=None, quiet=False):
-    return GetAllCmdOutput(self.FormSSHCommandLine(args), cwd, quiet=quiet)
 
   def _RemoveSSHWarnings(self, toClean):
     """Removes specific ssh warning lines from a string.
@@ -250,13 +257,18 @@ class CrOSInterface(object):
     return re.sub('Warning: Permanently added [^\n]* to the list of known '
                   'hosts.\s\n', '', toClean)
 
-  def TryLogin(self):
-    logging.debug('TryLogin()')
-    stdout, stderr = self.GetAllCmdOutput(['echo', '$USER'], quiet=True)
-
+  def RunCmdOnDevice(self, args, cwd=None, quiet=False):
+    stdout, stderr = GetAllCmdOutput(
+        self.FormSSHCommandLine(args), cwd, quiet=quiet)
     # The initial login will add the host to the hosts file but will also print
     # a warning to stderr that we need to remove.
     stderr = self._RemoveSSHWarnings(stderr)
+    return stdout, stderr
+
+  def TryLogin(self):
+    logging.debug('TryLogin()')
+    assert not self.local
+    stdout, stderr = self.RunCmdOnDevice(['echo', '$USER'], quiet=True)
     if stderr != '':
       if 'Host key verification failed' in stderr:
         raise LoginException(('%s host key verification failed. ' +
@@ -279,7 +291,10 @@ class CrOSInterface(object):
           self._hostname, stdout))
 
   def FileExistsOnDevice(self, file_name, quiet=False):
-    stdout, stderr = self.GetAllCmdOutput([
+    if self.local:
+      return os.path.exists(file_name)
+
+    stdout, stderr = self.RunCmdOnDevice([
         'if', 'test', '-a', file_name, ';',
         'then', 'echo', '1', ';',
         'fi'
@@ -296,6 +311,7 @@ class CrOSInterface(object):
     return exists
 
   def PushFile(self, filename, remote_filename):
+    assert not self.local
     args = ['scp', '-r' ] + self._ssh_args
     if self._ssh_identity:
       args.extend(['-i', self._ssh_identity])
@@ -304,9 +320,9 @@ class CrOSInterface(object):
                  'root@%s:%s' % (self._hostname, remote_filename)])
 
     stdout, stderr = GetAllCmdOutput(args, quiet=True)
+    stderr = self._RemoveSSHWarnings(stderr)
     if stderr != '':
-      assert 'No such file or directory' in stderr
-      raise OSError
+      raise OSError('No such file or directory %s' % stderr)
 
   def PushContents(self, text, remote_filename):
     logging.debug("PushContents(<text>, %s)" % remote_filename)
@@ -316,6 +332,7 @@ class CrOSInterface(object):
       self.PushFile(f.name, remote_filename)
 
   def GetFileContents(self, filename):
+    assert not self.local
     with tempfile.NamedTemporaryFile() as f:
       args = ['scp'] + self._ssh_args
       if self._ssh_identity:
@@ -325,10 +342,10 @@ class CrOSInterface(object):
                    os.path.abspath(f.name)])
 
       stdout, stderr = GetAllCmdOutput(args, quiet=True)
+      stderr = self._RemoveSSHWarnings(stderr)
 
       if stderr != '':
-        assert 'No such file or directory' in stderr
-        raise OSError
+        raise OSError('No such file or directory %s' % stderr)
 
       with open(f.name, 'r') as f2:
         res = f2.read()
@@ -336,7 +353,7 @@ class CrOSInterface(object):
         return res
 
   def ListProcesses(self):
-    stdout, stderr = self.GetAllCmdOutput([
+    stdout, stderr = self.RunCmdOnDevice([
         '/bin/ps', '--no-headers',
         '-A',
         '-o', 'pid,args'], quiet=True)
@@ -353,7 +370,7 @@ class CrOSInterface(object):
 
   def RmRF(self, filename):
     logging.debug("rm -rf %s" % filename)
-    self.GetCmdOutput(['rm', '-rf', filename], quiet=True)
+    self.RunCmdOnDevice(['rm', '-rf', filename], quiet=True)
 
   def KillAllMatching(self, predicate):
     kills = ['kill', '-KILL']
@@ -363,26 +380,19 @@ class CrOSInterface(object):
         kills.append(p[0])
     logging.debug("KillAllMatching(<predicate>)->%i" % (len(kills) - 2))
     if len(kills) > 2:
-      self.GetCmdOutput(kills, quiet=True)
+      self.RunCmdOnDevice(kills, quiet=True)
     return len(kills) - 2
 
   def IsServiceRunning(self, service_name):
-    stdout, stderr = self.GetAllCmdOutput([
+    stdout, stderr = self.RunCmdOnDevice([
         'status', service_name], quiet=True)
     assert stderr == ''
     running = 'running, process' in stdout
     logging.debug("IsServiceRunning(%s)->%s" % (service_name, running))
     return running
 
-  def GetCmdOutput(self, args, quiet=False):
-    stdout, stderr = self.GetAllCmdOutput(args, quiet=True)
-    assert stderr == ''
-    if not quiet:
-      logging.debug("GetCmdOutput(%s)->%s" % (repr(args), stdout))
-    return stdout
-
   def GetRemotePort(self):
-    netstat = self.GetAllCmdOutput(['netstat', '-ant'])
+    netstat = self.RunCmdOnDevice(['netstat', '-ant'])
     netstat = netstat[0].split('\n')
     ports_in_use = []
 
@@ -401,7 +411,7 @@ class CrOSInterface(object):
     return new_port
 
   def IsHTTPServerRunningOnPort(self, port):
-    wget_output = self.GetAllCmdOutput(
+    wget_output = self.RunCmdOnDevice(
         ['wget', 'localhost:%i' % (port), '-T1', '-t1'])
 
     if 'Connection refused' in wget_output[1]:

@@ -17,7 +17,7 @@ class ContextProviderCommandBuffer::LostContextCallbackProxy
   }
 
   virtual void onContextLost() {
-    provider_->OnLostContext();
+    provider_->OnLostContextInternal();
   }
 
  private:
@@ -33,7 +33,8 @@ class ContextProviderCommandBuffer::MemoryAllocationCallbackProxy
     provider_->context3d_->setMemoryAllocationChangedCallbackCHROMIUM(this);
   }
 
-  void onMemoryAllocationChanged(WebKit::WebGraphicsMemoryAllocation alloc) {
+  virtual void onMemoryAllocationChanged(
+      WebKit::WebGraphicsMemoryAllocation alloc) {
     provider_->OnMemoryAllocationChanged(!!alloc.gpuResourceSizeInBytes);
   }
 
@@ -42,37 +43,51 @@ class ContextProviderCommandBuffer::MemoryAllocationCallbackProxy
 };
 
 ContextProviderCommandBuffer::ContextProviderCommandBuffer()
-    : destroyed_(false) {
+    : leak_on_destroy_(false),
+      destroyed_(false) {
 }
 
-ContextProviderCommandBuffer::~ContextProviderCommandBuffer() {}
+ContextProviderCommandBuffer::~ContextProviderCommandBuffer() {
+  base::AutoLock lock(main_thread_lock_);
+  if (leak_on_destroy_) {
+    WebGraphicsContext3DCommandBufferImpl* context3d ALLOW_UNUSED =
+        context3d_.release();
+    webkit::gpu::GrContextForWebGraphicsContext3D* gr_context ALLOW_UNUSED =
+        gr_context_.release();
+  }
+}
 
 bool ContextProviderCommandBuffer::InitializeOnMainThread() {
-  if (destroyed_)
-    return false;
-  if (context3d_)
-    return true;
-
+  DCHECK(!context3d_);
   context3d_ = CreateOffscreenContext3d().Pass();
-  destroyed_ = !context3d_;
   return !!context3d_;
 }
 
 bool ContextProviderCommandBuffer::BindToCurrentThread() {
+  DCHECK(context3d_);
+
   if (lost_context_callback_proxy_)
     return true;
 
-  bool result = context3d_->makeContextCurrent();
+  if (!context3d_->makeContextCurrent())
+    return false;
+
   lost_context_callback_proxy_.reset(new LostContextCallbackProxy(this));
-  return result;
+  return true;
 }
 
 WebGraphicsContext3DCommandBufferImpl*
 ContextProviderCommandBuffer::Context3d() {
+  DCHECK(context3d_);
+  DCHECK(lost_context_callback_proxy_);  // Is bound to thread.
+
   return context3d_.get();
 }
 
 class GrContext* ContextProviderCommandBuffer::GrContext() {
+  DCHECK(context3d_);
+  DCHECK(lost_context_callback_proxy_);  // Is bound to thread.
+
   if (gr_context_)
     return gr_context_->get();
 
@@ -84,17 +99,25 @@ class GrContext* ContextProviderCommandBuffer::GrContext() {
 }
 
 void ContextProviderCommandBuffer::VerifyContexts() {
-  if (!destroyed_ && context3d_->isContextLost())
-    OnLostContext();
+  DCHECK(context3d_);
+  DCHECK(lost_context_callback_proxy_);  // Is bound to thread.
+
+  if (context3d_->isContextLost())
+    OnLostContextInternal();
 }
 
-void ContextProviderCommandBuffer::OnLostContext() {
-  base::AutoLock lock(destroyed_lock_);
-  destroyed_ = true;
+void ContextProviderCommandBuffer::OnLostContextInternal() {
+  {
+    base::AutoLock lock(main_thread_lock_);
+    if (destroyed_)
+      return;
+    destroyed_ = true;
+  }
+  OnLostContext();
 }
 
 bool ContextProviderCommandBuffer::DestroyedOnMainThread() {
-  base::AutoLock lock(destroyed_lock_);
+  base::AutoLock lock(main_thread_lock_);
   return destroyed_;
 }
 

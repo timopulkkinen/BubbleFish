@@ -28,6 +28,8 @@
 #include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_factory.h"
 #include "ash/shell_window_ids.h"
@@ -465,8 +467,7 @@ void Shell::Init() {
   aura::RootWindow* root_window = display_controller_->GetPrimaryRootWindow();
   active_root_window_ = root_window;
 
-  cursor_manager_.SetDeviceScaleFactor(
-      root_window->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
+  cursor_manager_.SetDisplay(DisplayController::GetPrimaryDisplay());
 
 #if !defined(OS_MACOSX)
   nested_dispatcher_controller_.reset(new NestedDispatcherController);
@@ -721,9 +722,9 @@ void Shell::CreateLauncher() {
     RootWindowControllerList controllers = GetAllRootWindowControllers();
     for (RootWindowControllerList::iterator iter = controllers.begin();
          iter != controllers.end(); ++iter)
-      (*iter)->CreateLauncher();
+      (*iter)->shelf()->CreateLauncher();
   } else {
-    GetPrimaryRootWindowController()->CreateLauncher();
+    GetPrimaryRootWindowController()->shelf()->CreateLauncher();
   }
 }
 
@@ -756,24 +757,28 @@ void Shell::UpdateShelfVisibility() {
 
 void Shell::SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior,
                                      aura::RootWindow* root_window) {
-  GetRootWindowController(root_window)->SetShelfAutoHideBehavior(behavior);
+  ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      SetAutoHideBehavior(behavior);
 }
 
 ShelfAutoHideBehavior Shell::GetShelfAutoHideBehavior(
     aura::RootWindow* root_window) const {
-  return GetRootWindowController(root_window)->GetShelfAutoHideBehavior();
+  return ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      auto_hide_behavior();
 }
 
 void Shell::SetShelfAlignment(ShelfAlignment alignment,
                               aura::RootWindow* root_window) {
-  if (GetRootWindowController(root_window)->SetShelfAlignment(alignment)) {
+  if (ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      SetAlignment(alignment)) {
     FOR_EACH_OBSERVER(
         ShellObserver, observers_, OnShelfAlignmentChanged(root_window));
   }
 }
 
 ShelfAlignment Shell::GetShelfAlignment(aura::RootWindow* root_window) {
-  return GetRootWindowController(root_window)->GetShelfAlignment();
+  return GetRootWindowController(root_window)->
+      GetShelfLayoutManager()->GetAlignment();
 }
 
 void Shell::SetDimming(bool should_dim) {
@@ -812,12 +817,13 @@ void Shell::OnModalWindowRemoved(aura::Window* removed) {
 }
 
 WebNotificationTray* Shell::GetWebNotificationTray() {
-  return GetPrimaryRootWindowController()->status_area_widget()->
-      web_notification_tray();
+  return GetPrimaryRootWindowController()->shelf()->
+      status_area_widget()->web_notification_tray();
 }
 
 bool Shell::HasPrimaryStatusArea() {
-  return !!GetPrimaryRootWindowController()->status_area_widget();
+  ShelfWidget* shelf = GetPrimaryRootWindowController()->shelf();
+  return shelf && shelf->status_area_widget();
 }
 
 SystemTray* Shell::GetPrimarySystemTray() {
@@ -856,12 +862,6 @@ void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
 void Shell::DoInitialWorkspaceAnimation() {
   return GetPrimaryRootWindowController()->workspace_controller()->
       DoInitialAnimation();
-}
-
-message_center::MessageCenter* Shell::message_center() {
-  if (!message_center_.get())
-    message_center_.reset(new message_center::MessageCenter());
-  return message_center_.get();
 }
 
 void Shell::InitRootWindowController(

@@ -586,6 +586,11 @@
             "items": {"type": "string"}
           },
           {
+            "name": "shouldReturnLocalPath",
+            "type": "boolean",
+            "description": "true if paths need to be resolved to local paths."
+          },
+          {
             "name": "callback",
             "type": "function",
             "parameters": []
@@ -606,6 +611,16 @@
             "name": "index",
             "type": "integer",
             "description": "Index of Filter"
+          },
+          {
+            "name": "forOpening",
+            "type": "boolean",
+            "description": "true if paths are selected for opening. false if for saving."
+          },
+          {
+            "name": "shouldReturnLocalPath",
+            "type": "boolean",
+            "description": "true if paths need to be resolved to local paths."
           },
           {
             "name": "callback",
@@ -1206,6 +1221,17 @@
                 "description": "true if the length is in the valid range, false otherwise."
               }
             ]
+          }
+        ]
+      },
+      {
+        "name": "openNewWindow",
+        "description": "Opens a new window of the Files.app.",
+        "parameters": [
+          {
+            "name": "url",
+            "type": "string",
+            "description": "Internal url to be opened."
           }
         ]
       }

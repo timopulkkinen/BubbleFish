@@ -119,6 +119,8 @@ class GpuCommandBufferStub
   // Sends a message to the console.
   void SendConsoleMessage(int32 id, const std::string& message);
 
+  void SendCachedShader(const std::string& key, const std::string& shader);
+
   gfx::GLSurface* surface() const { return surface_; }
 
   void AddDestructionObserver(DestructionObserver* observer);
@@ -239,6 +241,8 @@ class GpuCommandBufferStub
   int sync_point_wait_count_;
 
   bool delayed_work_scheduled_;
+  uint64 previous_messages_processed_;
+  base::TimeTicks last_idle_time_;
 
   scoped_refptr<gpu::PreemptionFlag> preemption_flag_;
 

@@ -10,7 +10,7 @@ from pylib import android_commands
 from pylib import constants
 from pylib import perf_tests_helper
 from pylib.android_commands import errors
-from pylib.base import new_base_test_runner as base_test_runner
+from pylib.base import base_test_runner
 from pylib.base import test_result
 from pylib.utils import run_tests_helper
 
@@ -263,6 +263,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
       logging.warning(e)
       if android_commands.IsDeviceAttached(self.device):
         raise
+    finally:
+      self.CleanupSpawningServerState()
     # Calculate unknown test results.
     # TODO(frankf): Do not break TestResults encapsulation.
     all_tests = set(test.split(':'))

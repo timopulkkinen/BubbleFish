@@ -20,49 +20,49 @@ WebExternalTextureLayerImpl::WebExternalTextureLayerImpl(
     : client_(client) {
   scoped_refptr<TextureLayer> layer;
   if (client_)
-    layer = TextureLayer::create(this);
+    layer = TextureLayer::Create(this);
   else
-    layer = TextureLayer::create(0);
-  layer->setIsDrawable(true);
+    layer = TextureLayer::Create(NULL);
+  layer->SetIsDrawable(true);
   layer_.reset(new WebLayerImpl(layer));
 }
 
 WebExternalTextureLayerImpl::~WebExternalTextureLayerImpl() {
-  static_cast<TextureLayer*>(layer_->layer())->clearClient();
+  static_cast<TextureLayer*>(layer_->layer())->ClearClient();
 }
 
 WebLayer* WebExternalTextureLayerImpl::layer() { return layer_.get(); }
 
 void WebExternalTextureLayerImpl::setTextureId(unsigned id) {
-  static_cast<TextureLayer*>(layer_->layer())->setTextureId(id);
+  static_cast<TextureLayer*>(layer_->layer())->SetTextureId(id);
 }
 
 void WebExternalTextureLayerImpl::setFlipped(bool flipped) {
-  static_cast<TextureLayer*>(layer_->layer())->setFlipped(flipped);
+  static_cast<TextureLayer*>(layer_->layer())->SetFlipped(flipped);
 }
 
 void WebExternalTextureLayerImpl::setUVRect(const WebFloatRect& rect) {
-  static_cast<TextureLayer*>(layer_->layer())
-      ->setUV(gfx::PointF(rect.x, rect.y),
-              gfx::PointF(rect.x + rect.width, rect.y + rect.height));
+  static_cast<TextureLayer*>(layer_->layer())->SetUV(
+      gfx::PointF(rect.x, rect.y),
+      gfx::PointF(rect.x + rect.width, rect.y + rect.height));
 }
 
 void WebExternalTextureLayerImpl::setOpaque(bool opaque) {
-  static_cast<TextureLayer*>(layer_->layer())->setContentsOpaque(opaque);
+  static_cast<TextureLayer*>(layer_->layer())->SetContentsOpaque(opaque);
 }
 
 void WebExternalTextureLayerImpl::setPremultipliedAlpha(
     bool premultiplied_alpha) {
-  static_cast<TextureLayer*>(layer_->layer())
-      ->setPremultipliedAlpha(premultiplied_alpha);
+  static_cast<TextureLayer*>(layer_->layer())->SetPremultipliedAlpha(
+      premultiplied_alpha);
 }
 
 void WebExternalTextureLayerImpl::willModifyTexture() {
-  static_cast<TextureLayer*>(layer_->layer())->willModifyTexture();
+  static_cast<TextureLayer*>(layer_->layer())->WillModifyTexture();
 }
 
 void WebExternalTextureLayerImpl::setRateLimitContext(bool rate_limit) {
-  static_cast<TextureLayer*>(layer_->layer())->setRateLimitContext(rate_limit);
+  static_cast<TextureLayer*>(layer_->layer())->SetRateLimitContext(rate_limit);
 }
 
 class WebTextureUpdaterImpl : public WebTextureUpdater {

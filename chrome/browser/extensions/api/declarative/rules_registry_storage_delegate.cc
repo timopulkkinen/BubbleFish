@@ -106,7 +106,9 @@ class RulesRegistryStorageDelegate::Inner
   const std::string storage_key_;
 
   // A set of extension IDs that have rules we are reading from storage.
-  std::set<std::string> waiting_for_extensions_;
+  // TODO(vabr): Once the migration code of http://crbug.com/166474 is removed,
+  // switch this back to just set. http://crbug.com/176926
+  std::multiset<std::string> waiting_for_extensions_;
 
   // The thread that our RulesRegistry lives on.
   content::BrowserThread::ID rules_registry_thread_;
@@ -167,7 +169,7 @@ void RulesRegistryStorageDelegate::OnRulesChanged(
   DCHECK_EQ("", error);
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&Inner::WriteToStorage, inner_.get(), extension_id,
+      base::Bind(&Inner::WriteToStorage, inner_, extension_id,
                  base::Passed(RulesToValue(new_rules))));
 }
 
@@ -251,8 +253,11 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
   extensions::StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);
-    store->GetExtensionValue(extension_id, storage_key_,
-        base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
+    store->GetExtensionValue(extension_id,
+                             storage_key_,
+                             base::Bind(&Inner::ReadFromStorageCallback,
+                                        make_scoped_refptr(this),
+                                        extension_id));
   }
 
   // TODO(mpcomplete): Migration code. Remove when declarativeWebRequest goes
@@ -261,8 +266,11 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
   store = ExtensionSystem::Get(profile_)->state_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);
-    store->GetExtensionValue(extension_id, storage_key_,
-        base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
+    store->GetExtensionValue(extension_id,
+                             storage_key_,
+                             base::Bind(&Inner::ReadFromStorageCallback,
+                                        make_scoped_refptr(this),
+                                        extension_id));
     store->RemoveExtensionValue(extension_id, storage_key_);
   }
 }
@@ -271,11 +279,21 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorageCallback(
     const std::string& extension_id, scoped_ptr<base::Value> value) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   content::BrowserThread::PostTask(
-      rules_registry_thread_, FROM_HERE,
-      base::Bind(&Inner::ReadFromStorageOnRegistryThread, this, extension_id,
+      rules_registry_thread_,
+      FROM_HERE,
+      base::Bind(&Inner::ReadFromStorageOnRegistryThread,
+                 make_scoped_refptr(this),
+                 extension_id,
                  base::Passed(&value)));
 
-  waiting_for_extensions_.erase(extension_id);
+  // TODO(vabr): Once the migration code of http://crbug.com/166474 is removed,
+  // and |waiting_for_extensions_| is just a set again, switch this back to only
+  // calling erase(extension_id). http://crbug.com/176926
+  std::multiset<std::string>::iterator it =
+      waiting_for_extensions_.find(extension_id);
+  CHECK(it != waiting_for_extensions_.end());
+  waiting_for_extensions_.erase(it);
+
   CheckIfReady();
   if (log_storage_init_delay_ && waiting_for_extensions_.empty()) {
     UMA_HISTOGRAM_TIMES("Extensions.DeclarativeRulesStorageInitialization",
@@ -301,8 +319,10 @@ void RulesRegistryStorageDelegate::Inner::CheckIfReady() {
     return;
 
   content::BrowserThread::PostTask(
-      rules_registry_thread_, FROM_HERE,
-      base::Bind(&Inner::NotifyReadyOnRegistryThread, this));
+      rules_registry_thread_,
+      FROM_HERE,
+      base::Bind(&Inner::NotifyReadyOnRegistryThread,
+                 make_scoped_refptr(this)));
 }
 
 void RulesRegistryStorageDelegate::Inner::ReadFromStorageOnRegistryThread(
@@ -320,6 +340,9 @@ void RulesRegistryStorageDelegate::Inner::NotifyReadyOnRegistryThread() {
     return;  // we've already notified our readiness
 
   ready_ = true;
+
+  if (!rules_registry_)
+    return;  // registry went away
   rules_registry_->OnReady();
 }
 

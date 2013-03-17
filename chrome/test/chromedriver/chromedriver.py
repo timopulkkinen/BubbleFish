@@ -17,9 +17,15 @@ class StaleElementReference(ChromeDriverException):
   pass
 class UnknownError(ChromeDriverException):
   pass
+class JavaScriptError(ChromeDriverException):
+  pass
 class XPathLookupError(ChromeDriverException):
   pass
 class NoSuchWindow(ChromeDriverException):
+  pass
+class InvalidCookieDomain(ChromeDriverException):
+  pass
+class ScriptTimeout(ChromeDriverException):
   pass
 class InvalidSelector(ChromeDriverException):
   pass
@@ -34,8 +40,11 @@ def _ExceptionForResponse(response):
     9: UnknownCommand,
     10: StaleElementReference,
     13: UnknownError,
+    17: JavaScriptError,
     19: XPathLookupError,
     23: NoSuchWindow,
+    24: InvalidCookieDomain,
+    28: ScriptTimeout,
     32: InvalidSelector,
     33: SessionNotCreatedException,
     100: NoSuchSession
@@ -48,7 +57,7 @@ class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
   def __init__(self, lib_path, chrome_binary=None, android_package=None,
-               chrome_switches=None):
+               chrome_switches=None, chrome_extensions=None):
     self._lib = ctypes.CDLL(lib_path)
 
     options = {}
@@ -60,6 +69,10 @@ class ChromeDriver(object):
     if chrome_switches:
       assert type(chrome_switches) is list
       options['args'] = chrome_switches
+
+    if chrome_extensions:
+      assert type(chrome_extensions) is list
+      options['extensions'] = chrome_extensions
 
     if options:
       params = {
@@ -148,6 +161,11 @@ class ChromeDriver(object):
     return self.ExecuteSessionCommand(
         'executeScript', {'script': script, 'args': converted_args})
 
+  def ExecuteAsyncScript(self, script, *args):
+    converted_args = list(args)
+    return self.ExecuteSessionCommand(
+        'executeAsyncScript', {'script': script, 'args': converted_args})
+
   def SwitchToFrame(self, id_or_name):
     self.ExecuteSessionCommand('switchToFrame', {'id': id_or_name})
 
@@ -209,6 +227,18 @@ class ChromeDriver(object):
   def MouseDoubleClick(self, button=0):
     self.ExecuteSessionCommand('mouseDoubleClick', {'button': button})
 
+  def GetCookies(self):
+    return self.ExecuteSessionCommand('getCookies')
+
+  def AddCookie(self, cookie):
+    self.ExecuteSessionCommand('addCookie', {'cookie': cookie})
+
+  def DeleteCookie(self, name):
+    self.ExecuteSessionCommand('deleteCookie', {'name': name})
+
+  def DeleteAllCookies(self):
+    self.ExecuteSessionCommand('deleteAllCookies')
+
   def IsAlertOpen(self):
     return self.ExecuteSessionCommand('getAlert')
 
@@ -223,6 +253,9 @@ class ChromeDriver(object):
     else:
       cmd = 'dismissAlert'
     self.ExecuteSessionCommand(cmd)
+
+  def IsLoading(self):
+    return self.ExecuteSessionCommand('isLoading')
 
   def Quit(self):
     """Quits the browser and ends the session."""

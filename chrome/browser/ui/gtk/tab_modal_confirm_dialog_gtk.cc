@@ -8,6 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -70,20 +71,14 @@ TabModalConfirmDialogGtk::TabModalConfirmDialogGtk(
   g_signal_connect(ok_, "clicked", G_CALLBACK(OnAcceptThunk), this);
   gtk_box_pack_end(GTK_BOX(buttonBox), ok_, FALSE, TRUE, 0);
 
-  window_ = new ConstrainedWindowGtk(web_contents, this);
+  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnDestroyThunk), this);
+
+  window_ = CreateWebContentsModalDialogGtk(dialog_, cancel_);
   delegate_->set_close_delegate(this);
-}
 
-GtkWidget* TabModalConfirmDialogGtk::GetWidgetRoot() {
-  return dialog_;
-}
-
-GtkWidget* TabModalConfirmDialogGtk::GetFocusWidget() {
-  return cancel_;
-}
-
-void TabModalConfirmDialogGtk::DeleteDelegate() {
-  delete this;
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents);
+  web_contents_modal_dialog_manager->ShowDialog(window_);
 }
 
 TabModalConfirmDialogGtk::~TabModalConfirmDialogGtk() {
@@ -99,7 +94,7 @@ void TabModalConfirmDialogGtk::CancelTabModalDialog() {
 }
 
 void TabModalConfirmDialogGtk::CloseDialog() {
-  window_->CloseWebContentsModalDialog();
+  gtk_widget_destroy(window_);
 }
 
 void TabModalConfirmDialogGtk::OnAccept(GtkWidget* widget) {
@@ -108,4 +103,8 @@ void TabModalConfirmDialogGtk::OnAccept(GtkWidget* widget) {
 
 void TabModalConfirmDialogGtk::OnCancel(GtkWidget* widget) {
   delegate_->Cancel();
+}
+
+void TabModalConfirmDialogGtk::OnDestroy(GtkWidget* widget) {
+  delete this;
 }

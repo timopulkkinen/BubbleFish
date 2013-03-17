@@ -11,9 +11,7 @@
 #include "base/prefs/pref_notifier.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -22,6 +20,7 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/browser_resources.h"
@@ -416,8 +415,10 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
 #if defined(OS_CHROMEOS)
   if (!skip_session_components) {
+#if defined(GOOGLE_CHROME_BUILD)
     Add(IDR_WALLPAPERMANAGER_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
+#endif  // defined(OFFICIAL_BUILD)
 
     base::FilePath echo_extension_path(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/echo"));
@@ -437,7 +438,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
         base::FilePath(extension_misc::kChromeVoxExtensionPath);
     Add(IDR_CHROMEVOX_MANIFEST, path);
   }
-#endif
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(ENABLE_GOOGLE_NOW)
   if (CommandLine::ForCurrentProcess()->HasSwitch(

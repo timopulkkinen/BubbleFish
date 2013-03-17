@@ -2,36 +2,37 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom bindings for the syncFileSystem API.
+// Custom binding for the syncFileSystem API.
+
+var binding = require('binding').Binding.create('syncFileSystem');
 
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 var fileSystemNatives = requireNative('file_system_natives');
+var forEach = require('utils').forEach;
 var syncFileSystemNatives = requireNative('sync_file_system');
 
-chromeHidden.registerCustomHook('syncFileSystem', function(bindingsAPI) {
+binding.registerCustomHook(function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
 
   // Functions which take in an [instanceOf=FileEntry].
-  function bindFileEntryFunction(functionName) {
+  function bindFileEntryFunction(i, functionName) {
     apiFunctions.setUpdateArgumentsPostValidate(
         functionName, function(entry, callback) {
       var fileSystemUrl = entry.toURL();
       return [fileSystemUrl, callback];
     });
   }
-  ['getFileStatus']
-      .forEach(bindFileEntryFunction);
+  forEach(['getFileStatus'], bindFileEntryFunction);
 
   // Functions which take in an [instanceOf=DOMFileSystem].
-  function bindFileSystemFunction(functionName) {
+  function bindFileSystemFunction(i, functionName) {
     apiFunctions.setUpdateArgumentsPostValidate(
         functionName, function(filesystem, callback) {
       var fileSystemUrl = filesystem.root.toURL();
       return [fileSystemUrl, callback];
     });
   }
-  ['deleteFileSystem', 'getUsageAndQuota']
-      .forEach(bindFileSystemFunction);
+  forEach(['deleteFileSystem', 'getUsageAndQuota'], bindFileSystemFunction);
 
   // Functions which return an [instanceOf=DOMFileSystem].
   apiFunctions.setCustomCallback('requestFileSystem',
@@ -67,3 +68,5 @@ chromeHidden.Event.registerArgumentMassager(
   }
   dispatch([fileInfo]);
 });
+
+exports.binding = binding.generate();

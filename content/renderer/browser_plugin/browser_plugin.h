@@ -94,6 +94,7 @@ class CONTENT_EXPORT BrowserPlugin :
   int guest_route_id() const { return guest_route_id_; }
   // Returns whether the guest process has crashed.
   bool guest_crashed() const { return guest_crashed_; }
+  bool HasGuest() const;
 
   // Query whether the guest can navigate back to the previous entry.
   bool CanGoBack() const;
@@ -140,6 +141,9 @@ class CONTENT_EXPORT BrowserPlugin :
   // Called by browser plugin binding.
   void OnEmbedderDecidedPermission(int request_id, bool allow);
 
+
+  // Returns whether a message should be forwarded to BrowserPlugin.
+  static bool ShouldForwardToBrowserPlugin(const IPC::Message& message);
 
   // WebKit::WebPlugin implementation.
   virtual WebKit::WebPluginContainer* container() const OVERRIDE;
@@ -264,8 +268,6 @@ class CONTENT_EXPORT BrowserPlugin :
   // Informs the BrowserPlugin that guest has changed its size in autosize mode.
   void SizeChangedDueToAutoSize(const gfx::Size& old_view_size);
 
-  bool HasEventListeners(const std::string& event_name);
-
   // Indicates whether a damage buffer was used by the guest process for the
   // provided |params|.
   static bool UsesDamageBuffer(
@@ -280,14 +282,17 @@ class CONTENT_EXPORT BrowserPlugin :
   // browser process.
   void SetInstanceID(int instance_id);
 
-  // Requests media access permission from the embedder.
-  void RequestMediaPermission(int request_id,
-                              const base::DictionaryValue& request_info);
+  void AddPermissionRequestToMap(int request_id,
+                                 BrowserPluginPermissionType type);
+
   // Informs the BrowserPlugin that the guest's permission request has been
   // allowed or denied by the embedder.
   void RespondPermission(BrowserPluginPermissionType permission_type,
                          int request_id,
                          bool allow);
+
+  // Handles the response to the pointerLock permission request.
+  void RespondPermissionPointerLock(bool allow);
 
   // If the request with id |request_id| is pending then informs the
   // BrowserPlugin that the guest's permission request has been allowed or
@@ -297,7 +302,8 @@ class CONTENT_EXPORT BrowserPlugin :
   // object goes out of scope in JavaScript.
   void OnRequestObjectGarbageCollected(int request_id);
   // V8 garbage collection callback for |object|.
-  static void WeakCallbackForPersistObject(v8::Persistent<v8::Value> object,
+  static void WeakCallbackForPersistObject(v8::Isolate* isolate,
+                                           v8::Persistent<v8::Value> object,
                                            void* param);
 
   // IPC message handlers.
@@ -325,8 +331,6 @@ class CONTENT_EXPORT BrowserPlugin :
                       bool is_top_level);
   void OnLoadStart(int instance_id, const GURL& url, bool is_top_level);
   void OnLoadStop(int instance_id);
-  void OnLockMouse(int instance_id, bool user_gesture,
-      bool last_unlocked_by_target, bool privileged);
   // Requests permission from the embedder.
   void OnRequestPermission(int instance_id,
                            BrowserPluginPermissionType permission_type,
@@ -357,8 +361,6 @@ class CONTENT_EXPORT BrowserPlugin :
   SkBitmap* sad_guest_;
   bool guest_crashed_;
   scoped_ptr<BrowserPluginHostMsg_ResizeGuest_Params> pending_resize_params_;
-  // True if we have ever sent a NavigateGuest message to the embedder.
-  bool navigate_src_sent_;
   bool auto_size_ack_pending_;
   int guest_process_id_;
   int guest_route_id_;
@@ -379,8 +381,7 @@ class CONTENT_EXPORT BrowserPlugin :
 
   // Each permission request item in the map is a pair of request id and
   // permission type.
-  typedef std::map<int, std::pair<int, BrowserPluginPermissionType> >
-      PendingPermissionRequests;
+  typedef std::map<int, BrowserPluginPermissionType> PendingPermissionRequests;
   PendingPermissionRequests pending_permission_requests_;
 
   typedef std::pair<int, base::WeakPtr<BrowserPlugin> >

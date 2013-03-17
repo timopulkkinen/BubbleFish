@@ -69,8 +69,8 @@ void SetAllowOSMesaImageTransportForTesting() {
 #endif
 }
 
-void DoNotRequireUserGestureForFocusChanges() {
-  RenderThreadImpl::current()->set_require_user_gesture_for_focus(false);
+void DoNotSendFocusEvents() {
+  RenderThreadImpl::current()->set_should_send_focus_ipcs(false);
 }
 
 void SyncNavigationState(RenderView* render_view) {
@@ -80,6 +80,19 @@ void SyncNavigationState(RenderView* render_view) {
 void SetFocusAndActivate(RenderView* render_view, bool enable) {
   static_cast<RenderViewImpl*>(render_view)
       ->SetFocusAndActivateForTesting(enable);
+}
+
+void EnableShortCircuitSizeUpdates() {
+  RenderThreadImpl::current()->set_short_circuit_size_updates(true);
+}
+
+void ForceResizeRenderView(RenderView* render_view,
+                           const WebKit::WebSize& new_size) {
+  static_cast<RenderViewImpl*>(render_view)->didAutoResize(new_size);
+}
+
+void DisableNavigationErrorPages() {
+  RenderThreadImpl::current()->set_skip_error_pages(true);
 }
 
 }  // namespace content

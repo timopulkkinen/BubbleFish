@@ -118,6 +118,7 @@ class InstantController : public InstantPage::Delegate,
   // reverted to |full_text| by the OmniboxEditModel prior to calling this.
   // |match| is the match reverted to.
   void OnCancel(const AutocompleteMatch& match,
+                const string16& user_text,
                 const string16& full_text);
 
   // The overlay WebContents. May be NULL. InstantController retains ownership.
@@ -170,9 +171,15 @@ class InstantController : public InstantPage::Delegate,
   // is deleted and recreated. Else the refresh is skipped.
   void ReloadOverlayIfStale();
 
+  // Called when the |overlay_|'s main frame has finished loading.
+  void OverlayLoadCompletedMainFrame();
+
   // Adds a new event to |debug_events_| and also DVLOG's it. Ensures that
   // |debug_events_| doesn't get too large.
   void LogDebugEvent(const std::string& info) const;
+
+  // Resets list of debug events.
+  void ClearDebugEvents();
 
   // See comments for |debug_events_| below.
   const std::list<std::pair<int64, std::string> >& debug_events() {
@@ -195,6 +202,7 @@ class InstantController : public InstantPage::Delegate,
   FRIEND_TEST_ALL_PREFIXES(InstantTest, InstantOverlayRefresh);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ExtendedModeIsOn);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, MostVisited);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, RestrictedItemReadback);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OmniboxFocusLoadsInstant);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
                            OmniboxTextUponFocusedCommittedSERP);
@@ -205,8 +213,11 @@ class InstantController : public InstantPage::Delegate,
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPIsUsedInSameTab);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ProcessIsolation);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, UnrelatedSiteInstance);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ValidatesSuggestions);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
       OmniboxCommitsWhenShownFullHeight);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
+                           MANUAL_OmniboxFocusLoadsInstant);
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -231,9 +242,9 @@ class InstantController : public InstantPage::Delegate,
       const std::vector<InstantSuggestion>& suggestions) OVERRIDE;
   virtual void ShowInstantOverlay(
       const content::WebContents* contents,
-      InstantShownReason reason,
       int height,
       InstantSizeUnits units) OVERRIDE;
+  virtual void FocusOmnibox(const content::WebContents* contents) OVERRIDE;
   virtual void StartCapturingKeyStrokes(
       const content::WebContents* contents) OVERRIDE;
   virtual void StopCapturingKeyStrokes(content::WebContents* contents) OVERRIDE;
@@ -245,11 +256,11 @@ class InstantController : public InstantPage::Delegate,
 
   // Invoked by the InstantLoader when the Instant page wants to delete a
   // Most Visited item.
-  virtual void DeleteMostVisitedItem(const GURL& url) OVERRIDE;
+  virtual void DeleteMostVisitedItem(uint64 most_visited_item_id) OVERRIDE;
 
   // Invoked by the InstantLoader when the Instant page wants to undo a
   // Most Visited deletion.
-  virtual void UndoMostVisitedDeletion(const GURL& url) OVERRIDE;
+  virtual void UndoMostVisitedDeletion(uint64 most_visited_item_id) OVERRIDE;
 
   // Invoked by the InstantLoader when the Instant page wants to undo all
   // Most Visited deletions.
@@ -293,9 +304,7 @@ class InstantController : public InstantPage::Delegate,
 
   // Counterpart to HideOverlay(). Asks the |browser_| to display the overlay
   // with the given |height| in |units|.
-  void ShowOverlay(InstantShownReason reason,
-                   int height,
-                   InstantSizeUnits units);
+  void ShowOverlay(int height, InstantSizeUnits units);
 
   // Send the omnibox popup bounds to the page.
   void SendPopupBoundsToPage();
@@ -343,7 +352,12 @@ class InstantController : public InstantPage::Delegate,
 
   // Sends a collection of MostVisitedItems to the renderer process via
   // the appropriate InstantPage subclass.
-  void SendMostVisitedItems(const std::vector<MostVisitedItem>& items);
+  void SendMostVisitedItems(const std::vector<InstantMostVisitedItem>& items);
+
+  // If possible, tries to mutate |suggestion| to a valid suggestion. Returns
+  // true if successful. (Note that |suggestion| may be modified even if this
+  // returns false.)
+  bool FixSuggestion(InstantSuggestion* suggestion) const;
 
   chrome::BrowserInstantController* const browser_;
 
@@ -372,6 +386,10 @@ class InstantController : public InstantPage::Delegate,
   // The most recent full_text passed to Update(). If empty, we'll not accept
   // search suggestions from |overlay_| or |instant_tab_|.
   string16 last_omnibox_text_;
+
+  // The most recent user_text passed to Update(). Used to filter out-of-date
+  // URL suggestions from the Instant page.
+  string16 last_user_text_;
 
   // True if the last Update() had an inline autocompletion. Used only to make
   // sure that we don't accidentally suggest gray text suggestion in that case.

@@ -12,11 +12,11 @@
 #include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
-#include "chrome/test/chromedriver/chrome.h"
+#include "chrome/test/chromedriver/chrome/chrome.h"
+#include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/session_map.h"
-#include "chrome/test/chromedriver/status.h"
-#include "chrome/test/chromedriver/web_view.h"
 
 namespace {
 
@@ -57,6 +57,15 @@ Status ExecuteSessionCommand(
   if (status.IsError() && session->chrome)
     status.AddDetails("Session info: chrome=" + session->chrome->GetVersion());
   return status;
+}
+
+Status ExecuteGetSessionCapabilities(
+    SessionMap* session_map,
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  value->reset(session->capabilities->DeepCopy());
+  return Status(kOk);
 }
 
 Status ExecuteQuit(
@@ -158,7 +167,7 @@ Status ExecuteSwitchToWindow(
   if (!web_view)
     return Status(kNoSuchWindow);
   session->window = web_view->GetId();
-  session->frame = "";
+  session->SwitchToTopFrame();
   session->mouse_position = WebPoint(0, 0);
   return Status(kOk);
 }
@@ -181,6 +190,17 @@ Status ExecuteSetTimeout(
     session->page_load_timeout = ms;
   else
     return Status(kUnknownError, "unknown type of timeout:" + type);
+  return Status(kOk);
+}
+
+Status ExecuteSetScriptTimeout(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  int ms;
+  if (!params.GetInteger("ms", &ms) || ms < 0)
+    return Status(kUnknownError, "'ms' must be a non-negative integer");
+  session->script_timeout = ms;
   return Status(kOk);
 }
 
@@ -245,4 +265,26 @@ Status ExecuteDismissAlert(
       false, session->prompt_text);
   session->prompt_text = "";
   return status;
+}
+
+Status ExecuteIsLoading(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  WebView* web_view = NULL;
+  Status status = session->GetTargetWindow(&web_view);
+  if (status.IsError())
+    return status;
+
+  status = web_view->ConnectIfNecessary();
+  if (status.IsError())
+    return status;
+
+  bool is_pending;
+  status = web_view->IsPendingNavigation(
+      session->GetCurrentFrameId(), &is_pending);
+  if (status.IsError())
+    return status;
+  value->reset(new base::FundamentalValue(is_pending));
+  return Status(kOk);
 }

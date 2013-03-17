@@ -250,6 +250,7 @@ class RenderWidgetHostViewWin
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
   virtual gfx::Point GetLastTouchEventLocation() const OVERRIDE;
+  virtual void FatalAccessibilityTreeError() OVERRIDE;
 
   // Overridden from ui::GestureEventHelper.
   virtual bool DispatchLongPressGestureEvent(ui::GestureEvent* event) OVERRIDE;
@@ -437,6 +438,10 @@ class RenderWidgetHostViewWin
   // take effect on Vista+.
   void UpdateInputScopeIfNecessary(ui::TextInputType text_input_type);
 
+  // Create a BrowserAccessibilityManager with an empty document if it
+  // doesn't already exist.
+  void CreateBrowserAccessibilityManagerIfNeeded();
+
   // The associated Model.  While |this| is being Destroyed,
   // |render_widget_host_| is NULL and the Windows message loop is run one last
   // time. Message handlers must check for a NULL |render_widget_host_|.
@@ -583,6 +588,9 @@ class RenderWidgetHostViewWin
   bool touch_events_enabled_;
 
   scoped_ptr<ui::GestureRecognizer> gesture_recognizer_;
+
+  // The OS-provided default IAccessible instance for our hwnd.
+  base::win::ScopedComPtr<IAccessible> window_iaccessible_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

@@ -62,7 +62,6 @@
           'dependencies': [
             'symbolize',
             '../build/linux/system.gyp:glib',
-            '../build/linux/system.gyp:x11',
             'xdg_mime',
           ],
           'defines': [
@@ -73,13 +72,20 @@
           ],
           'export_dependent_settings': [
             '../build/linux/system.gyp:glib',
-            '../build/linux/system.gyp:x11',
           ],
         }, {  # use_glib!=1
             'sources/': [
               ['exclude', '/xdg_user_dirs/'],
               ['exclude', '_nss\\.cc$'],
             ],
+        }],
+        ['use_x11==1', {
+          'dependencies': [
+            '../build/linux/system.gyp:x11',
+          ],
+          'export_dependent_settings': [
+            '../build/linux/system.gyp:x11',
+          ],
         }],
         ['OS == "android" and _toolset == "host"', {
           # Base for host support is the minimum required to run the
@@ -145,7 +151,7 @@
             '../build/android/cpufeatures.gypi',
           ],
         }],
-        ['OS == "android" and _toolset == "target" and android_build_type == 0', {
+        ['OS == "android" and _toolset == "target" and android_webview_build == 0', {
           'dependencies': [
             'base_java',
           ],
@@ -521,6 +527,7 @@
         'posix/file_descriptor_shuffle_unittest.cc',
         'posix/unix_domain_socket_linux_unittest.cc',
         'pr_time_unittest.cc',
+        'prefs/default_pref_store_unittest.cc',
         'prefs/json_pref_store_unittest.cc',
         'prefs/mock_pref_change_callback.h',
         'prefs/overlay_user_pref_store_unittest.cc',
@@ -810,9 +817,6 @@
         'test/expectations/expectation.h',
         'test/expectations/parser.cc',
         'test/expectations/parser.h',
-        'test/main_hook.cc',
-        'test/main_hook.h',
-        'test/main_hook_ios.mm',
         'test/mock_chrome_application_mac.h',
         'test/mock_chrome_application_mac.mm',
         'test/mock_devices_changed_observer.cc',
@@ -1112,7 +1116,7 @@
             'android/java/src/org/chromium/base/ThreadUtils.java',
           ],
           'variables': {
-            'jni_gen_dir': 'base',
+            'jni_gen_package': 'base',
           },
           'includes': [ '../build/jni_generator.gypi' ],
         },
@@ -1124,7 +1128,7 @@
           },
           'includes': [ '../build/java.gypi' ],
           'conditions': [
-            ['android_build_type==0', {
+            ['android_webview_build==0', {
               'dependencies': [
                 '../third_party/jsr-305/jsr-305.gyp:jsr_305_javalib',
               ],

@@ -69,17 +69,17 @@ class LayerTreeHostDelegatedTestCaseSingleDelegatedLayer
     : public LayerTreeHostDelegatedTest {
  public:
   virtual void setupTree() OVERRIDE {
-    root_ = Layer::create();
-    root_->setAnchorPoint(gfx::PointF());
-    root_->setBounds(gfx::Size(10, 10));
+    root_ = Layer::Create();
+    root_->SetAnchorPoint(gfx::PointF());
+    root_->SetBounds(gfx::Size(10, 10));
 
     delegated_ = FakeDelegatedRendererLayer::Create();
-    delegated_->setAnchorPoint(gfx::PointF());
-    delegated_->setBounds(gfx::Size(10, 10));
-    delegated_->setIsDrawable(true);
+    delegated_->SetAnchorPoint(gfx::PointF());
+    delegated_->SetBounds(gfx::Size(10, 10));
+    delegated_->SetIsDrawable(true);
 
-    root_->addChild(delegated_);
-    m_layerTreeHost->setRootLayer(root_);
+    root_->AddChild(delegated_);
+    m_layerTreeHost->SetRootLayer(root_);
     LayerTreeHostDelegatedTest::setupTree();
   }
 
@@ -110,7 +110,7 @@ class LayerTreeHostDelegatedTestCreateChildId
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
@@ -120,7 +120,7 @@ class LayerTreeHostDelegatedTestCreateChildId
         EXPECT_TRUE(delegated_impl->ChildId());
         EXPECT_FALSE(did_reset_child_id_);
 
-        host_impl->resourceProvider()->graphicsContext3D()->loseContextCHROMIUM(
+        host_impl->resource_provider()->GraphicsContext3D()->loseContextCHROMIUM(
             GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
         break;
       case 3:
@@ -138,7 +138,7 @@ class LayerTreeHostDelegatedTestCreateChildId
     if (num_activates_ < 2)
       return;
 
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
@@ -164,7 +164,7 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
         first_draw_for_source_frame_(true) {}
 
   virtual void didCommit() OVERRIDE {
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // The first time the layer gets a frame the whole layer should be
@@ -183,25 +183,25 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
         break;
       case 3:
         // Should create zero damage.
-        m_layerTreeHost->setNeedsCommit();
+        m_layerTreeHost->SetNeedsCommit();
         break;
       case 4:
         // Should damage the full viewport.
-        delegated_->setBounds(gfx::Size(2, 2));
+        delegated_->SetBounds(gfx::Size(2, 2));
         break;
       case 5:
         // Should create zero damage.
-        m_layerTreeHost->setNeedsCommit();
+        m_layerTreeHost->SetNeedsCommit();
         break;
       case 6:
         // Should damage the full layer.
-        delegated_->setBounds(gfx::Size(6, 6));
+        delegated_->SetBounds(gfx::Size(6, 6));
         delegated_->SetFrameData(CreateFrameData(gfx::Rect(0, 0, 5, 5),
                                                  gfx::Rect(1, 1, 2, 2)));
         break;
       case 7:
         // Should create zero damage.
-        m_layerTreeHost->setNeedsCommit();
+        m_layerTreeHost->SetNeedsCommit();
         break;
       case 8:
         // Should damage the full layer.
@@ -209,7 +209,7 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
         break;
       case 9:
         // Should create zero damage.
-        m_layerTreeHost->setNeedsCommit();
+        m_layerTreeHost->SetNeedsCommit();
         break;
       case 10:
         // Setting an empty frame should damage the whole layer the
@@ -235,23 +235,23 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
         break;
       case 14:
         // Should create zero damage.
-        m_layerTreeHost->setNeedsCommit();
+        m_layerTreeHost->SetNeedsCommit();
         break;
     }
     first_draw_for_source_frame_ = true;
   }
 
   virtual bool prepareToDrawOnThread(LayerTreeHostImpl* host_impl,
-                                     LayerTreeHostImpl::FrameData& frame,
-                                     bool result) {
+                                     LayerTreeHostImpl::FrameData* frame,
+                                     bool result) OVERRIDE {
     EXPECT_TRUE(result);
 
     if (!first_draw_for_source_frame_)
       return result;
 
-    gfx::RectF damage_rect = frame.renderPasses.back()->damage_rect;
+    gfx::RectF damage_rect = frame->render_passes.back()->damage_rect;
 
-    switch (host_impl->activeTree()->source_frame_number()) {
+    switch (host_impl->active_tree()->source_frame_number()) {
       case 0:
         // Before the layer has a frame to display it should not
         // be visible at all, and not damage anything.
@@ -351,12 +351,12 @@ class LayerTreeHostDelegatedTestMergeResources
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     const ResourceProvider::ResourceIdMap& map =
-        host_impl->resourceProvider()->getChildToParentMap(
+        host_impl->resource_provider()->GetChildToParentMap(
             delegated_impl->ChildId());
 
     // Both frames' resources should be in the parent's resource provider.
@@ -364,7 +364,6 @@ class LayerTreeHostDelegatedTestMergeResources
     EXPECT_EQ(1u, map.count(999));
     EXPECT_EQ(1u, map.count(555));
 
-    // Both frames' resources should be saved on the layer.
     EXPECT_EQ(2u, delegated_impl->Resources().size());
     EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
     EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
@@ -394,12 +393,12 @@ class LayerTreeHostDelegatedTestRemapResourcesInQuads
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     const ResourceProvider::ResourceIdMap& map =
-        host_impl->resourceProvider()->getChildToParentMap(
+        host_impl->resource_provider()->GetChildToParentMap(
             delegated_impl->ChildId());
 
     // The frame's resource should be in the parent's resource provider.
@@ -439,7 +438,7 @@ class LayerTreeHostDelegatedTestReturnUnusedResources
     scoped_ptr<DelegatedFrameData> frame;
     TransferableResourceArray resources;
 
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // Generate a frame with two resources in it.
@@ -509,7 +508,7 @@ class LayerTreeHostDelegatedTestReusedResources
     scoped_ptr<DelegatedFrameData> frame;
     TransferableResourceArray resources;
 
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // Generate a frame with some resources in it.
@@ -568,7 +567,7 @@ class LayerTreeHostDelegatedTestFrameBeforeAck
     scoped_ptr<DelegatedFrameData> frame;
     TransferableResourceArray resources;
 
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // Generate a frame with some resources in it.
@@ -620,15 +619,15 @@ class LayerTreeHostDelegatedTestFrameBeforeAck
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    if (host_impl->activeTree()->source_frame_number() != 3)
+    if (host_impl->active_tree()->source_frame_number() != 3)
       return;
 
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     const ResourceProvider::ResourceIdMap& map =
-        host_impl->resourceProvider()->getChildToParentMap(
+        host_impl->resource_provider()->GetChildToParentMap(
             delegated_impl->ChildId());
 
     // The bad frame should be dropped. So we should only have one quad (the
@@ -665,7 +664,7 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
     scoped_ptr<DelegatedFrameData> frame;
     TransferableResourceArray resources;
 
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // Generate a frame with some resources in it.
@@ -704,20 +703,11 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
         AddTextureQuad(frame.get(), 444);
         delegated_->SetFrameData(frame.Pass());
 
-        // When we take resources, it should have the resources that were
-        // released during the last valid frame committed.
+        // The resources are used by the new frame so are not returned.
         delegated_->TakeUnusedResourcesForChildCompositor(&resources);
-        EXPECT_EQ(2u, resources.size());
-        if (resources[0].id == 555) {
-          EXPECT_EQ(555, resources[0].id);
-          EXPECT_EQ(444, resources[1].id);
-        } else {
-          EXPECT_EQ(444, resources[0].id);
-          EXPECT_EQ(555, resources[1].id);
-        }
+        EXPECT_EQ(0u, resources.size());
         break;
       case 4:
-        // The invalid frame doesn't cause anything to be released.
         delegated_->TakeUnusedResourcesForChildCompositor(&resources);
         EXPECT_EQ(0u, resources.size());
         endTest();
@@ -726,31 +716,40 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    if (host_impl->activeTree()->source_frame_number() != 3)
+    if (host_impl->active_tree()->source_frame_number() != 3)
       return;
 
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     const ResourceProvider::ResourceIdMap& map =
-        host_impl->resourceProvider()->getChildToParentMap(
+        host_impl->resource_provider()->GetChildToParentMap(
             delegated_impl->ChildId());
 
-    // The bad frame should be dropped. So we should only have one quad (the
-    // one with resource 999) on the impl tree. And only 999 will be present
-    // in the parent's resource provider.
-    EXPECT_EQ(1u, map.size());
+    // The third frame has all of the resources in it again, the delegated
+    // renderer layer should continue to own the resources for it.
+    EXPECT_EQ(3u, map.size());
     EXPECT_EQ(1u, map.count(999));
+    EXPECT_EQ(1u, map.count(555));
+    EXPECT_EQ(1u, map.count(444));
 
-    EXPECT_EQ(1u, delegated_impl->Resources().size());
+    EXPECT_EQ(3u, delegated_impl->Resources().size());
     EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
+    EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+    EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(444)->second));
 
     const RenderPass* pass = delegated_impl->RenderPassesInDrawOrder()[0];
-    EXPECT_EQ(1u, pass->quad_list.size());
-    const TextureDrawQuad* quad = TextureDrawQuad::MaterialCast(
+    EXPECT_EQ(3u, pass->quad_list.size());
+    const TextureDrawQuad* quad1 = TextureDrawQuad::MaterialCast(
         pass->quad_list[0]);
-    EXPECT_EQ(map.find(999)->second, quad->resource_id);
+    EXPECT_EQ(map.find(999)->second, quad1->resource_id);
+    const TextureDrawQuad* quad2 = TextureDrawQuad::MaterialCast(
+        pass->quad_list[1]);
+    EXPECT_EQ(map.find(555)->second, quad2->resource_id);
+    const TextureDrawQuad* quad3 = TextureDrawQuad::MaterialCast(
+        pass->quad_list[2]);
+    EXPECT_EQ(map.find(444)->second, quad3->resource_id);
   }
 
   virtual void afterTest() OVERRIDE {}
@@ -770,7 +769,7 @@ class LayerTreeHostDelegatedTestBadFrame
     scoped_ptr<DelegatedFrameData> frame;
     TransferableResourceArray resources;
 
-    int next_source_frame_number = m_layerTreeHost->commitNumber();
+    int next_source_frame_number = m_layerTreeHost->commit_number();
     switch (next_source_frame_number) {
       case 1:
         // Generate a frame with some resources in it.
@@ -801,10 +800,10 @@ class LayerTreeHostDelegatedTestBadFrame
         // The parent compositor (this one) does a commit.
         break;
       case 3:
-        // The bad frame does not cause resources to be released, and the
-        // resources given in it are held onto.
+        // The bad frame's resource is given back to the child compositor.
         delegated_->TakeUnusedResourcesForChildCompositor(&resources);
-        EXPECT_EQ(0u, resources.size());
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(444, resources[0].id);
 
         // Now send a good frame with 999 again.
         frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
@@ -812,17 +811,10 @@ class LayerTreeHostDelegatedTestBadFrame
         delegated_->SetFrameData(frame.Pass());
         break;
       case 4:
-        // The unused 444 resource from the bad frame will be released along
-        // with the unused 555.
+        // The unused 555 from the last good frame is now released.
         delegated_->TakeUnusedResourcesForChildCompositor(&resources);
-        EXPECT_EQ(2u, resources.size());
-        if (resources[0].id == 555) {
-          EXPECT_EQ(555, resources[0].id);
-          EXPECT_EQ(444, resources[1].id);
-        } else {
-          EXPECT_EQ(444, resources[0].id);
-          EXPECT_EQ(555, resources[1].id);
-        }
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(555, resources[0].id);
 
         endTest();
         break;
@@ -830,18 +822,18 @@ class LayerTreeHostDelegatedTestBadFrame
   }
 
   virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    if (host_impl->activeTree()->source_frame_number() < 1)
+    if (host_impl->active_tree()->source_frame_number() < 1)
       return;
 
-    LayerImpl* root_impl = host_impl->activeTree()->RootLayer();
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
 
     const ResourceProvider::ResourceIdMap& map =
-        host_impl->resourceProvider()->getChildToParentMap(
+        host_impl->resource_provider()->GetChildToParentMap(
             delegated_impl->ChildId());
 
-    switch (host_impl->activeTree()->source_frame_number()) {
+    switch (host_impl->active_tree()->source_frame_number()) {
       case 1: {
         // We have the first good frame with just 990 and 555 in it.
         // layer.
@@ -864,17 +856,14 @@ class LayerTreeHostDelegatedTestBadFrame
         break;
       }
       case 2: {
-        // We have all resources whose ownership has been given to the delegated
-        // layer.
-        EXPECT_EQ(3u, map.size());
+        // We only keep resources from the last valid frame.
+        EXPECT_EQ(2u, map.size());
         EXPECT_EQ(1u, map.count(999));
         EXPECT_EQ(1u, map.count(555));
-        EXPECT_EQ(1u, map.count(444));
 
-        EXPECT_EQ(3u, delegated_impl->Resources().size());
+        EXPECT_EQ(2u, delegated_impl->Resources().size());
         EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
         EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
-        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(444)->second));
 
         // The bad frame is dropped though, we still have the frame with 999 and
         // 555 in it.
@@ -910,6 +899,340 @@ class LayerTreeHostDelegatedTestBadFrame
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestBadFrame)
+
+class LayerTreeHostDelegatedTestUnnamedResource
+    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
+ public:
+  virtual void beginTest() OVERRIDE {
+    postSetNeedsCommitToMainThread();
+  }
+
+  virtual void didCommit() OVERRIDE {
+    scoped_ptr<DelegatedFrameData> frame;
+    TransferableResourceArray resources;
+
+    int next_source_frame_number = m_layerTreeHost->commit_number();
+    switch (next_source_frame_number) {
+      case 1:
+        // This frame includes two resources in it, but only uses one.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTransferableResource(frame.get(), 999);
+        AddTextureQuad(frame.get(), 555);
+        AddTransferableResource(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 2:
+        // The unused resource should be returned.
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(999, resources[0].id);
+
+        endTest();
+        break;
+    }
+  }
+
+  virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    if (host_impl->active_tree()->source_frame_number() != 1)
+      return;
+
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
+    FakeDelegatedRendererLayerImpl* delegated_impl =
+        static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
+
+    const ResourceProvider::ResourceIdMap& map =
+        host_impl->resource_provider()->GetChildToParentMap(
+            delegated_impl->ChildId());
+
+    // The layer only held on to the resource that was used.
+    EXPECT_EQ(1u, map.size());
+    EXPECT_EQ(1u, map.count(555));
+
+    EXPECT_EQ(1u, delegated_impl->Resources().size());
+    EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+  }
+
+  virtual void afterTest() OVERRIDE {}
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestUnnamedResource)
+
+class LayerTreeHostDelegatedTestDontLeakResource
+    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
+ public:
+  virtual void beginTest() OVERRIDE {
+    postSetNeedsCommitToMainThread();
+  }
+
+  virtual void didCommit() OVERRIDE {
+    scoped_ptr<DelegatedFrameData> frame;
+    TransferableResourceArray resources;
+
+    int next_source_frame_number = m_layerTreeHost->commit_number();
+    switch (next_source_frame_number) {
+      case 1:
+        // This frame includes two resources in it.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 999);
+        AddTransferableResource(frame.get(), 999);
+        AddTextureQuad(frame.get(), 555);
+        AddTransferableResource(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+
+        // But then we immediately stop using 999.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 2:
+        // The unused resource should be returned.
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(999, resources[0].id);
+
+        endTest();
+        break;
+    }
+  }
+
+  virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    if (host_impl->active_tree()->source_frame_number() != 1)
+      return;
+
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
+    FakeDelegatedRendererLayerImpl* delegated_impl =
+        static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
+
+    const ResourceProvider::ResourceIdMap& map =
+        host_impl->resource_provider()->GetChildToParentMap(
+            delegated_impl->ChildId());
+
+    // The layer only held on to the resource that was used.
+    EXPECT_EQ(1u, map.size());
+    EXPECT_EQ(1u, map.count(555));
+
+    EXPECT_EQ(1u, delegated_impl->Resources().size());
+    EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+  }
+
+  virtual void afterTest() OVERRIDE {}
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestDontLeakResource)
+
+class LayerTreeHostDelegatedTestResourceSentToParent
+    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
+ public:
+  virtual void beginTest() OVERRIDE {
+    // Prevent drawing with resources that are sent to the grandparent.
+    m_layerTreeHost->SetViewportSize(gfx::Size(10, 10), gfx::Size());
+    postSetNeedsCommitToMainThread();
+  }
+
+  virtual void didCommit() OVERRIDE {
+    scoped_ptr<DelegatedFrameData> frame;
+    TransferableResourceArray resources;
+
+    int next_source_frame_number = m_layerTreeHost->commit_number();
+    switch (next_source_frame_number) {
+      case 1:
+        // This frame includes two resources in it.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 999);
+        AddTransferableResource(frame.get(), 999);
+        AddTextureQuad(frame.get(), 555);
+        AddTransferableResource(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 2:
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(0u, resources.size());
+
+        // 999 is in use in the grandparent compositor, generate a frame without
+        // it present.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 3:
+        // Since 999 is in the grandparent it is not returned.
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(0u, resources.size());
+
+        m_layerTreeHost->SetNeedsCommit();
+        break;
+      case 4:
+        // 999 was returned from the grandparent and could be released.
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(999, resources[0].id);
+
+        endTest();
+        break;
+    }
+  }
+
+  virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    if (host_impl->active_tree()->source_frame_number() < 1)
+      return;
+
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
+    FakeDelegatedRendererLayerImpl* delegated_impl =
+        static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
+
+    const ResourceProvider::ResourceIdMap& map =
+        host_impl->resource_provider()->GetChildToParentMap(
+            delegated_impl->ChildId());
+
+    switch (host_impl->active_tree()->source_frame_number()) {
+      case 1: {
+        EXPECT_EQ(2u, map.size());
+        EXPECT_EQ(1u, map.count(999));
+        EXPECT_EQ(1u, map.count(555));
+
+        EXPECT_EQ(2u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+
+        // The 999 resource is sent to a grandparent compositor.
+        ResourceProvider::ResourceIdArray resources_for_parent;
+        resources_for_parent.push_back(map.find(999)->second);
+        TransferableResourceArray transferable_resources;
+        host_impl->resource_provider()->PrepareSendToParent(
+            resources_for_parent, &transferable_resources);
+        break;
+      }
+      case 2: {
+        EXPECT_EQ(2u, map.size());
+        EXPECT_EQ(1u, map.count(999));
+        EXPECT_EQ(1u, map.count(555));
+
+        /// 999 is in the parent, so not held by delegated renderer layer.
+        EXPECT_EQ(1u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+
+        // Receive 999 back from the grandparent.
+        TransferableResource resource;
+        resource.id = map.find(999)->second;
+        TransferableResourceArray transferable_resources;
+        transferable_resources.push_back(resource);
+        host_impl->resource_provider()->ReceiveFromParent(
+            transferable_resources);
+        break;
+      }
+      case 3:
+        // 999 should be released.
+        EXPECT_EQ(1u, map.size());
+        EXPECT_EQ(1u, map.count(555));
+
+        EXPECT_EQ(1u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+    }
+  }
+
+  virtual void afterTest() OVERRIDE {}
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestResourceSentToParent)
+
+class LayerTreeHostDelegatedTestCommitWithoutTake
+    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
+ public:
+  virtual void beginTest() OVERRIDE {
+    // Prevent drawing with resources that are sent to the grandparent.
+    m_layerTreeHost->SetViewportSize(gfx::Size(10, 10), gfx::Size());
+    postSetNeedsCommitToMainThread();
+  }
+
+  virtual void didCommit() OVERRIDE {
+    scoped_ptr<DelegatedFrameData> frame;
+    TransferableResourceArray resources;
+
+    int next_source_frame_number = m_layerTreeHost->commit_number();
+    switch (next_source_frame_number) {
+      case 1:
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 999);
+        AddTransferableResource(frame.get(), 999);
+        AddTextureQuad(frame.get(), 555);
+        AddTransferableResource(frame.get(), 555);
+        AddTextureQuad(frame.get(), 444);
+        AddTransferableResource(frame.get(), 444);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 2:
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(0u, resources.size());
+
+        // Stop using 999 and 444 in this frame and commit.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 3:
+        // Don't take resources here, but set a new frame that uses 999 again.
+        frame = CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
+        AddTextureQuad(frame.get(), 999);
+        AddTextureQuad(frame.get(), 555);
+        delegated_->SetFrameData(frame.Pass());
+        break;
+      case 4:
+        // 999 and 555 are in use, but 444 should be returned now.
+        delegated_->TakeUnusedResourcesForChildCompositor(&resources);
+        EXPECT_EQ(1u, resources.size());
+        EXPECT_EQ(444, resources[0].id);
+
+        endTest();
+        break;
+    }
+  }
+
+  virtual void treeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    if (host_impl->active_tree()->source_frame_number() < 1)
+      return;
+
+    LayerImpl* root_impl = host_impl->active_tree()->root_layer();
+    FakeDelegatedRendererLayerImpl* delegated_impl =
+        static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
+
+    const ResourceProvider::ResourceIdMap& map =
+        host_impl->resource_provider()->GetChildToParentMap(
+            delegated_impl->ChildId());
+
+    switch (host_impl->active_tree()->source_frame_number()) {
+      case 1:
+        EXPECT_EQ(3u, map.size());
+        EXPECT_EQ(1u, map.count(999));
+        EXPECT_EQ(1u, map.count(555));
+        EXPECT_EQ(1u, map.count(444));
+
+        EXPECT_EQ(3u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(444)->second));
+        break;
+      case 2:
+        EXPECT_EQ(1u, map.size());
+        EXPECT_EQ(1u, map.count(555));
+
+        EXPECT_EQ(1u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+        break;
+      case 3:
+        EXPECT_EQ(2u, map.size());
+        EXPECT_EQ(1u, map.count(999));
+        EXPECT_EQ(1u, map.count(555));
+
+        EXPECT_EQ(2u, delegated_impl->Resources().size());
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(999)->second));
+        EXPECT_EQ(1u, delegated_impl->Resources().count(map.find(555)->second));
+    }
+  }
+
+  virtual void afterTest() OVERRIDE {}
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestCommitWithoutTake)
 
 }  // namespace
 }  // namespace cc

@@ -8,6 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -28,8 +29,14 @@ MediaGalleriesDialogGtk::MediaGalleriesDialogGtk(
   InitWidgets();
 
   // May be NULL during tests.
-  if (controller->web_contents())
-    window_ = new ConstrainedWindowGtk(controller->web_contents(), this);
+  if (controller->web_contents()) {
+    window_ = CreateWebContentsModalDialogGtk(contents_.get(), confirm_);
+
+    WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+        WebContentsModalDialogManager::FromWebContents(
+            controller->web_contents());
+    web_contents_modal_dialog_manager->ShowDialog(window_);
+  }
 }
 
 MediaGalleriesDialogGtk::~MediaGalleriesDialogGtk() {
@@ -37,6 +44,10 @@ MediaGalleriesDialogGtk::~MediaGalleriesDialogGtk() {
 
 void MediaGalleriesDialogGtk::InitWidgets() {
   contents_.Own(gtk_vbox_new(FALSE, ui::kContentAreaSpacing));
+  g_signal_connect(contents_.get(),
+                   "destroy",
+                   G_CALLBACK(OnDestroyThunk),
+                   this);
 
   GtkWidget* header =
       gtk_util::CreateBoldLabel(UTF16ToUTF8(controller_->GetHeader()));
@@ -128,18 +139,6 @@ void MediaGalleriesDialogGtk::ForgetGallery(
   checkbox_map_.erase(iter);
 }
 
-GtkWidget* MediaGalleriesDialogGtk::GetWidgetRoot() {
-  return contents_.get();
-}
-
-GtkWidget* MediaGalleriesDialogGtk::GetFocusWidget() {
-  return confirm_;
-}
-
-void MediaGalleriesDialogGtk::DeleteDelegate() {
-  controller_->DialogFinished(accepted_);
-}
-
 void MediaGalleriesDialogGtk::OnToggled(GtkWidget* widget) {
   if (confirm_)
     gtk_widget_set_sensitive(confirm_, TRUE);
@@ -166,11 +165,15 @@ void MediaGalleriesDialogGtk::OnAddFolder(GtkWidget* widget) {
 
 void MediaGalleriesDialogGtk::OnConfirm(GtkWidget* widget) {
   accepted_ = true;
-  window_->CloseWebContentsModalDialog();
+  gtk_widget_destroy(window_);
 }
 
 void MediaGalleriesDialogGtk::OnCancel(GtkWidget* widget) {
-  window_->CloseWebContentsModalDialog();
+  gtk_widget_destroy(window_);
+}
+
+void MediaGalleriesDialogGtk::OnDestroy(GtkWidget* widget) {
+  controller_->DialogFinished(accepted_);
 }
 
 // MediaGalleriesDialogController ----------------------------------------------

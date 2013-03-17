@@ -51,6 +51,8 @@ ActionBoxMenuModel::ActionBoxMenuModel(Browser* browser,
                       starred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR);
   SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE_FROM_STAR),
           rb.GetNativeImageNamed(starred ? IDR_STAR_LIT : IDR_STAR));
+
+  AddItemWithStringId(IDC_PRINT, IDS_PRINT);
 }
 
 ActionBoxMenuModel::~ActionBoxMenuModel() {
@@ -89,7 +91,7 @@ const extensions::Extension* ActionBoxMenuModel::GetExtensionAt(int index) {
 }
 
 void ActionBoxMenuModel::ExecuteCommand(int command_id) {
-  delegate()->ExecuteCommand(command_id);
+  delegate()->ExecuteCommand(command_id, 0);
 }
 
 int ActionBoxMenuModel::GetFirstExtensionIndex() {

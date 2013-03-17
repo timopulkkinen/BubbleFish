@@ -16,6 +16,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_prefs',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/linux/system.gyp:dbus',
         '../build/linux/system.gyp:ssl',
         '../dbus/dbus.gyp:dbus',
@@ -130,6 +131,8 @@
         'dbus/session_manager_client.h',
         'dbus/sms_client.cc',
         'dbus/sms_client.h',
+        'dbus/system_clock_client.cc',
+        'dbus/system_clock_client.h',
         'dbus/update_engine_client.cc',
         'dbus/update_engine_client.h',
         'disks/disk_mount_manager.cc',
@@ -197,13 +200,29 @@
         'network/sms_watcher.h',
         'power/power_state_override.cc',
         'power/power_state_override.h',
+        'process_proxy/process_output_watcher.cc',
+        'process_proxy/process_output_watcher.h',
+        'process_proxy/process_proxy.cc',
+        'process_proxy/process_proxy.h',
+        'process_proxy/process_proxy_registry.cc',
+        'process_proxy/process_proxy_registry.h',
       ],
-      'link_settings': {
-        'libraries': [
-          '-lXext',
-          '-lXrandr',
-        ],
-      },
+      'conditions': [
+        ['use_x11 == 1', {
+          'link_settings': {
+            'libraries': [
+              '-lXext',
+              '-lXrandr',
+            ],
+          },
+        }, {
+          # use_x11 == 0
+          'sources!': [
+            'display/output_configurator.cc',
+            'display/output_configurator.h',
+          ],
+        }],
+      ],
     },
     {
       # This target contains mocks that can be used to write unit tests.
@@ -222,6 +241,8 @@
         'chromeos_test_utils.h',
         'cryptohome/mock_async_method_caller.cc',
         'cryptohome/mock_async_method_caller.h',
+        'dbus/fake_session_manager_client.cc',
+        'dbus/fake_session_manager_client.h',
         'dbus/mock_bluetooth_adapter_client.cc',
         'dbus/mock_bluetooth_adapter_client.h',
         'dbus/mock_bluetooth_device_client.cc',
@@ -268,6 +289,8 @@
         'dbus/mock_session_manager_client.h',
         'dbus/mock_sms_client.cc',
         'dbus/mock_sms_client.h',
+        'dbus/mock_system_clock_client.cc',
+        'dbus/mock_system_clock_client.h',
         'dbus/mock_update_engine_client.cc',
         'dbus/mock_update_engine_client.h',
         'disks/mock_disk_mount_manager.cc',
@@ -365,6 +388,8 @@
         'network/onc/onc_validator_unittest.cc',
         'network/shill_property_handler_unittest.cc',
         'power/power_state_override_unittest.cc',
+        'process_proxy/process_output_watcher_unittest.cc',
+        'process_proxy/process_proxy_unittest.cc',
       ],
       'include_dirs': [
         '..',

@@ -14,15 +14,15 @@ namespace cc {
 // The content bounds are determined by bounds and scale of the contents.
 class CC_EXPORT ContentsScalingLayer : public Layer {
  public:
-  virtual void calculateContentsScale(
+  virtual void CalculateContentsScale(
       float ideal_contents_scale,
       bool animating_transform_to_screen,
       float* contents_scale_x,
       float* contents_scale_y,
       gfx::Size* content_bounds) OVERRIDE;
 
-  virtual void update(
-    ResourceUpdateQueue& queue,
+  virtual void Update(
+    ResourceUpdateQueue* queue,
     const OcclusionTracker* occlusion,
     RenderingStats* stats) OVERRIDE;
 
@@ -30,7 +30,7 @@ class CC_EXPORT ContentsScalingLayer : public Layer {
   ContentsScalingLayer();
   virtual ~ContentsScalingLayer();
 
-  gfx::Size computeContentBoundsForScale(float scaleX, float scaleY) const;
+  gfx::Size ComputeContentBoundsForScale(float scale_x, float scale_y) const;
 
  private:
   float last_update_contents_scale_x_;

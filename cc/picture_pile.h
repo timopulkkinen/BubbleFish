@@ -26,11 +26,12 @@ class CC_EXPORT PicturePile : public PicturePileBase {
       gfx::Rect visible_layer_rect,
       RenderingStats* stats);
 
-  // Update other with a shallow copy of this (main => compositor thread commit)
-  void PushPropertiesTo(PicturePileImpl* other);
-
   void set_num_raster_threads(int num_raster_threads) {
     num_raster_threads_ = num_raster_threads;
+  }
+
+  void set_slow_down_raster_scale_factor(int factor) {
+    slow_down_raster_scale_factor_for_debug_ = factor;
   }
 
  private:
@@ -42,8 +43,6 @@ class CC_EXPORT PicturePile : public PicturePileBase {
   void InvalidateRect(
       PictureList& picture_list,
       gfx::Rect invalidation);
-
-  int num_raster_threads_;
 
   DISALLOW_COPY_AND_ASSIGN(PicturePile);
 };

@@ -17,7 +17,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/storage_monitor/media_device_notifications_utils.h"
 #include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "chrome/browser/storage_monitor/mock_removable_storage_observer.h"
 #include "chrome/browser/storage_monitor/removable_device_constants.h"
@@ -69,24 +68,36 @@ const TestDeviceData kTestDeviceData[] = {
 };
 
 void GetDeviceInfo(const base::FilePath& device_path,
-                   std::string* id,
+                   const base::FilePath& mount_point,
+                   std::string* device_id,
                    string16* name,
                    bool* removable,
-                   uint64* partition_size_in_bytes) {
+                   uint64* partition_size_in_bytes,
+                   string16* out_volume_label,
+                   string16* out_vendor_name,
+                   string16* out_model_name) {
   for (size_t i = 0; i < arraysize(kTestDeviceData); i++) {
     if (device_path.value() == kTestDeviceData[i].device_path) {
-      if (id)
-        *id = kTestDeviceData[i].unique_id;
       if (name)
         *name = ASCIIToUTF16(kTestDeviceData[i].device_name);
+      MediaStorageUtil::Type type = kTestDeviceData[i].type;
       if (removable) {
-        MediaStorageUtil::Type type = kTestDeviceData[i].type;
         *removable =
           (type == MediaStorageUtil::REMOVABLE_MASS_STORAGE_WITH_DCIM) ||
           (type == MediaStorageUtil::REMOVABLE_MASS_STORAGE_NO_DCIM);
       }
+      if (device_id) {
+        *device_id =
+            MediaStorageUtil::MakeDeviceId(type, kTestDeviceData[i].unique_id);
+      }
       if (partition_size_in_bytes)
         *partition_size_in_bytes = kTestDeviceData[i].partition_size_in_bytes;
+      if (out_volume_label)
+        *out_volume_label = ASCIIToUTF16("volume label");
+      if (out_vendor_name)
+        *out_vendor_name = ASCIIToUTF16("vendor name");
+      if (out_model_name)
+        *out_model_name = ASCIIToUTF16("model name");
       return;
     }
   }
@@ -118,7 +129,7 @@ std::string GetDeviceId(const std::string& device) {
 string16 GetDeviceNameWithSizeDetails(const std::string& device) {
   for (size_t i = 0; i < arraysize(kTestDeviceData); ++i) {
     if (device == kTestDeviceData[i].device_path) {
-      return GetDisplayNameForDevice(
+      return MediaStorageUtil::GetDisplayNameForDevice(
           kTestDeviceData[i].partition_size_in_bytes,
           ASCIIToUTF16(kTestDeviceData[i].device_name));
     }
@@ -605,7 +616,7 @@ TEST_F(StorageMonitorLinuxTest, DeviceLookUp) {
   ASSERT_FALSE(test_path_c.empty());
 
   // Attach to one first.
-  // (*'d mounts are those StorageMonitor knows about.)
+  // (starred mounts are those StorageMonitor knows about.)
   // kDeviceDCIM1  -> kMountPointA *
   // kDeviceNoDCIM -> kMountPointB *
   // kDeviceFixed  -> kMountPointC
@@ -618,11 +629,15 @@ TEST_F(StorageMonitorLinuxTest, DeviceLookUp) {
   EXPECT_EQ(2, observer().attach_calls());
   EXPECT_EQ(0, observer().detach_calls());
 
-  StorageMonitor::StorageInfo device_info;
+  StorageInfo device_info;
   EXPECT_TRUE(notifier()->GetStorageInfoForPath(test_path_a, &device_info));
   EXPECT_EQ(GetDeviceId(kDeviceDCIM1), device_info.device_id);
   EXPECT_EQ(test_path_a.value(), device_info.location);
   EXPECT_EQ(GetDeviceName(kDeviceDCIM1), device_info.name);
+  EXPECT_EQ(88788ULL, device_info.total_size_in_bytes);
+  EXPECT_EQ(ASCIIToUTF16("volume label"), device_info.storage_label);
+  EXPECT_EQ(ASCIIToUTF16("vendor name"), device_info.vendor_name);
+  EXPECT_EQ(ASCIIToUTF16("model name"), device_info.model_name);
 
   EXPECT_TRUE(notifier()->GetStorageInfoForPath(test_path_b, &device_info));
   EXPECT_EQ(GetDeviceId(kDeviceNoDCIM), device_info.device_id);
