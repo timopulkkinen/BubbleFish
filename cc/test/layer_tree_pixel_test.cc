@@ -5,9 +5,9 @@
 #include "cc/test/layer_tree_pixel_test.h"
 
 #include "base/path_service.h"
-#include "cc/layer_tree_impl.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_test_utils.h"
+#include "cc/trees/layer_tree_impl.h"
 #include "ui/gl/gl_implementation.h"
 #include "webkit/gpu/context_provider_in_process.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
@@ -18,7 +18,7 @@ LayerTreePixelTest::LayerTreePixelTest() {}
 
 LayerTreePixelTest::~LayerTreePixelTest() {}
 
-scoped_ptr<OutputSurface> LayerTreePixelTest::createOutputSurface() {
+scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface() {
   CHECK(gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL));
 
   using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
@@ -32,8 +32,7 @@ scoped_ptr<OutputSurface> LayerTreePixelTest::createOutputSurface() {
 scoped_refptr<cc::ContextProvider>
 LayerTreePixelTest::OffscreenContextProviderForMainThread() {
   scoped_refptr<webkit::gpu::ContextProviderInProcess> provider =
-      webkit::gpu::ContextProviderInProcess::Create(
-          webkit::gpu::ContextProviderInProcess::IN_PROCESS_COMMAND_BUFFER);
+      webkit::gpu::ContextProviderInProcess::Create();
   CHECK(provider->BindToCurrentThread());
   return provider;
 }
@@ -41,13 +40,12 @@ LayerTreePixelTest::OffscreenContextProviderForMainThread() {
 scoped_refptr<cc::ContextProvider>
 LayerTreePixelTest::OffscreenContextProviderForCompositorThread() {
   scoped_refptr<webkit::gpu::ContextProviderInProcess> provider =
-      webkit::gpu::ContextProviderInProcess::Create(
-          webkit::gpu::ContextProviderInProcess::IN_PROCESS_COMMAND_BUFFER);
+      webkit::gpu::ContextProviderInProcess::Create();
   CHECK(provider);
   return provider;
 }
 
-void LayerTreePixelTest::swapBuffersOnThread(LayerTreeHostImpl* host_impl,
+void LayerTreePixelTest::SwapBuffersOnThread(LayerTreeHostImpl* host_impl,
                                              bool result) {
   EXPECT_TRUE(result);
 
@@ -70,14 +68,14 @@ void LayerTreePixelTest::swapBuffersOnThread(LayerTreeHostImpl* host_impl,
 
   EXPECT_TRUE(IsSameAsPNGFile(bitmap, test_data_dir.Append(ref_file_)));
 
-  endTest();
+  EndTest();
 }
 
-void LayerTreePixelTest::beginTest() {
-  postSetNeedsCommitToMainThread();
+void LayerTreePixelTest::BeginTest() {
+  PostSetNeedsCommitToMainThread();
 }
 
-void LayerTreePixelTest::afterTest() {}
+void LayerTreePixelTest::AfterTest() {}
 
 scoped_refptr<SolidColorLayer> LayerTreePixelTest::CreateSolidColorLayer(
     gfx::Rect rect, SkColor color) {
@@ -92,19 +90,18 @@ scoped_refptr<SolidColorLayer> LayerTreePixelTest::CreateSolidColorLayer(
 
 void LayerTreePixelTest::RunPixelTest(
     scoped_refptr<Layer> content_root,
-    base::FilePath file_name)
-{
+    base::FilePath file_name) {
   content_root_ = content_root;
   ref_file_ = file_name;
-  runTest(true);
+  RunTest(true);
 }
 
-void LayerTreePixelTest::setupTree() {
+void LayerTreePixelTest::SetupTree() {
   scoped_refptr<Layer> root = Layer::Create();
   root->SetBounds(content_root_->bounds());
   root->AddChild(content_root_);
-  m_layerTreeHost->SetRootLayer(root);
-  ThreadedTest::setupTree();
+  layer_tree_host()->SetRootLayer(root);
+  LayerTreeTest::SetupTree();
 }
 
 }  // namespace cc

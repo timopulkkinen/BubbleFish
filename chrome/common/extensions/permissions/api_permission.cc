@@ -192,6 +192,7 @@ void APIPermissionInfo::RegisterAllPermissions(
 
     // Register extension permissions.
     { APIPermission::kActiveTab, "activeTab" },
+    { APIPermission::kAdView, "adview" },
     { APIPermission::kAlarms, "alarms" },
     { APIPermission::kBookmark, "bookmarks", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS,
@@ -216,6 +217,7 @@ void APIPermissionInfo::RegisterAllPermissions(
       IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT,
       PermissionMessage::kManagement },
     { APIPermission::kNativeMessaging, "nativeMessaging" },
+    { APIPermission::kPower, "power", },
     { APIPermission::kPrivacy, "privacy", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_PRIVACY,
       PermissionMessage::kPrivacy },

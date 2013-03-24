@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "content/browser/renderer_host/media/audio_input_renderer_host.h"
@@ -40,6 +41,11 @@
 
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "media/audio/audio_manager_base.h"
 #endif
 
 using media::AudioParameters;
@@ -128,6 +134,11 @@ WebRTCAudioDeviceTest::WebRTCAudioDeviceTest()
 WebRTCAudioDeviceTest::~WebRTCAudioDeviceTest() {}
 
 void WebRTCAudioDeviceTest::SetUp() {
+#if defined(OS_ANDROID)
+    media::AudioManagerBase::RegisterAudioManager(
+        base::android::AttachCurrentThread());
+#endif
+
   // This part sets up a RenderThread environment to ensure that
   // RenderThread::current() (<=> TLS pointer) is valid.
   // Main parts are inspired by the RenderViewFakeResourcesTest.
@@ -156,7 +167,7 @@ void WebRTCAudioDeviceTest::TearDown() {
   SetAudioHardwareConfig(NULL);
 
   // Run any pending cleanup tasks that may have been posted to the main thread.
-  ChildProcess::current()->main_thread()->message_loop()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   // Kick of the cleanup process by closing the channel. This queues up
   // OnStreamClosed calls to be executed on the audio thread.
@@ -341,7 +352,7 @@ std::string WebRTCAudioDeviceTest::GetTestDataPath(
   EXPECT_TRUE(PathService::Get(DIR_TEST_DATA, &path));
   path = path.Append(file_name);
   EXPECT_TRUE(file_util::PathExists(path));
-#ifdef OS_WIN
+#if defined(OS_WIN)
   return WideToUTF8(path.value());
 #else
   return path.value();

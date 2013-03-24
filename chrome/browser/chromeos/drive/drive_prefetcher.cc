@@ -78,11 +78,10 @@ DrivePrefetcher::~DrivePrefetcher() {
     file_system_->RemoveObserver(this);
 }
 
-void DrivePrefetcher::OnInitialLoadFinished(DriveFileError error) {
+void DrivePrefetcher::OnInitialLoadFinished() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (error == DRIVE_FILE_OK)
-    StartPrefetcherCycle();
+  StartPrefetcherCycle();
 }
 
 void DrivePrefetcher::OnDirectoryChanged(const base::FilePath& directory_path) {
@@ -96,8 +95,7 @@ void DrivePrefetcher::StartPrefetcherCycle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Scans the filesystem. When it is finished, DoPrefetch() will be called.
-  base::FilePath root(util::ExtractDrivePath(util::GetDriveMountPointPath()));
-  VisitDirectory(root);
+  VisitDirectory(util::GetDriveMyDriveRootPath());
 }
 
 void DrivePrefetcher::DoPrefetch() {

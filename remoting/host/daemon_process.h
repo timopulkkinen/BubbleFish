@@ -32,9 +32,9 @@ namespace remoting {
 
 class AutoThreadTaskRunner;
 class DesktopSession;
-struct DesktopSessionParams;
 class HostEventLogger;
 class HostStatusObserver;
+class ScreenResolution;
 
 // This class implements core of the daemon process. It manages the networking
 // process running at lower privileges and maintains the list of desktop
@@ -94,8 +94,12 @@ class DaemonProcess
 
   // Creates a desktop session and assigns a unique ID to it.
   void CreateDesktopSession(int terminal_id,
-                            const DesktopSessionParams& params,
+                            const ScreenResolution& resolution,
                             bool virtual_terminal);
+
+  // Changes the screen resolution of the desktop session identified by
+  // |terminal_id|.
+  void SetScreenResolution(int terminal_id, const ScreenResolution& resolution);
 
   // Requests the network process to crash.
   void CrashNetworkProcess(const tracked_objects::Location& location);
@@ -103,9 +107,9 @@ class DaemonProcess
   // Reads the host configuration and launches the network process.
   void Initialize();
 
-  // Returns true if |terminal_id| is considered to be known. I.e. it is
+  // Returns true if |terminal_id| is in the range of allocated IDs. I.e. it is
   // less or equal to the highest ID we have seen so far.
-  bool IsTerminalIdKnown(int terminal_id);
+  bool WasTerminalIdAllocated(int terminal_id);
 
   // Handlers for the host status notifications received from the network
   // process.
@@ -126,7 +130,7 @@ class DaemonProcess
   // An implementation should validate |params| as they are received via IPC.
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
       int terminal_id,
-      const DesktopSessionParams& params,
+      const ScreenResolution& resolution,
       bool virtual_terminal) = 0;
 
   // Requests the network process to crash.

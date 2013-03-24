@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/drive/change_list_loader.h"
 #include "chrome/browser/chromeos/drive/change_list_loader_observer.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_system/drive_operations.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
@@ -61,6 +62,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
                   google_apis::DriveServiceInterface* drive_service,
                   google_apis::DriveUploaderInterface* uploader,
                   DriveWebAppsRegistry* webapps_registry,
+                  DriveResourceMetadata* resource_metadata,
                   base::SequencedTaskRunner* blocking_task_runner);
   virtual ~DriveFileSystem();
 
@@ -150,9 +152,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const base::FilePath& directory_path) OVERRIDE;
   virtual void OnResourceListFetched(int num_accumulated_entries) OVERRIDE;
   virtual void OnFeedFromServerLoaded() OVERRIDE;
-
-  // Used in tests to load the file system from the cache.
-  void LoadFromCacheForTesting(const FileOperationCallback& callback);
+  virtual void OnInitialFeedLoaded() OVERRIDE;
 
   // Used in tests to update the file system from |feed_list|.
   // See also the comment at ChangeListLoader::UpdateFromFeed().
@@ -172,9 +172,11 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // Struct used for AddUploadedFile.
   struct AddUploadedFileParams;
 
-  // Initializes DriveResourceMetadata and related instances (ChangeListLoader
-  // and DriveOperations). This is a part of the initialization.
-  void ResetResourceMetadata();
+  // Used to implement Reload().
+  void ReloadAfterReset();
+
+  // Sets up ChangeListLoader.
+  void SetupChangeListLoader();
 
   // Called on preference change.
   void OnDisableDriveHostedFilesChanged();
@@ -307,11 +309,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // Callback for handling results of ReloadFeedFromServerIfNeeded() initiated
   // from CheckForUpdates().
   void OnUpdateChecked(DriveFileError error);
-
-  // Notifies that the initial feed load is finished and runs |callback|.
-  // |callback| must not be null.
-  void NotifyInitialLoadFinishedAndRun(const FileOperationCallback& callback,
-                                       DriveFileError error);
 
   // Helper function for internally handling responses from
   // GetFileFromCacheByResourceIdAndMd5() calls during processing of
@@ -459,8 +456,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
       base::PlatformFileInfo* file_info,
       bool get_file_info_result);
 
-  scoped_ptr<DriveResourceMetadata> resource_metadata_;
-
   // The profile hosts the DriveFileSystem via DriveSystemService.
   Profile* profile_;
 
@@ -475,6 +470,8 @@ class DriveFileSystem : public DriveFileSystemInterface,
 
   // The webapps registry owned by DriveSystemService.
   DriveWebAppsRegistry* webapps_registry_;
+
+  DriveResourceMetadata* resource_metadata_;
 
   // Periodic timer for checking updates.
   base::Timer update_timer_;

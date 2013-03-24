@@ -6,10 +6,18 @@
 #define CHROME_COMMON_INSTANT_TYPES_H_
 
 #include <string>
+#include <utility>
 
 #include "base/string16.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
+
+// ID used by Instant code to refer to objects (e.g. Autocomplete results, Most
+// Visited items) that the Instant page needs access to.
+typedef int InstantRestrictedID;
+
+// The size of the InstantMostVisitedItem cache.
+const size_t kMaxInstantMostVisitedItemCacheSize = 100;
 
 // Ways that the Instant suggested text is autocompleted into the omnibox.
 enum InstantCompleteBehavior {
@@ -73,6 +81,10 @@ struct InstantAutocompleteResult {
   // The URL of the match, same as AutocompleteMatch::destination_url.
   string16 destination_url;
 
+  // The search query for this match. Only set for matches coming from
+  // SearchProvider. Populated using AutocompleteMatch::contents.
+  string16 search_query;
+
   // The transition type to use when the user opens this match. Same as
   // AutocompleteMatch::transition.
   content::PageTransition transition;
@@ -80,6 +92,10 @@ struct InstantAutocompleteResult {
   // The relevance score of this match, same as AutocompleteMatch::relevance.
   int relevance;
 };
+
+// An InstantAutocompleteResult along with its assigned restricted ID.
+typedef std::pair<InstantRestrictedID, InstantAutocompleteResult>
+    InstantAutocompleteResultIDPair;
 
 // How to interpret the size (height or width) of the Instant overlay (preview).
 enum InstantSizeUnits {
@@ -136,14 +152,13 @@ struct ThemeBackgroundInfo {
   // The theme background image height.
   // Value is only valid if |theme_id| is valid.
   uint16 image_height;
+
+  // True if theme has attribution logo.
+  // Value is only valid if |theme_id| is valid.
+  bool has_attribution;
 };
 
 struct InstantMostVisitedItem {
-  InstantMostVisitedItem() : most_visited_item_id(0) {}
-
-  // A private identifier used on the browser side when retrieving assets.
-  uint64 most_visited_item_id;
-
   // The URL of the Most Visited item.
   GURL url;
 
@@ -151,5 +166,9 @@ struct InstantMostVisitedItem {
   // is used as the title.
   string16 title;
 };
+
+// An InstantMostVisitedItem along with its assigned restricted ID.
+typedef std::pair<InstantRestrictedID, InstantMostVisitedItem>
+    InstantMostVisitedItemIDPair;
 
 #endif  // CHROME_COMMON_INSTANT_TYPES_H_

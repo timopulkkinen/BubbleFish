@@ -48,31 +48,42 @@ class SearchMetadataTest : public testing::Test {
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
-    drive_cache_ = new DriveCache(
+    drive_cache_.reset(new DriveCache(
         DriveCache::GetCacheRootPath(profile_.get()),
         blocking_task_runner_,
-        fake_free_disk_space_getter_.get());
+        fake_free_disk_space_getter_.get()));
 
     drive_webapps_registry_.reset(new DriveWebAppsRegistry);
 
+    resource_metadata_.reset(new DriveResourceMetadata(
+        fake_drive_service_->GetRootResourceId(),
+        drive_cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+        blocking_task_runner_));
+
     file_system_.reset(new DriveFileSystem(profile_.get(),
-                                           drive_cache_,
+                                           drive_cache_.get(),
                                            fake_drive_service_.get(),
                                            NULL,  // uploader
                                            drive_webapps_registry_.get(),
+                                           resource_metadata_.get(),
                                            blocking_task_runner_));
     file_system_->Initialize();
+
     DriveFileError error = DRIVE_FILE_ERROR_FAILED;
+    resource_metadata_->Initialize(
+        google_apis::test_util::CreateCopyResultCallback(&error));
+    google_apis::test_util::RunBlockingPoolTask();
+    ASSERT_EQ(DRIVE_FILE_OK, error);
+
     file_system_->change_list_loader()->LoadFromServerIfNeeded(
         DirectoryFetchInfo(),
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                   &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     ASSERT_EQ(DRIVE_FILE_OK, error);
   }
 
   virtual void TearDown() OVERRIDE {
-    test_util::DeleteDriveCache(drive_cache_);
+    drive_cache_.reset();
   }
 
  protected:
@@ -82,8 +93,10 @@ class SearchMetadataTest : public testing::Test {
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
-  DriveCache* drive_cache_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> drive_cache_;
   scoped_ptr<DriveWebAppsRegistry> drive_webapps_registry_;
+  scoped_ptr<DriveResourceMetadata, test_util::DestroyHelperForTests>
+      resource_metadata_;
   scoped_ptr<DriveFileSystem> file_system_;
 };
 

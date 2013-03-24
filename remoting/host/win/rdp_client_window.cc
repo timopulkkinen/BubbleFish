@@ -4,9 +4,18 @@
 
 #include "remoting/host/win/rdp_client_window.h"
 
+#include <wtsdefs.h>
+
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
+
+// RDP connection disconnect reasons codes that should not be interpreted as
+// errors.
+const long kDisconnectReasonNoInfo = 0;
+const long kDisconnectReasonLocalNotError = 1;
+const long kDisconnectReasonRemoteByUser = 2;
+const long kDisconnectReasonByServer = 3;
 
 namespace remoting {
 
@@ -101,6 +110,11 @@ LRESULT RdpClientWindow::OnCreate(CREATESTRUCT* create_struct) {
   if (FAILED(result))
     goto done;
 
+  // Use 32-bit color.
+  result = client_->put_ColorDepth(32);
+  if (FAILED(result))
+    goto done;
+
   // Set dimensions of the remote desktop.
   result = client_->put_DesktopWidth(screen_size_.width());
   if (FAILED(result))
@@ -151,6 +165,14 @@ LRESULT RdpClientWindow::OnCreate(CREATESTRUCT* create_struct) {
   if (FAILED(result))
     goto done;
 
+  // Enable enhanced graphics, font smoothing and desktop composition.
+  const LONG kDesiredFlags = WTS_PERF_ENABLE_ENHANCED_GRAPHICS |
+                             WTS_PERF_ENABLE_FONT_SMOOTHING |
+                             WTS_PERF_ENABLE_DESKTOP_COMPOSITION;
+  result = client_settings_->put_PerformanceFlags(kDesiredFlags);
+  if (FAILED(result))
+    goto done;
+
   // Set the port to connect to.
   result = client_settings_->put_RDPPort(server_endpoint_.port());
   if (FAILED(result))
@@ -162,8 +184,9 @@ LRESULT RdpClientWindow::OnCreate(CREATESTRUCT* create_struct) {
 
 done:
   if (FAILED(result)) {
-    LOG(ERROR) << "Failed to start an RDP connection: error=" << std::hex
-               << result << std::dec;
+    LOG(ERROR) << "RDP: failed to initiate a connection to "
+               << server_endpoint_.ToString() << ": error="
+               << std::hex << result << std::dec;
     client_.Release();
     client_settings_.Release();
     return -1;
@@ -178,42 +201,50 @@ void RdpClientWindow::OnDestroy() {
 }
 
 HRESULT RdpClientWindow::OnConnected() {
-  VLOG(3) << "The RDP client control has established a connection";
+  VLOG(1) << "RDP: successfully connected to " << server_endpoint_.ToString();
 
   NotifyConnected();
   return S_OK;
 }
 
 HRESULT RdpClientWindow::OnDisconnected(long reason) {
-  // Log the disconnect reason and extended code.
+  if (reason == kDisconnectReasonNoInfo ||
+      reason == kDisconnectReasonLocalNotError ||
+      reason == kDisconnectReasonRemoteByUser ||
+      reason == kDisconnectReasonByServer) {
+    VLOG(1) << "RDP: disconnected from " << server_endpoint_.ToString()
+            << ", reason=" << reason;
+    NotifyDisconnected();
+    return S_OK;
+  }
+
+  // Get the extended disconnect reason code.
   mstsc::ExtendedDisconnectReasonCode extended_code;
   HRESULT result = client_->get_ExtendedDisconnectReason(&extended_code);
   if (FAILED(result))
     extended_code = mstsc::exDiscReasonNoInfo;
 
-  VLOG(1) << "The RDP client control has been disconnected: reason=" << reason
-          << ", extended_code=" << extended_code;
-
-  // Try to log the error message as well.
-  if (extended_code != mstsc::exDiscReasonNoInfo) {
-    base::win::ScopedComPtr<mstsc::IMsRdpClient5> client5;
-    result = client_.QueryInterface(client5.Receive());
-    if (SUCCEEDED(result)) {
-      base::win::ScopedBstr error_message;
-      reason = client5->GetErrorDescription(reason, extended_code,
-                                            error_message.Receive());
-      if (SUCCEEDED(result)) {
-        VLOG(1) << "  error_message=" << error_message;
-      }
-    }
+  // Get the error message as well.
+  base::win::ScopedBstr error_message;
+  base::win::ScopedComPtr<mstsc::IMsRdpClient5> client5;
+  result = client_.QueryInterface(client5.Receive());
+  if (SUCCEEDED(result)) {
+    result = client5->GetErrorDescription(reason, extended_code,
+                                          error_message.Receive());
+    if (FAILED(result))
+      error_message.Reset();
   }
+
+  LOG(ERROR) << "RDP: disconnected from " << server_endpoint_.ToString()
+             << ": " << error_message << " (reason=" << reason
+             << ", extended_code=" << extended_code << ")";
 
   NotifyDisconnected();
   return S_OK;
 }
 
 HRESULT RdpClientWindow::OnFatalError(long error_code) {
-  LOG(ERROR) << "An error occured in the RDP client control: error_code="
+  LOG(ERROR) << "RDP: an error occured: error_code="
              << error_code;
 
   NotifyDisconnected();

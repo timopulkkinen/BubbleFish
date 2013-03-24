@@ -7,17 +7,30 @@
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkDraw.h"
 #include "third_party/skia/include/core/SkRRect.h"
+#include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/src/core/SkRasterClip.h"
 #include "ui/gfx/rect_conversions.h"
 
 namespace {
 
-// FIXME: Arbitrary number. Requires tuning & experimentation.
+// FIXME: Arbitrary numbers. Requires tuning & experimentation.
 // Probably requires per-platform tuning; N10 average draw call takes
 // 25x as long as Z620.
 const int gPictureCostThreshold = 1000;
+const int kUnknownExpensiveCost = 500;
+const int kUnknownBitmapCost = 1000;
 
-static bool isSolidColorPaint(const SkPaint& paint) {
+// URI label for a lazily decoded SkPixelRef.
+const char kLabelLazyDecoded[] = "lazy";
+const int kLabelLazyDecodedLength = 4;
+
+// Estimate of rasterization performance on mid-low-range hardware,
+// drawing rectangles with simple paints.
+const int kSimpleRectPixelsPerUS = 1000;
+const int kComplexRectPixelsPerUS = 100;
+const int kSimpleTextCharPerUS = 2;
+
+bool isSolidColorPaint(const SkPaint& paint) {
   SkXfermode::Mode xferMode;
 
   // getXfermode can return a NULL, but that is handled
@@ -38,9 +51,9 @@ static bool isSolidColorPaint(const SkPaint& paint) {
            xferMode == SkXfermode::kSrcOver_Mode));
 }
 
-static bool isFullQuad(const SkDraw& draw,
-                       const SkRect& canvasRect,
-                       const SkRect& drawnRect) {
+bool isFullQuad(const SkDraw& draw,
+                const SkRect& canvasRect,
+                const SkRect& drawnRect) {
 
   // If the transform results in a non-axis aligned
   // rect, then be conservative and return false.
@@ -65,6 +78,12 @@ static bool isFullQuad(const SkDraw& draw,
          deviceRect.contains(clipRect) &&
          clipRect.contains(canvasRect) &&
          drawBitmapRect.contains(canvasRect);
+}
+
+bool hasBitmap(const SkPaint& paint) {
+  SkShader* shader = paint.getShader();
+  return shader &&
+      (SkShader::kNone_BitmapType != shader->asABitmap(NULL, NULL, NULL));
 }
 
 } // namespace
@@ -111,8 +130,55 @@ void AnalysisDevice::setForceNotTransparent(bool flag) {
     isTransparent_ = false;
 }
 
+void AnalysisDevice::addPixelRefIfLazy(SkPixelRef* pixelRef) {
+  if (!pixelRef)
+    return;
+
+  uint32_t genID = pixelRef->getGenerationID();
+
+  // If this ID exists (whether it is lazy pixel ref or not),
+  // we can return early.
+  std::pair<IdSet::iterator, bool> insertionResult =
+      existingPixelRefIDs_.insert(genID);
+  if (!insertionResult.second)
+    return;
+
+  if (pixelRef->getURI() &&
+      !strncmp(pixelRef->getURI(),
+               kLabelLazyDecoded,
+               kLabelLazyDecodedLength)) {
+    lazyPixelRefs_.push_back(static_cast<skia::LazyPixelRef*>(pixelRef));
+  }
+}
+
+void AnalysisDevice::addBitmap(const SkBitmap& bitmap) {
+  addPixelRefIfLazy(bitmap.pixelRef());
+}
+
+void AnalysisDevice::addBitmapFromPaint(const SkPaint& paint) {
+  SkShader* shader = paint.getShader();
+  if (shader) {
+    SkBitmap bitmap;
+    // Check whether the shader is a gradient in order to short-circuit
+    // call to asABitmap to prevent generation of bitmaps from
+    // gradient shaders, which implement asABitmap.
+    if (SkShader::kNone_GradientType == shader->asAGradient(NULL) &&
+        SkShader::kNone_BitmapType != shader->asABitmap(&bitmap, NULL, NULL)) {
+        addPixelRefIfLazy(bitmap.pixelRef());
+    }
+  }
+}
+
+void AnalysisDevice::consumeLazyPixelRefs(LazyPixelRefList* pixelRefs) {
+  DCHECK(pixelRefs);
+  DCHECK(pixelRefs->empty());
+  lazyPixelRefs_.swap(*pixelRefs);
+  existingPixelRefIDs_.clear();
+}
+
 void AnalysisDevice::clear(SkColor color) {
-  ++estimatedCost_;
+  // FIXME: cost here should be simple rect of device size
+  estimatedCost_ += kUnknownExpensiveCost;
 
   isTransparent_ = (!isForcedNotTransparent_ && SkColorGetA(color) == 0);
 
@@ -126,7 +192,11 @@ void AnalysisDevice::clear(SkColor color) {
 }
 
 void AnalysisDevice::drawPaint(const SkDraw&, const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -134,7 +204,11 @@ void AnalysisDevice::drawPaint(const SkDraw&, const SkPaint& paint) {
 void AnalysisDevice::drawPoints(const SkDraw&, SkCanvas::PointMode mode,
                           size_t count, const SkPoint[],
                           const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -143,10 +217,14 @@ void AnalysisDevice::drawRect(const SkDraw& draw, const SkRect& rect,
                         const SkPaint& paint) {
 
   // FIXME: if there's a pending image decode & resize, more expensive
+  estimatedCost_ += 1 + rect.width() * rect.height() / kSimpleRectPixelsPerUS;
   if (paint.getMaskFilter()) {
-    estimatedCost_ += 300;
+    estimatedCost_ += kUnknownExpensiveCost;
   }
-  ++estimatedCost_;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
 
   bool doesCoverCanvas = isFullQuad(draw,
                                     SkRect::MakeWH(width(), height()),
@@ -192,14 +270,18 @@ void AnalysisDevice::drawRect(const SkDraw& draw, const SkRect& rect,
 
 void AnalysisDevice::drawOval(const SkDraw&, const SkRect& oval,
                         const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
 
 void AnalysisDevice::drawPath(const SkDraw&, const SkPath& path,
                         const SkPaint& paint,
-                        const SkMatrix* prePathMatrix ,
+                        const SkMatrix* prePathMatrix,
                         bool pathIsMutable ) {
   // On Z620, every antialiased path costs us about 300us.
   // We've only seen this in practice on filled paths, but
@@ -207,7 +289,13 @@ void AnalysisDevice::drawPath(const SkDraw&, const SkPath& path,
   if (paint.getMaskFilter()) {
     estimatedCost_ += 300;
   }
-  ++estimatedCost_;
+  // FIXME: horrible overestimate if the path is stroked instead of filled
+  estimatedCost_ += 1 + path.getBounds().width() *
+      path.getBounds().height() / kSimpleRectPixelsPerUS;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -215,51 +303,75 @@ void AnalysisDevice::drawPath(const SkDraw&, const SkPath& path,
 void AnalysisDevice::drawBitmap(const SkDraw&, const SkBitmap& bitmap,
                           const SkIRect* srcRectOrNull,
                           const SkMatrix& matrix, const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  //DCHECK(hasBitmap(paint));
+  estimatedCost_ += kUnknownBitmapCost;
   isSolidColor_ = false;
   isTransparent_ = false;
+  addBitmap(bitmap);
 }
 
 void AnalysisDevice::drawSprite(const SkDraw&, const SkBitmap& bitmap,
                           int x, int y, const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  //DCHECK(hasBitmap(paint));
+  estimatedCost_ += kUnknownBitmapCost;
   isSolidColor_ = false;
   isTransparent_ = false;
+  addBitmap(bitmap);
 }
 
-void AnalysisDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap&,
+void AnalysisDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
                               const SkRect* srcOrNull, const SkRect& dst,
                               const SkPaint& paint) {
-  ++estimatedCost_;
+  // FIXME: we also accumulate cost from drawRect()
+  estimatedCost_ += 1 + dst.width() * dst.height() / kComplexRectPixelsPerUS;
+  //DCHECK(hasBitmap(paint));
+  estimatedCost_ += kUnknownBitmapCost;
 
   // Call drawRect to determine transparency,
   // but reset solid color to false.
   drawRect(draw, dst, paint);
   isSolidColor_ = false;
+  addBitmap(bitmap);
 }
 
 
 void AnalysisDevice::drawText(const SkDraw&, const void* text, size_t len,
                         SkScalar x, SkScalar y, const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += 1 + len / kSimpleTextCharPerUS;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
 
-void AnalysisDevice::drawPosText(const SkDraw& draw, const void* text, size_t len,
+void AnalysisDevice::drawPosText(const SkDraw& draw, const void* text,
+                           size_t len,
                            const SkScalar pos[], SkScalar constY,
                            int scalarsPerPos, const SkPaint& paint) {
   // FIXME: On Z620, every glyph cache miss costs us about 10us.
   // We don't have a good mechanism for predicting glyph cache misses.
-  ++estimatedCost_;
+  estimatedCost_ += 1 + len / kSimpleTextCharPerUS;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
 
-void AnalysisDevice::drawTextOnPath(const SkDraw&, const void* text, size_t len,
+void AnalysisDevice::drawTextOnPath(const SkDraw&, const void* text,
+                              size_t len,
                               const SkPath& path, const SkMatrix* matrix,
                               const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += 1 + len / kSimpleTextCharPerUS;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -269,7 +381,11 @@ void AnalysisDevice::drawPosTextOnPath(const SkDraw& draw, const void* text,
                                  size_t len,
                                  const SkPoint pos[], const SkPaint& paint,
                                  const SkPath& path, const SkMatrix* matrix) {
-  ++estimatedCost_;
+  estimatedCost_ += 1 + len / kSimpleTextCharPerUS;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -281,14 +397,20 @@ void AnalysisDevice::drawVertices(const SkDraw&, SkCanvas::VertexMode,
                             const SkColor colors[], SkXfermode* xmode,
                             const uint16_t indices[], int indexCount,
                             const SkPaint& paint) {
-  ++estimatedCost_;
+  estimatedCost_ += kUnknownExpensiveCost;
+  if (hasBitmap(paint)) {
+    estimatedCost_ += kUnknownBitmapCost;
+    addBitmapFromPaint(paint);
+  }
   isSolidColor_ = false;
   isTransparent_ = false;
 }
 
 void AnalysisDevice::drawDevice(const SkDraw&, SkDevice*, int x, int y,
-                          const SkPaint&) {
-  ++estimatedCost_;
+                          const SkPaint& paint) {
+  estimatedCost_ += kUnknownExpensiveCost;
+  if (hasBitmap(paint))
+    estimatedCost_ += kUnknownBitmapCost;
   isSolidColor_ = false;
   isTransparent_ = false;
 }
@@ -321,6 +443,10 @@ bool AnalysisCanvas::isTransparent() const {
 
 int AnalysisCanvas::getEstimatedCost() const {
   return (static_cast<AnalysisDevice*>(getDevice()))->getEstimatedCost();
+}
+
+void AnalysisCanvas::consumeLazyPixelRefs(LazyPixelRefList* pixelRefs) {
+  static_cast<AnalysisDevice*>(getDevice())->consumeLazyPixelRefs(pixelRefs);
 }
 
 bool AnalysisCanvas::clipRect(const SkRect& rect, SkRegion::Op op,

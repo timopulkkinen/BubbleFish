@@ -420,12 +420,9 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
   }
 }
 
-static scoped_refptr<RefcountedProfileKeyedService> BuildWebDataService(
+static ProfileKeyedService* BuildWebDataService(
     Profile* profile) {
-  WebDataService* web_data_service = new WebDataService();
-  if (web_data_service)
-    web_data_service->Init(profile->GetPath());
-  return web_data_service;
+  return new WebDataServiceWrapper(profile);
 }
 
 void TestingProfile::CreateWebDataService() {

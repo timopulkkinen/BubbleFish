@@ -44,6 +44,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
+#if defined(USE_ASH)
+#include "ash/wm/window_util.h"
+#endif
+
 #if defined(OS_WIN)
 #include "win8/util/win8_util.h"
 #endif
@@ -353,6 +357,14 @@ void TaskManagerView::Init() {
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PROCESS_ID_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+#if defined(OS_WIN)
+  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_GDI_HANDLES_COLUMN,
+                                     ui::TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
+  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_USER_HANDLES_COLUMN,
+                                     ui::TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
+#endif
   columns_.push_back(ui::TableColumn(
       IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
       ui::TableColumn::RIGHT, -1, 0));
@@ -406,6 +418,8 @@ void TaskManagerView::Init() {
       IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN,
                                   false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_GDI_HANDLES_COLUMN, false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_USER_HANDLES_COLUMN, false);
 
   UpdateStatsCounters();
   tab_table_->SetObserver(this);
@@ -521,7 +535,10 @@ void TaskManagerView::Show(bool highlight_background_resources,
   // In Windows Metro it's not good to open this native window.
   DCHECK(!win8::IsSingleWindowMetroMode());
 #endif
-  const chrome::HostDesktopType desktop_type = browser->host_desktop_type();
+  // In ash we can come here through the ChromeShellDelegate. If there is no
+  // browser window at that time of the call, browser could be passed as NULL.
+  const chrome::HostDesktopType desktop_type =
+      browser ? browser->host_desktop_type() : chrome::HOST_DESKTOP_TYPE_ASH;
 
   if (instance_) {
     if (instance_->highlight_background_resources_ !=
@@ -535,8 +552,13 @@ void TaskManagerView::Show(bool highlight_background_resources,
     }
   }
   instance_ = new TaskManagerView(highlight_background_resources, desktop_type);
-  DialogDelegateView::CreateDialogWidget(instance_,
-      browser->window()->GetNativeWindow(), NULL);
+  gfx::NativeWindow window =
+      browser ? browser->window()->GetNativeWindow() : NULL;
+#if defined(USE_ASH)
+  if (!window)
+    window = ash::wm::GetActiveWindow();
+#endif
+  DialogDelegateView::CreateDialogWidget(instance_, window, NULL);
   instance_->InitAlwaysOnTopState();
   instance_->model_->StartUpdating();
   instance_->GetWidget()->Show();
@@ -753,12 +775,8 @@ bool TaskManagerView::GetSavedAlwaysOnTopState(bool* always_on_top) const {
 namespace chrome {
 
 // Declared in browser_dialogs.h so others don't need to depend on our header.
-void ShowTaskManager(Browser* browser) {
-  TaskManagerView::Show(false, browser);
-}
-
-void ShowBackgroundPages(Browser* browser) {
-  TaskManagerView::Show(true, browser);
+void ShowTaskManager(Browser* browser, bool highlight_background_resources) {
+  TaskManagerView::Show(highlight_background_resources, browser);
 }
 
 }  // namespace chrome

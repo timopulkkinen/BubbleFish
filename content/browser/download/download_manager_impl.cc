@@ -18,7 +18,7 @@
 #include "base/synchronization/lock.h"
 #include "base/sys_string_conversions.h"
 #include "build/build_config.h"
-#include "content/browser/download/byte_stream.h"
+#include "content/browser/byte_stream.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_factory.h"
 #include "content/browser/download/download_item_factory.h"
@@ -95,7 +95,7 @@ void BeginDownload(scoped_ptr<DownloadUrlParameters> params,
   if (params->offset() > 0) {
     request->SetExtraRequestHeaderByName(
         "Range",
-        StringPrintf("bytes=%" PRId64 "-", params->offset()),
+        base::StringPrintf("bytes=%" PRId64 "-", params->offset()),
         true);
 
     if (has_last_modified) {
@@ -552,7 +552,7 @@ int DownloadManagerImpl::RemoveDownloadsBetween(base::Time remove_begin,
 
     if (download->GetStartTime() >= remove_begin &&
         (remove_end.is_null() || download->GetStartTime() < remove_end) &&
-        (download->IsComplete() || download->IsCancelled())) {
+        !download->IsInProgress()) {
       // Erases the download from downloads_.
       download->Remove();
       count++;

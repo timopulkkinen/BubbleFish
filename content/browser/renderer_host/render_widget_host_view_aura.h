@@ -112,6 +112,10 @@ class RenderWidgetHostViewAura
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
+#if defined(OS_WIN)
+  virtual void SetParentNativeViewAccessible(
+      gfx::NativeViewAccessible accessible_parent) OVERRIDE;
+#endif
 
   // Overridden from RenderWidgetHostViewPort:
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -404,6 +408,11 @@ class RenderWidgetHostViewAura
   void UpdateCutoutRects();
 #endif
 
+  void CopyFromCompositingSurfaceHelper(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size_in_pixel,
+      const base::Callback<void(bool, const SkBitmap&)>& callback);
+
   // The model object.
   RenderWidgetHostImpl* host_;
 
@@ -550,6 +559,8 @@ class RenderWidgetHostViewAura
 #endif
 
   base::TimeTicks last_draw_ended_;
+
+  gfx::NativeViewAccessible accessible_parent_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };

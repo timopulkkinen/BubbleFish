@@ -22,7 +22,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -31,9 +30,7 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/instant/instant_service.h"
-#include "chrome/browser/instant/instant_service_factory.h"
-#include "chrome/browser/instant/search.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -43,6 +40,9 @@
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -60,6 +60,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/extensions/extension.h"
@@ -362,8 +363,8 @@ bool SetPluginEnabled(PluginPrefs* plugin_prefs,
 int CountPluginsOnIOThread() {
   int count = 0;
   for (content::BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
-    if (iter.GetData().type == content::PROCESS_TYPE_PLUGIN ||
-        iter.GetData().type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
+    if (iter.GetData().process_type == content::PROCESS_TYPE_PLUGIN ||
+        iter.GetData().process_type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
       count++;
     }
   }
@@ -1274,7 +1275,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
 
   // Setting the forcelist extension should install "good.crx".
   base::ListValue forcelist;
-  forcelist.Append(base::Value::CreateStringValue(StringPrintf(
+  forcelist.Append(base::Value::CreateStringValue(base::StringPrintf(
       "%s;%s", kGoodCrxId, url.spec().c_str())));
   PolicyMap policies;
   policies.Set(key::kExtensionInstallForcelist, POLICY_LEVEL_MANDATORY,
@@ -1511,15 +1512,17 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
     "http://sub.bbb.com/empty.html",
     "http://bbb.com/policy/blank.html",
   };
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(RedirectHostsToTestData, kURLS, arraysize(kURLS)),
-      MessageLoop::QuitClosure());
-  content::RunMessageLoop();
+  {
+    base::RunLoop loop;
+    BrowserThread::PostTaskAndReply(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(RedirectHostsToTestData, kURLS, arraysize(kURLS)),
+        loop.QuitClosure());
+    loop.Run();
+  }
 
-  // Verify that all the URLs can be opened without a blacklist.
-  for (size_t i = 0; i < arraysize(kURLS); ++i)
-    CheckCanOpenURL(browser(), kURLS[i]);
+  // Verify that "bbb.com" opens before applying the blacklist.
+  CheckCanOpenURL(browser(), kURLS[1]);
 
   // Set a blacklist.
   base::ListValue blacklist;
@@ -1529,7 +1532,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
                POLICY_SCOPE_USER, blacklist.DeepCopy());
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
-  // All bbb.com URLs are blocked.
+  // All bbb.com URLs are blocked, and "aaa.com" is still unblocked.
   CheckCanOpenURL(browser(), kURLS[0]);
   for (size_t i = 1; i < arraysize(kURLS); ++i)
     CheckURLIsBlocked(browser(), kURLS[i]);
@@ -1542,16 +1545,18 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
                POLICY_SCOPE_USER, whitelist.DeepCopy());
   UpdateProviderPolicy(policies);
   FlushBlacklistPolicy();
-  CheckCanOpenURL(browser(), kURLS[0]);
   CheckURLIsBlocked(browser(), kURLS[1]);
   CheckCanOpenURL(browser(), kURLS[2]);
   CheckCanOpenURL(browser(), kURLS[3]);
 
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(UndoRedirectHostsToTestData, kURLS, arraysize(kURLS)),
-      MessageLoop::QuitClosure());
-  content::RunMessageLoop();
+  {
+    base::RunLoop loop;
+    BrowserThread::PostTaskAndReply(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(UndoRedirectHostsToTestData, kURLS, arraysize(kURLS)),
+        loop.QuitClosure());
+    loop.Run();
+  }
 }
 
 // Flaky on Linux. http://crbug.com/155459
@@ -1874,7 +1879,7 @@ class MediaStreamDevicesControllerBrowserTest
         content_settings,
         request,
         base::Bind(&MediaStreamDevicesControllerBrowserTest::Accept, this));
-    controller.DismissInfoBarAndTakeActionOnSettings();
+    controller.ProcessRequest();
 
     MessageLoop::current()->QuitWhenIdle();
   }
@@ -1890,7 +1895,7 @@ class MediaStreamDevicesControllerBrowserTest
     MediaStreamDevicesController controller(
         browser()->profile(), content_settings, request,
         base::Bind(&MediaStreamDevicesControllerBrowserTest::Accept, this));
-    controller.DismissInfoBarAndTakeActionOnSettings();
+    controller.ProcessRequest();
 
     MessageLoop::current()->QuitWhenIdle();
   }
@@ -1929,6 +1934,7 @@ IN_PROC_BROWSER_TEST_P(MediaStreamDevicesControllerBrowserTest,
       content::MEDIA_DEVICE_VIDEO_CAPTURE, "fake_dev", "Fake Video Device");
   video_devices.push_back(fake_video_device);
 
+LOG(ERROR) << " *** Policy test";
   PolicyMap policies;
   policies.Set(key::kVideoCaptureAllowed, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER,

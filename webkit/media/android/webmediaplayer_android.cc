@@ -4,14 +4,18 @@
 
 #include "webkit/media/android/webmediaplayer_android.h"
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "cc/layers/video_layer.h"
 #include "media/base/android/media_player_bridge.h"
 #include "media/base/video_frame.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
+#include "webkit/compositor_bindings/web_layer_impl.h"
 #include "webkit/media/android/stream_texture_factory_android.h"
 #include "webkit/media/android/webmediaplayer_manager_android.h"
+#include "webkit/media/media_switches.h"
 #include "webkit/media/webmediaplayer_util.h"
 #include "webkit/media/webvideoframe_impl.h"
 
@@ -44,12 +48,19 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       is_playing_(false),
       needs_establish_peer_(true),
       has_size_info_(false),
-      stream_texture_factory_(factory) {
+      stream_texture_factory_(factory),
+      needs_external_surface_(false),
+      video_frame_provider_client_(NULL) {
   main_loop_->AddDestructionObserver(this);
   if (manager_)
     player_id_ = manager_->RegisterMediaPlayer(this);
 
-  if (stream_texture_factory_.get()) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kUseExternalVideoSurface)) {
+    needs_external_surface_ = true;
+    SetNeedsEstablishPeer(false);
+    ReallocateVideoFrame();
+  } else if (stream_texture_factory_.get()) {
     stream_texture_proxy_.reset(stream_texture_factory_->CreateProxy());
     stream_id_ = stream_texture_factory_->CreateStreamTexture(&texture_id_);
     ReallocateVideoFrame();
@@ -57,6 +68,11 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
 }
 
 WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
+#ifdef REMOVE_WEBVIDEOFRAME
+  SetVideoFrameProviderClient(NULL);
+  client_->setWebLayer(NULL);
+#endif
+
   if (stream_id_)
     stream_texture_factory_->DestroyStreamTexture(texture_id_);
 
@@ -87,6 +103,10 @@ void WebMediaPlayerAndroid::cancelLoad() {
 }
 
 void WebMediaPlayerAndroid::play() {
+  if (hasVideo() && needs_external_surface_) {
+    DCHECK(!needs_establish_peer_);
+    RequestExternalSurface();
+  }
   if (hasVideo() && needs_establish_peer_)
     EstablishSurfaceTexturePeer();
 
@@ -276,11 +296,21 @@ void WebMediaPlayerAndroid::OnMediaPrepared(base::TimeDelta duration) {
   if (ready_state_ != WebMediaPlayer::ReadyStateHaveEnoughData) {
     UpdateReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
     UpdateReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
+#ifndef REMOVE_WEBVIDEOFRAME
   } else {
     // If the status is already set to ReadyStateHaveEnoughData, set it again
     // to make sure that Videolayerchromium will get created.
     UpdateReadyState(WebMediaPlayer::ReadyStateHaveEnoughData);
+#endif
   }
+
+#ifdef REMOVE_WEBVIDEOFRAME
+  if (hasVideo() && !video_weblayer_ && client->needsWebLayerForVideo()) {
+    video_weblayer_.reset(
+        new webkit::WebLayerImpl(cc::VideoLayer::Create(this)));
+    client_->setWebLayer(video_weblayer_.get());
+  }
+#endif
 
   // In we have skipped loading, we have to update webkit about the new
   // duration.
@@ -395,34 +425,44 @@ void WebMediaPlayerAndroid::Detach() {
     stream_id_ = 0;
   }
 
-  web_video_frame_.reset();
+  current_frame_ = NULL;
 
   manager_ = NULL;
 }
 
 void WebMediaPlayerAndroid::ReallocateVideoFrame() {
-  if (texture_id_) {
-    web_video_frame_.reset(new WebVideoFrameImpl(VideoFrame::WrapNativeTexture(
+  if (needs_external_surface_) {
+    // VideoFrame::CreateHoleFrame is only defined under GOOGLE_TV.
+#if defined(GOOGLE_TV)
+    if (!natural_size_.isEmpty())
+      current_frame_ = VideoFrame::CreateHoleFrame(natural_size_);
+#else
+    NOTIMPLEMENTED() << "Hole punching not supported outside of Google TV";
+#endif
+  } else if (texture_id_) {
+    current_frame_ = VideoFrame::WrapNativeTexture(
         texture_id_, kGLTextureExternalOES, natural_size_,
         gfx::Rect(natural_size_), natural_size_, base::TimeDelta(),
         VideoFrame::ReadPixelsCB(),
-        base::Closure())));
+        base::Closure());
   }
 }
 
+#ifndef REMOVE_WEBVIDEOFRAME
 WebVideoFrame* WebMediaPlayerAndroid::getCurrentFrame() {
-  if (stream_texture_proxy_.get() && !stream_texture_proxy_->IsInitialized()
-      && stream_id_) {
-    gfx::Size natural_size = web_video_frame_->video_frame->natural_size();
+  if (stream_texture_proxy_ && !stream_texture_proxy_->IsInitialized() &&
+      stream_id_ && !needs_external_surface_) {
+    gfx::Size natural_size = current_frame_->natural_size();
     stream_texture_proxy_->Initialize(
         stream_id_, natural_size.width(), natural_size.height());
   }
 
-  return web_video_frame_.get();
+  return new WebVideoFrameImpl(current_frame_);
 }
 
 void WebMediaPlayerAndroid::putCurrentFrame(
     WebVideoFrame* web_video_frame) {
+  delete web_video_frame;
 }
 
 void WebMediaPlayerAndroid::setStreamTextureClient(
@@ -430,6 +470,34 @@ void WebMediaPlayerAndroid::setStreamTextureClient(
   if (stream_texture_proxy_.get())
     stream_texture_proxy_->SetClient(client);
 }
+#else
+void WebMediaPlayerAndroid::SetVideoFrameProviderClient(
+    cc::VideoFrameProvider::Client* client) {
+  // This is called from both the main renderer thread and the compositor
+  // thread (when the main thread is blocked).
+  if (video_frame_provider_client_)
+    video_frame_provider_client_->StopUsingProvider();
+  video_frame_provider_client_ = client;
+
+  // Set the callback target when a frame is produced.
+  if (stream_texture_proxy_)
+    stream_texture_proxy_->SetClient(client);
+}
+
+scoped_refptr<media::VideoFrame> WebMediaPlayerAndroid::GetCurrentFrame() {
+  if (stream_texture_proxy_ && !stream_texture_proxy_->IsInitialized() &&
+      stream_id_ && !needs_external_surface_) {
+    gfx::Size natural_size = current_frame_->natural_size();
+    stream_texture_proxy_->Initialize(
+        stream_id_, natural_size.width(), natural_size.height());
+  }
+  return current_frame_;
+}
+
+void WebMediaPlayerAndroid::PutCurrentFrame(
+    const scoped_refptr<media::VideoFrame>& frame) {
+}
+#endif
 
 void WebMediaPlayerAndroid::EstablishSurfaceTexturePeer() {
   if (stream_texture_factory_.get() && stream_id_)

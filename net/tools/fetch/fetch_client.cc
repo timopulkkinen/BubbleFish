@@ -15,9 +15,10 @@
 #include "base/string_util.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/completion_callback.h"
-#include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/request_priority.h"
+#include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
@@ -59,7 +60,8 @@ class Client {
   Client(net::HttpTransactionFactory* factory, const std::string& url) :
       url_(url),
       buffer_(new net::IOBuffer(kBufferSize)) {
-    int rv = factory->CreateTransaction(&transaction_, NULL);
+    int rv = factory->CreateTransaction(
+        net::DEFAULT_PRIORITY, &transaction_, NULL);
     DCHECK_EQ(net::OK, rv);
     buffer_->AddRef();
     g_driver.Get().ClientStarted();

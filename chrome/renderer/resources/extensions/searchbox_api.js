@@ -31,14 +31,14 @@ if (!chrome.embeddedSearch) {
     var safeObjects = {};
 
     // Returns the |restrictedText| wrapped in a ShadowDOM.
-    function SafeWrap(restrictedText, width, height, opt_fontSize,
+    function SafeWrap(restrictedText, height, opt_width, opt_fontSize,
         opt_direction) {
       var node = document.createElement('div');
       var nodeShadow = safeObjects.createShadowRoot.apply(node);
       nodeShadow.applyAuthorStyles = true;
       nodeShadow.innerHTML =
           '<div style="' +
-              'width: ' + width + 'px !important;' +
+              (opt_width ? 'width: ' + opt_width + 'px !important;' : '') +
               'height: ' + height + 'px !important;' +
               'font-family: \'' + GetFont() + '\', \'Arial\' !important;' +
               (opt_fontSize ?
@@ -105,9 +105,11 @@ if (!chrome.embeddedSearch) {
       native function StartCapturingKeyStrokes();
       native function StopCapturingKeyStrokes();
       native function NavigateSearchBox();
+      native function ShowBars();
+      native function HideBars();
 
       function SafeWrapSuggestion(restrictedText) {
-        return SafeWrap(restrictedText, window.innerWidth - 155, 22);
+        return SafeWrap(restrictedText, 22);
       }
 
       // Wraps the AutocompleteResult query and URL into ShadowDOM nodes so that
@@ -117,34 +119,20 @@ if (!chrome.embeddedSearch) {
             GetAutocompleteResults());
         var userInput = GetQuery();
         for (var i = 0, result; result = autocompleteResults[i]; ++i) {
-          var title = escapeHTML(result.contents);
-          var url = escapeHTML(CleanUrl(result.destination_url, userInput));
-          var combinedHtml = '<span class=chrome_url>' + url + '</span>';
-          // TODO(dcblack): Rename these titleElement, urlElement, and
-          // combinedElement for optimal correctness.
-          if (title) {
-            result.titleNode = SafeWrapSuggestion(title);
-            combinedHtml += '<span class=chrome_separator> &ndash; </span>' +
-                '<span class=chrome_title>' + title + '</span>';
+          var className = result.is_search ? 'chrome_search' : 'chrome_url';
+          var combinedElement = '<span class=' + className + '>' +
+              escapeHTML(result.contents) + '</span>';
+          if (result.description) {
+            combinedElement += '<span class=chrome_separator> &ndash; </span>' +
+                '<span class=chrome_title>' +
+                escapeHTML(result.description) + '</span>';
           }
-          result.urlNode = SafeWrapSuggestion(url);
-          result.combinedNode = SafeWrapSuggestion(combinedHtml);
+          result.combinedNode = SafeWrapSuggestion(combinedElement);
           delete result.contents;
+          delete result.description;
           delete result.destination_url;
         }
         return autocompleteResults;
-      }
-
-      // TODO(dcblack): Do this in C++ instead of JS.
-      function CleanUrl(url, userInput) {
-        if (url.indexOf(userInput) == 0) {
-          return url;
-        }
-        url = url.replace(HTTP_REGEX, '');
-        if (url.indexOf(userInput) == 0) {
-          return url;
-        }
-        return url.replace(WWW_REGEX, '');
       }
 
       // TODO(dcblack): Do this in C++ instead of JS.
@@ -270,6 +258,12 @@ if (!chrome.embeddedSearch) {
       this.navigateContentWindow = function(destination, disposition) {
         NavigateSearchBox(destination, disposition);
       }
+      this.showBars = function() {
+        ShowBars();
+      };
+      this.hideBars = function() {
+        HideBars();
+      };
       this.onchange = null;
       this.onsubmit = null;
       this.oncancel = null;
@@ -278,6 +272,7 @@ if (!chrome.embeddedSearch) {
       this.onkeycapturechange = null;
       this.onmarginchange = null;
       this.onnativesuggestions = null;
+      this.onbarshidden = null;
 
       // DEPRECATED. These methods are from the legacy searchbox API.
       // TODO(jered): Delete these.
@@ -304,7 +299,7 @@ if (!chrome.embeddedSearch) {
       native function NavigateNewTabPage();
 
       function SafeWrapMostVisited(restrictedText, width, opt_direction) {
-        return SafeWrap(restrictedText, width, 18, 11, opt_direction);
+        return SafeWrap(restrictedText, 18, width, 11, opt_direction);
       }
 
       function GetMostVisitedItemsWrapper() {

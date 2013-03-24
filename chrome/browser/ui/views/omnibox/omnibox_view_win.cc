@@ -30,9 +30,9 @@
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
@@ -51,8 +51,8 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/base/dragdrop/drag_source.h"
-#include "ui/base/dragdrop/drop_target.h"
+#include "ui/base/dragdrop/drag_source_win.h"
+#include "ui/base/dragdrop/drop_target_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #include "ui/base/events/event.h"
@@ -154,7 +154,7 @@ void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
 // URL. A drop of plain text from the same edit either copies or moves the
 // selected text, and a drop of plain text from a source other than the edit
 // does a paste and go.
-class OmniboxViewWin::EditDropTarget : public ui::DropTarget {
+class OmniboxViewWin::EditDropTarget : public ui::DropTargetWin {
  public:
   explicit EditDropTarget(OmniboxViewWin* edit);
 
@@ -195,7 +195,7 @@ class OmniboxViewWin::EditDropTarget : public ui::DropTarget {
 };
 
 OmniboxViewWin::EditDropTarget::EditDropTarget(OmniboxViewWin* edit)
-    : ui::DropTarget(edit->m_hWnd),
+    : ui::DropTargetWin(edit->m_hWnd),
       edit_(edit),
       drag_has_url_(false),
       drag_has_string_(false) {
@@ -511,11 +511,19 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   SetReadOnly(popup_window_mode_);
   SetFont(font_.GetNativeFont());
 
-  // Disable auto font changing. Otherwise, characters come from
-  // auto-completion and characters come from keyboard may be rendered with
-  // different fonts. See http://crbug.com/168480 for details.
-  const LRESULT lang_option = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
-  SendMessage(m_hWnd, EM_SETLANGOPTIONS, 0, lang_option & ~IMF_AUTOFONT);
+  // IMF_DUALFONT (on by default) is supposed to use one font for ASCII text
+  // and a different one for Asian text.  In some cases, ASCII characters may
+  // be mis-marked as Asian, e.g. because input from the keyboard may be
+  // auto-stamped with the keyboard language.  As a result adjacent characters
+  // can render in different fonts, which looks bizarre.  To fix this we
+  // disable dual-font mode, which forces the control to use a single font for
+  // everything.
+  // Note that we should not disable the very similar IMF_AUTOFONT flag, which
+  // allows the control to hunt for fonts that can display all the current
+  // characters; doing this results in "missing glyph" boxes when the user
+  // enters characters not available in the currently-chosen font.
+  const LRESULT lang_options = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
+  SendMessage(m_hWnd, EM_SETLANGOPTIONS, 0, lang_options & ~IMF_DUALFONT);
 
   // NOTE: Do not use SetWordBreakProcEx() here, that is no longer supported as
   // of Rich Edit 2.0 onward.
@@ -2456,8 +2464,7 @@ void OmniboxViewWin::EmphasizeURLComponents() {
   // be treated as a search or a navigation, and is the same method the Paste
   // And Go system uses.
   url_parse::Component scheme, host;
-  AutocompleteInput::ParseForEmphasizeComponents(
-      GetText(), model()->GetDesiredTLD(), &scheme, &host);
+  AutocompleteInput::ParseForEmphasizeComponents(GetText(), &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
 
   // Set the baseline emphasis.
@@ -2706,7 +2713,7 @@ void OmniboxViewWin::StartDragIfNecessary(const CPoint& point) {
 
   data.SetString(text_to_write);
 
-  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
+  scoped_refptr<ui::DragSourceWin> drag_source(new ui::DragSourceWin);
   DWORD dropped_mode;
   base::AutoReset<bool> auto_reset_in_drag(&in_drag_, true);
   if (DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),

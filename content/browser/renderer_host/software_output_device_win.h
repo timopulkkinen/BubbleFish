@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_SOFTWARE_OUTPUT_DEVICE_WIN_H_
 #define CONTENT_BROWSER_RENDERER_HOST_SOFTWARE_OUTPUT_DEVICE_WIN_H_
 
-#include "cc/software_output_device.h"
+#include "cc/output/software_output_device.h"
 
 #include <windows.h>
 
@@ -21,7 +21,7 @@ class SoftwareOutputDeviceWin : public cc::SoftwareOutputDevice {
 
   virtual ~SoftwareOutputDeviceWin();
 
-  virtual void Resize(const gfx::Size& viewport_size) OVERRIDE;
+  virtual void Resize(gfx::Size viewport_size) OVERRIDE;
 
   virtual void EndPaint(cc::SoftwareFrameData* frame_data) OVERRIDE;
 

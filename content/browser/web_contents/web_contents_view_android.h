@@ -28,6 +28,8 @@ class WebContentsViewAndroid : public WebContentsViewPort,
   // by the UI frontend.
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
 
+  void RequestExternalVideoSurface(int player_id);
+
   // WebContentsView implementation --------------------------------------------
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
@@ -53,6 +55,7 @@ class WebContentsViewAndroid : public WebContentsViewPort,
   virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
   virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
+  virtual void SetOverscrollControllerEnabled(bool enabled) OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegateView.
   virtual void ShowContextMenu(const ContextMenuParams& params,

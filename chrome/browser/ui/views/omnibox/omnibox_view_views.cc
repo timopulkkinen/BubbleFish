@@ -13,8 +13,8 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
@@ -798,8 +798,7 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   // be treated as a search or a navigation, and is the same method the Paste
   // And Go system uses.
   url_parse::Component scheme, host;
-  AutocompleteInput::ParseForEmphasizeComponents(
-      text(), model()->GetDesiredTLD(), &scheme, &host);
+  AutocompleteInput::ParseForEmphasizeComponents(text(), &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
   SetColor(location_bar_view_->GetColor(security_level_,
       emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));

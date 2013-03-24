@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 document.addEventListener('DOMContentLoaded', function() {
   PhotoImport.load();
 });
@@ -102,6 +104,10 @@ PhotoImport.prototype.initDom_ = function() {
   this.importButton_.textContent =
       loadTimeData.getString('PHOTO_IMPORT_IMPORT_BUTTON');
   this.importButton_.addEventListener('click', this.onImportClick_.bind(this));
+
+  this.cancelButton_ = this.dom_.querySelector('button.cancel');
+  this.cancelButton_.textContent = str('CANCEL_LABEL');
+  this.cancelButton_.addEventListener('click', this.onCancelClick_.bind(this));
 
   this.grid_ = this.dom_.querySelector('grid');
   cr.ui.Grid.decorate(this.grid_);
@@ -437,6 +443,15 @@ PhotoImport.prototype.onImportClick_ = function(event) {
 
     this.importingDialog_.show(entries, this.destination_, move);
   }.bind(this));
+};
+
+/**
+ * Click event handler for the cancel button.
+ * @param {Event} event The event.
+ * @private
+ */
+PhotoImport.prototype.onCancelClick_ = function(event) {
+  window.close();
 };
 
 /**

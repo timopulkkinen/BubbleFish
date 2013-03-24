@@ -43,11 +43,11 @@
 #include "net/base/cert_verifier.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_mapping_rules.h"
-#include "net/base/host_resolver.h"
-#include "net/base/mapped_host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/base/sdch_manager.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/dns/host_resolver.h"
+#include "net/dns/mapped_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -660,8 +660,6 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
     EnableSpdy(spdy_mode);
   } else if (command_line.HasSwitch(switches::kEnableSpdy31)) {
     net::HttpStreamFactory::EnableNpnSpdy31();
-  } else if (command_line.HasSwitch(switches::kEnableSpdy3)) {
-    net::HttpStreamFactory::EnableNpnSpdy3();
   } else if (command_line.HasSwitch(switches::kEnableNpn)) {
     net::HttpStreamFactory::EnableNpnSpdy();
   } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
@@ -748,6 +746,11 @@ void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
   registry->RegisterInt64Pref(prefs::kHttpReceivedContentLength, 0);
   registry->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  registry->RegisterListPref(prefs::kDailyHttpOriginalContentLength);
+  registry->RegisterListPref(prefs::kDailyHttpReceivedContentLength);
+  registry->RegisterInt64Pref(prefs::kDailyHttpContentLengthLastUpdateDate, 0L);
+#endif
   registry->RegisterBooleanPref(prefs::kBuiltInDnsClientEnabled, true);
 }
 

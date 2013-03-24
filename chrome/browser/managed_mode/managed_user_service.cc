@@ -12,8 +12,7 @@
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -104,15 +103,18 @@ bool ManagedUserService::IsElevated() const {
   return is_elevated_;
 }
 
-void ManagedUserService::RequestAuthorization(
-    content::WebContents* web_contents,
-    const PassphraseCheckedCallback& callback) {
-
+bool ManagedUserService::CanSkipPassphraseDialog() {
   // If the profile is already elevated or there is no passphrase set, no
   // authentication is needed.
   PrefService* pref_service = profile_->GetPrefs();
-  if (IsElevated() ||
-      pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty()) {
+  return IsElevated() ||
+      pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty();
+}
+
+void ManagedUserService::RequestAuthorization(
+    content::WebContents* web_contents,
+    const PassphraseCheckedCallback& callback) {
+  if (CanSkipPassphraseDialog()) {
     callback.Run(true);
     return;
   }
@@ -121,11 +123,9 @@ void ManagedUserService::RequestAuthorization(
   new ManagedUserPassphraseDialog(web_contents, callback);
 }
 
-void ManagedUserService::RequestAuthorization(
+void ManagedUserService::RequestAuthorizationUsingActiveWebContents(
+    Browser* browser,
     const PassphraseCheckedCallback& callback) {
-  Browser* browser = chrome::FindBrowserWithProfile(
-      profile_,
-      chrome::GetActiveDesktop());
   RequestAuthorization(
       browser->tab_strip_model()->GetActiveWebContents(),
       callback);
@@ -206,7 +206,7 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
 
   if (extension) {
     bool was_installed_by_default = extension->was_installed_by_default();
-#ifdef OS_CHROMEOS
+#if defined(OS_CHROMEOS)
     // On Chrome OS all external sources are controlled by us so it means that
     // they are "default". Method was_installed_by_default returns false because
     // extensions creation flags are ignored in case of default extensions with
@@ -291,7 +291,8 @@ ScopedVector<ManagedModeSiteList> ManagedUserService::GetActiveSiteLists() {
     if (!extension_service->IsExtensionEnabled(extension->id()))
       continue;
 
-    ExtensionResource site_list = extension->GetContentPackSiteList();
+    extensions::ExtensionResource site_list =
+        extension->GetContentPackSiteList();
     if (!site_list.empty())
       site_lists.push_back(new ManagedModeSiteList(extension->id(), site_list));
   }

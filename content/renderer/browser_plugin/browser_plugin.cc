@@ -33,6 +33,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/plugins/sad_plugin.h"
 
 #if defined (OS_WIN)
@@ -50,6 +51,25 @@ using WebKit::WebVector;
 namespace content {
 
 namespace {
+
+static bool shouldIgnoreKeyBoardEvent(const WebKit::WebKeyboardEvent* event) {
+  if (event->type == WebKit::WebInputEvent::Char)
+    return false;
+  int keycode = event->windowsKeyCode;
+  if (keycode == ui::VKEY_SHIFT ||
+      keycode == ui::VKEY_CONTROL ||
+      keycode == ui::VKEY_MENU ||
+      keycode == ui::VKEY_LWIN)  // The search key on chromeOS.
+    return true;
+  // We don't want to handle keys like volume control, or app launchers inside
+  // of BrowserPlugin. These keys should be handled either by the browser, or
+  // the OS.
+  if ((keycode >= ui::VKEY_BROWSER_BACK &&
+       keycode <= ui::VKEY_MEDIA_LAUNCH_APP2) ||
+      (keycode >= ui::VKEY_F1 && keycode <= ui::VKEY_F24))
+    return true;
+  return false;
+}
 
 static std::string TerminationStatusToString(base::TerminationStatus status) {
   switch (status) {
@@ -79,6 +99,8 @@ static std::string PermissionTypeToString(BrowserPluginPermissionType type) {
       return browser_plugin::kPermissionTypeGeolocation;
     case BrowserPluginPermissionTypeMedia:
       return browser_plugin::kPermissionTypeMedia;
+    case BrowserPluginPermissionTypeNewWindow:
+      return browser_plugin::kPermissionTypeNewWindow;
     case BrowserPluginPermissionTypePointerLock:
       return browser_plugin::kPermissionTypePointerLock;
     case BrowserPluginPermissionTypeUnknown:
@@ -88,6 +110,12 @@ static std::string PermissionTypeToString(BrowserPluginPermissionType type) {
   }
   return "";
 }
+
+typedef std::map<WebKit::WebPluginContainer*,
+                 BrowserPlugin*> PluginContainerMap;
+static base::LazyInstance<PluginContainerMap> g_plugin_container_map =
+    LAZY_INSTANCE_INITIALIZER;
+
 }  // namespace
 
 BrowserPlugin::BrowserPlugin(
@@ -130,6 +158,14 @@ BrowserPlugin::~BrowserPlugin() {
   browser_plugin_manager()->Send(
       new BrowserPluginHostMsg_PluginDestroyed(render_view_routing_id_,
                                                instance_id_));
+}
+
+/*static*/
+BrowserPlugin* BrowserPlugin::FromContainer(
+    WebKit::WebPluginContainer* container) {
+  PluginContainerMap* browser_plugins = g_plugin_container_map.Pointer();
+  PluginContainerMap::iterator it = browser_plugins->find(container);
+  return it == browser_plugins->end() ? NULL : it->second;
 }
 
 bool BrowserPlugin::OnMessageReceived(const IPC::Message& message) {
@@ -382,20 +418,28 @@ bool BrowserPlugin::UsesPendingDamageBuffer(
   return damage_buffer_sequence_id_ == params.damage_buffer_sequence_id;
 }
 
-void BrowserPlugin::SetInstanceID(int instance_id) {
+void BrowserPlugin::SetInstanceID(int instance_id, bool new_guest) {
   CHECK(instance_id != browser_plugin::kInstanceIDNone);
   instance_id_ = instance_id;
   browser_plugin_manager()->AddBrowserPlugin(instance_id, this);
 
   BrowserPluginHostMsg_CreateGuest_Params create_guest_params;
-  create_guest_params.storage_partition_id = storage_partition_id_;
-  create_guest_params.persist_storage = persist_storage_;
   create_guest_params.focused = ShouldGuestBeFocused();
   create_guest_params.visible = visible_;
   create_guest_params.name = GetNameAttribute();
-  create_guest_params.src = GetSrcAttribute();
   GetDamageBufferWithSizeParams(&create_guest_params.auto_size_params,
                                 &create_guest_params.resize_guest_params);
+
+  if (!new_guest) {
+    browser_plugin_manager()->Send(
+        new BrowserPluginHostMsg_Attach(render_view_routing_id_,
+                                        instance_id_, create_guest_params));
+    return;
+  }
+
+  create_guest_params.storage_partition_id = storage_partition_id_;
+  create_guest_params.persist_storage = persist_storage_;
+  create_guest_params.src = GetSrcAttribute();
   browser_plugin_manager()->Send(
       new BrowserPluginHostMsg_CreateGuest(render_view_routing_id_,
                                            instance_id_,
@@ -533,6 +577,14 @@ void BrowserPlugin::OnRequestPermission(
     BrowserPluginPermissionType permission_type,
     int request_id,
     const base::DictionaryValue& request_info) {
+  // The New Window API is very similiar to the permission API in structure,
+  // but exposes a slightly different interface to the developer and so we put
+  // it in a separate event.
+  const char* event_name =
+      (permission_type == BrowserPluginPermissionTypeNewWindow) ?
+          browser_plugin::kEventNewWindow :
+              browser_plugin::kEventRequestPermission;
+
   AddPermissionRequestToMap(request_id, permission_type);
 
   std::map<std::string, base::Value*> props;
@@ -546,7 +598,7 @@ void BrowserPlugin::OnRequestPermission(
            iter.Advance()) {
     props[iter.key()] = iter.value().DeepCopy();
   }
-  TriggerEvent(browser_plugin::kEventRequestPermission, &props);
+  TriggerEvent(event_name, &props);
 }
 
 void BrowserPlugin::OnSetCursor(int instance_id, const WebCursor& cursor) {
@@ -723,6 +775,45 @@ NPObject* BrowserPlugin::GetContentWindow() const {
     return NULL;
   WebKit::WebFrame* guest_frame = guest_render_view->GetWebView()->mainFrame();
   return guest_frame->windowObject();
+}
+
+// static
+bool BrowserPlugin::AttachWindowTo(const WebKit::WebNode& node, int window_id) {
+  if (node.isNull())
+    return false;
+
+  if (!node.isElementNode())
+    return false;
+
+  WebKit::WebElement shim_element = node.toConst<WebKit::WebElement>();
+  // The shim containing the BrowserPlugin must be attached to a document.
+  if (shim_element.document().isNull())
+    return false;
+
+  WebKit::WebNode shadow_root = shim_element.shadowRoot();
+  if (shadow_root.isNull() || !shadow_root.hasChildNodes())
+    return false;
+
+  WebKit::WebNode plugin_element = shadow_root.firstChild();
+  WebKit::WebPluginContainer* plugin_container =
+      plugin_element.pluginContainer();
+  if (!plugin_container)
+    return false;
+
+  BrowserPlugin* browser_plugin =
+      BrowserPlugin::FromContainer(plugin_container);
+  if (!browser_plugin)
+    return false;
+
+  // If the BrowserPlugin already has a guest attached to it then we probably
+  // shouldn't allow attaching a different guest.
+  // TODO(fsamuel): We may wish to support reattaching guests in the future:
+  // http://crbug.com/156219
+  if (browser_plugin->HasGuest())
+    return false;
+
+  browser_plugin->SetInstanceID(window_id, false);
+  return true;
 }
 
 bool BrowserPlugin::HasGuest() const {
@@ -1004,6 +1095,7 @@ bool BrowserPlugin::initialize(WebPluginContainer* container) {
   container_ = container;
   container_->setWantsWheelEvents(true);
   ParseAttributes();
+  g_plugin_container_map.Get().insert(std::make_pair(container_, this));
   return true;
 }
 
@@ -1044,6 +1136,7 @@ void BrowserPlugin::EnableCompositing(bool enable) {
 void BrowserPlugin::destroy() {
   // The BrowserPlugin's WebPluginContainer is deleted immediately after this
   // call returns, so let's not keep a reference to it around.
+  g_plugin_container_map.Get().erase(container_);
   container_ = NULL;
   if (compositing_helper_)
     compositing_helper_->OnContainerDestroy();
@@ -1309,11 +1402,40 @@ bool BrowserPlugin::handleInputEvent(const WebKit::WebInputEvent& event,
   if (guest_crashed_ || !HasGuest() ||
       event.type == WebKit::WebInputEvent::ContextMenu)
     return false;
+
+  if (WebKit::WebInputEvent::isKeyboardEventType(event.type)) {
+    // TODO(mthiesse): This is a temporary solution for BrowserPlugin capturing
+    // keys like the search key on chromeOS. The guest should be allowed to
+    // handle these key events (as javascript allows this), so a better solution
+    // is needed.
+    if (shouldIgnoreKeyBoardEvent(
+        static_cast<const WebKit::WebKeyboardEvent*>(&event)))
+      return false;
+  }
+
+  const WebKit::WebInputEvent* modified_event = &event;
+  scoped_ptr<WebKit::WebTouchEvent> touch_event;
+  // WebKit gives BrowserPlugin a list of touches that are down, but the browser
+  // process expects a list of all touches. We modify the TouchEnd event here to
+  // match these expectations.
+  if (event.type == WebKit::WebInputEvent::TouchEnd) {
+    const WebKit::WebTouchEvent* orig_touch_event =
+        static_cast<const WebKit::WebTouchEvent*>(&event);
+    touch_event.reset(new WebKit::WebTouchEvent());
+    memcpy(touch_event.get(), orig_touch_event, sizeof(WebKit::WebTouchEvent));
+    if (touch_event->changedTouchesLength > 0) {
+      memcpy(&touch_event->touches[touch_event->touchesLength],
+             &touch_event->changedTouches,
+            touch_event->changedTouchesLength * sizeof(WebKit::WebTouchPoint));
+    }
+    touch_event->touchesLength += touch_event->changedTouchesLength;
+    modified_event = touch_event.get();
+  }
   browser_plugin_manager()->Send(
       new BrowserPluginHostMsg_HandleInputEvent(render_view_routing_id_,
                                                 instance_id_,
                                                 plugin_rect_,
-                                                &event));
+                                                modified_event));
   cursor_.GetCursorInfo(&cursor_info);
   return true;
 }

@@ -23,6 +23,7 @@
 #include "chrome/browser/chromeos/drive/stale_cache_files_remover.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/fake_drive_service.h"
+#include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -73,19 +74,24 @@ class StaleCacheFilesRemoverTest : public testing::Test {
         pool->GetSequencedTaskRunner(pool->GetSequenceToken());
 
     // Likewise, this will be owned by DriveFileSystem.
-    cache_ = new DriveCache(
-        DriveCache::GetCacheRootPath(profile_.get()),
-        blocking_task_runner_,
-        fake_free_disk_space_getter_.get());
+    cache_.reset(new DriveCache(DriveCache::GetCacheRootPath(profile_.get()),
+                                blocking_task_runner_,
+                                fake_free_disk_space_getter_.get()));
 
     drive_webapps_registry_.reset(new DriveWebAppsRegistry);
 
+    resource_metadata_.reset(new DriveResourceMetadata(
+        fake_drive_service_->GetRootResourceId(),
+        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+        blocking_task_runner_));
+
     ASSERT_FALSE(file_system_);
     file_system_ = new DriveFileSystem(profile_.get(),
-                                       cache_,
+                                       cache_.get(),
                                        fake_drive_service_.get(),
                                        NULL,  // drive_uploader
                                        drive_webapps_registry_.get(),
+                                       resource_metadata_.get(),
                                        blocking_task_runner_);
 
     mock_cache_observer_.reset(new StrictMock<MockDriveCacheObserver>);
@@ -96,9 +102,16 @@ class StaleCacheFilesRemoverTest : public testing::Test {
 
     file_system_->Initialize();
     cache_->RequestInitializeForTesting();
+    google_apis::test_util::RunBlockingPoolTask();
+
+    DriveFileError error = DRIVE_FILE_ERROR_FAILED;
+    resource_metadata_->Initialize(
+        google_apis::test_util::CreateCopyResultCallback(&error));
+    google_apis::test_util::RunBlockingPoolTask();
+    ASSERT_EQ(DRIVE_FILE_OK, error);
 
     stale_cache_files_remover_.reset(new StaleCacheFilesRemover(file_system_,
-                                                                cache_));
+                                                                cache_.get()));
 
     google_apis::test_util::RunBlockingPoolTask();
   }
@@ -108,7 +121,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
     stale_cache_files_remover_.reset();
     delete file_system_;
     file_system_ = NULL;
-    test_util::DeleteDriveCache(cache_);
+    cache_.reset();
     profile_.reset(NULL);
   }
 
@@ -118,10 +131,12 @@ class StaleCacheFilesRemoverTest : public testing::Test {
   content::TestBrowserThread ui_thread_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<TestingProfile> profile_;
-  DriveCache* cache_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache_;
   DriveFileSystem* file_system_;
   scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
   scoped_ptr<DriveWebAppsRegistry> drive_webapps_registry_;
+  scoped_ptr<DriveResourceMetadata, test_util::DestroyHelperForTests>
+      resource_metadata_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
   scoped_ptr<StrictMock<MockDriveCacheObserver> > mock_cache_observer_;
   scoped_ptr<StrictMock<MockDirectoryChangeObserver> > mock_directory_observer_;
@@ -141,8 +156,7 @@ TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   // Create a stale cache file.
   DriveFileError error = DRIVE_FILE_OK;
   cache_->Store(resource_id, md5, dummy_file, DriveCache::FILE_OPERATION_COPY,
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(DRIVE_FILE_OK, error);
 
@@ -161,10 +175,8 @@ TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   scoped_ptr<DriveEntryProto> entry_proto;
   file_system_->GetEntryInfoByResourceId(
       resource_id,
-      base::Bind(&test_util::CopyResultsFromGetEntryInfoWithFilePathCallback,
-                 &error,
-                 &unused,
-                 &entry_proto));
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &unused, &entry_proto));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(DRIVE_FILE_ERROR_NOT_FOUND, error);
   EXPECT_FALSE(entry_proto.get());

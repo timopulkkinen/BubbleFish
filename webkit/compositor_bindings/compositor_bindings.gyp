@@ -4,6 +4,7 @@
 
 {
   'variables': {
+    'chromium_code': 1,
     'webkit_compositor_bindings_sources': [
       'web_animation_curve_common.cc',
       'web_animation_curve_common.h',
@@ -21,8 +22,6 @@
       'web_layer_impl.h',
       'web_layer_impl_fixed_bounds.cc',
       'web_layer_impl_fixed_bounds.h',
-      'web_nine_patch_layer_impl.cc',
-      'web_nine_patch_layer_impl.h',
       'web_to_ccinput_handler_adapter.cc',
       'web_to_ccinput_handler_adapter.h',
       'web_to_ccscrollbar_theme_painter_adapter.cc',

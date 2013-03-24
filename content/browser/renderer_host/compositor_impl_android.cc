@@ -15,12 +15,12 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
-#include "cc/context_provider.h"
-#include "cc/input_handler.h"
-#include "cc/layer.h"
-#include "cc/layer_tree_host.h"
-#include "cc/output_surface.h"
-#include "cc/thread_impl.h"
+#include "cc/base/thread_impl.h"
+#include "cc/input/input_handler.h"
+#include "cc/layers/layer.h"
+#include "cc/output/context_provider.h"
+#include "cc/output/output_surface.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
@@ -29,9 +29,9 @@
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/common/content_switches.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "webkit/glue/webthread_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
@@ -184,20 +184,20 @@ void CompositorImpl::SetVisible(bool visible) {
     host_.reset();
   } else if (!host_.get()) {
     cc::LayerTreeSettings settings;
-    settings.refreshRate = 60.0;
-    settings.implSidePainting = false;
-    settings.calculateTopControlsPosition = false;
-    settings.topControlsHeight = 0.f;
-    settings.useMemoryManagement = false;
+    settings.refresh_rate = 60.0;
+    settings.impl_side_painting = false;
+    settings.calculate_top_controls_position = false;
+    settings.top_controls_height = 0.f;
+    settings.use_memory_management = false;
 
     // Do not clear the framebuffer when rendering into external GL contexts
     // like Android View System's.
     if (UsesDirectGL())
-      settings.shouldClearRootRenderPass = false;
+      settings.should_clear_root_render_pass = false;
 
     scoped_ptr<cc::Thread> impl_thread;
     if (g_impl_thread)
-      impl_thread = cc::ThreadImpl::createForDifferentThread(
+      impl_thread = cc::ThreadImpl::CreateForDifferentThread(
           g_impl_thread->message_loop()->message_loop_proxy());
 
     host_ = cc::LayerTreeHost::Create(this, settings, impl_thread.Pass());
@@ -313,17 +313,7 @@ bool CompositorImpl::CopyTextureToBitmap(WebKit::WebGLId texture_id,
   return true;
 }
 
-void CompositorImpl::animate(double monotonicFrameBeginTime) {
-}
-
-void CompositorImpl::layout() {
-}
-
-void CompositorImpl::applyScrollAndScale(gfx::Vector2d scrollDelta,
-                                         float pageScale) {
-}
-
-scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
+scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface() {
   if (g_use_direct_gl) {
     WebKit::WebGraphicsContext3D::Attributes attrs;
     attrs.shareResources = false;
@@ -364,24 +354,15 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::createOutputSurface() {
   }
 }
 
-scoped_ptr<cc::InputHandler> CompositorImpl::createInputHandler() {
+scoped_ptr<cc::InputHandler> CompositorImpl::CreateInputHandler() {
   return scoped_ptr<cc::InputHandler>();
 }
 
-void CompositorImpl::didRecreateOutputSurface(bool success) {
-}
-
-void CompositorImpl::didCommit() {
-}
-
-void CompositorImpl::didCommitAndDrawFrame() {
-}
-
-void CompositorImpl::didCompleteSwapBuffers() {
+void CompositorImpl::DidCompleteSwapBuffers() {
   client_->OnSwapBuffersCompleted();
 }
 
-void CompositorImpl::scheduleComposite() {
+void CompositorImpl::ScheduleComposite() {
   client_->ScheduleComposite();
 }
 

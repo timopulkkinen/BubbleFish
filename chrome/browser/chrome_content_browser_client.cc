@@ -41,9 +41,6 @@
 #include "chrome/browser/extensions/suggest_permission_util.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/instant/instant_service.h"
-#include "chrome/browser/instant/instant_service_factory.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
@@ -63,6 +60,9 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/renderer_host/chrome_render_view_host_observer.h"
 #include "chrome/browser/renderer_host/pepper/chrome_browser_pepper_host_factory.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -83,6 +83,7 @@
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
@@ -125,6 +126,7 @@
 
 #if defined(OS_WIN)
 #include "chrome/browser/chrome_browser_main_win.h"
+#include "sandbox/win/src/sandbox_policy.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
 #include "chrome/browser/spellchecker/spellcheck_message_filter_mac.h"
@@ -1083,6 +1085,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
   std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+
+  if (browser_command_line.HasSwitch(switches::kChromeFrame))
+    command_line->AppendSwitch(switches::kChromeFrame);
+
   if (process_type == switches::kRendererProcess) {
     base::FilePath user_data_dir =
         browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
@@ -1155,6 +1161,8 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kDisableExtensionsResourceWhitelist,
       switches::kDisableScriptedPrintThrottling,
       switches::kDumpHistogramsOnExit,
+      switches::kEnableAdview,
+      switches::kEnableAdviewSrcAttribute,
       switches::kEnableBenchmarking,
       switches::kEnableExperimentalExtensionApis,
       switches::kEnableExperimentalFormFilling,
@@ -1165,6 +1173,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kEnablePasswordGeneration,
       switches::kEnablePnacl,
       switches::kEnableWatchdog,
+      switches::kExtensionsOnChromeURLs,
       switches::kMemoryProfiling,
       switches::kMessageLoopHistogrammer,
       switches::kNoJsRandomness,
@@ -1949,7 +1958,7 @@ void ChromeContentBrowserClient::DidCreatePpapiPlugin(
 content::BrowserPpapiHost*
     ChromeContentBrowserClient::GetExternalBrowserPpapiHost(
         int plugin_process_id) {
-  BrowserChildProcessHostIterator iter(content::PROCESS_TYPE_NACL_LOADER);
+  BrowserChildProcessHostIterator iter(PROCESS_TYPE_NACL_LOADER);
   while (!iter.Done()) {
     NaClProcessHost* host = static_cast<NaClProcessHost*>(iter.GetDelegate());
     if (host->process() &&
@@ -1960,6 +1969,26 @@ content::BrowserPpapiHost*
     ++iter;
   }
   return NULL;
+}
+
+bool ChromeContentBrowserClient::SupportsBrowserPlugin(
+    content::BrowserContext* browser_context, const GURL& site_url) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserPluginForAllViewTypes))
+    return true;
+
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (!service)
+    return false;
+
+  const Extension* extension = service->extensions()->
+      GetExtensionOrAppByURL(ExtensionURLInfo(site_url));
+  if (!extension)
+    return false;
+
+  return extension->HasAPIPermission(APIPermission::kWebView);
 }
 
 bool ChromeContentBrowserClient::AllowPepperSocketAPI(
@@ -2092,6 +2121,33 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 #if defined(OS_WIN)
 const wchar_t* ChromeContentBrowserClient::GetResourceDllName() {
   return chrome::kBrowserResourcesDll;
+}
+
+void ChromeContentBrowserClient::PreSpawnRenderer(
+    sandbox::TargetPolicy* policy,
+    bool* success) {
+  // This code is duplicated in nacl_exe_win_64.cc.
+  // Allow the server side of a pipe restricted to the "chrome.nacl."
+  // namespace so that it cannot impersonate other system or other chrome
+  // service pipes.
+  sandbox::ResultCode result = policy->AddRule(
+      sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
+      sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
+      L"\\\\.\\pipe\\chrome.nacl.*");
+  if (result != sandbox::SBOX_ALL_OK) {
+    *success = false;
+    return;
+  }
+
+  // Renderers need to send named pipe handles and shared memory
+  // segment handles to NaCl loader processes.
+  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                           sandbox::TargetPolicy::HANDLES_DUP_ANY,
+                           L"File");
+  if (result != sandbox::SBOX_ALL_OK) {
+    *success = false;
+    return;
+  }
 }
 #endif
 

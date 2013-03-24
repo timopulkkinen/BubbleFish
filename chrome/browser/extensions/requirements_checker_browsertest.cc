@@ -30,9 +30,9 @@ namespace extensions {
 class RequirementsCheckerBrowserTest : public ExtensionBrowserTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // In linux, we need to launch GPU process to decide if WebGL is allowed.
+    // We need to launch GPU process to decide if WebGL is allowed.
     // Run it on top of osmesa to avoid bot driver issues.
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
     CHECK(test_launcher_utils::OverrideGLImplementation(
         command_line, gfx::kGLImplementationOSMesaName)) <<
         "kUseGL must not be set multiple times!";
@@ -70,7 +70,7 @@ class RequirementsCheckerBrowserTest : public ExtensionBrowserTest {
       "  \"entries\": [\n"
       "    {\n"
       "      \"id\": 1,\n"
-      "      \"blacklist\": [\"" + JoinString(features, "\", \"") + "\"]\n"
+      "      \"features\": [\"" + JoinString(features, "\", \"") + "\"]\n"
       "    }\n"
       "  ]\n"
       "}";

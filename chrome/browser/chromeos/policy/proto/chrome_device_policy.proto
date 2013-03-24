@@ -14,6 +14,8 @@ message DevicePolicyRefreshRateProto {
 }
 
 message UserWhitelistProto {
+  // If a UserWhitelistProto is included in the ChromeDeviceSettingsProto but
+  // the user_whitelist field is empty then no user can sign-in.
   repeated string user_whitelist = 1;
 }
 
@@ -194,6 +196,10 @@ message AutoUpdateSettingsProto {
   // connection types that are considered expensive, which include WiMax,
   // Bluetooth and Cellular at the moment.
   repeated ConnectionType allowed_connection_types = 5;
+
+  // True if the device should reboot automatically when an update has been
+  // applied and a reboot is required to complete the update process.
+  optional bool reboot_after_update = 6;
 }
 
 message StartUpUrlsProto {
@@ -247,13 +253,22 @@ message AllowRedeemChromeOsRegistrationOffersProto {
   // to redeem electronic offers provided by service provider.
   // This value determines if users are allowed to redeem offers through
   // Chrome OS Registration service.
-  optional bool allow_redeem_offers = 1 [default = true];
+  optional bool allow_redeem_offers = 1 [default = false];
 }
 
 message StartUpFlagsProto {
   // The list of flags to be applied to chrome on start-up (back up store for
   // owner set flags in about:flags).
   repeated string flags = 1;
+}
+
+message UptimeLimitProto {
+  // Sets the length of device uptime after which an automatic reboot is
+  // scheduled. An automatic reboot is scheduled at the selected time but may be
+  // delayed on the device by up to 24 hours, e.g. if a user is currently using
+  // the device or an app/extension has requested reboots to be inhibited
+  // temporarily. The policy value should be specified in seconds.
+  optional int64 uptime_limit = 1;
 }
 
 message ChromeDeviceSettingsProto {
@@ -280,4 +295,5 @@ message ChromeDeviceSettingsProto {
   optional DeviceLocalAccountsProto device_local_accounts = 21;
   optional AllowRedeemChromeOsRegistrationOffersProto allow_redeem_offers = 22;
   optional StartUpFlagsProto start_up_flags = 23;
+  optional UptimeLimitProto uptime_limit = 24;
 }

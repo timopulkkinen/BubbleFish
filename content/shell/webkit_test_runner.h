@@ -39,6 +39,11 @@ class WebKitTestRunner : public RenderViewObserver,
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void Navigate(const GURL& url) OVERRIDE;
+  virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
+                                        bool is_new_navigation) OVERRIDE;
+  virtual void DidFailProvisionalLoad(
+      WebKit::WebFrame* frame, const WebKit::WebURLError& error) OVERRIDE;
 
   // WebTestDelegate implementation.
   virtual void clearEditCommand();
@@ -98,6 +103,7 @@ class WebKitTestRunner : public RenderViewObserver,
       const std::vector<int>& routing_ids,
       const std::vector<std::vector<std::string> >& session_histories,
       const std::vector<unsigned>& current_entry_indexes);
+  void OnReset();
 
   // After finishing the test, retrieves the audio, text, and pixel dumps from
   // the TestRunner library and sends them to the browser process.
@@ -116,6 +122,8 @@ class WebKitTestRunner : public RenderViewObserver,
   std::vector<unsigned> current_entry_indexes_;
 
   bool is_main_window_;
+
+  bool focus_on_next_commit_;
 
   DISALLOW_COPY_AND_ASSIGN(WebKitTestRunner);
 };

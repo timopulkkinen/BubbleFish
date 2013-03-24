@@ -24,10 +24,11 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/message_bundle.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
@@ -35,6 +36,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::Extension;
+using extensions::ExtensionResource;
 using extensions::Manifest;
 
 namespace errors = extension_manifest_errors;
@@ -46,12 +48,6 @@ const base::FilePath::CharType kTempDirectoryName[] = FILE_PATH_LITERAL("Temp");
 }  // namespace
 
 namespace extension_file_util {
-
-// Returns false and sets the error if script file can't be loaded,
-// or if it's not UTF-8 encoded.
-static bool IsScriptValid(const base::FilePath& path,
-                          const base::FilePath& relative_path,
-                          int message_id, std::string* error);
 
 base::FilePath InstallExtension(const base::FilePath& unpacked_source_dir,
                                 const std::string& id,
@@ -157,7 +153,7 @@ scoped_refptr<Extension> LoadExtension(const base::FilePath& extension_path,
 DictionaryValue* LoadManifest(const base::FilePath& extension_path,
                               std::string* error) {
   base::FilePath manifest_path =
-      extension_path.Append(Extension::kManifestFilename);
+      extension_path.Append(extensions::kManifestFilename);
   if (!file_util::PathExists(manifest_path)) {
     *error = l10n_util::GetStringUTF8(IDS_EXTENSION_MANIFEST_UNREADABLE);
     return NULL;
@@ -251,41 +247,6 @@ bool ValidateExtension(const Extension* extension,
   if (!extensions::ManifestHandler::ValidateExtension(
           extension, error, warnings))
     return false;
-
-  // TODO(yoz): Move this to content scripts manifest handler.
-  // Validate that claimed script resources actually exist,
-  // and are UTF-8 encoded.
-  ExtensionResource::SymlinkPolicy symlink_policy;
-  if ((extension->creation_flags() &
-       Extension::FOLLOW_SYMLINKS_ANYWHERE) != 0) {
-    symlink_policy = ExtensionResource::FOLLOW_SYMLINKS_ANYWHERE;
-  } else {
-    symlink_policy = ExtensionResource::SYMLINKS_MUST_RESOLVE_WITHIN_ROOT;
-  }
-
-  for (size_t i = 0; i < extension->content_scripts().size(); ++i) {
-    const extensions::UserScript& script = extension->content_scripts()[i];
-
-    for (size_t j = 0; j < script.js_scripts().size(); j++) {
-      const extensions::UserScript::File& js_script = script.js_scripts()[j];
-      const base::FilePath& path = ExtensionResource::GetFilePath(
-          js_script.extension_root(), js_script.relative_path(),
-          symlink_policy);
-      if (!IsScriptValid(path, js_script.relative_path(),
-                         IDS_EXTENSION_LOAD_JAVASCRIPT_FAILED, error))
-        return false;
-    }
-
-    for (size_t j = 0; j < script.css_scripts().size(); j++) {
-      const extensions::UserScript::File& css_script = script.css_scripts()[j];
-      const base::FilePath& path = ExtensionResource::GetFilePath(
-          css_script.extension_root(), css_script.relative_path(),
-          symlink_policy);
-      if (!IsScriptValid(path, css_script.relative_path(),
-                         IDS_EXTENSION_LOAD_CSS_FAILED, error))
-        return false;
-    }
-  }
 
   // Check children of extension root to see if any of them start with _ and is
   // not on the reserved list.
@@ -401,8 +362,7 @@ extensions::MessageBundle* LoadMessageBundle(
     std::string* error) {
   error->clear();
   // Load locale information if available.
-  base::FilePath locale_path = extension_path.Append(
-      Extension::kLocaleFolder);
+  base::FilePath locale_path = extension_path.Append(extensions::kLocaleFolder);
   if (!file_util::PathExists(locale_path))
     return NULL;
 
@@ -451,34 +411,12 @@ SubstitutionMap* LoadMessageBundleSubstitutionMap(
   return returnValue;
 }
 
-static bool IsScriptValid(const base::FilePath& path,
-                          const base::FilePath& relative_path,
-                          int message_id,
-                          std::string* error) {
-  std::string content;
-  if (!file_util::PathExists(path) ||
-      !file_util::ReadFileToString(path, &content)) {
-    *error = l10n_util::GetStringFUTF8(
-        message_id,
-        relative_path.LossyDisplayName());
-    return false;
-  }
-
-  if (!IsStringUTF8(content)) {
-    *error = l10n_util::GetStringFUTF8(
-        IDS_EXTENSION_BAD_FILE_ENCODING,
-        relative_path.LossyDisplayName());
-    return false;
-  }
-
-  return true;
-}
-
 bool CheckForIllegalFilenames(const base::FilePath& extension_path,
                               std::string* error) {
   // Reserved underscore names.
   static const base::FilePath::CharType* reserved_names[] = {
-    Extension::kLocaleFolder,
+    extensions::kLocaleFolder,
+    extensions::kPlatformSpecificFolder,
     FILE_PATH_LITERAL("__MACOSX"),
   };
   CR_DEFINE_STATIC_LOCAL(

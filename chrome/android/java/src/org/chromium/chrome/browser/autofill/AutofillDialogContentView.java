@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import android.content.Context;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
@@ -15,7 +16,6 @@ import android.view.animation.Animation;
 import android.view.animation.AnimationSet;
 import android.view.animation.ScaleAnimation;
 import android.view.animation.TranslateAnimation;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -24,7 +24,6 @@ import android.widget.TextView;
 import android.widget.AdapterView.OnItemSelectedListener;
 
 import static org.chromium.chrome.browser.autofill.AutofillDialogConstants.NUM_SECTIONS;
-import static org.chromium.chrome.browser.autofill.AutofillDialogConstants.SECTION_EMAIL;
 import static org.chromium.chrome.browser.autofill.AutofillDialogConstants.SECTION_CC;
 import static org.chromium.chrome.browser.autofill.AutofillDialogConstants.SECTION_CC_BILLING;
 import static org.chromium.chrome.browser.autofill.AutofillDialogConstants.SECTION_BILLING;
@@ -41,8 +40,6 @@ import org.chromium.chrome.R;
 public class AutofillDialogContentView extends LinearLayout {
     private static final int ANIMATION_DURATION_MS = 1000;
     // TODO(yusufo): Remove all placeholders here and also in related layout xml files.
-    private final AutofillDialogMenuItem[][] mDefaultMenuItems =
-            new AutofillDialogMenuItem[NUM_SECTIONS][];
     static final int INVALID_LAYOUT = -1;
     static final int LAYOUT_EDITING_SHIPPING = 0;
     static final int LAYOUT_EDITING_CC = 1;
@@ -64,21 +61,6 @@ public class AutofillDialogContentView extends LinearLayout {
 
     public AutofillDialogContentView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        AutofillDialogMenuItem[] billingItems = {
-                new AutofillDialogMenuItem(0,
-                        getResources().getString(R.string.autofill_new_billing)),
-                new AutofillDialogMenuItem(0,
-                        getResources().getString(R.string.autofill_edit_billing))
-        };
-        AutofillDialogMenuItem[] shippingItems = {
-                new AutofillDialogMenuItem(0,
-                        getResources().getString(R.string.autofill_new_shipping)),
-                new AutofillDialogMenuItem(0,
-                        getResources().getString(R.string.autofill_edit_shipping))
-        };
-
-        mDefaultMenuItems[SECTION_CC_BILLING] = billingItems;
-        mDefaultMenuItems[SECTION_SHIPPING] = shippingItems;
     }
 
     @Override
@@ -97,20 +79,7 @@ public class AutofillDialogContentView extends LinearLayout {
             mSpinners[i].setAdapter(adapter);
         }
 
-        createAndAddPlaceHolders();
         changeLayoutTo(LAYOUT_FETCHING);
-    }
-
-    // TODO(yusufo): Remove this method once glue implements fetching data.
-    private void createAndAddPlaceHolders() {
-        AutofillDialogMenuItem[] ccItems = new AutofillDialogMenuItem[1];
-        ccItems[0] = new AutofillDialogMenuItem(
-                0, "XXXX-XXXX-XXXX-1000", "Additional info required", null);
-        AutofillDialogMenuItem[] addressItems = new AutofillDialogMenuItem[1];
-        addressItems[0] = new AutofillDialogMenuItem(
-                0, "Place Holder", "1600 Amphitheatre Pkwy", null);
-        updateMenuItemsForSection(SECTION_CC_BILLING, ccItems);
-        updateMenuItemsForSection(SECTION_SHIPPING, addressItems);
     }
 
     @Override
@@ -135,35 +104,29 @@ public class AutofillDialogContentView extends LinearLayout {
     }
 
     /**
-     * @param spinner The dropdown that was selected by the user.
-     * @param section The section  that the dropdown corresponds to.
-     * @param position The position for the selected item in the dropdown.
-     * @return Whether the selection should cause a layout state change.
+     * @return Whether the current layout is one of the editing layouts.
      */
-    public boolean selectionShouldChangeLayout(AdapterView<?> spinner, int section, int position) {
-        int numDefaultItems = mDefaultMenuItems[section] != null ?
-                mDefaultMenuItems[section].length : 0;
-        return position >= spinner.getCount() - numDefaultItems;
+    public boolean isInEditingMode() {
+        return mCurrentLayout != INVALID_LAYOUT &&
+                mCurrentLayout != LAYOUT_STEADY &&
+                        mCurrentLayout != LAYOUT_FETCHING;
     }
 
     /**
-     * @return The current layout the content is showing.
+     * @return The current section if we are in editing mode, INVALID_SECTION otherwise.
      */
-    // TODO(yusufo): Consider restricting this access more to checks rather than the
-    // current value.
-    public int getCurrentLayout() {
-        return mCurrentLayout;
+    public int getCurrentSection() {
+        return getSectionForLayoutMode(mCurrentLayout);
     }
 
     /**
      * Updates a dropdown with the given items and adds default items to the end.
      * @param items The {@link AutofillDialogMenuItem} array to update the dropdown with.
      */
-    public void updateMenuItemsForSection(int section, AutofillDialogMenuItem[] items) {
+    public void updateMenuItemsForSection(int section, List<AutofillDialogMenuItem> items) {
         AutofillDialogMenuAdapter adapter = mAdapters[section];
         adapter.clear();
         adapter.addAll(items);
-        if (mDefaultMenuItems[section] != null) adapter.addAll(mDefaultMenuItems[section]);
     }
 
     /**
@@ -326,10 +289,24 @@ public class AutofillDialogContentView extends LinearLayout {
             ImageView icon = (ImageView) convertView.findViewById(R.id.cc_icon);
             TextView line1 = (TextView) convertView.findViewById(R.id.adapter_item_line_1);
             TextView line2 = (TextView) convertView.findViewById(R.id.adapter_item_line_2);
-            // TODO(yusufo): Fix card icon when it gets added to menuItem.
-            if (icon != null) icon.setImageResource(R.drawable.visa);
+            if (icon != null) {
+                if (item.mIcon != null) {
+                    icon.setImageBitmap(item.mIcon);
+                    icon.setVisibility(VISIBLE);
+                } else {
+                    icon.setImageBitmap(null);
+                    icon.setVisibility(GONE);
+                }
+            }
             if (line1 != null) line1.setText(item.mLine1);
-            if (line2 != null) line2.setText(item.mLine2);
+            if (line2 != null) {
+                if (!TextUtils.isEmpty(item.mLine2)) {
+                    line2.setVisibility(VISIBLE);
+                    line2.setText(item.mLine2);
+                } else {
+                    line2.setVisibility(GONE);
+                }
+            }
             return convertView;
         }
     }

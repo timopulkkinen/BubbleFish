@@ -9,9 +9,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/instant/instant_unload_handler.h"
+#include "base/prefs/pref_change_registrar.h"
+#include "chrome/browser/ui/search/instant_controller.h"
+#include "chrome/browser/ui/search/instant_unload_handler.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -111,8 +111,9 @@ class BrowserInstantController : public content::NotificationObserver,
   void ResetInstant(const std::string& pref_name);
 
   // Overridden from search::SearchModelObserver:
-  virtual void ModeChanged(const search::Mode& old_mode,
-                           const search::Mode& new_mode) OVERRIDE;
+  virtual void ModelChanged(
+      const search::SearchModel::State& old_state,
+      const search::SearchModel::State& new_state) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,

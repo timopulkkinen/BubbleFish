@@ -7,9 +7,9 @@
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -141,6 +141,7 @@ void InMemoryURLIndex::ShutDown() {
   base::FilePath path;
   if (!GetCacheFilePath(&path))
     return;
+  private_data_->CancelPendingUpdates();
   URLIndexPrivateData::WritePrivateDataToCacheFileTask(private_data_, path);
   needs_to_be_cached_ = false;
 }
@@ -202,15 +203,21 @@ void InMemoryURLIndex::Observe(int notification_type,
 }
 
 void InMemoryURLIndex::OnURLVisited(const URLVisitedDetails* details) {
-  needs_to_be_cached_ |=
-      private_data_->UpdateURL(details->row, languages_, scheme_whitelist_);
+  HistoryService* service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           Profile::EXPLICIT_ACCESS);
+  needs_to_be_cached_ |= private_data_->UpdateURL(
+      service, details->row, languages_, scheme_whitelist_);
 }
 
 void InMemoryURLIndex::OnURLsModified(const URLsModifiedDetails* details) {
+  HistoryService* service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           Profile::EXPLICIT_ACCESS);
   for (URLRows::const_iterator row = details->changed_urls.begin();
        row != details->changed_urls.end(); ++row)
     needs_to_be_cached_ |=
-        private_data_->UpdateURL(*row, languages_, scheme_whitelist_);
+        private_data_->UpdateURL(service, *row, languages_, scheme_whitelist_);
 }
 
 void InMemoryURLIndex::OnURLsDeleted(const URLsDeletedDetails* details) {

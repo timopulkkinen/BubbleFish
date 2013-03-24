@@ -63,6 +63,9 @@ class RulesRegistryStorageDelegate::Inner
         RulesRegistryWithCache* rules_registry,
         const std::string& storage_key);
 
+  // Run this once, just after Inner is constructed.
+  void Init();
+
  private:
   friend class base::RefCountedThreadSafe<Inner>;
   friend class RulesRegistryStorageDelegate;
@@ -126,8 +129,6 @@ class RulesRegistryStorageDelegate::Inner
   // with UMA once per the delegate instance, unless in Incognito.
   base::Time storage_init_time_;
   bool log_storage_init_delay_;
-  // TODO(vabr): Could |ready_| be used instead of |log_storage_init_delay_|?
-  // http://crbug.com/176926
 };
 
 RulesRegistryStorageDelegate::RulesRegistryStorageDelegate() {
@@ -147,6 +148,7 @@ void RulesRegistryStorageDelegate::InitOnUIThread(
   if (store)
     store->RegisterKey(storage_key);
   inner_ = new Inner(profile, rules_registry, storage_key);
+  inner_->Init();
 }
 
 void RulesRegistryStorageDelegate::CleanupOnUIThread() {
@@ -183,16 +185,18 @@ RulesRegistryStorageDelegate::Inner::Inner(
       rules_registry_thread_(rules_registry->GetOwnerThread()),
       rules_registry_(rules_registry),
       ready_(false),
-      log_storage_init_delay_(true) {
+      log_storage_init_delay_(true) {}
+
+void RulesRegistryStorageDelegate::Inner::Init() {
   if (!profile_->IsOffTheRecord()) {
     registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                    content::Source<Profile>(profile));
+                    content::Source<Profile>(profile_));
     registrar_->Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                    content::Source<Profile>(profile));
+                    content::Source<Profile>(profile_));
   } else {
     log_storage_init_delay_ = false;
     registrar_->Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                    content::Source<Profile>(profile->GetOriginalProfile()));
+                    content::Source<Profile>(profile_->GetOriginalProfile()));
     InitForOTRProfile();
   }
 }
@@ -212,7 +216,7 @@ void RulesRegistryStorageDelegate::Inner::InitForOTRProfile() {
         extension_service->IsIncognitoEnabled((*i)->id()))
       ReadFromStorage((*i)->id());
   }
-  ready_ = true;
+  CheckIfReady();
 }
 
 void RulesRegistryStorageDelegate::Inner::Observe(
@@ -253,11 +257,9 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
   extensions::StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);
-    store->GetExtensionValue(extension_id,
-                             storage_key_,
-                             base::Bind(&Inner::ReadFromStorageCallback,
-                                        make_scoped_refptr(this),
-                                        extension_id));
+    store->GetExtensionValue(
+        extension_id, storage_key_,
+        base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
   }
 
   // TODO(mpcomplete): Migration code. Remove when declarativeWebRequest goes
@@ -266,11 +268,9 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
   store = ExtensionSystem::Get(profile_)->state_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);
-    store->GetExtensionValue(extension_id,
-                             storage_key_,
-                             base::Bind(&Inner::ReadFromStorageCallback,
-                                        make_scoped_refptr(this),
-                                        extension_id));
+    store->GetExtensionValue(
+        extension_id, storage_key_,
+        base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
     store->RemoveExtensionValue(extension_id, storage_key_);
   }
 }
@@ -281,9 +281,7 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorageCallback(
   content::BrowserThread::PostTask(
       rules_registry_thread_,
       FROM_HERE,
-      base::Bind(&Inner::ReadFromStorageOnRegistryThread,
-                 make_scoped_refptr(this),
-                 extension_id,
+      base::Bind(&Inner::ReadFromStorageOnRegistryThread, this, extension_id,
                  base::Passed(&value)));
 
   // TODO(vabr): Once the migration code of http://crbug.com/166474 is removed,
@@ -321,8 +319,7 @@ void RulesRegistryStorageDelegate::Inner::CheckIfReady() {
   content::BrowserThread::PostTask(
       rules_registry_thread_,
       FROM_HERE,
-      base::Bind(&Inner::NotifyReadyOnRegistryThread,
-                 make_scoped_refptr(this)));
+      base::Bind(&Inner::NotifyReadyOnRegistryThread, this));
 }
 
 void RulesRegistryStorageDelegate::Inner::ReadFromStorageOnRegistryThread(

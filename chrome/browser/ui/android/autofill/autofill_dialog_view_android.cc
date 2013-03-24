@@ -46,11 +46,36 @@ void AutofillDialogViewAndroid::Hide() {
   NOTIMPLEMENTED();
 }
 
-void AutofillDialogViewAndroid::UpdateAccountChooser() {
-  NOTIMPLEMENTED();
+void AutofillDialogViewAndroid::UpdateNotificationArea() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::vector<DialogNotification> notifications =
+      controller_->CurrentNotifications();
+  const size_t count = notifications.size();
+  ScopedJavaLocalRef<jobjectArray> notification_array =
+      Java_AutofillDialogGlue_createAutofillDialogNotificationArray(
+          env, count);
+  for (size_t i = 0; i < count; ++i) {
+    ScopedJavaLocalRef<jstring> text =
+        base::android::ConvertUTF16ToJavaString(
+            env, notifications[i].display_text());
+
+    Java_AutofillDialogGlue_addToAutofillDialogNotificationArray(
+        env,
+        notification_array.obj(),
+        i,
+        static_cast<int>(notifications[i].GetBackgroundColor()),
+        static_cast<int>(notifications[i].GetTextColor()),
+        notifications[i].HasArrow(),
+        notifications[i].HasCheckbox(),
+        text.obj());
+  }
+
+  Java_AutofillDialogGlue_updateNotificationArea(env,
+                                                 java_object_.obj(),
+                                                 notification_array.obj());
 }
 
-void AutofillDialogViewAndroid::UpdateNotificationArea() {
+void AutofillDialogViewAndroid::UpdateAccountChooser() {
   NOTIMPLEMENTED();
 }
 
@@ -96,7 +121,12 @@ void AutofillDialogViewAndroid::UpdateSection(DialogSection section) {
       Java_AutofillDialogGlue_createAutofillDialogMenuItemArray(env,
                                                                 itemCount);
 
+  int checkedItem = -1;
+
   for (int i = 0; i < itemCount; ++i) {
+    if (menuModel->IsItemCheckedAt(i))
+      checkedItem = i;
+
     ScopedJavaLocalRef<jstring> line1 =
         base::android::ConvertUTF16ToJavaString(env, menuModel->GetLabelAt(i));
     ScopedJavaLocalRef<jstring> line2 =
@@ -119,7 +149,8 @@ void AutofillDialogViewAndroid::UpdateSection(DialogSection section) {
                                         section,
                                         controller_->SectionIsActive(section),
                                         field_array.obj(),
-                                        menu_array.obj());
+                                        menu_array.obj(),
+                                        checkedItem);
 }
 
 void AutofillDialogViewAndroid::GetUserInput(DialogSection section,
@@ -182,6 +213,9 @@ void AutofillDialogViewAndroid::UpdateProgressBar(double value) {
 }
 
 void AutofillDialogViewAndroid::ModelChanged() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_AutofillDialogGlue_modelChanged(env, java_object_.obj(), false);
+
   UpdateSection(SECTION_EMAIL);
   UpdateSection(SECTION_CC);
   UpdateSection(SECTION_BILLING);
@@ -190,11 +224,53 @@ void AutofillDialogViewAndroid::ModelChanged() {
 }
 
 void AutofillDialogViewAndroid::SubmitForTesting() {
-  NOTIMPLEMENTED();
+  controller_->OnSubmit();
 }
 
 void AutofillDialogViewAndroid::CancelForTesting() {
+  controller_->OnCancel();
+}
+
+// Calls from Java to C++
+
+void AutofillDialogViewAndroid::ItemSelected(JNIEnv* env, jobject obj,
+                                             jint section, jint index) {
+  ui::MenuModel* menuModel =
+      controller_->MenuModelForSection(static_cast<DialogSection>(section));
+  menuModel->ActivatedAt(index);
+}
+
+void AutofillDialogViewAndroid::AccountSelected(JNIEnv* env, jobject obj,
+                                                jint index) {
+  // TODO(aruslan): start using this call.
   NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::EditingStart(JNIEnv* env, jobject obj,
+                                             jint section) {
+  // TODO(aruslan): start using this call.
+  NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::EditingComplete(JNIEnv* env, jobject obj,
+                                           jint section) {
+  // TODO(aruslan): start using this call.
+  NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::EditingCancel(JNIEnv* env, jobject obj,
+                                              jint section) {
+  // TODO(aruslan): start using this call.
+  NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::DialogSubmit(JNIEnv* env, jobject obj) {
+  // TODO(aurimas): add validation step.
+  controller_->OnSubmit();
+}
+
+void AutofillDialogViewAndroid::DialogCancel(JNIEnv* env, jobject obj) {
+  controller_->OnCancel();
 }
 
 // static

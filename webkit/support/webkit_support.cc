@@ -21,13 +21,14 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/run_loop.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "cc/thread_impl.h"
+#include "cc/base/thread_impl.h"
 #include "googleurl/src/url_util.h"
 #include "grit/webkit_chromium_resources.h"
 #include "media/base/filter_collection.h"
@@ -62,11 +63,6 @@
 #include "webkit/gpu/test_context_provider_factory.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
-#if defined(OS_ANDROID)
-#include "webkit/media/android/media_player_bridge_manager_impl.h"
-#include "webkit/media/android/webmediaplayer_in_process_android.h"
-#include "webkit/media/android/webmediaplayer_manager_android.h"
-#endif
 #include "webkit/media/media_stream_client.h"
 #include "webkit/media/webmediaplayer_impl.h"
 #include "webkit/media/webmediaplayer_ms.h"
@@ -183,15 +179,6 @@ class TestEnvironment {
 
     idb_factory_.reset(new TestWebIDBFactory());
     WebKit::setIDBFactory(idb_factory_.get());
-
-#if defined(OS_ANDROID)
-    // Make sure we have enough decoding resources for layout tests.
-    // The current maximum number of media elements in a layout test is 8.
-    media_bridge_manager_.reset(
-        new webkit_media::MediaPlayerBridgeManagerImpl(8));
-    media_player_manager_.reset(
-        new webkit_media::WebMediaPlayerManagerAndroid());
-#endif
   }
 
   ~TestEnvironment() {
@@ -225,14 +212,6 @@ class TestEnvironment {
   base::FilePath mock_current_directory() const {
     return mock_current_directory_;
   }
-
-  webkit_media::WebMediaPlayerManagerAndroid* media_player_manager() {
-    return media_player_manager_.get();
-  }
-
-  webkit_media::MediaPlayerBridgeManagerImpl* media_bridge_manager() {
-    return media_bridge_manager_.get();
-  }
 #endif
 
  private:
@@ -245,8 +224,6 @@ class TestEnvironment {
 
 #if defined(OS_ANDROID)
   base::FilePath mock_current_directory_;
-  scoped_ptr<webkit_media::WebMediaPlayerManagerAndroid> media_player_manager_;
-  scoped_ptr<webkit_media::MediaPlayerBridgeManagerImpl> media_bridge_manager_;
 #endif
 };
 
@@ -304,10 +281,6 @@ class WebKitClientMessageLoopImpl
  private:
   MessageLoop* message_loop_;
 };
-
-webkit_support::GraphicsContext3DImplementation
-    g_graphics_context_3d_implementation =
-        webkit_support::IN_PROCESS_COMMAND_BUFFER;
 
 TestEnvironment* test_environment;
 
@@ -389,7 +362,7 @@ void SetUpTestEnvironmentForUnitTests(
 void TearDownTestEnvironment() {
   // Flush any remaining messages before we kill ourselves.
   // http://code.google.com/p/chromium/issues/detail?id=9500
-  MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   BeforeShutdown();
   if (RunningOnValgrind())
@@ -438,14 +411,7 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
   }
 
 #if defined(OS_ANDROID)
-  return new webkit_media::WebMediaPlayerInProcessAndroid(
-      frame,
-      client,
-      GetWebKitPlatformSupport()->cookieJar(),
-      test_environment->media_player_manager(),
-      test_environment->media_bridge_manager(),
-      new webkit_support::TestStreamTextureFactory(),
-      true);
+  return NULL;
 #else
   webkit_media::WebMediaPlayerParams params(
       NULL, NULL, new media::MediaLog());
@@ -463,12 +429,6 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebMediaPlayerClient* client) {
   return CreateMediaPlayer(frame, url, client, NULL);
 }
-
-#if defined(OS_ANDROID)
-void ReleaseMediaResources() {
-  test_environment->media_player_manager()->ReleaseMediaResources();
-}
-#endif
 
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
     WebFrame*, WebKit::WebApplicationCacheHostClient* client) {
@@ -497,35 +457,16 @@ void SetUpGLBindings(GLBindingPreferences bindingPref) {
     default:
       NOTREACHED();
   }
-  webkit::gpu::TestContextProviderFactory::SetUpFactoryForTesting(
-      g_graphics_context_3d_implementation);
-}
-
-void SetGraphicsContext3DImplementation(GraphicsContext3DImplementation impl) {
-  g_graphics_context_3d_implementation = impl;
-}
-
-GraphicsContext3DImplementation GetGraphicsContext3DImplementation() {
-  return g_graphics_context_3d_implementation;
 }
 
 WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view) {
-  switch (webkit_support::GetGraphicsContext3DImplementation()) {
-    case webkit_support::IN_PROCESS:
-      return WebGraphicsContext3DInProcessImpl::CreateForWebView(
-          attributes, true /* direct */);
-    case webkit_support::IN_PROCESS_COMMAND_BUFFER: {
-      scoped_ptr<WebGraphicsContext3DInProcessCommandBufferImpl> context(
-          new WebGraphicsContext3DInProcessCommandBufferImpl());
-      if (!context->Initialize(attributes, NULL))
-        return NULL;
-      return context.release();
-    }
-  }
-  NOTREACHED();
-  return NULL;
+  scoped_ptr<WebGraphicsContext3DInProcessCommandBufferImpl> context(
+      new WebGraphicsContext3DInProcessCommandBufferImpl());
+  if (!context->Initialize(attributes, NULL))
+    return NULL;
+  return context.release();
 }
 
 WebKit::WebLayerTreeView* CreateLayerTreeView(
@@ -534,12 +475,12 @@ WebKit::WebLayerTreeView* CreateLayerTreeView(
     WebKit::WebThread* thread) {
   scoped_ptr<cc::Thread> compositor_thread;
   if (thread)
-    compositor_thread = cc::ThreadImpl::createForDifferentThread(
+    compositor_thread = cc::ThreadImpl::CreateForDifferentThread(
         static_cast<webkit_glue::WebThreadImpl*>(thread)->
         message_loop()->message_loop_proxy());
 
-  scoped_ptr<WebKit::WebLayerTreeViewImplForTesting> view(
-      new WebKit::WebLayerTreeViewImplForTesting(type, client));
+  scoped_ptr<webkit::WebLayerTreeViewImplForTesting> view(
+      new webkit::WebLayerTreeViewImplForTesting(type, client));
 
   if (!view->initialize(compositor_thread.Pass()))
     return NULL;
@@ -605,7 +546,7 @@ void QuitMessageLoopNow() {
 }
 
 void RunAllPendingMessages() {
-  MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 bool MessageLoopNestableTasksAllowed() {
@@ -619,7 +560,7 @@ void MessageLoopSetNestableTasksAllowed(bool allowed) {
 void DispatchMessageLoop() {
   MessageLoop* current = MessageLoop::current();
   MessageLoop::ScopedNestableTaskAllower allow(current);
-  current->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
@@ -874,14 +815,16 @@ WebURL GetDevToolsPathAsURL() {
 }
 
 // FileSystem
-void OpenFileSystem(WebFrame* frame, WebFileSystem::Type type,
+void OpenFileSystem(WebFrame* frame,
+    WebKit::WebFileSystemType type,
     long long size, bool create, WebFileSystemCallbacks* callbacks) {
   SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
       test_environment->webkit_platform_support()->fileSystem());
   fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
 }
 
-void DeleteFileSystem(WebFrame* frame, WebFileSystem::Type type,
+void DeleteFileSystem(WebFrame* frame,
+                      WebKit::WebFileSystemType type,
                       WebFileSystemCallbacks* callbacks) {
   SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
       test_environment->webkit_platform_support()->fileSystem());

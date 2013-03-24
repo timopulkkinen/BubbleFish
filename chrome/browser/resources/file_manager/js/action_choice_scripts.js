@@ -20,6 +20,9 @@
 //<include src="../../../../../ui/webui/resources/js/cr/event_target.js"/>
 //<include src="../../../../../ui/webui/resources/js/cr/ui/touch_handler.js"/>
 
+(function() {
+// 'strict mode' is invoked for this scope.
+
 //<include src="util.js"/>
 //<include src="file_type.js"/>
 //<include src="path_util.js"/>
@@ -30,3 +33,9 @@
 //<include src="media/media_util.js"/>
 
 //<include src="action_choice.js"/>
+
+// Exports
+window.ImageUtil = ImageUtil;
+window.Gallery = Gallery;
+
+})();

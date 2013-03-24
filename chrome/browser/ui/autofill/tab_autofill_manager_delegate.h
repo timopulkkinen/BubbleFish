@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/api/sync/profile_sync_service_observer.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "components/autofill/browser/autofill_manager_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -39,6 +39,8 @@ class TabAutofillManagerDelegate
   // AutofillManagerDelegate implementation.
   virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
+  virtual autocheckout::WhitelistManager*
+      GetAutocheckoutWhitelistManager() const OVERRIDE;
   virtual void HideRequestAutocompleteDialog() OVERRIDE;
   virtual bool IsSavingPasswordsEnabled() const OVERRIDE;
   virtual bool IsPasswordSyncEnabled() const OVERRIDE;
@@ -62,7 +64,6 @@ class TabAutofillManagerDelegate
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
       const GURL& source_url,
-      const content::SSLStatus& ssl_status,
       const AutofillMetrics& metric_logger,
       DialogType dialog_type,
       const base::Callback<void(const FormStructure*)>& callback) OVERRIDE;

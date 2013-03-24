@@ -17,7 +17,7 @@
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_session.h"
 #include "remoting/host/desktop_session_proxy.h"
-#include "remoting/host/event_executor.h"
+#include "remoting/host/input_injector.h"
 #include "remoting/host/session_controller.h"
 
 namespace remoting {
@@ -51,12 +51,12 @@ scoped_ptr<AudioCapturer> IpcDesktopEnvironment::CreateAudioCapturer(
   return desktop_session_proxy_->CreateAudioCapturer(audio_task_runner);
 }
 
-scoped_ptr<EventExecutor> IpcDesktopEnvironment::CreateEventExecutor(
+scoped_ptr<InputInjector> IpcDesktopEnvironment::CreateInputInjector(
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return desktop_session_proxy_->CreateEventExecutor(input_task_runner,
+  return desktop_session_proxy_->CreateInputInjector(input_task_runner,
                                                      ui_task_runner);
 }
 
@@ -114,7 +114,7 @@ bool IpcDesktopEnvironmentFactory::SupportsAudioCapture() const {
 
 void IpcDesktopEnvironmentFactory::ConnectTerminal(
     DesktopSessionProxy* desktop_session_proxy,
-    const DesktopSessionParams& params,
+    const ScreenResolution& resolution,
     bool virtual_terminal) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
@@ -126,7 +126,7 @@ void IpcDesktopEnvironmentFactory::ConnectTerminal(
   VLOG(1) << "Network: registered desktop environment " << id;
 
   daemon_channel_->Send(new ChromotingNetworkHostMsg_ConnectTerminal(
-      id, params, virtual_terminal));
+      id, resolution, virtual_terminal));
 }
 
 void IpcDesktopEnvironmentFactory::DisconnectTerminal(
@@ -145,6 +145,23 @@ void IpcDesktopEnvironmentFactory::DisconnectTerminal(
 
     VLOG(1) << "Network: unregistered desktop environment " << id;
     daemon_channel_->Send(new ChromotingNetworkHostMsg_DisconnectTerminal(id));
+  }
+}
+
+void IpcDesktopEnvironmentFactory::SetScreenResolution(
+    DesktopSessionProxy* desktop_session_proxy,
+    const ScreenResolution& resolution) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  ActiveConnectionsList::iterator i;
+  for (i = active_connections_.begin(); i != active_connections_.end(); ++i) {
+    if (i->second == desktop_session_proxy)
+      break;
+  }
+
+  if (i != active_connections_.end()) {
+    daemon_channel_->Send(new ChromotingNetworkDaemonMsg_SetScreenResolution(
+        i->first, resolution));
   }
 }
 

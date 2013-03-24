@@ -73,6 +73,7 @@ namespace extension_info_keys {
   extern const char kHomepageUrlKey[];
   extern const char kIdKey[];
   extern const char kNameKey[];
+  extern const char kKioskEnabledKey[];
   extern const char kOfflineEnabledKey[];
   extern const char kOptionsUrlKey[];
   extern const char kDetailsUrlKey[];
@@ -111,11 +112,14 @@ namespace extension_misc {
   // The extension id of the Crosh component app for ChromeOS.
   extern const char kCroshBuiltinAppId[];
 
-  // The extension id of the Office Viewer extension.
-  extern const char kQuickOfficeExtensionId[];
+  // The extension id of the Office Viewer component extension.
+  extern const char kQuickOfficeComponentExtensionId[];
 
   // The extension id of the Office Viewer dev extension.
   extern const char kQuickOfficeDevExtensionId[];
+
+  // The extension id of the Office Viewer extension.
+  extern const char kQuickOfficeExtensionId[];
 
   // The extension id used for testing streamsPrivate
   extern const char kStreamsPrivateTestExtensionId[];
@@ -153,6 +157,9 @@ namespace extension_misc {
 
   // The name of the app launch histogram.
   extern const char kAppLaunchHistogram[];
+
+  // The name of the app launch histogram for platform apps.
+  extern const char kPlatformAppLaunchHistogram[];
 
   // The buckets used for app launches.
   enum AppLaunchBucket {
@@ -217,6 +224,12 @@ namespace extension_misc {
 
     // User clicked [+] icon in apps page.
     APP_LAUNCH_NTP_WEBSTORE_PLUS_ICON,
+
+    // User clicked icon in app launcher main view.
+    APP_LAUNCH_APP_LIST_MAIN,
+
+    // User clicked app launcher search result.
+    APP_LAUNCH_APP_LIST_SEARCH,
 
     APP_LAUNCH_BUCKET_BOUNDARY,
     APP_LAUNCH_BUCKET_INVALID

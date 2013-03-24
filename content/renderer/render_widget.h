@@ -15,7 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "cc/rendering_stats.h"
+#include "cc/debug/rendering_stats.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/paint_aggregator.h"
@@ -46,7 +46,6 @@ class SyncMessage;
 namespace WebKit {
 class WebGestureEvent;
 class WebInputEvent;
-class WebLayerTreeViewClient;
 class WebMouseEvent;
 class WebTouchEvent;
 struct WebPoint;
@@ -130,10 +129,6 @@ class CONTENT_EXPORT RenderWidget
   virtual void didActivateCompositor(int input_handler_identifier);
   virtual void didDeactivateCompositor();
   virtual void initializeLayerTreeView();
-  virtual void initializeLayerTreeView(
-      WebKit::WebLayerTreeViewClient* client,
-      const WebKit::WebLayer& root_layer,
-      const WebKit::WebLayerTreeView::Settings& settings);
   virtual WebKit::WebLayerTreeView* layerTreeView();
   virtual void didBecomeReadyForAdditionalInput();
   virtual void didCommitAndDrawCompositorFrame();
@@ -168,8 +163,6 @@ class CONTENT_EXPORT RenderWidget
 
   // Fills in a WebRenderingStatsImpl struct containing information about
   // rendering, e.g. count of frames rendered, time spent painting.
-  // This call is relatively expensive in threaded compositing mode,
-  // as it blocks on the compositor thread.
   void GetRenderingStats(WebKit::WebRenderingStatsImpl&) const;
 
   // Fills in a GpuRenderingStats struct containing information about
@@ -278,6 +271,7 @@ class CONTENT_EXPORT RenderWidget
   // Resizes the render widget.
   void Resize(const gfx::Size& new_size,
               const gfx::Size& physical_backing_size,
+              float overdraw_bottom_height,
               const gfx::Rect& resizer_rect,
               bool is_fullscreen,
               ResizeAck resize_ack);
@@ -287,6 +281,7 @@ class CONTENT_EXPORT RenderWidget
   void OnCreatingNewAck();
   virtual void OnResize(const gfx::Size& new_size,
                         const gfx::Size& physical_backing_size,
+                        float overdraw_bottom_height,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen);
   void OnChangeResizeRect(const gfx::Rect& resizer_rect);
@@ -324,6 +319,7 @@ class CONTENT_EXPORT RenderWidget
   void OnImeBatchStateChanged(bool is_begin);
   void OnShowImeIfNeeded();
 #endif
+  void OnSnapshot(const gfx::Rect& src_subrect);
 
   // Notify the compositor about a change in viewport size. This should be
   // used only with auto resize mode WebWidgets, as normal WebWidgets should
@@ -485,6 +481,8 @@ class CONTENT_EXPORT RenderWidget
   WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
       const WebKit::WebGraphicsContext3D::Attributes& attributes);
 
+  bool OnSnapshotHelper(const gfx::Rect& src_subrect, SkBitmap* bitmap);
+
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
   int32 routing_id_;
@@ -525,6 +523,10 @@ class CONTENT_EXPORT RenderWidget
 
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   gfx::Size physical_backing_size_;
+
+  // The height of the physical backing surface that is overdrawn opaquely in
+  // the browser, for example by an on-screen-keyboard (in DPI-adjusted pixels).
+  float overdraw_bottom_height_;
 
   // The area that must be reserved for drawing the resize corner.
   gfx::Rect resizer_rect_;

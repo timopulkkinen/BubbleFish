@@ -470,14 +470,6 @@ void BrowserWindowCocoa::ShowUpdateChromeDialog() {
   restart_browser::RequestRestart(window());
 }
 
-void BrowserWindowCocoa::ShowTaskManager() {
-  TaskManagerMac::Show(false);
-}
-
-void BrowserWindowCocoa::ShowBackgroundPages() {
-  TaskManagerMac::Show(true);
-}
-
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
                                             bool already_bookmarked) {
   [controller_ showBookmarkBubbleForURL:url
@@ -645,7 +637,7 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
   // constructor or the FindBarCocoaController init, but that makes
   // unit testing difficult, since we would also require a
   // BrowserWindow object.
-  FindBarBridge* bridge = new FindBarBridge();
+  FindBarBridge* bridge = new FindBarBridge(browser_);
   AddFindBar(bridge->find_bar_cocoa_controller());
   return bridge;
 }
@@ -665,9 +657,9 @@ extensions::ActiveTabPermissionGranter*
   return tab_helper ? tab_helper->active_tab_permission_granter() : NULL;
 }
 
-void BrowserWindowCocoa::ModeChanged(
-    const chrome::search::Mode& old_mode,
-    const chrome::search::Mode& new_mode) {
+void BrowserWindowCocoa::ModelChanged(
+    const chrome::search::SearchModel::State& old_state,
+    const chrome::search::SearchModel::State& new_state) {
   [controller_ updateBookmarkBarStateForInstantOverlay];
 }
 

@@ -10,13 +10,13 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "cc/content_layer.h"
-#include "cc/delegated_frame_data.h"
-#include "cc/delegated_renderer_layer.h"
-#include "cc/scoped_ptr_algorithm.h"
-#include "cc/solid_color_layer.h"
-#include "cc/texture_layer.h"
-#include "cc/transferable_resource.h"
+#include "cc/base/scoped_ptr_algorithm.h"
+#include "cc/layers/content_layer.h"
+#include "cc/layers/delegated_renderer_layer.h"
+#include "cc/layers/solid_color_layer.h"
+#include "cc/layers/texture_layer.h"
+#include "cc/output/delegated_frame_data.h"
+#include "cc/resources/transferable_resource.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
 #include "ui/base/animation/animation.h"
@@ -26,8 +26,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/interpolated_transform.h"
-#include "ui/gfx/point_conversions.h"
 #include "ui/gfx/point3_f.h"
+#include "ui/gfx/point_conversions.h"
 #include "ui/gfx/size_conversions.h"
 
 namespace {
@@ -614,12 +614,12 @@ void Layer::PaintContents(SkCanvas* sk_canvas,
     canvas->Restore();
 }
 
-unsigned Layer::prepareTexture(cc::ResourceUpdateQueue&) {
+unsigned Layer::PrepareTexture(cc::ResourceUpdateQueue* queue) {
   DCHECK(texture_layer_);
   return texture_->PrepareTexture();
 }
 
-WebKit::WebGraphicsContext3D* Layer::context() {
+WebKit::WebGraphicsContext3D* Layer::Context3d() {
   DCHECK(texture_layer_);
   return texture_->HostContext3D();
 }

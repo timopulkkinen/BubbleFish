@@ -15,7 +15,7 @@
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "cc/texture_layer.h"
+#include "cc/layers/texture_layer.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
@@ -68,8 +68,8 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/range/range.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/ppapi/common.h"
@@ -136,6 +136,7 @@ using WebKit::WebScopedUserGesture;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
 using WebKit::WebUserGestureIndicator;
+using WebKit::WebUserGestureToken;
 using WebKit::WebView;
 
 namespace webkit {
@@ -327,7 +328,8 @@ PPB_Gamepad_API* PluginInstance::GamepadImpl::AsPPB_Gamepad_API() {
   return this;
 }
 
-void PluginInstance::GamepadImpl::Sample(PP_GamepadsSampleData* data) {
+void PluginInstance::GamepadImpl::Sample(PP_Instance /* instance */,
+                                         PP_GamepadsSampleData* data) {
   WebKit::WebGamepads webkit_data;
   delegate_->SampleGamepads(&webkit_data);
   ConvertWebKitGamepadData(
@@ -781,6 +783,8 @@ bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
       if (WebUserGestureIndicator::isProcessingUserGesture()) {
         pending_user_gesture_ =
             ::ppapi::EventTimeToPPTimeTicks(event.timeStampSeconds);
+        pending_user_gesture_token_ =
+            WebUserGestureIndicator::currentUserGestureToken();
       }
 
       // Each input event may generate more than one PP_InputEvent.
@@ -1442,7 +1446,7 @@ bool PluginInstance::SetFullscreen(bool fullscreen) {
 
   if (fullscreen) {
     // Create the user gesture in case we're processing one that's pending.
-    WebScopedUserGesture user_gesture;
+    WebScopedUserGesture user_gesture(CurrentUserGestureToken());
     // WebKit does not resize the plugin to fill the screen in fullscreen mode,
     // so we will tweak plugin's attributes to support the expected behavior.
     KeepSizeAttributesBeforeFullscreen();
@@ -1515,7 +1519,7 @@ void PluginInstance::UpdateFlashFullscreenState(bool flash_fullscreen) {
     } else {
       // Open a user gesture here so the Webkit user gesture checks will succeed
       // for out-of-process plugins.
-      WebScopedUserGesture user_gesture;
+      WebScopedUserGesture user_gesture(CurrentUserGestureToken());
       if (!delegate()->LockMouse(this))
         lock_mouse_callback_->Run(PP_ERROR_FAILED);
     }
@@ -1717,7 +1721,7 @@ void PluginInstance::UpdateLayer() {
   if (want_layer) {
     DCHECK(bound_graphics_3d_.get());
     texture_layer_ = cc::TextureLayer::Create(this);
-    web_layer_.reset(new WebKit::WebLayerImpl(texture_layer_));
+    web_layer_.reset(new webkit::WebLayerImpl(texture_layer_));
     if (fullscreen_container_)
       fullscreen_container_->SetLayer(web_layer_.get());
     else
@@ -1749,7 +1753,14 @@ bool PluginInstance::IsProcessingUserGesture() {
       ::ppapi::TimeTicksToPPTimeTicks(base::TimeTicks::Now());
   // Give a lot of slack so tests won't be flaky.
   const PP_TimeTicks kUserGestureDurationInSeconds = 10.0;
-  return (now - pending_user_gesture_ < kUserGestureDurationInSeconds);
+  return pending_user_gesture_token_.hasGestures() &&
+         (now - pending_user_gesture_ < kUserGestureDurationInSeconds);
+}
+
+WebUserGestureToken PluginInstance::CurrentUserGestureToken() {
+  if (!IsProcessingUserGesture())
+    pending_user_gesture_token_ = WebUserGestureToken();
+  return pending_user_gesture_token_;
 }
 
 void PluginInstance::OnLockMouseACK(bool succeeded) {
@@ -1967,7 +1978,7 @@ PP_Var PluginInstance::ExecuteScript(PP_Instance instance,
   NPVariant result;
   bool ok = false;
   if (IsProcessingUserGesture()) {
-    WebKit::WebScopedUserGesture user_gesture;
+    WebKit::WebScopedUserGesture user_gesture(CurrentUserGestureToken());
     ok = WebBindings::evaluate(NULL, frame->windowObject(), &np_script,
                                &result);
   } else {
@@ -2079,11 +2090,11 @@ void PluginInstance::DeliverSamples(PP_Instance instance,
   content_decryptor_delegate_->DeliverSamples(audio_frames, block_info);
 }
 
-unsigned PluginInstance::prepareTexture(cc::ResourceUpdateQueue&) {
+unsigned PluginInstance::PrepareTexture(cc::ResourceUpdateQueue* queue) {
   return GetBackingTextureId();
 }
 
-WebKit::WebGraphicsContext3D* PluginInstance::context() {
+WebKit::WebGraphicsContext3D* PluginInstance::Context3d() {
   DCHECK(bound_graphics_3d_.get());
   DCHECK(bound_graphics_3d_->platform_context());
   return bound_graphics_3d_->platform_context()->GetParentContext();
@@ -2125,6 +2136,7 @@ PP_Bool PluginInstance::GetScreenSize(PP_Instance instance, PP_Size* size) {
     case ::ppapi::FLASH_FILE_SINGLETON_ID:
     case ::ppapi::FLASH_FULLSCREEN_SINGLETON_ID:
     case ::ppapi::FLASH_SINGLETON_ID:
+    case ::ppapi::PDF_SINGLETON_ID:
     case ::ppapi::TRUETYPE_FONT_SINGLETON_ID:
       NOTIMPLEMENTED();
       return NULL;
@@ -2239,7 +2251,7 @@ int32_t PluginInstance::LockMouse(PP_Instance instance,
   if (!FlashIsFullscreenOrPending() || flash_fullscreen()) {
     // Open a user gesture here so the Webkit user gesture checks will succeed
     // for out-of-process plugins.
-    WebScopedUserGesture user_gesture;
+    WebScopedUserGesture user_gesture(CurrentUserGestureToken());
     if (!delegate()->LockMouse(this))
       return PP_ERROR_FAILED;
   }

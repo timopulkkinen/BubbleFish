@@ -27,7 +27,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 
 using content::WebContents;
 using extensions::DictionaryBuilder;
@@ -82,7 +82,8 @@ class WebstoreStartupInstallerTest : public InProcessBrowserTest {
 
   void RunTest(const std::string& test_function_name) {
     bool result = false;
-    std::string script = StringPrintf("%s('%s')", test_function_name.c_str(),
+    std::string script = base::StringPrintf(
+        "%s('%s')", test_function_name.c_str(),
         test_gallery_url_.c_str());
     ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
         browser()->tab_strip_model()->GetActiveWebContents(),
@@ -100,7 +101,7 @@ class WebstoreStartupInstallerTest : public InProcessBrowserTest {
   bool RunIndexedTest(const std::string& test_function_name,
                       int i) {
     std::string result = "FAILED";
-    std::string script = StringPrintf("%s('%s', %d)",
+    std::string script = base::StringPrintf("%s('%s', %d)",
         test_function_name.c_str(), test_gallery_url_.c_str(), i);
     EXPECT_TRUE(content::ExecuteScriptAndExtractString(
         browser()->tab_strip_model()->GetActiveWebContents(),

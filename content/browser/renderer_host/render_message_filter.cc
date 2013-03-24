@@ -35,6 +35,7 @@
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/media/media_param_traits.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -54,6 +55,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/keygen_handler.h"
 #include "net/base/mime_util.h"
+#include "net/base/request_priority.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
@@ -486,18 +488,21 @@ void RenderMessageFilter::OnCreateFullscreenWidget(int opener_id,
       opener_id, route_id, surface_id);
 }
 
-void RenderMessageFilter::OnGetProcessMemorySizes(
-    size_t* private_bytes, size_t* shared_bytes) {
+void RenderMessageFilter::OnGetProcessMemorySizes(size_t* private_bytes,
+                                                  size_t* shared_bytes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   using base::ProcessMetrics;
 #if !defined(OS_MACOSX) || defined(OS_IOS)
-  scoped_ptr<ProcessMetrics> metrics(
-      ProcessMetrics::CreateProcessMetrics(peer_handle()));
+  scoped_ptr<ProcessMetrics> metrics(ProcessMetrics::CreateProcessMetrics(
+      peer_handle()));
 #else
-  scoped_ptr<ProcessMetrics> metrics(
-      ProcessMetrics::CreateProcessMetrics(peer_handle(), NULL));
+  scoped_ptr<ProcessMetrics> metrics(ProcessMetrics::CreateProcessMetrics(
+      peer_handle(), content::BrowserChildProcessHost::GetPortProvider()));
 #endif
-  metrics->GetMemoryBytes(private_bytes, shared_bytes);
+  if (!metrics->GetMemoryBytes(private_bytes, shared_bytes)) {
+    *private_bytes = 0;
+    *shared_bytes = 0;
+  }
 }
 
 void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
@@ -891,10 +896,17 @@ void RenderMessageFilter::OnCacheableMetadataAvailable(
       http_transaction_factory()->GetCache();
   DCHECK(cache);
 
+  // Use the same priority for the metadata write as for script
+  // resources (see defaultPriorityForResourceType() in WebKit's
+  // CachedResource.cpp). Note that WebURLRequest::PriorityMedium
+  // corresponds to net::LOW (see ConvertWebKitPriorityToNetPriority()
+  // in weburlloader_impl.cc).
+  const net::RequestPriority kPriority = net::LOW;
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(data.size()));
   memcpy(buf->data(), &data.front(), data.size());
   cache->WriteMetadata(
-      url, base::Time::FromDoubleT(expected_response_time), buf, data.size());
+      url, kPriority,
+      base::Time::FromDoubleT(expected_response_time), buf, data.size());
 }
 
 void RenderMessageFilter::OnKeygen(uint32 key_size_index,

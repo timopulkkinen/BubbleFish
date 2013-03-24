@@ -22,11 +22,11 @@
 #include "base/threading/thread_checker.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permission_message.h"
 #include "chrome/common/extensions/user_script.h"
+#include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
@@ -191,31 +191,15 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Valid schemes for host permission URLPatterns.
   static const int kValidHostPermissionSchemes;
 
-  // The name of the manifest inside an extension.
-  static const base::FilePath::CharType kManifestFilename[];
-
-  // The name of locale folder inside an extension.
-  static const base::FilePath::CharType kLocaleFolder[];
-
-  // The name of the messages file inside an extension.
-  static const base::FilePath::CharType kMessagesFilename[];
-
 #if defined(OS_WIN)
   static const char kExtensionRegistryPath[];
 #endif
-
-  // The number of bytes in a legal id.
-  static const size_t kIdSize;
 
   // The mimetype used for extensions.
   static const char kMimeType[];
 
   // Checks to see if the extension has a valid ID.
   static bool IdIsValid(const std::string& id);
-
-  // Generate an ID for an extension in the given path.
-  // Used while developing extensions, before they have a key.
-  static std::string GenerateIdForPath(const base::FilePath& file_name);
 
   // Returns true if the specified file is an extension.
   static bool IsExtension(const base::FilePath& file_name);
@@ -266,11 +250,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Does a simple base64 encoding of |input| into |output|.
   static bool ProducePEM(const std::string& input, std::string* output);
-
-  // Generates an extension ID from arbitrary input. The same input string will
-  // always generate the same output ID.
-  static bool GenerateId(const std::string& input,
-                         std::string* output) WARN_UNUSED_RESULT;
 
   // Expects base64 encoded |input| and formats into |output| including
   // the appropriate header & footer.
@@ -407,9 +386,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // settings page (i.e. chrome://extensions).
   bool ShouldDisplayInExtensionSettings() const;
 
-  // Returns true if the extension has a content script declared at |url|.
-  bool HasContentScriptAtURL(const GURL& url) const;
-
   // Gets the tab-specific host permissions of |tab_id|, or NULL if there
   // aren't any.
   scoped_refptr<const PermissionSet> GetTabSpecificPermissions(int tab_id)
@@ -453,7 +429,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool converted_from_user_script() const {
     return converted_from_user_script_;
   }
-  const UserScriptList& content_scripts() const { return content_scripts_; }
   const ActionInfo* system_indicator_info() const {
     return system_indicator_info_.get();
   }
@@ -484,8 +459,15 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     return manifest_.get();
   }
   bool incognito_split_mode() const { return incognito_split_mode_; }
+  bool kiosk_enabled() const { return kiosk_enabled_; }
   bool offline_enabled() const { return offline_enabled_; }
   bool wants_file_access() const { return wants_file_access_; }
+  // TODO(rdevlin.cronin): This is needed for ContentScriptsHandler, and should
+  // be moved out as part of crbug.com/159265. This should not be used anywhere
+  // else.
+  void set_wants_file_access(bool wants_file_access) {
+    wants_file_access_ = wants_file_access;
+  }
   int creation_flags() const { return creation_flags_; }
   bool from_webstore() const { return (creation_flags_ & FROM_WEBSTORE) != 0; }
   bool from_bookmark() const { return (creation_flags_ & FROM_BOOKMARK) != 0; }
@@ -555,10 +537,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                               int creation_flags,
                               string16* error);
 
-  // Normalize the path for use by the extension. On Windows, this will make
-  // sure the drive letter is uppercase.
-  static base::FilePath MaybeNormalizePath(const base::FilePath& path);
-
   // Returns true if this extension id is from a trusted provider.
   static bool IsTrustedId(const std::string& id);
 
@@ -599,9 +577,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadSandboxedPages(string16* error);
   // Must be called after the "plugins" key has been parsed.
   bool LoadRequirements(string16* error);
+  bool LoadKioskEnabled(string16* error);
   bool LoadOfflineEnabled(string16* error);
   bool LoadExtensionFeatures(string16* error);
-  bool LoadContentScripts(string16* error);
   bool LoadBrowserAction(string16* error);
   bool LoadSystemIndicator(string16* error);
   bool LoadTextToSpeechVoices(string16* error);
@@ -613,22 +591,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadManagedModeConfigurations(
       const base::DictionaryValue* content_pack_value,
       string16* error);
-
-  // Helper method that loads a UserScript object from a
-  // dictionary in the content_script list of the manifest.
-  bool LoadUserScriptHelper(const base::DictionaryValue* content_script,
-                            int definition_index,
-                            string16* error,
-                            UserScript* result);
-
-  // Helper method that loads either the include_globs or exclude_globs list
-  // from an entry in the content_script lists of the manifest.
-  bool LoadGlobsHelper(const base::DictionaryValue* content_script,
-                       int content_script_index,
-                       const char* globs_property_name,
-                       string16* error,
-                       void(UserScript::*add_method)(const std::string& glob),
-                       UserScript* instance);
 
   // Returns true if the extension has more than one "UI surface". For example,
   // an extension that has a browser action and a page action.
@@ -683,6 +645,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // mode.
   bool incognito_split_mode_;
 
+  // Whether the extension or app should be enabled in app kiosk mode.
+  bool kiosk_enabled_;
+
   // Whether the extension or app should be enabled when offline.
   bool offline_enabled_;
 
@@ -718,9 +683,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // True if the extension was generated from a user script. (We show slightly
   // different UI if so).
   bool converted_from_user_script_;
-
-  // Paths to the content scripts the extension contains.
-  UserScriptList content_scripts_;
 
   // The extension's system indicator, if any.
   scoped_ptr<ActionInfo> system_indicator_info_;

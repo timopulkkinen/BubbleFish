@@ -17,14 +17,15 @@
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "cc/compositor_frame.h"
-#include "cc/compositor_frame_ack.h"
+#include "cc/output/compositor_frame.h"
+#include "cc/output/compositor_frame_ack.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
+#include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/gesture_event_filter.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -145,6 +146,7 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
       is_accelerated_compositing_active_(false),
       repaint_ack_pending_(false),
       resize_ack_pending_(false),
+      overdraw_bottom_height_(0.f),
       should_auto_resize_(false),
       waiting_for_screen_rects_ack_(false),
       mouse_move_pending_(false),
@@ -391,6 +393,7 @@ bool RenderWidgetHostImpl::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_WindowlessPluginDummyWindowDestroyed,
                         OnWindowlessPluginDummyWindowDestroyed)
 #endif
+    IPC_MESSAGE_HANDLER(ViewHostMsg_Snapshot, OnSnapshot)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -491,11 +494,14 @@ void RenderWidgetHostImpl::WasResized() {
   physical_backing_size_ = view_->GetPhysicalBackingSize();
   bool was_fullscreen = is_fullscreen_;
   is_fullscreen_ = IsFullscreen();
+  float old_overdraw_bottom_height = overdraw_bottom_height_;
+  overdraw_bottom_height_ = view_->GetOverdrawBottomHeight();
 
   bool size_changed = new_size != current_size_;
   bool side_payload_changed =
       old_physical_backing_size != physical_backing_size_ ||
-      was_fullscreen != is_fullscreen_;
+      was_fullscreen != is_fullscreen_ ||
+      old_overdraw_bottom_height != overdraw_bottom_height_;
 
   if (!size_changed && !side_payload_changed)
     return;
@@ -510,6 +516,7 @@ void RenderWidgetHostImpl::WasResized() {
     resize_ack_pending_ = true;
 
   if (!Send(new ViewMsg_Resize(routing_id_, new_size, physical_backing_size_,
+                               overdraw_bottom_height_,
                                GetRootWindowResizerRect(), is_fullscreen_))) {
     resize_ack_pending_ = false;
   } else {
@@ -573,9 +580,9 @@ void RenderWidgetHostImpl::CopyFromBackingStore(
   if (view_ && is_accelerated_compositing_active_) {
     TRACE_EVENT0("browser",
         "RenderWidgetHostImpl::CopyFromBackingStore::FromCompositingSurface");
-    gfx::Rect copy_rect = src_subrect.IsEmpty() ?
+    gfx::Rect accelerated_copy_rect = src_subrect.IsEmpty() ?
         gfx::Rect(view_->GetViewBounds().size()) : src_subrect;
-    view_->CopyFromCompositingSurface(copy_rect,
+    view_->CopyFromCompositingSurface(accelerated_copy_rect,
                                       accelerated_dst_size,
                                       callback);
     return;
@@ -766,7 +773,7 @@ void RenderWidgetHostImpl::ScheduleComposite() {
 }
 
 void RenderWidgetHostImpl::StartHangMonitorTimeout(TimeDelta delay) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!GetProcess()->IsGuest() && CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableHangMonitor)) {
     return;
   }
@@ -918,11 +925,11 @@ void RenderWidgetHostImpl::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
   }
 
   if (mouse_event.type == WebInputEvent::MouseDown &&
-      gesture_event_filter_->GetTapSuppressionController()->
+      gesture_event_filter_->GetTouchpadTapSuppressionController()->
           ShouldDeferMouseDown(mouse_event))
       return;
   if (mouse_event.type == WebInputEvent::MouseUp &&
-      gesture_event_filter_->GetTapSuppressionController()->
+      gesture_event_filter_->GetTouchpadTapSuppressionController()->
           ShouldSuppressMouseUp())
       return;
 
@@ -1000,7 +1007,7 @@ void RenderWidgetHostImpl::ForwardGestureEvent(
 }
 
 // Forwards MouseEvent without passing it through
-// TouchpadTapSuppressionController
+// TouchpadTapSuppressionController.
 void RenderWidgetHostImpl::ForwardMouseEventImmediately(
     const WebMouseEvent& mouse_event) {
   TRACE_EVENT2("renderer_host",
@@ -1187,6 +1194,27 @@ void RenderWidgetHostImpl::ForwardInputEvent(const WebInputEvent& input_event,
     coalesced_mouse_wheel_events_.clear();
   }
 
+  if (view_) {
+    // Perform optional, synchronous event handling, sending ACK messages for
+    // processed events, or proceeding as usual.
+    InputEventAckState filter_ack = view_->FilterInputEvent(input_event);
+    switch (filter_ack) {
+      // Send the ACK and early exit.
+      case INPUT_EVENT_ACK_STATE_CONSUMED:
+      case INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS:
+        next_mouse_move_.reset();
+        OnInputEventAck(input_event.type, filter_ack);
+        // WARNING: |this| may be deleted at this point.
+        return;
+
+      // Proceed as normal.
+      case INPUT_EVENT_ACK_STATE_UNKNOWN:
+      case INPUT_EVENT_ACK_STATE_NOT_CONSUMED:
+      default:
+        break;
+    };
+  }
+
   SendInputEvent(input_event, event_size, is_keyboard_shortcut);
 
   // Any input event cancels a pending mouse move event. Note that
@@ -1226,6 +1254,39 @@ void RenderWidgetHostImpl::NotifyScreenInfoChanged() {
   WebKit::WebScreenInfo screen_info;
   GetWebScreenInfo(&screen_info);
   Send(new ViewMsg_ScreenInfoChanged(GetRoutingID(), screen_info));
+}
+
+void RenderWidgetHostImpl::GetSnapshotFromRenderer(
+    const gfx::Rect& src_subrect,
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  TRACE_EVENT0("browser", "RenderWidgetHostImpl::GetSnapshotFromRenderer");
+  pending_snapshots_.push(callback);
+
+  gfx::Rect copy_rect = src_subrect.IsEmpty() ?
+      gfx::Rect(view_->GetViewBounds().size()) : src_subrect;
+
+  gfx::Rect copy_rect_in_pixel = ConvertRectToPixel(view_, copy_rect);
+  Send(new ViewMsg_Snapshot(GetRoutingID(), copy_rect_in_pixel));
+}
+
+void RenderWidgetHostImpl::OnSnapshot(bool success,
+                                    const SkBitmap& bitmap) {
+  if (pending_snapshots_.size() == 0) {
+    LOG(ERROR) << "RenderWidgetHostImpl::OnSnapshot: "
+                  "Received a snapshot that was not requested.";
+    return;
+  }
+
+  base::Callback<void(bool, const SkBitmap&)> callback =
+      pending_snapshots_.front();
+  pending_snapshots_.pop();
+
+  if (!success) {
+    callback.Run(success, SkBitmap());
+    return;
+  }
+
+  callback.Run(success, bitmap);
 }
 
 void RenderWidgetHostImpl::UpdateVSyncParameters(base::TimeTicks timebase,
@@ -1524,12 +1585,6 @@ void RenderWidgetHostImpl::OnCompositorSurfaceBuffersSwapped(
   gpu_params.surface_handle = surface_handle;
   gpu_params.route_id = route_id;
   gpu_params.size = size;
-#if defined(OS_MACOSX)
-  // Compositor window is always gfx::kNullPluginWindow.
-  // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
-  // plugin windows.
-  gpu_params.window = gfx::kNullPluginWindow;
-#endif
   view_->AcceleratedSurfaceBuffersSwapped(gpu_params,
                                           gpu_process_host_id);
 }
@@ -1977,8 +2032,7 @@ void RenderWidgetHostImpl::OnImeCancelComposition() {
     view_->ImeCancelComposition();
 }
 
-void RenderWidgetHostImpl::OnDidActivateAcceleratedCompositing(
-    bool activated) {
+void RenderWidgetHostImpl::OnDidActivateAcceleratedCompositing(bool activated) {
   TRACE_EVENT1("renderer_host",
                "RenderWidgetHostImpl::OnDidActivateAcceleratedCompositing",
                "activated", activated);

@@ -236,11 +236,18 @@ def RunWebkitLayoutTests(options):
       cmd_args.extend(['--%s' % flag.replace('_', '-'),
                        options.factory_properties.get(flag)])
 
+  for f in options.factory_properties.get('additional_expectations', []):
+    cmd_args.extend(
+        ['--additional-expectations=%s' % os.path.join(CHROME_SRC, *f)])
+
+  # TODO(dpranke): Remove this block after
+  # https://codereview.chromium.org/12927002/ lands.
   for f in options.factory_properties.get('additional_expectations_files', []):
     cmd_args.extend(
         ['--additional-expectations=%s' % os.path.join(CHROME_SRC, *f)])
 
-  RunCmd(['webkit/tools/layout_tests/run_webkit_tests.py'] + cmd_args)
+  RunCmd(['webkit/tools/layout_tests/run_webkit_tests.py'] + cmd_args,
+         flunk_on_failure=False)
 
 
 def MainTestWrapper(options):
@@ -262,7 +269,7 @@ def MainTestWrapper(options):
 
   # Device check and alert emails
   buildbot_report.PrintNamedStep('device_status_check')
-  RunCmd(['build/android/device_status_check.py'], flunk_on_failure=False)
+  RunCmd(['build/android/device_status_check.py'])
 
   if options.install:
     test_obj = INSTRUMENTATION_TESTS[options.install]

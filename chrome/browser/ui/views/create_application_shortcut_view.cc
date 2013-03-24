@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -492,6 +491,7 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
 
   pending_download_id_ = web_contents_->DownloadFavicon(
       unprocessed_icons_.back().url,
+      true,
       std::max(unprocessed_icons_.back().width,
                unprocessed_icons_.back().height),
       base::Bind(&CreateUrlApplicationShortcutView::DidDownloadFavicon,

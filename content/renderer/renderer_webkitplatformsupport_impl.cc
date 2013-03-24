@@ -250,6 +250,14 @@ WebKit::WebCookieJar* RendererWebKitPlatformSupportImpl::cookieJar() {
   return NULL;
 }
 
+WebKit::WebThemeEngine* RendererWebKitPlatformSupportImpl::themeEngine() {
+  WebKit::WebThemeEngine* theme_engine =
+      GetContentClient()->renderer()->OverrideThemeEngine();
+  if (theme_engine)
+    return theme_engine;
+  return WebKitPlatformSupportImpl::themeEngine();
+}
+
 bool RendererWebKitPlatformSupportImpl::sandboxEnabled() {
   // As explained in Platform.h, this function is used to decide
   // whether to allow file system operations to come out of WebKit or not.
@@ -860,18 +868,10 @@ bool RendererWebKitPlatformSupportImpl::processMemorySizesInBytes(
 WebKit::WebGraphicsContext3D*
 RendererWebKitPlatformSupportImpl::createOffscreenGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes) {
-  // The WebGraphicsContext3DInProcessImpl code path is used for
-  // layout tests (though not through this code) as well as for
-  // debugging and bringing up new ports.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
-    return webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWebView(
-        attributes, false);
-  } else {
-    return WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
-        RenderThreadImpl::current(),
-        attributes,
-        GURL(attributes.topDocumentURL));
-  }
+  return WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
+      RenderThreadImpl::current(),
+      attributes,
+      GURL(attributes.topDocumentURL));
 }
 
 //------------------------------------------------------------------------------

@@ -12,6 +12,7 @@
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/screen.h"
 
 using views::corewm::CursorManager;
 
@@ -26,8 +27,10 @@ class MouseEventLocationDelegate : public aura::test::TestWindowDelegate {
   MouseEventLocationDelegate() {}
   virtual ~MouseEventLocationDelegate() {}
 
-  const gfx::Point& mouse_event_location() const {
-    return mouse_event_location_;
+  gfx::Point GetMouseEventLocationAndReset() {
+    gfx::Point p = mouse_event_location_;
+    mouse_event_location_.SetPoint(-100, -100);
+    return p;
   }
 
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
@@ -49,7 +52,9 @@ TEST_F(AshNativeCursorManagerTest, LockCursor) {
   CursorManager* cursor_manager = Shell::GetInstance()->cursor_manager();
   CursorManagerTestApi test_api(cursor_manager);
   gfx::Display display(0);
-
+#if defined(OS_WIN)
+  cursor_manager->SetCursorResourceModule(L"ash_unittests.exe");
+#endif
   cursor_manager->SetCursor(ui::kCursorCopy);
   EXPECT_EQ(ui::kCursorCopy, test_api.GetCurrentCursor().native_type());
   display.set_device_scale_factor(2.0f);
@@ -85,7 +90,9 @@ TEST_F(AshNativeCursorManagerTest, LockCursor) {
 TEST_F(AshNativeCursorManagerTest, SetCursor) {
   CursorManager* cursor_manager = Shell::GetInstance()->cursor_manager();
   CursorManagerTestApi test_api(cursor_manager);
-
+#if defined(OS_WIN)
+  cursor_manager->SetCursorResourceModule(L"ash_unittests.exe");
+#endif
   cursor_manager->SetCursor(ui::kCursorCopy);
   EXPECT_EQ(ui::kCursorCopy, test_api.GetCurrentCursor().native_type());
   EXPECT_TRUE(test_api.GetCurrentCursor().platform());
@@ -139,21 +146,23 @@ TEST_F(AshNativeCursorManagerTest, MAYBE_DisabledMouseEventsLocation) {
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&event);
 
   // Location was in window.
-  local_point = delegate->mouse_event_location();
+  local_point = delegate->GetMouseEventLocationAndReset();
   aura::Window::ConvertPointToTarget(window.get(), root_window, &local_point);
   EXPECT_TRUE(window->bounds().Contains(local_point));
 
   // Location is now out of window.
   cursor_manager->DisableMouseEvents();
   RunAllPendingInMessageLoop();
-  local_point = delegate->mouse_event_location();
+  local_point = delegate->GetMouseEventLocationAndReset();
   aura::Window::ConvertPointToTarget(window.get(), root_window, &local_point);
   EXPECT_FALSE(window->bounds().Contains(local_point));
+  EXPECT_FALSE(window->bounds().Contains(
+      gfx::Screen::GetScreenFor(window.get())->GetCursorScreenPoint()));
 
   // Location is back in window.
   cursor_manager->EnableMouseEvents();
   RunAllPendingInMessageLoop();
-  local_point = delegate->mouse_event_location();
+  local_point = delegate->GetMouseEventLocationAndReset();
   aura::Window::ConvertPointToTarget(window.get(), root_window, &local_point);
   EXPECT_TRUE(window->bounds().Contains(local_point));
 }

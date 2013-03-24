@@ -7,18 +7,18 @@
 #import "base/mac/mac_util.h"
 #include "base/run_loop.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/instant/search.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
+#import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
@@ -102,8 +102,10 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
     chrome::search::Mode mode(chrome::search::Mode::MODE_SEARCH_SUGGESTIONS,
                               chrome::search::Mode::ORIGIN_SEARCH);
     browser()->search_model()->SetMode(mode);
+    browser()->search_model()->SetTopBarsVisible(false);
     EXPECT_TRUE(browser()->search_model()->mode().is_search_suggestions());
-    EXPECT_TRUE([controller() isShowingInstantResults]);
+    EXPECT_EQ(browser_window_controller::kInstantUIFullPageResults,
+              [controller() currentInstantUIState]);
   }
 
   void ShowInstantNTP() {
@@ -111,8 +113,10 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
     chrome::search::Mode mode(chrome::search::Mode::MODE_NTP,
                               chrome::search::Mode::ORIGIN_NTP);
     browser()->search_model()->SetMode(mode);
+    browser()->search_model()->SetTopBarsVisible(true);
     EXPECT_TRUE(browser()->search_model()->mode().is_ntp());
-    EXPECT_FALSE([controller() isShowingInstantResults]);
+    EXPECT_EQ(browser_window_controller::kInstantUINone,
+              [controller() currentInstantUIState]);
   }
 
   void ShowInfoBar() {
@@ -295,6 +299,10 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ZOrderNormalInstant) {
 // non-Instant presentation mode.
 IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
                        ZOrderInstantPresentationMode) {
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+
   chrome::ToggleFullscreenMode(browser());
   ShowInstantResults();
   browser()->GetFindBarController();  // add find bar
@@ -314,6 +322,10 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
 // then calling |updateSubviewZOrder:| will correctly move back above.
 IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
                        FloatingBarBelowContentView) {
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+
   chrome::ToggleFullscreenMode(browser());
 
   NSView* fullscreen_floating_bar =
@@ -339,9 +351,9 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
 IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ContentOffset) {
   OverlayableContentsController* overlay =
       [controller() overlayableContentsController];
-
   // Just toolbar.
-  EXPECT_EQ(0, [overlay activeContainerOffset]);
+  EXPECT_EQ(bookmarks::kBookmarkBarOverlap - 1,
+            [overlay activeContainerOffset]);
 
   // Plus bookmark bar.
   browser()->window()->ToggleBookmarkBar();
@@ -351,18 +363,23 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ContentOffset) {
   // Plus info bar.
   ShowInfoBar();
   EXPECT_EQ(GetViewHeight(VIEW_ID_BOOKMARK_BAR) +
-                GetViewHeight(VIEW_ID_INFO_BAR),
+            GetViewHeight(VIEW_ID_INFO_BAR),
             [overlay activeContainerOffset]);
 
   // Minus bookmark bar.
   browser()->window()->ToggleBookmarkBar();
-  EXPECT_EQ(GetViewHeight(VIEW_ID_INFO_BAR), [overlay activeContainerOffset]);
+  EXPECT_EQ(GetViewHeight(VIEW_ID_INFO_BAR) + bookmarks::kBookmarkBarOverlap,
+            [overlay activeContainerOffset]);
 }
 
 // Verify that in non-Instant presentation mode the content area is beneath
 // the info bar.
 IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
                        ContentOffsetPresentationMode) {
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+
   chrome::ToggleFullscreenMode(browser());
   OverlayableContentsController* overlay =
       [controller() overlayableContentsController];
@@ -414,7 +431,8 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ContentOffsetInstantNPT) {
       [controller() overlayableContentsController];
 
   // Just toolbar.
-  EXPECT_EQ(0, [overlay activeContainerOffset]);
+  EXPECT_EQ(bookmarks::kBookmarkBarOverlap - 1,
+            [overlay activeContainerOffset]);
 
   // Plus bookmark bar.
   browser()->window()->ToggleBookmarkBar();
@@ -424,12 +442,13 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest, ContentOffsetInstantNPT) {
   // Plus info bar.
   ShowInfoBar();
   EXPECT_EQ(GetViewHeight(VIEW_ID_BOOKMARK_BAR) +
-                GetViewHeight(VIEW_ID_INFO_BAR),
+            GetViewHeight(VIEW_ID_INFO_BAR),
             [overlay activeContainerOffset]);
 
   // Minus bookmark bar.
   browser()->window()->ToggleBookmarkBar();
-  EXPECT_EQ(GetViewHeight(VIEW_ID_INFO_BAR), [overlay activeContainerOffset]);
+  EXPECT_EQ(GetViewHeight(VIEW_ID_INFO_BAR) + bookmarks::kBookmarkBarOverlap,
+            [overlay activeContainerOffset]);
 }
 
 // Verify that if bookmark bar is underneath Instant search results then

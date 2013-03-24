@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
 #include "chrome/browser/chromeos/drive/fake_free_disk_space_getter.h"
 #include "chrome/browser/chromeos/drive/mock_drive_cache_observer.h"
+#include "chrome/browser/google_apis/test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
@@ -110,10 +111,9 @@ class DriveCacheTest : public testing::Test {
         content::BrowserThread::GetBlockingPool();
     blocking_task_runner_ =
         pool->GetSequencedTaskRunner(pool->GetSequenceToken());
-    cache_ = new DriveCache(
-        DriveCache::GetCacheRootPath(profile_.get()),
-        blocking_task_runner_,
-        fake_free_disk_space_getter_.get());
+    cache_.reset(new DriveCache(DriveCache::GetCacheRootPath(profile_.get()),
+                                blocking_task_runner_,
+                                fake_free_disk_space_getter_.get()));
 
     mock_cache_observer_.reset(new StrictMock<MockDriveCacheObserver>);
     cache_->AddObserver(mock_cache_observer_.get());
@@ -127,7 +127,7 @@ class DriveCacheTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    test_util::DeleteDriveCache(cache_);
+    cache_.reset();
     profile_.reset(NULL);
   }
 
@@ -148,8 +148,7 @@ class DriveCacheTest : public testing::Test {
             resource.md5,
             source_path,
             DriveCache::FILE_OPERATION_COPY,
-            base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                       &error));
+            google_apis::test_util::CreateCopyResultCallback(&error));
         google_apis::test_util::RunBlockingPoolTask();
         EXPECT_EQ(DRIVE_FILE_OK, error);
       }
@@ -161,8 +160,7 @@ class DriveCacheTest : public testing::Test {
         cache_->Pin(
             resource.resource_id,
             resource.md5,
-            base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                       &error));
+            google_apis::test_util::CreateCopyResultCallback(&error));
         google_apis::test_util::RunBlockingPoolTask();
         EXPECT_EQ(DRIVE_FILE_OK, error);
       }
@@ -172,8 +170,7 @@ class DriveCacheTest : public testing::Test {
         cache_->MarkDirty(
             resource.resource_id,
             resource.md5,
-            base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                       &error));
+            google_apis::test_util::CreateCopyResultCallback(&error));
         google_apis::test_util::RunBlockingPoolTask();
         EXPECT_EQ(DRIVE_FILE_OK, error);
 
@@ -182,8 +179,7 @@ class DriveCacheTest : public testing::Test {
         cache_->CommitDirty(
             resource.resource_id,
             resource.md5,
-            base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                       &error));
+            google_apis::test_util::CreateCopyResultCallback(&error));
         google_apis::test_util::RunBlockingPoolTask();
         EXPECT_EQ(DRIVE_FILE_OK, error);
       }
@@ -232,8 +228,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->Store(resource_id, md5, source_path,
                   DriveCache::FILE_OPERATION_COPY,
-                  base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                             &error));
+                  google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyCacheFileState(error, resource_id, md5);
   }
@@ -245,7 +240,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->Remove(
         resource_id,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyRemoveFromCache(error, resource_id, "");
   }
@@ -341,8 +336,7 @@ class DriveCacheTest : public testing::Test {
 
     DriveFileError error = DRIVE_FILE_OK;
     cache_->Pin(resource_id, md5,
-                base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                           &error));
+                google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyCacheFileState(error, resource_id, md5);
   }
@@ -359,8 +353,7 @@ class DriveCacheTest : public testing::Test {
 
     DriveFileError error = DRIVE_FILE_OK;
     cache_->Unpin(resource_id, md5,
-                  base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                             &error));
+                  google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyCacheFileState(error, resource_id, md5);
   }
@@ -378,7 +371,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->MarkDirty(
         resource_id, md5,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
 
     VerifyCacheFileState(error, resource_id, md5);
@@ -415,7 +408,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->CommitDirty(
         resource_id, md5,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyCacheFileState(error, resource_id, md5);
   }
@@ -434,7 +427,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->ClearDirty(
         resource_id, md5,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
     VerifyCacheFileState(error, resource_id, md5);
   }
@@ -482,7 +475,7 @@ class DriveCacheTest : public testing::Test {
     DriveFileError error = DRIVE_FILE_OK;
     cache_->MarkAsUnmounted(
         file_path,
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback, &error));
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
 
     base::FilePath cache_file_path;
@@ -643,7 +636,7 @@ class DriveCacheTest : public testing::Test {
   content::TestBrowserThread ui_thread_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<TestingProfile> profile_;
-  DriveCache* cache_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
   scoped_ptr<StrictMock<MockDriveCacheObserver> > mock_cache_observer_;
 
@@ -1102,7 +1095,7 @@ TEST_F(DriveCacheTest, DirtyCacheRepetitive) {
                   test_util::TEST_CACHE_STATE_PERSISTENT,
                   DriveCache::CACHE_TYPE_PERSISTENT);
 
-  // Mark the file dirty agian after it's being committed.  Outgoing symlink
+  // Mark the file dirty again after it's being committed.  Outgoing symlink
   // should be deleted.
   TestMarkDirty(resource_id, md5, DRIVE_FILE_OK,
                 test_util::TEST_CACHE_STATE_PRESENT |
@@ -1344,18 +1337,16 @@ TEST(DriveCacheExtraTest, InitializationFailure) {
       content::BrowserThread::GetBlockingPool();
 
   // Set the cache root to a non existent path, so the initialization fails.
-  DriveCache* cache = new DriveCache(
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache(new DriveCache(
       base::FilePath::FromUTF8Unsafe("/somewhere/nonexistent/blah/blah"),
       pool->GetSequencedTaskRunner(pool->GetSequenceToken()),
-      NULL /* free_disk_space_getter */);
+      NULL /* free_disk_space_getter */));
 
   bool success = false;
   cache->RequestInitialize(
       base::Bind(&test_util::CopyResultFromInitializeCacheCallback, &success));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_FALSE(success);
-
-  test_util::DeleteDriveCache(cache);
 }
 
 }   // namespace drive

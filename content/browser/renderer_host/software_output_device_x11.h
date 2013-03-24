@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_SOFTWARE_OUTPUT_DEVICE_X11_H_
 #define CONTENT_BROWSER_RENDERER_HOST_SOFTWARE_OUTPUT_DEVICE_X11_H_
 
-#include "cc/software_output_device.h"
+#include "cc/output/software_output_device.h"
 #include "ui/base/x/x11_util.h"
 
 namespace ui {
@@ -20,7 +20,7 @@ class SoftwareOutputDeviceX11 : public cc::SoftwareOutputDevice {
 
   virtual ~SoftwareOutputDeviceX11();
 
-  virtual void Resize(const gfx::Size& viewport_size) OVERRIDE;
+  virtual void Resize(gfx::Size viewport_size) OVERRIDE;
 
   virtual void EndPaint(cc::SoftwareFrameData* frame_data) OVERRIDE;
 

@@ -57,7 +57,7 @@ const uint64 kOutdatedBuildAgeInDays = 12 * 7;
 
 // Finch Experiment strings to identify if we should check for outdated install.
 const char kOutdatedInstallCheckTrialName[] = "OutdatedInstallCheck";
-const char kOutdatedInstallCheck12WeeksGroupName[] = "12WeeksOutdatedIntalls";
+const char kOutdatedInstallCheck12WeeksGroupName[] = "12WeeksOutdatedInstall";
 
 std::string CmdLineInterval() {
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
@@ -183,7 +183,7 @@ UpgradeDetectorImpl::UpgradeDetectorImpl()
   base::Closure start_upgrade_check_timer_task =
       base::Bind(&UpgradeDetectorImpl::StartTimerForUpgradeCheck,
                  weak_factory_.GetWeakPtr());
-#if defined(OS_WINDOW) && defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
   // On Windows, there might be a policy preventing updates, so validate
   // updatability, and then call StartTimerForUpgradeCheck appropriately.
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
@@ -191,7 +191,7 @@ UpgradeDetectorImpl::UpgradeDetectorImpl()
                                      start_upgrade_check_timer_task,
                                      &is_unstable_channel_));
   return;
-#elif defined(OS_WINDOW) && !defined(GOOGLE_CHROME_BUILD)
+#elif defined(OS_WIN) && !defined(GOOGLE_CHROME_BUILD)
   return;  // Chromium has no upgrade channel.
 #elif defined(OS_MACOSX)
   if (!keystone_glue::KeystoneEnabled())

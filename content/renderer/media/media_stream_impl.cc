@@ -84,9 +84,9 @@ void CreateWebKitSourceVector(
   for (size_t i = 0; i < devices.size(); ++i) {
     const char* track_type =
         (type == WebKit::WebMediaStreamSource::TypeAudio) ? "a" : "v";
-    std::string source_id = StringPrintf("%s%s%u", label.c_str(),
-                                         track_type,
-                                         static_cast<unsigned int>(i));
+    std::string source_id = base::StringPrintf("%s%s%u", label.c_str(),
+                                               track_type,
+                                               static_cast<unsigned int>(i));
     webkit_sources[i].initialize(
           UTF8ToUTF16(source_id),
           type,
@@ -128,12 +128,7 @@ void MediaStreamImpl::OnLocalMediaStreamStop(
 
   UserMediaRequestInfo* user_media_request = FindUserMediaRequestInfo(label);
   if (user_media_request) {
-    if (dependency_factory_->GetWebRtcAudioDevice()) {
-      scoped_refptr<WebRtcAudioCapturer> capturer =
-          dependency_factory_->GetWebRtcAudioDevice()->capturer();
-      if (capturer)
-        capturer->Stop();
-    }
+    dependency_factory_->StopLocalAudioSource(user_media_request->descriptor);
 
     media_stream_dispatcher_->StopStream(label);
     DeleteUserMediaRequestInfo(user_media_request);
@@ -283,7 +278,7 @@ MediaStreamImpl::GetAudioRenderer(const GURL& url) {
   if (!renderer) {
     renderer = CreateRemoteAudioRenderer(extra_data->stream());
 
-    if (renderer && !audio_device->SetRenderer(renderer))
+    if (renderer && !audio_device->SetAudioRenderer(renderer))
       renderer = NULL;
   }
   return renderer;
@@ -495,6 +490,9 @@ void MediaStreamImpl::FrameWillClose(WebKit::WebFrame* frame) {
       // MediaStreamDispatcher know that the stream is no longer wanted.
       // If not, we cancel the request and delete the request object.
       if ((*request_it)->generated) {
+        // Stop the local audio track before closing the device in the browser.
+        dependency_factory_->StopLocalAudioSource((*request_it)->descriptor);
+
         media_stream_dispatcher_->StopStream(
             UTF16ToUTF8((*request_it)->descriptor.label()));
       } else {

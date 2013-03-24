@@ -28,7 +28,7 @@ class Sender;
 namespace remoting {
 
 class DesktopSessionProxy;
-struct DesktopSessionParams;
+class ScreenResolution;
 
 // A variant of desktop environment integrating with the desktop by means of
 // a helper process and talking to that process via IPC.
@@ -49,7 +49,7 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
   // DesktopEnvironment implementation.
   virtual scoped_ptr<AudioCapturer> CreateAudioCapturer(
       scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner) OVERRIDE;
-  virtual scoped_ptr<EventExecutor> CreateEventExecutor(
+  virtual scoped_ptr<InputInjector> CreateInputInjector(
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) OVERRIDE;
   virtual scoped_ptr<SessionController> CreateSessionController() OVERRIDE;
@@ -93,10 +93,13 @@ class IpcDesktopEnvironmentFactory
   // DesktopSessionConnector implementation.
   virtual void ConnectTerminal(
       DesktopSessionProxy* desktop_session_proxy,
-      const DesktopSessionParams& params,
+      const ScreenResolution& resolution,
       bool virtual_terminal) OVERRIDE;
   virtual void DisconnectTerminal(
       DesktopSessionProxy* desktop_session_proxy) OVERRIDE;
+  virtual void SetScreenResolution(
+      DesktopSessionProxy* desktop_session_proxy,
+      const ScreenResolution& resolution) OVERRIDE;
   virtual void OnDesktopSessionAgentAttached(
       int terminal_id,
       base::ProcessHandle desktop_process,

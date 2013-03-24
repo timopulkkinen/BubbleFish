@@ -8,9 +8,10 @@ from telemetry.core import wpr_modes
 from telemetry.page import page_benchmark
 from telemetry.page import page_benchmark_unittest_base
 from telemetry.page import page as page_module
-from telemetry.page import page_action
 from telemetry.page import page_set
 from telemetry.page import page_set_archive_info
+from telemetry.page.actions import all_page_actions
+from telemetry.page.actions import page_action
 from telemetry.test import options_for_unittests
 
 class BenchThatFails(page_benchmark.PageBenchmark):
@@ -135,9 +136,8 @@ class PageBenchmarkUnitTest(
   def testActions(self):
     action_called = [False]
     class MockAction(page_action.PageAction):
-      def RunActionOnce(self, page, tab, previous_action):
+      def RunAction(self, page, tab, previous_action):
         action_called[0] = True
-    from telemetry.page import all_page_actions
     all_page_actions.RegisterClassForTest('mock', MockAction)
 
     ps = self.CreatePageSetFromFileInUnittestDataDir('blank.html')

@@ -7,6 +7,11 @@
 #include "base/logging.h"
 #include "chrome/browser/webdata/web_data_service.h"
 
+AutofillWebDataService::AutofillWebDataService()
+    : WebDataServiceBase(base::FilePath(),
+                         WebDataServiceBase::ProfileErrorCallback()) {
+}
+
 AutofillWebDataServiceImpl::AutofillWebDataServiceImpl(
     scoped_refptr<WebDataService> service)
     : service_(service) {
@@ -84,4 +89,12 @@ void AutofillWebDataServiceImpl::CancelRequest(Handle h) {
 content::NotificationSource
 AutofillWebDataServiceImpl::GetNotificationSource() {
   return service_->GetNotificationSource();
+}
+
+bool AutofillWebDataServiceImpl::IsDatabaseLoaded() {
+  return service_->IsDatabaseLoaded();
+}
+
+WebDatabase* AutofillWebDataServiceImpl::GetDatabase() {
+  return service_->GetDatabase();
 }

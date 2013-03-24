@@ -328,6 +328,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kHideWebStoreIcon,
     prefs::kHideWebStoreIcon,
     Value::TYPE_BOOLEAN },
+  { key::kVariationsRestrictParameter,
+    prefs::kVariationsRestrictParameter,
+    Value::TYPE_STRING },
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -368,6 +371,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_STRING },
   { key::kShowAccessibilityOptionsInSystemTrayMenu,
     prefs::kShouldAlwaysShowAccessibilityMenu,
+    Value::TYPE_BOOLEAN },
+  { key::kRebootAfterUpdate,
+    prefs::kRebootAfterUpdate,
     Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 
@@ -460,6 +466,11 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
           0, INT_MAX, true));
   handlers_.push_back(
       new IntRangePolicyHandler(
+          key::kIdleWarningDelayAC,
+          prefs::kPowerAcIdleWarningDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
           key::kIdleDelayAC,
           prefs::kPowerAcIdleDelayMs,
           0, INT_MAX, true));
@@ -477,6 +488,11 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
       new IntRangePolicyHandler(
           key::kScreenLockDelayBattery,
           prefs::kPowerBatteryScreenLockDelayMs,
+          0, INT_MAX, true));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kIdleWarningDelayBattery,
+          prefs::kPowerBatteryIdleWarningDelayMs,
           0, INT_MAX, true));
   handlers_.push_back(
       new IntRangePolicyHandler(
@@ -498,6 +514,9 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
           key::kPresentationIdleDelayScale,
           prefs::kPowerPresentationIdleDelayFactor,
           100, INT_MAX, true));
+  handlers_.push_back(new IntRangePolicyHandler(key::kUptimeLimit,
+                                                prefs::kUptimeLimit,
+                                                3600, INT_MAX, true));
 #endif  // defined(OS_CHROMEOS)
 }
 

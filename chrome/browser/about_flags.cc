@@ -4,6 +4,8 @@
 
 #include "chrome/browser/about_flags.h"
 
+#include <string.h>
+
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -17,10 +19,11 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "cc/switches.h"
+#include "cc/base/switches.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
@@ -331,13 +334,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableAccelerated2dCanvas)
   },
   {
-    "disable-deferred-2d-canvas",
-    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_NAME,
-    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableDeferred2dCanvas)
-  },
-  {
     "disable-threaded-animation",
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_NAME,
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_DESCRIPTION,
@@ -349,14 +345,14 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_COMPOSITED_LAYER_BORDERS,
     IDS_FLAGS_COMPOSITED_LAYER_BORDERS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kShowCompositedLayerBorders)
+    SINGLE_VALUE_TYPE(cc::switches::kShowCompositedLayerBorders)
   },
   {
     "show-fps-counter",
     IDS_FLAGS_SHOW_FPS_COUNTER,
     IDS_FLAGS_SHOW_FPS_COUNTER_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kShowFPSCounter)
+    SINGLE_VALUE_TYPE(cc::switches::kShowFPSCounter)
   },
   {
     "accelerated-filters",
@@ -467,6 +463,27 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalExtensionApis)
   },
   {
+    "extensions-on-chrome-urls",
+    IDS_FLAGS_EXTENSIONS_ON_CHROME_URLS_NAME,
+    IDS_FLAGS_EXTENSIONS_ON_CHROME_URLS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kExtensionsOnChromeURLs)
+  },
+  {
+    "enable-adview",
+    IDS_FLAGS_ENABLE_ADVIEW_NAME,
+    IDS_FLAGS_ENABLE_ADVIEW_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kEnableAdview)
+  },
+  {
+    "enable-adview-src-attribute",
+    IDS_FLAGS_ENABLE_ADVIEW_SRC_ATTRIBUTE_NAME,
+    IDS_FLAGS_ENABLE_ADVIEW_SRC_ATTRIBUTE_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kEnableAdviewSrcAttribute)
+  },
+  {
     "action-box",
     IDS_FLAGS_ACTION_BOX_NAME,
     IDS_FLAGS_ACTION_BOX_DESCRIPTION,
@@ -545,11 +562,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kShowAutofillTypePredictions)
   },
   {
-    "sync-tab-favicons",
-    IDS_FLAGS_SYNC_TAB_FAVICONS_NAME,
-    IDS_FLAGS_SYNC_TAB_FAVICONS_DESCRIPTION,
+    "enable-sync-favicons",
+    IDS_FLAGS_ENABLE_SYNC_FAVICONS_NAME,
+    IDS_FLAGS_ENABLE_SYNC_FAVICONS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kSyncTabFavicons)
+    SINGLE_VALUE_TYPE(switches::kEnableSyncFavicons)
   },
   {
     "sync-keystore-encryption",
@@ -619,11 +636,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableAutologin)
   },
   {
-    "enable-spdy3",
-    IDS_FLAGS_ENABLE_SPDY3_NAME,
-    IDS_FLAGS_ENABLE_SPDY3_DESCRIPTION,
+    "enable-spdy31",
+    IDS_FLAGS_ENABLE_SPDY31_NAME,
+    IDS_FLAGS_ENABLE_SPDY31_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSpdy3)
+    SINGLE_VALUE_TYPE(switches::kEnableSpdy31)
   },
   {
     "enable-async-dns",
@@ -987,17 +1004,17 @@ const Experiment kExperiments[] = {
   },
   {
     "enable-app-mode",
-    IDS_FLAGS_ENABLE_KIOSK_APPS_NAME,
-    IDS_FLAGS_ENABLE_KIOSK_APPS_DESCRIPTION,
+    IDS_FLAGS_DISABLE_KIOSK_APPS_NAME,
+    IDS_FLAGS_DISABLE_KIOSK_APPS_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableAppMode),
+    SINGLE_VALUE_TYPE(switches::kDisableAppMode),
   },
   {
     "force-fullscreen-app",
-    IDS_FLAGS_FORCE_FULLSCREEN_APP_NAME,
-    IDS_FLAGS_FORCE_FULLSCREEN_APP_DESCRIPTION,
+    IDS_FLAGS_DISABLE_FULLSCREEN_APP_NAME,
+    IDS_FLAGS_DISABLE_FULLSCREEN_APP_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kForceFullscreenApp),
+    SINGLE_VALUE_TYPE(switches::kDisableFullscreenApp),
   },
 #endif  // defined(OS_CHROMEOS)
   {
@@ -1056,11 +1073,11 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableWorkspaceScrubbing),
   },
-  { "ash-disable-immersive-mode",
-    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_NAME,
-    IDS_FLAGS_ASH_DISABLE_IMMERSIVE_MODE_DESCRIPTION,
+  { "ash-immersive-fullscreen",
+    IDS_FLAGS_ASH_IMMERSIVE_FULLSCREEN_NAME,
+    IDS_FLAGS_ASH_IMMERSIVE_FULLSCREEN_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshDisableImmersiveMode),
+    SINGLE_VALUE_TYPE(ash::switches::kAshImmersiveFullscreen),
   },
 #if defined(OS_LINUX)
   { "ash-enable-memory-monitor",
@@ -1143,6 +1160,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalFormFilling)
   },
   {
+    "wallet-service-use-prod",
+    IDS_FLAGS_ENABLE_WALLET_PRODUCTION_SERVICE_NAME,
+    IDS_FLAGS_ENABLE_WALLET_PRODUCTION_SERVICE_DESCRIPTION,
+    kOsCrOS | kOsWin,
+    SINGLE_VALUE_TYPE(switches::kWalletServiceUseProd)
+  },
+  {
     "enable-interactive-autocomplete",
     IDS_FLAGS_ENABLE_INTERACTIVE_AUTOCOMPLETE_NAME,
     IDS_FLAGS_ENABLE_INTERACTIVE_AUTOCOMPLETE_DESCRIPTION,
@@ -1206,7 +1230,7 @@ const Experiment kExperiments[] = {
     "impl-side-painting",
     IDS_FLAGS_IMPL_SIDE_PAINTING_NAME,
     IDS_FLAGS_IMPL_SIDE_PAINTING_DESCRIPTION,
-    kOsAndroid,
+    kOsAndroid | kOsLinux | kOsCrOS,
     MULTI_VALUE_TYPE(kImplSidePaintingChoices)
   },
   // TODO(sky): ifdef needed until focus sorted out in DesktopNativeWidgetAura.
@@ -1463,6 +1487,15 @@ ListValue* GetFlagsExperimentsData(PrefService* prefs) {
   for (size_t i = 0; i < num_experiments; ++i) {
     const Experiment& experiment = experiments[i];
 
+#if defined(OS_ANDROID)
+    // Special case enable-spdy-proxy-auth, because it should only
+    // be available on Dev and Beta channels.
+    if (!strcmp("enable-spdy-proxy-auth", experiment.internal_name) &&
+        chrome::VersionInfo::GetChannel() ==
+            chrome::VersionInfo::CHANNEL_STABLE)
+      continue;
+#endif
+
     DictionaryValue* data = new DictionaryValue();
     data->SetString("internal_name", experiment.internal_name);
     data->SetString("name",
@@ -1629,8 +1662,6 @@ bool FlagsState::IsRestartNeededToCommitChanges() {
 
 void FlagsState::SetExperimentEnabled(
     PrefService* prefs, const std::string& internal_name, bool enable) {
-  needs_restart_ = true;
-
   size_t at_index = internal_name.find(testing::kMultiSeparator);
   if (at_index != std::string::npos) {
     DCHECK(enable);
@@ -1644,7 +1675,7 @@ void FlagsState::SetExperimentEnabled(
     if (internal_name != experiment_name + "@0") {
       std::set<std::string> enabled_experiments;
       GetSanitizedEnabledFlags(prefs, &enabled_experiments);
-      enabled_experiments.insert(internal_name);
+      needs_restart_ |= enabled_experiments.insert(internal_name).second;
       SetEnabledFlags(prefs, enabled_experiments);
     }
     return;
@@ -1664,19 +1695,20 @@ void FlagsState::SetExperimentEnabled(
 
   if (e->type == Experiment::SINGLE_VALUE) {
     if (enable)
-      enabled_experiments.insert(internal_name);
+      needs_restart_ |= enabled_experiments.insert(internal_name).second;
     else
-      enabled_experiments.erase(internal_name);
+      needs_restart_ |= (enabled_experiments.erase(internal_name) > 0);
   } else {
     if (enable) {
       // Enable the first choice.
-      enabled_experiments.insert(e->NameForChoice(0));
+      needs_restart_ |= enabled_experiments.insert(e->NameForChoice(0)).second;
     } else {
       // Find the currently enabled choice and disable it.
       for (int i = 0; i < e->num_choices; ++i) {
         std::string choice_name = e->NameForChoice(i);
         if (enabled_experiments.find(choice_name) !=
             enabled_experiments.end()) {
+          needs_restart_ = true;
           enabled_experiments.erase(choice_name);
           // Continue on just in case there's a bug and more than one
           // experiment for this choice was enabled.

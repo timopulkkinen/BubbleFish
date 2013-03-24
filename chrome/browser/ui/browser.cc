@@ -28,8 +28,6 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
-#include "chrome/browser/api/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service.h"
@@ -59,8 +57,10 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_url_tracker.h"
-#include "chrome/browser/instant/search.h"
+#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
@@ -71,6 +71,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/repost_form_warning_controller.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
@@ -114,9 +115,7 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/screen_capture_infobar_delegate.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
@@ -655,8 +654,16 @@ void Browser::OnWindowActivated() {
   // On some platforms we want to automatically reload tabs that are
   // killed when the user selects them.
   WebContents* contents = tab_strip_model_->GetActiveWebContents();
-  if (contents && ShouldReloadCrashedTab(contents))
+  if (contents && ShouldReloadCrashedTab(contents)) {
     chrome::Reload(this, CURRENT_TAB);
+    // The reload above will change the toolbar reload button into a stop
+    // button. If the user activated the window with a mouse press on the
+    // reload button itself, the reload will stop on mouse release and the page
+    // will be blank. Disable the stop command temporarily. It will be
+    // re-enabled as the page loads.
+    command_controller_->command_updater()->UpdateCommandEnabled(IDC_STOP,
+                                                                 false);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1152,8 +1159,18 @@ bool Browser::CanOverscrollContent() const {
 #if defined(USE_AURA)
   bool overscroll_enabled = !CommandLine::ForCurrentProcess()->
       HasSwitch(switches::kDisableOverscrollHistoryNavigation);
-  return overscroll_enabled ? !is_app() && !is_devtools() && is_type_tabbed() :
-                              false;
+  if (!overscroll_enabled)
+    return false;
+  if (is_app() || is_devtools() || !is_type_tabbed())
+    return false;
+
+  // The detached bookmark bar has appearance of floating above the
+  // web-contents. This does not play nicely with overscroll navigation
+  // gestures. So disable overscroll navigation when the bookmark bar is in the
+  // detached state.
+  if (bookmark_bar_state_ == BookmarkBar::DETACHED)
+    return false;
+  return true;
 #else
   return false;
 #endif
@@ -1223,20 +1240,6 @@ void Browser::OnWindowDidShow() {
 
 void Browser::ShowFirstRunBubble() {
   window()->GetLocationBar()->ShowFirstRunBubble();
-}
-
-void Browser::MaybeUpdateBookmarkBarStateForInstantOverlay(
-    const chrome::search::Mode& mode) {
-  // This is invoked by a platform-specific implementation of
-  // |InstantOverlayController| to update bookmark bar state according to
-  // Instant overlay state.
-  // ModeChanged() updates bookmark bar state for all mode transitions except
-  // when new mode is |SEARCH_SUGGESTIONS|, because that needs to be done when
-  // the suggestions are ready.
-  if (mode.is_search_suggestions() &&
-      bookmark_bar_state_ == BookmarkBar::SHOW) {
-    UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
-  }
 }
 
 void Browser::ShowDownload(content::DownloadItem* download) {
@@ -1454,6 +1457,7 @@ bool Browser::ShouldCreateWebContents(
 
 void Browser::WebContentsCreated(WebContents* source_contents,
                                  int64 source_frame_id,
+                                 const string16& frame_name,
                                  const GURL& target_url,
                                  WebContents* new_contents) {
   // Adopt the WebContents now, so all observers are in place, as the network
@@ -1608,17 +1612,8 @@ void Browser::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  // The case when microphone access is requested together with screen capturing
-  // is not supported yet. Just check requested video type to decide which
-  // infobar to show.
-  //
-  // TODO(sergeyu): Add support for video stream with microphone, e.g. refactor
-  // MediaStreamDevicesController to use a single infobar for both permissions,
-  // or maybe show two infobars.
-  if (request.video_type == content::MEDIA_SCREEN_VIDEO_CAPTURE)
-    ScreenCaptureInfoBarDelegate::Create(web_contents, request, callback);
-  else
-    MediaStreamInfoBarDelegate::Create(web_contents, request, callback);
+  MediaCaptureDevicesDispatcher::GetInstance()->RequestAccess(
+      web_contents, request, callback);
 }
 
 bool Browser::RequestPpapiBrokerPermission(
@@ -1814,22 +1809,13 @@ void Browser::Observe(int type,
   }
 }
 
-void Browser::ModeChanged(const chrome::search::Mode& old_mode,
-                          const chrome::search::Mode& new_mode) {
-  // If new mode is |SEARCH_SUGGESTIONS|, don't update bookmark bar state now;
-  // wait till the Instant overlay is ready to show suggestions before hiding
-  // the bookmark bar (in MaybeUpdateBookmarkBarStateForInstantOverlay()).
-  // TODO(kuan): but for now, only delay updating bookmark bar state if origin
-  // is |DEFAULT|; other origins require more complex logic to be implemented
-  // to prevent jankiness caused by hiding bookmark bar, so just hide the
-  // bookmark bar immediately and tolerate the jankiness for a while.
-  // For other mode transitions, update bookmark bar state accordingly.
-  if (new_mode.is_search_suggestions() &&
-      new_mode.is_origin_default() &&
-      bookmark_bar_state_ == BookmarkBar::SHOW) {
-    return;
+void Browser::ModelChanged(
+    const chrome::search::SearchModel::State& old_state,
+    const chrome::search::SearchModel::State& new_state) {
+  if (chrome::search::SearchModel::ShouldChangeTopBarsVisibility(old_state,
+                                                                 new_state)) {
+    UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
   }
-  UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1963,6 +1949,11 @@ void Browser::ProcessPendingUIUpdates() {
           tab_strip_model_->GetIndexOfWebContents(contents),
           TabStripModelObserver::ALL);
     }
+
+    // Update the bookmark bar. It may happen that the tab is crashed, and if
+    // so, the bookmark bar should be hidden.
+    if (flags & content::INVALIDATE_TYPE_TAB)
+      UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
 
     // We don't need to process INVALIDATE_STATE, since that's not visible.
   }
@@ -2139,16 +2130,22 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
       state = BookmarkBar::HIDDEN;
   }
 
-  // Don't allow the bookmark bar to be shown in suggestions mode.
+  // Bookmark bar may need to be hidden for |SEARCH_SUGGESTIONS| and
+  // |SEARCH_RESULTS| modes as per SearchBox API or Instant overlay or if it's
+  // detached.
+  // TODO(sail): remove conditional MACOSX flag when bookmark bar is actually
+  // hidden on mac; for now, mac keeps the bookmark bar shown but changes its
+  // z-order to stack it below contents.
 #if !defined(OS_MACOSX)
-  if (search_model_->mode().is_search_suggestions())
+  if (search_model_->mode().is_search() &&
+      (state == BookmarkBar::DETACHED || !search_model_->top_bars_visible())) {
     state = BookmarkBar::HIDDEN;
-#endif
-
-  // Don't allow detached bookmark bar to be shown in suggestions or results
-  // modes.
+  }
+#else
+  // TODO(sail): remove this when the above block is enabled for mac.
   if (state == BookmarkBar::DETACHED && search_model_->mode().is_search())
     state = BookmarkBar::HIDDEN;
+#endif  // !defined(OS_MACOSX)
 
   if (state == bookmark_bar_state_)
     return;

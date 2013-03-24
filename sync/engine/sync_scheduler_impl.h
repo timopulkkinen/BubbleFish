@@ -33,9 +33,7 @@ namespace syncer {
 
 class BackoffDelayProvider;
 
-class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
-    public SyncScheduler,
-    public SyncSessionJob::DestructionObserver {
+class SYNC_EXPORT_PRIVATE SyncSchedulerImpl : public SyncScheduler {
  public:
   // |name| is a display string to identify the syncer thread.  Takes
   // |ownership of |syncer| and |delay_provider|.
@@ -80,9 +78,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
   virtual void OnShouldStopSyncingPermanently() OVERRIDE;
   virtual void OnSyncProtocolError(
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
-
-  // SyncSessionJob::DestructionObserver implementation.
-  virtual void OnJobDestroyed(SyncSessionJob* job) OVERRIDE;
 
  private:
   enum JobProcessDecision {
@@ -174,25 +169,25 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
                        const base::Closure& task,
                        base::TimeDelta delay);
 
-  // Helper to assemble a job and post a delayed task to sync.
-  void ScheduleSyncSessionJob(const tracked_objects::Location& loc,
-                              scoped_ptr<SyncSessionJob> job);
-
-  // Invoke the Syncer to perform a sync.
+  // Invoke the Syncer to perform a non-poll job.
   bool DoSyncSessionJob(scoped_ptr<SyncSessionJob> job,
                         JobPriority priority);
+
+  // Returns whether or not it's safe to run a poll job at this time.
+  bool ShouldPoll();
+
+  // Invoke the Syncer to perform a poll job.
+  void DoPollSyncSessionJob(scoped_ptr<SyncSessionJob> job);
 
   // Called after the Syncer has performed the sync represented by |job|, to
   // reset our state.  |exited_prematurely| is true if the Syncer did not
   // cycle from job.start_step() to job.end_step(), likely because the
   // scheduler was forced to quit the job mid-way through.
-  bool FinishSyncSessionJob(scoped_ptr<SyncSessionJob> job,
+  bool FinishSyncSessionJob(SyncSessionJob* job,
                             bool exited_prematurely);
 
-  // Helper to FinishSyncSessionJob to schedule the next sync operation.
-  // |succeeded| carries the return value of |old_job|->Finish.
-  void ScheduleNextSync(scoped_ptr<SyncSessionJob> finished_job,
-                        bool succeeded);
+  // Helper to schedule retries of a failed configure or nudge job.
+  void ScheduleNextSync(scoped_ptr<SyncSessionJob> finished_job);
 
   // Helper to configure polling intervals. Used by Start and ScheduleNextSync.
   void AdjustPolling(const SyncSessionJob* old_job);
@@ -219,6 +214,11 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
   // 'Impl' here refers to real implementation of public functions, running on
   // |thread_|.
   void StopImpl(const base::Closure& callback);
+
+  // If the scheduler's current state supports it, this will create a job based
+  // on the passed in parameters and coalesce it with any other pending jobs,
+  // then post a delayed task to run it.  It may also choose to drop the job or
+  // save it for later, depending on the scheduler's current state.
   void ScheduleNudgeImpl(
       const base::TimeDelta& delay,
       sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source,
@@ -272,8 +272,6 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl :
   void UpdateNudgeTimeRecords(const sessions::SyncSourceInfo& info);
 
   virtual void OnActionableError(const sessions::SyncSessionSnapshot& snapshot);
-
-  void set_pending_nudge(SyncSessionJob* job);
 
   base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_;
 

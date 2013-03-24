@@ -17,15 +17,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/tuple.h"
-#include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
+#include "chrome/browser/webdata/web_database.h"
 #include "components/autofill/browser/autofill_country.h"
 #include "components/autofill/browser/autofill_profile.h"
 #include "components/autofill/browser/autofill_type.h"
 #include "components/autofill/browser/credit_card.h"
 #include "components/autofill/browser/personal_data_manager.h"
 #include "components/autofill/common/form_field_data.h"
+#include "components/webdata/encryptor/encryptor.h"
 #include "sql/statement.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -319,23 +320,37 @@ bool RemoveAutofillProfilePieces(const std::string& guid, sql::Connection* db) {
   return s3.Run();
 }
 
+int table_key = 0;
+
+WebDatabaseTable::TypeKey GetKey() {
+  return reinterpret_cast<void*>(&table_key);
+}
+
 }  // namespace
 
 // The maximum length allowed for form data.
 const size_t AutofillTable::kMaxDataLength = 1024;
 
-AutofillTable::AutofillTable(sql::Connection* db, sql::MetaTable* meta_table)
-    : WebDatabaseTable(db, meta_table) {
+AutofillTable::AutofillTable() {
 }
 
 AutofillTable::~AutofillTable() {
 }
 
-bool AutofillTable::Init() {
- return (InitMainTable() && InitCreditCardsTable() && InitDatesTable() &&
-     InitProfilesTable() && InitProfileNamesTable() &&
-     InitProfileEmailsTable() && InitProfilePhonesTable() &&
-     InitProfileTrashTable());
+AutofillTable* AutofillTable::FromWebDatabase(WebDatabase* db) {
+  return static_cast<AutofillTable*>(db->GetTable(GetKey()));
+}
+
+WebDatabaseTable::TypeKey AutofillTable::GetTypeKey() const {
+  return GetKey();
+}
+
+bool AutofillTable::Init(sql::Connection* db, sql::MetaTable* meta_table) {
+  WebDatabaseTable::Init(db, meta_table);
+  return (InitMainTable() && InitCreditCardsTable() && InitDatesTable() &&
+          InitProfilesTable() && InitProfileNamesTable() &&
+          InitProfileEmailsTable() && InitProfilePhonesTable() &&
+          InitProfileTrashTable());
 }
 
 bool AutofillTable::IsSyncable() {

@@ -31,7 +31,7 @@
 #include "chrome/browser/chromeos/login/remove_user_delegate.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/power/session_length_limiter.h"
+#include "chrome/browser/chromeos/session_length_limiter.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -246,6 +246,8 @@ void UserManagerImpl::UserLoggedIn(const std::string& email,
     GuestUserLoggedIn();
   } else if (email == kRetailModeUserEMail) {
     RetailModeUserLoggedIn();
+  } else if (gaia::ExtractDomainName(email) == kKioskAppUserDomain) {
+    KioskAppLoggedIn(email);
   } else {
     EnsureUsersLoaded();
 
@@ -294,6 +296,20 @@ void UserManagerImpl::GuestUserLoggedIn() {
   logged_in_user_->SetStubImage(User::kInvalidImageIndex, false);
 }
 
+void UserManagerImpl::KioskAppLoggedIn(const std::string& username) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(gaia::ExtractDomainName(username), kKioskAppUserDomain);
+
+  WallpaperManager::Get()->SetInitialUserWallpaper(username, false);
+  logged_in_user_ = User::CreateKioskAppUser(username);
+  logged_in_user_->SetStubImage(User::kInvalidImageIndex, false);
+
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendSwitch(::switches::kForceAppMode);
+  command_line->AppendSwitchASCII(::switches::kAppId,
+                                  logged_in_user_->GetAccountName(false));
+}
+
 void UserManagerImpl::LocallyManagedUserLoggedIn(
     const std::string& username) {
   // TODO(nkostylev): Refactor, share code with RegularUserLoggedIn().
@@ -330,7 +346,7 @@ void UserManagerImpl::LocallyManagedUserLoggedIn(
   user_image_manager_->UserLoggedIn(username, is_current_user_new_, true);
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
 
-   // Make sure that new data is persisted to Local State.
+  // Make sure that new data is persisted to Local State.
   g_browser_process->local_state()->CommitPendingWrite();
 }
 
@@ -734,6 +750,12 @@ bool UserManagerImpl::IsLoggedInAsLocallyManagedUser() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return IsUserLoggedIn() &&
       logged_in_user_->GetType() == User::USER_TYPE_LOCALLY_MANAGED;
+}
+
+bool UserManagerImpl::IsLoggedInAsKioskApp() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return IsUserLoggedIn() &&
+      logged_in_user_->GetType() == User::USER_TYPE_KIOSK_APP;
 }
 
 bool UserManagerImpl::IsLoggedInAsStub() const {

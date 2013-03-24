@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "cc/compositor_frame.h"
+#include "cc/output/compositor_frame.h"
 #include "content/common/content_export.h"
 #include "content/port/common/input_event_ack_state.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -203,7 +203,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
   // |subscriber| is now owned by this object, it will be called only on the
   // UI thread.
   virtual void BeginFrameSubscription(
-      RenderWidgetHostViewFrameSubscriber* subscriber) = 0;
+      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) = 0;
 
   // End subscribing for frame presentation events. FrameSubscriber will be
   // deleted after this call.
@@ -243,6 +243,10 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   virtual gfx::Size GetPhysicalBackingSize() const = 0;
 
+  // The height of the physical backing surface that is overdrawn opaquely in
+  // the browser, for example by an on-screen-keyboard (in DPI-adjusted pixels).
+  virtual float GetOverdrawBottomHeight() const = 0;
+
   // Gets the bounds of the window, in screen coordinates.
   virtual gfx::Rect GetBoundsInRootWindow() = 0;
 
@@ -268,6 +272,13 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView,
 
   // Called when a mousewheel event was not processed by the renderer.
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) = 0;
+
+  // Called prior to forwarding input event messages to the renderer, giving
+  // the view a chance to perform in-process event filtering or processing.
+  // Return values of |NOT_CONSUMED| or |UNKNOWN| will result in |input_event|
+  // being forwarded.
+  virtual InputEventAckState FilterInputEvent(
+      const WebKit::WebInputEvent& input_event) = 0;
 
   virtual void SetPopupType(WebKit::WebPopupType popup_type) = 0;
   virtual WebKit::WebPopupType GetPopupType() = 0;

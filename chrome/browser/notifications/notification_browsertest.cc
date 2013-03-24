@@ -12,9 +12,9 @@
 #include "base/run_loop.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
@@ -45,8 +45,15 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/window_open_disposition.h"
 
+// TODO(kbr): remove: http://crbug.com/222296
+#if defined(OS_MACOSX)
+#import "base/mac/mac_util.h"
+#endif
+
 #if defined(ENABLE_MESSAGE_CENTER)
+#include "base/command_line.h"
 #include "ui/message_center/message_center.h"
+#include "ui/message_center/message_center_switches.h"
 #endif
 
 // Mac implementation of message_center is incomplete. The code builds, but
@@ -197,7 +204,9 @@ class NotificationsTest : public InProcessBrowserTest {
 
   void CloseBrowserWindow(Browser* browser);
   void CrashTab(Browser* browser, int index);
-#if !ENABLE_MESSAGE_CENTER_TESTING
+#if ENABLE_MESSAGE_CENTER_TESTING
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
+#else
   const std::deque<Balloon*>& GetActiveBalloons();
   void CrashNotification(Balloon* balloon);
   bool CloseNotificationAndWait(const Notification& notification);
@@ -266,7 +275,14 @@ void NotificationsTest::CrashTab(Browser* browser, int index) {
   content::CrashTab(browser->tab_strip_model()->GetWebContentsAt(index));
 }
 
-#if !ENABLE_MESSAGE_CENTER_TESTING
+#if ENABLE_MESSAGE_CENTER_TESTING
+// Overriden from InProcessBrowserTest:
+void NotificationsTest::SetUpCommandLine(CommandLine* command_line) {
+  InProcessBrowserTest::SetUpCommandLine(command_line);
+  command_line->AppendSwitch(
+      message_center::switches::kEnableRichNotifications);
+}
+#else
 
 const std::deque<Balloon*>& NotificationsTest::GetActiveBalloons() {
   return BalloonNotificationUIManager::GetInstanceForTesting()->
@@ -500,6 +516,12 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNoUserGestureInfobar) {
 #if !defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateSimpleNotification) {
+#if defined(OS_MACOSX)
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+#endif
+
   // Creates a simple notification.
   AllowAllOrigins();
   ui_test_utils::NavigateToURL(browser(), test_page_url_);
@@ -528,6 +550,12 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateSimpleNotification) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseNotification) {
+#if defined(OS_MACOSX)
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+#endif
+
   // Creates a notification and closes it.
   AllowAllOrigins();
   ui_test_utils::NavigateToURL(browser(), test_page_url_);
@@ -553,6 +581,12 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseNotification) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCancelNotification) {
+#if defined(OS_MACOSX)
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+#endif
+
   // Creates a notification and cancels it in the origin page.
   AllowAllOrigins();
   ui_test_utils::NavigateToURL(browser(), test_page_url_);
@@ -575,6 +609,12 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestPermissionInfobarAppears) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowOnPermissionInfobar) {
+#if defined(OS_MACOSX)
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+#endif
+
   // Tries to create a notification and clicks allow on the infobar.
   ui_test_utils::NavigateToURL(browser(), test_page_url_);
   // This notification should not be shown because we do not have permission.

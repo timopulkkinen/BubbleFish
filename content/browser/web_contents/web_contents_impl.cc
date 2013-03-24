@@ -15,7 +15,7 @@
 #include "base/sys_info.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "cc/switches.h"
+#include "cc/base/switches.h"
 #include "content/browser/browser_plugin/browser_plugin_embedder.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/browser_plugin/browser_plugin_guest_manager.h"
@@ -155,11 +155,13 @@ const char kDotGoogleDotCom[] = ".google.com";
 
 static int StartDownload(content::RenderViewHost* rvh,
                          const GURL& url,
+                         bool is_favicon,
                          int image_size) {
   static int g_next_favicon_download_id = 0;
   rvh->Send(new IconMsg_DownloadFavicon(rvh->GetRoutingID(),
                                         ++g_next_favicon_download_id,
                                         url,
+                                        is_favicon,
                                         image_size));
   return g_next_favicon_download_id;
 }
@@ -296,7 +298,6 @@ WebContentsImpl::WebContentsImpl(
       notify_disconnection_(false),
       dialog_manager_(NULL),
       is_showing_before_unload_dialog_(false),
-      opener_web_ui_type_(WebUI::kNoWebUI),
       closed_by_user_gesture_(false),
       minimum_zoom_percent_(static_cast<int>(kMinimumZoomFactor * 100)),
       maximum_zoom_percent_(static_cast<int>(kMaximumZoomFactor * 100)),
@@ -373,24 +374,15 @@ WebContentsImpl* WebContentsImpl::CreateWithOpener(
 BrowserPluginGuest* WebContentsImpl::CreateGuest(
     BrowserContext* browser_context,
     SiteInstance* site_instance,
-    int routing_id,
-    WebContentsImpl* opener_web_contents,
-    int guest_instance_id,
-    const BrowserPluginHostMsg_CreateGuest_Params& params) {
-
-  WebContentsImpl* new_contents = new WebContentsImpl(browser_context,
-                                                      opener_web_contents);
+    int guest_instance_id) {
+  WebContentsImpl* new_contents = new WebContentsImpl(browser_context, NULL);
 
   // This makes |new_contents| act as a guest.
   // For more info, see comment above class BrowserPluginGuest.
   new_contents->browser_plugin_guest_.reset(
-    BrowserPluginGuest::Create(
-        guest_instance_id,
-        new_contents,
-        params));
+      BrowserPluginGuest::Create(guest_instance_id, new_contents));
 
   WebContents::CreateParams create_params(browser_context, site_instance);
-  create_params.routing_id = routing_id;
   new_contents->Init(create_params);
 
   // We are instantiating a WebContents for browser plugin. Set its subframe bit
@@ -487,8 +479,6 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
   prefs.accelerated_2d_canvas_enabled =
       GpuProcessHost::gpu_enabled() &&
       !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
-  prefs.deferred_2d_canvas_enabled =
-      !command_line.HasSwitch(switches::kDisableDeferred2dCanvas);
   prefs.antialiased_2d_canvas_disabled =
       command_line.HasSwitch(switches::kDisable2dCanvasAntialiasing);
   prefs.accelerated_filters_enabled =
@@ -644,15 +634,6 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
     prefs.accelerated_compositing_enabled = false;
   }
 
-#if defined(OS_LINUX) && !defined(USE_AURA)
-  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
-  WebContentsImpl* web_contents =
-      static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(rvh));
-  if (web_contents && web_contents->capturer_count_ > 0) {
-    prefs.accelerated_compositing_enabled = false;
-  }
-#endif
-
   return prefs;
 }
 
@@ -710,8 +691,10 @@ bool WebContentsImpl::OnMessageReceived(RenderViewHost* render_view_host,
     IPC_MESSAGE_HANDLER(ViewHostMsg_WebUISend, OnWebUISend)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestPpapiBrokerPermission,
                         OnRequestPpapiBrokerPermission)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_AllocateInstanceID,
-                        OnBrowserPluginAllocateInstanceID)
+    IPC_MESSAGE_HANDLER_GENERIC(BrowserPluginHostMsg_AllocateInstanceID,
+                                OnBrowserPluginMessage(message))
+    IPC_MESSAGE_HANDLER_GENERIC(BrowserPluginHostMsg_Attach,
+                                OnBrowserPluginMessage(message))
     IPC_MESSAGE_HANDLER(IconHostMsg_DidDownloadFavicon, OnDidDownloadFavicon)
     IPC_MESSAGE_HANDLER(IconHostMsg_UpdateFaviconURL, OnUpdateFaviconURL)
 #if defined(OS_ANDROID)
@@ -772,9 +755,8 @@ void WebContentsImpl::SetDelegate(WebContentsDelegate* delegate) {
   if (delegate_) {
     delegate_->Attach(this);
     // Ensure the visible RVH reflects the new delegate's preferences.
-    RenderViewHostImpl* host = render_manager_.current_host();
-    if (host)
-      host->SetOverscrollControllerEnabled(delegate->CanOverscrollContent());
+    if (view_)
+      view_->SetOverscrollControllerEnabled(delegate->CanOverscrollContent());
   }
 }
 
@@ -998,16 +980,6 @@ void WebContentsImpl::IncrementCapturerCount() {
   ++capturer_count_;
   DVLOG(1) << "There are now " << capturer_count_
            << " capturing(s) of WebContentsImpl@" << this;
-
-#if defined(OS_LINUX) && !defined(USE_AURA)
-  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
-  if (capturer_count_ == 1) {
-    // Force a WebkitPreferences reload to disable compositing for snapshots.
-    RenderViewHost* rvh = GetRenderViewHost();
-    if (rvh)
-      rvh->UpdateWebkitPreferences(rvh->GetWebkitPreferences());
-  }
-#endif
 }
 
 void WebContentsImpl::DecrementCapturerCount() {
@@ -1018,16 +990,6 @@ void WebContentsImpl::DecrementCapturerCount() {
 
   if (is_being_destroyed_)
     return;
-
-#if defined(OS_LINUX) && !defined(USE_AURA)
-  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
-  if (capturer_count_ == 0) {
-    // Force a WebkitPreferences reload to re-enable compositing.
-    RenderViewHost* rvh = GetRenderViewHost();
-    if (rvh)
-      rvh->UpdateWebkitPreferences(rvh->GetWebkitPreferences());
-  }
-#endif
 
   // While capturer_count_ was greater than zero, the WasHidden() calls to RWHV
   // were being prevented.  If there are no more capturers, make the call now.
@@ -1376,10 +1338,12 @@ void WebContentsImpl::CreateNewWindow(
 
   // We usually create the new window in the same BrowsingInstance (group of
   // script-related windows), by passing in the current SiteInstance.  However,
-  // if the opener is being suppressed, we create a new SiteInstance in its own
-  // BrowsingInstance.
+  // if the opener is being suppressed (in a non-guest), we create a new
+  // SiteInstance in its own BrowsingInstance.
+  bool is_guest = GetRenderProcessHost()->IsGuest();
+
   scoped_refptr<SiteInstance> site_instance =
-      params.opener_suppressed ?
+      params.opener_suppressed && !is_guest ?
       SiteInstance::CreateForURL(GetBrowserContext(), params.target_url) :
       GetSiteInstance();
 
@@ -1409,13 +1373,24 @@ void WebContentsImpl::CreateNewWindow(
       session_storage_namespace);
   CreateParams create_params(GetBrowserContext(), site_instance);
   create_params.routing_id = route_id;
-  create_params.initial_size = view_->GetContainerSize();
-  create_params.context = view_->GetNativeView();
+  if (!is_guest) {
+    create_params.context = view_->GetNativeView();
+    create_params.initial_size = view_->GetContainerSize();
+  } else {
+    // This makes |new_contents| act as a guest.
+    // For more info, see comment above class BrowserPluginGuest.
+    int instance_id = GetBrowserPluginGuestManager()->get_next_instance_id();
+    WebContentsImpl* new_contents_impl =
+        static_cast<WebContentsImpl*>(new_contents);
+    new_contents_impl->browser_plugin_guest_.reset(
+        BrowserPluginGuest::Create(instance_id, new_contents_impl));
+  }
   new_contents->Init(create_params);
 
-  new_contents->set_opener_web_ui_type(GetWebUITypeForCurrentState());
-
-  if (!params.opener_suppressed) {
+  // Save the window for later if we're not suppressing the opener (since it
+  // will be shown immediately) and if it's not a guest (since we separately
+  // track when to show guests).
+  if (!params.opener_suppressed && !is_guest) {
     WebContentsViewPort* new_view = new_contents->view_.get();
 
     // TODO(brettw): It seems bogus that we have to call this function on the
@@ -1432,7 +1407,8 @@ void WebContentsImpl::CreateNewWindow(
 
   if (delegate_) {
     delegate_->WebContentsCreated(
-        this, params.opener_frame_id, params.target_url, new_contents);
+        this, params.opener_frame_id, params.frame_name,
+        params.target_url, new_contents);
   }
 
   if (params.opener_suppressed) {
@@ -1863,18 +1839,6 @@ void WebContentsImpl::OnCloseStarted() {
     close_start_time_ = base::TimeTicks::Now();
 }
 
-bool WebContentsImpl::ShouldAcceptDragAndDrop() const {
-#if defined(OS_CHROMEOS)
-  // ChromeOS panels (pop-ups) do not take drag-n-drop.
-  // See http://crosbug.com/2413
-  if (delegate_ && delegate_->IsPopupOrPanel(this))
-    return false;
-  return true;
-#else
-  return true;
-#endif
-}
-
 void WebContentsImpl::SystemDragEnded() {
   if (GetRenderViewHost())
     GetRenderViewHostImpl()->DragSourceSystemDragEnded();
@@ -1963,11 +1927,6 @@ int WebContentsImpl::GetContentRestrictions() const {
   return content_restrictions_;
 }
 
-WebUI::TypeID WebContentsImpl::GetWebUITypeForCurrentState() {
-  return WebUIControllerFactoryRegistry::GetInstance()->GetWebUIType(
-      GetBrowserContext(), GetURL());
-}
-
 WebUI* WebContentsImpl::GetWebUIForCurrentState() {
   // When there is a pending navigation entry, we want to use the pending WebUI
   // that goes along with it to control the basic flags. For example, we want to
@@ -2030,10 +1989,12 @@ void WebContentsImpl::DidEndColorChooser(int color_chooser_id) {
   color_chooser_ = NULL;
 }
 
-int WebContentsImpl::DownloadFavicon(const GURL& url, int image_size,
-                                     const FaviconDownloadCallback& callback) {
+int WebContentsImpl::DownloadFavicon(const GURL& url,
+                              bool is_favicon,
+                              int image_size,
+                              const FaviconDownloadCallback& callback) {
   RenderViewHost* host = GetRenderViewHost();
-  int id = StartDownload(host, url, image_size);
+  int id = StartDownload(host, url, is_favicon, image_size);
   favicon_download_map_[id] = callback;
   return id;
 }
@@ -2435,18 +2396,12 @@ void WebContentsImpl::OnPpapiBrokerPermissionResult(int request_id,
                                                     result));
 }
 
-void WebContentsImpl::OnBrowserPluginAllocateInstanceID(
-    const IPC::Message& message, int request_id) {
+void WebContentsImpl::OnBrowserPluginMessage(const IPC::Message& message) {
   // This creates a BrowserPluginEmbedder, which handles all the BrowserPlugin
   // specific messages for this WebContents. This means that any message from
-  // a BrowserPlugin prior to AllocateInstanceID will be ignored.
+  // a BrowserPlugin prior to this will be ignored.
   // For more info, see comment above classes BrowserPluginEmbedder and
   // BrowserPluginGuest.
-  // The first BrowserPluginHostMsg_AllocateInstanceID message from this
-  // WebContents' embedder render process is handled here. Once
-  // BrowserPluginEmbedder is created, all subsequent BrowserPluginHostMsg_*
-  // messages are handled in BrowserPluginEmbedder. Thus, this code will not be
-  // executed if a BrowserPluginEmbedder exists for this WebContents.
   CHECK(!browser_plugin_embedder_.get());
   browser_plugin_embedder_.reset(BrowserPluginEmbedder::Create(this));
   browser_plugin_embedder_->OnMessageReceived(message);
@@ -2529,21 +2484,6 @@ void WebContentsImpl::SetIsLoading(bool is_loading,
 void WebContentsImpl::DidNavigateMainFramePostCommit(
     const LoadCommittedDetails& details,
     const ViewHostMsg_FrameNavigate_Params& params) {
-  if (opener_web_ui_type_ != WebUI::kNoWebUI) {
-    // If this is a window.open navigation, use the same WebUI as the renderer
-    // that opened the window, as long as both renderers have the same
-    // privileges.
-    if (delegate_ && opener_web_ui_type_ == GetWebUITypeForCurrentState()) {
-      WebUIImpl* web_ui = CreateWebUIForRenderManager(GetURL());
-      // web_ui might be NULL if the URL refers to a non-existent extension.
-      if (web_ui) {
-        render_manager_.SetWebUIPostCommit(web_ui);
-        web_ui->RenderViewCreated(GetRenderViewHost());
-      }
-    }
-    opener_web_ui_type_ = WebUI::kNoWebUI;
-  }
-
   if (details.is_navigation_to_different_page()) {
     // Clear the status bubble. This is a workaround for a bug where WebKit
     // doesn't let us know that the cursor left an element during a
@@ -2711,10 +2651,8 @@ void WebContentsImpl::RenderViewCreated(RenderViewHost* render_view_host) {
   if (static_cast<RenderViewHostImpl*>(render_view_host)->is_swapped_out())
     return;
 
-  if (delegate_) {
-    static_cast<RenderViewHostImpl*>(render_view_host)->
-        SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
-  }
+  if (delegate_)
+    view_->SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
 
   NotificationService::current()->Notify(
       NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
@@ -2859,8 +2797,10 @@ void WebContentsImpl::DidNavigate(
   // Run post-commit tasks.
   if (details.is_main_frame) {
     DidNavigateMainFramePostCommit(details, params);
-    if (delegate_)
+    if (delegate_) {
       delegate_->DidNavigateMainFramePostCommit(this);
+      view_->SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
+    }
   }
   DidNavigateAnyFramePostCommit(rvh, details, params);
 }
@@ -3372,11 +3312,8 @@ void WebContentsImpl::NotifySwappedFromRenderManager(RenderViewHost* rvh) {
   NotifySwapped(rvh);
 
   // Make sure the visible RVH reflects the new delegate's preferences.
-  if (delegate_) {
-    RenderViewHostImpl* host = render_manager_.current_host();
-    if (host)
-      host->SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
-  }
+  if (delegate_)
+    view_->SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
 
   view_->RenderViewSwappedIn(render_manager_.current_host());
 }

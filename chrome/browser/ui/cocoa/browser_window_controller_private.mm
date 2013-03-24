@@ -206,8 +206,8 @@ willPositionSheet:(NSWindow*)sheet
   DCHECK_LE(maxY, NSMaxY(contentBounds) + yOffset);
 
   // Place the toolbar at the top of the reserved area.
+  CGFloat toolbarTopY = maxY;
   maxY = [self layoutToolbarAtMinX:minX maxY:maxY width:width];
-  CGFloat toolbarBottomY = maxY;
 
   // If we're not displaying the bookmark bar below the infobar, then it goes
   // immediately below the toolbar.
@@ -251,8 +251,10 @@ willPositionSheet:(NSWindow*)sheet
     toolbarToWebContentsOffset_ = 0;
     contentAreaTop = maxY;
   } else {
-    toolbarToWebContentsOffset_ = toolbarBottomY - maxY;
-    contentAreaTop = toolbarBottomY;
+    CGFloat minToolbarHeight = [toolbarController_
+        desiredHeightForCompression:bookmarks::kBookmarkBarOverlap];
+    contentAreaTop = toolbarTopY - minToolbarHeight;
+    toolbarToWebContentsOffset_ = contentAreaTop - maxY;
   }
   [self updateContentOffsets];
 
@@ -842,23 +844,22 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (CGFloat)toolbarDividerOpacity {
-  if ([self isShowingInstantResults])
-    return 1;
   return [bookmarkBarController_ toolbarDividerOpacity];
 }
 
-- (BOOL)isShowingInstantResults {
+- (browser_window_controller::InstantUIState)currentInstantUIState {
   if (!browser_->search_model()->mode().is_search_suggestions())
-    return NO;
+    return browser_window_controller::kInstantUINone;
 
   // If the search suggestions are already being displayed in the overlay
-  // contents then return YES.
+  // contents then return kInstantUIOverlay.
   if ([overlayableContentsController_ isShowingOverlay])
-    return YES;
+    return browser_window_controller::kInstantUIOverlay;
 
-  // Search suggestions might be shown directly in the web contents in some
-  // cases.
-  return !browser_->search_model()->mode().is_origin_default();
+  if (browser_->search_model()->top_bars_visible())
+    return browser_window_controller::kInstantUINone;
+
+  return browser_window_controller::kInstantUIFullPageResults;
 }
 
 - (void)updateContentOffsets {
@@ -867,8 +868,8 @@ willPositionSheet:(NSWindow*)sheet
   // is on the search results page where the Instant results are shown inside
   // the page and not in the overlay contents as usual.
   CGFloat tabContentsOffset = toolbarToWebContentsOffset_;
-  if (browser_->search_model()->mode().is_search_suggestions() &&
-      !browser_->search_model()->mode().is_origin_default()) {
+  if ([self currentInstantUIState] ==
+      browser_window_controller::kInstantUIFullPageResults) {
     tabContentsOffset = 0;
   }
   [overlayableContentsController_ setActiveContainerOffset:tabContentsOffset];
@@ -877,7 +878,7 @@ willPositionSheet:(NSWindow*)sheet
   [[self tabContentArea] setContentOffset:toolbarToWebContentsOffset_];
 
   // Prevent the dev tools splitter from overlapping the bookmark bar.
-  if ([self isShowingInstantResults])
+  if ([self currentInstantUIState] != browser_window_controller::kInstantUINone)
     [devToolsController_ setTopContentOffset:0];
   else
     [devToolsController_ setTopContentOffset:toolbarToWebContentsOffset_];
@@ -925,12 +926,14 @@ willPositionSheet:(NSWindow*)sheet
   // The find bar is above everything except Instant search results.
   if (findBarCocoaController_) {
     NSView* relativeView = nil;
-    if (inPresentationMode)
-      relativeView =  toolbarView;
-    else if ([self isShowingInstantResults])
+    if (inPresentationMode) {
+      relativeView = toolbarView;
+    } else if ([self currentInstantUIState] !=
+               browser_window_controller::kInstantUINone) {
       relativeView = [infoBarContainerController_ view];
-    else
+    } else {
       relativeView = [self tabContentArea];
+    }
     [contentView cr_ensureSubview:[findBarCocoaController_ view]
                      isPositioned:NSWindowAbove
                        relativeTo:relativeView];

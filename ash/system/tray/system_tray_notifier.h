@@ -27,11 +27,11 @@
 #include "ash/system/user/update_observer.h"
 #include "ash/system/user/user_observer.h"
 #include "base/observer_list.h"
-#include "base/time.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/chromeos/network/sms_observer.h"
+#include "ash/system/chromeos/screen_capture/screen_capture_observer.h"
 #endif
 
 namespace ash {
@@ -95,6 +95,9 @@ public:
 
   void AddEnterpriseDomainObserver(EnterpriseDomainObserver* observer);
   void RemoveEnterpriseDomainObserver(EnterpriseDomainObserver* observer);
+
+  void AddScreenCaptureObserver(ScreenCaptureObserver* observer);
+  void RemoveScreenCaptureObserver(ScreenCaptureObserver* observer);
 #endif
 
   void NotifyAccessibilityModeChanged(
@@ -116,8 +119,8 @@ public:
                            const std::string& from_locale,
                            const std::string& to_locale);
   void NotifyPowerStatusChanged(const PowerSupplyStatus& power_status);
-  void NotifySessionStartTimeChanged(const base::Time& session_start_time);
-  void NotifySessionLengthLimitChanged(const base::TimeDelta& limit);
+  void NotifySessionStartTimeChanged();
+  void NotifySessionLengthLimitChanged();
   void NotifyUpdateRecommended(UpdateObserver::UpdateSeverity severity);
   void NotifyUserUpdate();
 #if defined(OS_CHROMEOS)
@@ -133,6 +136,9 @@ public:
   void NotifyWillToggleWifi();
   void NotifyAddSmsMessage(const base::DictionaryValue& message);
   void NotifyEnterpriseDomainChanged();
+  void NotifyScreenCaptureStart(const base::Closure& stop_callback,
+                                const string16& sharing_app_name);
+  void NotifyScreenCaptureStop();
 #endif
 
  private:
@@ -155,6 +161,7 @@ public:
   ObserverList<NetworkObserver> vpn_observers_;
   ObserverList<SmsObserver> sms_observers_;
   ObserverList<EnterpriseDomainObserver> enterprise_domain_observers_;
+  ObserverList<ScreenCaptureObserver> screen_capture_observers_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayNotifier);

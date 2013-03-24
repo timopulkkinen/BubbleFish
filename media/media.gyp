@@ -29,6 +29,11 @@
       }, {
         'use_alsa%': 0,
       }],
+      ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android" and chromeos != 1', {
+        'use_pulseaudio%': 1,
+      }, {
+        'use_pulseaudio%': 0,
+      }],
     ],
   },
   'targets': [
@@ -181,10 +186,10 @@
         'audio/win/wavein_input_win.h',
         'audio/win/waveout_output_win.cc',
         'audio/win/waveout_output_win.h',
-        'base/android/cookie_getter.cc',
-        'base/android/cookie_getter.h',
         'base/android/media_player_bridge_manager.cc',
         'base/android/media_player_bridge_manager.h',
+        'base/android/media_resource_getter.cc',
+        'base/android/media_resource_getter.h',
         'base/audio_capturer_source.h',
         'base/audio_converter.cc',
         'base/audio_converter.h',
@@ -196,6 +201,8 @@
         'base/audio_fifo.h',
         'base/audio_hardware_config.cc',
         'base/audio_hardware_config.h',
+        'base/audio_hash.cc',
+        'base/audio_hash.h',
         'base/audio_pull_fifo.cc',
         'base/audio_pull_fifo.h',
         'base/audio_renderer.cc',
@@ -328,6 +335,8 @@
         'filters/stream_parser_factory.h',
         'filters/video_decoder_selector.cc',
         'filters/video_decoder_selector.h',
+        'filters/video_frame_stream.cc',
+        'filters/video_frame_stream.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
         'filters/vpx_video_decoder.cc',
@@ -403,6 +412,8 @@
         'video/picture.h',
         'video/video_decode_accelerator.cc',
         'video/video_decode_accelerator.h',
+        'webm/webm_audio_client.cc',
+        'webm/webm_audio_client.h',
         'webm/webm_cluster_parser.cc',
         'webm/webm_cluster_parser.h',
         'webm/webm_constants.h',
@@ -420,6 +431,8 @@
         'webm/webm_stream_parser.h',
         'webm/webm_tracks_parser.cc',
         'webm/webm_tracks_parser.h',
+        'webm/webm_video_client.cc',
+        'webm/webm_video_client.h',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -456,8 +469,6 @@
             'ffmpeg/ffmpeg_common.h',
             'filters/audio_file_reader.cc',
             'filters/audio_file_reader.h',
-            'filters/chunk_demuxer.cc',
-            'filters/chunk_demuxer.h',
             'filters/blocking_url_protocol.cc',
             'filters/blocking_url_protocol.h',
             'filters/ffmpeg_audio_decoder.cc',
@@ -470,10 +481,6 @@
             'filters/ffmpeg_h264_to_annex_b_bitstream_converter.h',
             'filters/ffmpeg_video_decoder.cc',
             'filters/ffmpeg_video_decoder.h',
-            'webm/webm_cluster_parser.cc',
-            'webm/webm_cluster_parser.h',
-            'webm/webm_stream_parser.cc',
-            'webm/webm_stream_parser.h',
           ],
         }],
         ['media_use_libvpx == 1', {
@@ -556,6 +563,7 @@
             '<(SHARED_INTERMEDIATE_DIR)/media',
           ],
           'dependencies': [
+            'media_android_jni_headers',
             'video_capture_android_jni_headers',
           ],
         }],
@@ -643,7 +651,7 @@
             'audio/cras/cras_output.h',
           ],
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android" and chromeos != 1', {
+        ['use_pulseaudio==1', {
           'defines': [
             'USE_PULSEAUDIO',
           ],
@@ -699,7 +707,7 @@
               },
             }],
           ],
-        }, {  # else: OS=="win or OS == "mac" or OS == "ios" or OS == "android" or chromeos == 1
+        }, {  # else: use_pulseaudio==1
           'sources!': [
             'audio/pulse/audio_manager_pulse.cc',
             'audio/pulse/audio_manager_pulse.h',
@@ -872,6 +880,7 @@
         'base/audio_converter_unittest.cc',
         'base/audio_fifo_unittest.cc',
         'base/audio_hardware_config_unittest.cc',
+        'base/audio_hash_unittest.cc',
         'base/audio_pull_fifo_unittest.cc',
         'base/audio_renderer_mixer_input_unittest.cc',
         'base/audio_renderer_mixer_unittest.cc',
@@ -922,6 +931,7 @@
         'filters/skcanvas_video_renderer_unittest.cc',
         'filters/source_buffer_stream_unittest.cc',
         'filters/video_decoder_selector_unittest.cc',
+        'filters/video_frame_stream_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
         'video/capture/screen/differ_block_unittest.cc',
         'video/capture/screen/differ_unittest.cc',
@@ -1399,17 +1409,17 @@
           'variables': {
             'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaPlayer.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
         {
-          'target_name': 'player_android_jni_headers',
+          'target_name': 'media_android_jni_headers',
           'type': 'none',
           'dependencies': [
             'media_player_jni_headers',
           ],
           'sources': [
+            'base/android/java/src/org/chromium/media/AudioManagerAndroid.java',
             'base/android/java/src/org/chromium/media/MediaPlayerBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerListener.java',
           ],
@@ -1435,7 +1445,6 @@
           'variables': {
             'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaCodec.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
@@ -1445,7 +1454,6 @@
           'variables': {
             'jni_gen_package': 'media',
             'input_java_class': 'android/media/MediaFormat.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
@@ -1464,9 +1472,9 @@
           ],
           'dependencies': [
             '../base/base.gyp:base',
+            'media_android_jni_headers',
             'media_codec_jni_headers',
             'media_format_jni_headers',
-            'player_android_jni_headers',
           ],
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/media',

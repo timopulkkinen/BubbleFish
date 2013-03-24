@@ -162,12 +162,12 @@ IPC_STRUCT_TRAITS_BEGIN(InstantAutocompleteResult)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(description)
   IPC_STRUCT_TRAITS_MEMBER(destination_url)
+  IPC_STRUCT_TRAITS_MEMBER(search_query)
   IPC_STRUCT_TRAITS_MEMBER(transition)
   IPC_STRUCT_TRAITS_MEMBER(relevance)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(InstantMostVisitedItem)
-  IPC_STRUCT_TRAITS_MEMBER(most_visited_item_id)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(title)
 IPC_STRUCT_TRAITS_END()
@@ -208,6 +208,7 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(image_vertical_alignment)
   IPC_STRUCT_TRAITS_MEMBER(image_tiling)
   IPC_STRUCT_TRAITS_MEMBER(image_height)
+  IPC_STRUCT_TRAITS_MEMBER(has_attribution)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebKit::WebCache::ResourceTypeStat)
@@ -312,6 +313,8 @@ IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxMarginChange,
                     int /* start */,
                     int /* end */)
 
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_SearchBoxBarsHidden)
+
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_DetermineIfPageSupportsInstant)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxAutocompleteResults,
@@ -340,17 +343,14 @@ IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFontInformation,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxKeyCaptureChanged,
                     bool /* is_key_capture_enabled */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxGrantChromeSearchAccessFromOrigin,
-                    GURL /* origin_url */)
-
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
-                    std::vector<InstantMostVisitedItem> /* items */)
+                    std::vector<InstantMostVisitedItemIDPair> /* items */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem,
-                    uint64 /* most_visited_item_id */)
+                    InstantRestrictedID /* most_visited_item_id */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion,
-                    uint64 /* most_visited_item_id */)
+                    InstantRestrictedID /* most_visited_item_id */)
 
 IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions)
 
@@ -696,6 +696,14 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_ShowInstantOverlay,
 
 // Sent by Instant to focus the omnibox.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_FocusOmnibox,
+                    int /* page_id */)
+
+// Sent by Instant to show any attached bars.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxShowBars,
+                    int /* page_id */)
+
+// Sent by Instant to hide any attached bars.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxHideBars,
                     int /* page_id */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_StartCapturingKeyStrokes,

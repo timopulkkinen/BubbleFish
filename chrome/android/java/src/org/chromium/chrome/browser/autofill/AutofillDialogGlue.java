@@ -8,13 +8,14 @@ import android.graphics.Bitmap;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.chrome.browser.autofill.AutofillDialog.AutofillDialogDelegate;
 import org.chromium.ui.gfx.NativeWindow;
 
 /**
 * JNI call glue for AutofillDialog C++ and Java objects.
 */
 @JNINamespace("autofill")
-public class AutofillDialogGlue {
+public class AutofillDialogGlue implements AutofillDialogDelegate {
     @SuppressWarnings("unused")
     private final int mNativeDialogPopup;
     private AutofillDialog mAutofillDialog;
@@ -22,7 +23,7 @@ public class AutofillDialogGlue {
     public AutofillDialogGlue(int nativeAutofillDialogViewAndroid, NativeWindow nativeWindow) {
         mNativeDialogPopup = nativeAutofillDialogViewAndroid;
 
-        mAutofillDialog = new AutofillDialog(nativeWindow.getContext());
+        mAutofillDialog = new AutofillDialog(nativeWindow.getContext(), this);
         mAutofillDialog.show();
     }
 
@@ -33,48 +34,124 @@ public class AutofillDialogGlue {
     }
 
     /**
-     * Updates a section of Autofill dialog.
-     * @param section Section that needs to be updated. Should match one of the values in
-     *                {@link AutofillDialogConstants}.
-     * @param dialogInputs The array of values for inputs in the dialog.
+     * @see AutofillDialog#updateNotificationArea(AutofillDialogNotification[])
+     */
+    @CalledByNative
+    private void updateNotificationArea(AutofillDialogNotification[] notifications) {
+        mAutofillDialog.updateNotificationArea(notifications);
+    }
+
+    /**
+     * @see AutofillDialog#updateSection(int, boolean, AutofillDialogField[],
+     *                                   AutofillDialogMenuItem[], int)
      */
     @CalledByNative
     private void updateSection(int section, boolean visible, AutofillDialogField[] dialogInputs,
-            AutofillDialogMenuItem[] menuItems) {
-        mAutofillDialog.updateSection(section, visible, dialogInputs, menuItems);
+            AutofillDialogMenuItem[] menuItems, int selectedMenuItem) {
+        mAutofillDialog.updateSection(section, visible, dialogInputs, menuItems, selectedMenuItem);
     }
 
+    /**
+     * Notifies the dialog that the underlying model is changed and all sections will be updated.
+     * @param fetchingIsActive If true, the data is being fetched and is not yet available.
+     */
+    @CalledByNative
+    private void modelChanged(boolean fetchingIsActive) {
+        mAutofillDialog.modelChanged(fetchingIsActive);
+    }
+
+    /**
+     * Updates the account chooser of Autofill dialog.
+     * @param accountNames List of accounts to be shown.
+     * @param selectedAccountIndex Index of the currently selected account.
+     */
+    private void updateAccountChooser(String[] accountNames, int selectedAccountIndex) {
+        mAutofillDialog.updateAccountChooserAndAddTitle(accountNames, selectedAccountIndex);
+    }
+
+    /**
+     * @see AutofillDialog#getSection(int)
+     */
     @CalledByNative
     private AutofillDialogField[] getSection(int section) {
         return mAutofillDialog.getSection(section);
     }
 
+    /**
+     * @see AutofillDialog#getCvc()
+     */
     @CalledByNative
     private String getCvc() {
         return mAutofillDialog.getCvc();
     }
 
+    /**
+     * @see AutofillDialog#shouldUseBillingForShipping()
+     */
     @CalledByNative
     private boolean shouldUseBillingForShipping() {
         return mAutofillDialog.shouldUseBillingForShipping();
     }
 
+    /**
+     * @see AutofillDialog#shouldSaveDetailsInWallet()
+     */
     @CalledByNative
     private boolean shouldSaveDetailsInWallet() {
         return mAutofillDialog.shouldSaveDetailsInWallet();
     }
 
+    /**
+     * @see AutofillDialog#shouldSaveDetailsLocally()
+     */
     @CalledByNative
     private boolean shouldSaveDetailsLocally() {
         return mAutofillDialog.shouldSaveDetailsLocally();
     }
 
     /**
-     * @param value The progress bar value in a range [0.0, 1.0]
+     * @see AutofillDialog#updateProgressBar(double)
      */
     @CalledByNative
     private void updateProgressBar(double value) {
         mAutofillDialog.updateProgressBar(value);
+    }
+
+    // AutofillDialogDelegate implementation ------------------------------------------------------
+
+    @Override
+    public void itemSelected(int section, int index) {
+        nativeItemSelected(mNativeDialogPopup, section, index);
+    }
+
+    @Override
+    public void accountSelected(int index) {
+        nativeAccountSelected(mNativeDialogPopup, index);
+    }
+
+    @Override
+    public void editingStart(int section) {
+        nativeEditingStart(mNativeDialogPopup, section);
+    }
+
+    @Override
+    public void editingComplete(int section) {
+        nativeEditingComplete(mNativeDialogPopup, section);
+    }
+
+    @Override
+    public void editingCancel(int section) {
+        nativeEditingCancel(mNativeDialogPopup, section);
+    }
+
+    @Override
+    public void dialogSubmit() {
+        nativeDialogSubmit(mNativeDialogPopup);
+    }
+
+    @Override
+    public void dialogCancel() {
+        nativeDialogCancel(mNativeDialogPopup);
     }
 
     // Helper methods for AutofillDialogField and AutofillDialogItem ------------------------------
@@ -119,4 +196,28 @@ public class AutofillDialogGlue {
             String line1, String line2, Bitmap icon) {
         array[index] = new AutofillDialogMenuItem(index, line1, line2, icon);
     }
+
+    @CalledByNative
+    private static AutofillDialogNotification[] createAutofillDialogNotificationArray(int size) {
+        return new AutofillDialogNotification[size];
+    }
+
+    @CalledByNative
+    private static void addToAutofillDialogNotificationArray(AutofillDialogNotification[] array,
+            int index, int backgroundColor, int textColor, boolean hasArrow, boolean hasCheckbox,
+            String text) {
+        array[index] = new AutofillDialogNotification(backgroundColor, textColor, hasArrow,
+                hasCheckbox, text);
+    }
+
+    // Calls from Java to C++ AutofillDialogViewAndroid --------------------------------------------
+
+    private native void nativeItemSelected(int nativeAutofillDialogViewAndroid, int section,
+            int index);
+    private native void nativeAccountSelected(int nativeAutofillDialogViewAndroid, int index);
+    private native void nativeEditingStart(int nativeAutofillDialogViewAndroid, int section);
+    private native void nativeEditingComplete(int nativeAutofillDialogViewAndroid, int section);
+    private native void nativeEditingCancel(int nativeAutofillDialogViewAndroid, int section);
+    private native void nativeDialogSubmit(int nativeAutofillDialogViewAndroid);
+    private native void nativeDialogCancel(int nativeAutofillDialogViewAndroid);
 }

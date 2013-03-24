@@ -19,8 +19,6 @@
 #include "base/test/test_file_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -40,6 +38,8 @@
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
@@ -1177,7 +1177,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
   content::TestNavigationObserver observer(
       content::Source<content::NavigationController>(
           &web_contents->GetController()),
-      NULL,
       1);
   bool download_assempted;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
@@ -2724,8 +2723,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
     ASSERT_TRUE(item);
     ASSERT_TRUE(item->IsComplete());
     base::FilePath full_path(item->GetFullPath());
-    EXPECT_EQ(std::string("a_zip_file") + (index == 0 ? std::string(".zip") :
-                                           StringPrintf(" (%d).zip", index)),
+    EXPECT_EQ(std::string("a_zip_file") +
+        (index == 0 ? std::string(".zip") :
+                      base::StringPrintf(" (%d).zip", index)),
               full_path.BaseName().AsUTF8Unsafe());
     ASSERT_TRUE(file_util::PathExists(full_path));
     ASSERT_TRUE(VerifyFile(full_path, origin_contents, origin_contents.size()));

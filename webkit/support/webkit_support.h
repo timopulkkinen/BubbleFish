@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
@@ -100,11 +101,6 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
     const WebKit::WebURL& url,
     WebKit::WebMediaPlayerClient* client);
 
-// DEPRECATED: Use ResetTestEnvironment() instead.
-#if defined(OS_ANDROID)
-void ReleaseMediaResources();
-#endif
-
 // This is used by WebFrameClient::createApplicationCacheHost().
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
     WebKit::WebFrame* frame, WebKit::WebApplicationCacheHostClient* client);
@@ -125,9 +121,6 @@ enum GraphicsContext3DImplementation {
   IN_PROCESS,
   IN_PROCESS_COMMAND_BUFFER
 };
-// Registers which GraphicsContext3D Implementation to use.
-void SetGraphicsContext3DImplementation(GraphicsContext3DImplementation);
-GraphicsContext3DImplementation GetGraphicsContext3DImplementation();
 
 WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
@@ -269,12 +262,12 @@ WebKit::WebURL GetDevToolsPathAsURL();
 
 // - FileSystem
 void OpenFileSystem(WebKit::WebFrame* frame,
-                    WebKit::WebFileSystem::Type type,
+                    WebKit::WebFileSystemType type,
                     long long size,
                     bool create,
                     WebKit::WebFileSystemCallbacks* callbacks);
 void DeleteFileSystem(WebKit::WebFrame* frame,
-                      WebKit::WebFileSystem::Type type,
+                      WebKit::WebFileSystemType type,
                       WebKit::WebFileSystemCallbacks* callbacks);
 
 // Returns a filesystem ID for the newly created isolated filesystem.

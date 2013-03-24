@@ -68,8 +68,8 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/pref_names.h"
@@ -86,6 +86,8 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/common/gpu_info.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension_resource.h"
 #include "extensions/common/url_pattern.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
@@ -122,6 +124,7 @@ using extensions::CrxInstaller;
 using extensions::Extension;
 using extensions::ExtensionCreator;
 using extensions::ExtensionPrefs;
+using extensions::ExtensionResource;
 using extensions::ExtensionSystem;
 using extensions::FeatureSwitch;
 using extensions::Manifest;
@@ -547,6 +550,7 @@ void ExtensionServiceTestBase::SetUp() {
   testing::Test::SetUp();
   ExtensionErrorReporter::GetInstance()->ClearErrors();
   (new extensions::BackgroundManifestHandler)->Register();
+  (new extensions::ContentScriptsHandler)->Register();
   (new extensions::DefaultLocaleHandler)->Register();
   (new extensions::PluginsHandler)->Register();
 }
@@ -782,7 +786,7 @@ class ExtensionServiceTest
       "  \"entries\": [\n"
       "    {\n"
       "      \"id\": 1,\n"
-      "      \"blacklist\": [\"webgl\"]\n"
+      "      \"features\": [\"webgl\"]\n"
       "    }\n"
       "  ]\n"
       "}";
@@ -1154,7 +1158,8 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   AddPattern(&expected_patterns, "http://*.google.com/*");
   AddPattern(&expected_patterns, "https://*.google.com/*");
   const Extension* extension = loaded_[0];
-  const extensions::UserScriptList& scripts = extension->content_scripts();
+  const extensions::UserScriptList& scripts =
+      extensions::ContentScriptsInfo::GetContentScripts(extension);
   ASSERT_EQ(2u, scripts.size());
   EXPECT_EQ(expected_patterns, scripts[0].url_patterns());
   EXPECT_EQ(2u, scripts[0].js_scripts().size());
@@ -1193,7 +1198,8 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   EXPECT_EQ(std::string(""), loaded_[1]->description());
   EXPECT_EQ(loaded_[1]->GetResourceURL("background.html"),
             extensions::BackgroundInfo::GetBackgroundURL(loaded_[1]));
-  EXPECT_EQ(0u, loaded_[1]->content_scripts().size());
+  EXPECT_EQ(
+      0u, extensions::ContentScriptsInfo::GetContentScripts(loaded_[1]).size());
 
   // We don't parse the plugins section on Chrome OS.
 #if defined(OS_CHROMEOS)
@@ -1218,7 +1224,9 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   EXPECT_EQ(std::string(good2), loaded_[index]->id());
   EXPECT_EQ(std::string("My extension 3"), loaded_[index]->name());
   EXPECT_EQ(std::string(""), loaded_[index]->description());
-  EXPECT_EQ(0u, loaded_[index]->content_scripts().size());
+  EXPECT_EQ(
+      0u,
+      extensions::ContentScriptsInfo::GetContentScripts(loaded_[index]).size());
   EXPECT_EQ(Manifest::INTERNAL, loaded_[index]->location());
 };
 
@@ -1929,7 +1937,7 @@ TEST_F(ExtensionServiceTest, PackExtension) {
   // Try packing with an invalid manifest.
   std::string invalid_manifest_content = "I am not a manifest.";
   ASSERT_TRUE(file_util::WriteFile(
-      temp_dir2.path().Append(Extension::kManifestFilename),
+      temp_dir2.path().Append(extensions::kManifestFilename),
       invalid_manifest_content.c_str(), invalid_manifest_content.size()));
   creator.reset(new ExtensionCreator());
   ASSERT_FALSE(creator->Run(temp_dir2.path(), crx_path, privkey_path,
@@ -2105,7 +2113,9 @@ TEST_F(ExtensionServiceTest, InstallTheme) {
     ValidatePrefKeyCount(++pref_count);
     ASSERT_TRUE(extension);
     EXPECT_TRUE(extension->is_theme());
-    EXPECT_EQ(0u, extension->content_scripts().size());
+    EXPECT_EQ(
+        0u,
+        extensions::ContentScriptsInfo::GetContentScripts(extension).size());
   }
 
   // A theme with image resources missing (misspelt path).
@@ -2147,7 +2157,7 @@ TEST_F(ExtensionServiceTest, UnpackedExtensionCanChangeID) {
 
   base::FilePath extension_path = temp.path();
   base::FilePath manifest_path =
-      extension_path.Append(Extension::kManifestFilename);
+      extension_path.Append(extensions::kManifestFilename);
   base::FilePath manifest_no_key = data_dir_.
       AppendASCII("unpacked").
       AppendASCII("manifest_no_key.json");
@@ -2198,7 +2208,8 @@ TEST_F(ExtensionServiceTest, UnpackedExtensionMayContainSymlinkedFiles) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
   base::FilePath extension_path = temp.path();
-  base::FilePath manifest = extension_path.Append(Extension::kManifestFilename);
+  base::FilePath manifest = extension_path.Append(
+      extensions::kManifestFilename);
   base::FilePath icon_symlink = extension_path.AppendASCII("icon.png");
   file_util::CopyFile(source_manifest, manifest);
   file_util::CreateSymbolicLink(source_icon, icon_symlink);
@@ -2637,7 +2648,7 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
   // to make it easier to change the version number.
   base::FilePath extension_path = temp.path();
   base::FilePath manifest_path =
-      extension_path.Append(Extension::kManifestFilename);
+      extension_path.Append(extensions::kManifestFilename);
   ASSERT_FALSE(file_util::PathExists(manifest_path));
 
   // Start with version 2.0.
@@ -3205,7 +3216,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
       .AppendASCII("1.0.0.0");
   std::string manifest;
   ASSERT_TRUE(file_util::ReadFileToString(
-      path.Append(Extension::kManifestFilename), &manifest));
+      path.Append(extensions::kManifestFilename), &manifest));
   service_->component_loader()->Add(manifest, path);
   service_->Init();
 
@@ -4741,7 +4752,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensions) {
 
   std::string manifest;
   ASSERT_TRUE(file_util::ReadFileToString(
-      path.Append(Extension::kManifestFilename), &manifest));
+      path.Append(extensions::kManifestFilename), &manifest));
 
   service_->component_loader()->Add(manifest, path);
   service_->Init();

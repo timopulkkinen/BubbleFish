@@ -84,7 +84,6 @@ std::string EventTypeName(ui::EventType type) {
     CASE_TYPE(ET_GESTURE_TAP_CANCEL);
     CASE_TYPE(ET_GESTURE_BEGIN);
     CASE_TYPE(ET_GESTURE_END);
-    CASE_TYPE(ET_GESTURE_DOUBLE_TAP);
     CASE_TYPE(ET_GESTURE_TWO_FINGER_TAP);
     CASE_TYPE(ET_GESTURE_PINCH_BEGIN);
     CASE_TYPE(ET_GESTURE_PINCH_END);
@@ -273,8 +272,10 @@ void LocatedEvent::UpdateForRootTransform(
   // Transform has to be done at root level.
   gfx::Point3F p(location_);
   root_transform.TransformPointReverse(p);
-  // Use ToRoundedPoint so that the value -0.00001 becomes 0.
-  root_location_ = location_ = gfx::ToRoundedPoint(p.AsPointF());
+  // TODO(oshima): Translating a point using reversed matrix can
+  // results in small error like 0 -> -0.01, whose floored value
+  // is -1 instead of 0. crbug.com/222483.
+  root_location_ = location_ = gfx::ToFlooredPoint(p.AsPointF());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

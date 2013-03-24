@@ -47,12 +47,15 @@ size_t RegisterChromeCrashKeys() {
   base::debug::CrashKey keys[] = {
     // TODO(rsesek): Remove when done testing. Needed so arraysize > 0.
     { "rsesek_key", kSmallSize },
+    // content/:
+    { "ppapi_path", kMediumSize },
 #if defined(OS_MACOSX)
     { mac::kFirstNSException, kMediumSize },
     { mac::kFirstNSExceptionTrace, kMediumSize },
     { mac::kLastNSException, kMediumSize },
     { mac::kLastNSExceptionTrace, kMediumSize },
     { mac::kNSException, kMediumSize },
+    { mac::kNSExceptionTrace, kMediumSize },
     { mac::kSendAction, kMediumSize },
     { mac::kZombie, kMediumSize },
     { mac::kZombieTrace, kMediumSize },
@@ -68,6 +71,7 @@ size_t RegisterChromeCrashKeys() {
   return base::debug::InitCrashKeys(keys, arraysize(keys), kSingleChunkLength);
 }
 
+#if defined(OS_MACOSX)
 namespace mac {
 
 const char kFirstNSException[] = "firstexception";
@@ -77,6 +81,7 @@ const char kLastNSException[] = "lastexception";
 const char kLastNSExceptionTrace[] = "lastexception_bt";
 
 const char kNSException[] = "nsexception";
+const char kNSExceptionTrace[] = "nsexception_bt";
 
 const char kSendAction[] = "sendaction";
 
@@ -84,5 +89,6 @@ const char kZombie[] = "zombie";
 const char kZombieTrace[] = "zombie_dealloc_bt";
 
 }  // namespace mac
+#endif
 
 }  // namespace crash_keys

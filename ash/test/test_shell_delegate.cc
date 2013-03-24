@@ -41,6 +41,10 @@ bool TestShellDelegate::IsSessionStarted() const {
   return session_started_;
 }
 
+bool TestShellDelegate::IsGuestSession() const {
+  return false;
+}
+
 bool TestShellDelegate::IsFirstRunAfterBoot() const {
   return false;
 }
@@ -63,6 +67,9 @@ void TestShellDelegate::UnlockScreen() {
 
 bool TestShellDelegate::IsScreenLocked() const {
   return locked_;
+}
+
+void TestShellDelegate::PreInit() {
 }
 
 void TestShellDelegate::Shutdown() {

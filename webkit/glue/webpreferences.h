@@ -117,7 +117,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool accelerated_compositing_for_animation_enabled;
   bool accelerated_compositing_for_video_enabled;
   bool accelerated_2d_canvas_enabled;
-  bool deferred_2d_canvas_enabled;
+  int minimum_accelerated_2d_canvas_size;
   bool antialiased_2d_canvas_disabled;
   bool accelerated_filters_enabled;
   bool gesture_tap_highlight_enabled;
@@ -148,6 +148,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool supports_multiple_windows;
   bool viewport_enabled;
   bool initialize_at_minimum_page_scale;
+  bool smart_insert_delete_enabled;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
   // only controls whether or not the "document.cookie" field is properly
@@ -162,6 +163,7 @@ struct WEBKIT_GLUE_EXPORT WebPreferences {
   bool force_enable_zoom;
   bool double_tap_to_zoom_enabled;
   bool user_gesture_required_for_media_playback;
+  GURL default_video_poster_url;
 #endif
 
   // We try to keep the default values the same as the default values in

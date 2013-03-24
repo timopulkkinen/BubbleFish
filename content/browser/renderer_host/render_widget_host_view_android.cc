@@ -10,10 +10,10 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "cc/compositor_frame.h"
-#include "cc/compositor_frame_ack.h"
-#include "cc/layer.h"
-#include "cc/texture_layer.h"
+#include "cc/layers/layer.h"
+#include "cc/layers/texture_layer.h"
+#include "cc/output/compositor_frame.h"
+#include "cc/output/compositor_frame_ack.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
@@ -23,11 +23,11 @@
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
-#include "third_party/khronos/GLES2/gl2.h"
-#include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/display.h"
@@ -324,6 +324,13 @@ gfx::Size RenderWidgetHostViewAndroid::GetPhysicalBackingSize() const {
   return content_view_core_->GetPhysicalBackingSize();
 }
 
+float RenderWidgetHostViewAndroid::GetOverdrawBottomHeight() const {
+  if (!content_view_core_)
+    return 0.f;
+
+  return content_view_core_->GetOverdrawBottomHeightDip();
+}
+
 void RenderWidgetHostViewAndroid::UpdateCursor(const WebCursor& cursor) {
   // There are no cursors on Android.
 }
@@ -494,8 +501,20 @@ void RenderWidgetHostViewAndroid::OnSwapCompositorFrame(
                                       texture_size_in_layer_);
   ImageTransportFactoryAndroid::GetInstance()->WaitSyncPoint(
       frame->gl_frame_data->sync_point);
-  BuffersSwapped(
-      frame->gl_frame_data->mailbox, frame->gl_frame_data->size, callback);
+  const gfx::Size& texture_size = frame->gl_frame_data->size;
+
+  // Calculate the content size.  This should be 0 if the texture_size is 0.
+  float dp2px = frame->metadata.device_scale_factor;
+  gfx::Vector2dF offset;
+  if (texture_size.GetArea() > 0)
+    offset = frame->metadata.location_bar_content_translation;
+  gfx::SizeF content_size(texture_size.width() - offset.x() * dp2px,
+                          texture_size.height() - offset.y() * dp2px);
+
+  BuffersSwapped(frame->gl_frame_data->mailbox,
+                 texture_size,
+                 content_size,
+                 callback);
 
 }
 
@@ -523,12 +542,13 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
             params.mailbox_name.data() + params.mailbox_name.length(),
             reinterpret_cast<char*>(mailbox.name));
 
-  BuffersSwapped(mailbox, params.size, callback);
+  BuffersSwapped(mailbox, params.size, params.size, callback);
 }
 
 void RenderWidgetHostViewAndroid::BuffersSwapped(
     const gpu::Mailbox& mailbox,
-    const gfx::Size size,
+    const gfx::Size texture_size,
+    const gfx::SizeF content_size,
     const base::Closure& ack_callback) {
   ImageTransportFactoryAndroid* factory =
       ImageTransportFactoryAndroid::GetInstance();
@@ -557,8 +577,18 @@ void RenderWidgetHostViewAndroid::BuffersSwapped(
     content_view_core_->DidProduceRendererFrame();
 
   texture_layer_->SetNeedsDisplay();
-  texture_layer_->SetBounds(size);
-  texture_size_in_layer_ = size;
+  texture_layer_->SetBounds(gfx::Size(content_size.width(),
+                                      content_size.height()));
+
+  // Calculate the uv_max based on the content size relative to the texture
+  // size.
+  gfx::PointF uv_max;
+  if (texture_size.GetArea() > 0) {
+    uv_max.SetPoint(content_size.width() / texture_size.width(),
+                    content_size.height() / texture_size.height());
+  }
+  texture_layer_->SetUV(gfx::PointF(0, 0), uv_max);
+  texture_size_in_layer_ = texture_size;
   current_mailbox_ = mailbox;
   ack_callback.Run();
 }
@@ -629,6 +659,14 @@ void RenderWidgetHostViewAndroid::SetScrollOffsetPinning(
 void RenderWidgetHostViewAndroid::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
   // intentionally empty, like RenderWidgetHostViewViews
+}
+
+InputEventAckState RenderWidgetHostViewAndroid::FilterInputEvent(
+    const WebKit::WebInputEvent& input_event) {
+  if (!content_view_core_)
+    return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+
+  return content_view_core_->FilterInputEvent(input_event);
 }
 
 void RenderWidgetHostViewAndroid::OnAccessibilityNotifications(

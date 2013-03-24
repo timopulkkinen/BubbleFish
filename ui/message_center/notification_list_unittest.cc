@@ -59,8 +59,8 @@ class NotificationListTest : public testing::Test {
     std::string new_id = base::StringPrintf(kIdFormat, counter_);
     notification_list_->AddNotification(
         message_center::NOTIFICATION_TYPE_SIMPLE, new_id,
-        UTF8ToUTF16(StringPrintf(kTitleFormat, counter_)),
-        UTF8ToUTF16(StringPrintf(kMessageFormat, counter_)),
+        UTF8ToUTF16(base::StringPrintf(kTitleFormat, counter_)),
+        UTF8ToUTF16(base::StringPrintf(kMessageFormat, counter_)),
         UTF8ToUTF16(kDisplaySource), kExtensionId,
         optional_fields);
     counter_++;
@@ -260,6 +260,16 @@ TEST_F(NotificationListTest, Priority) {
             notification_list()->NotificationCount());
   EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications * 4,
             GetPopupCounts());
+}
+
+TEST_F(NotificationListTest, HasPopupsWithPriority) {
+  ASSERT_EQ(0u, notification_list()->NotificationCount());
+  ASSERT_EQ(0u, notification_list()->unread_count());
+
+  AddPriorityNotification(-2);
+  AddPriorityNotification(2);
+
+  EXPECT_EQ(1u, GetPopupCounts());
 }
 
 TEST_F(NotificationListTest, PriorityPromotion) {

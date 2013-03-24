@@ -78,7 +78,6 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
       : AutofillDialogControllerImpl(contents,
                                      form_data,
                                      GURL(),
-                                     content::SSLStatus(),
                                      metric_logger,
                                      dialog_type,
                                      base::Bind(&MockCallback)) {
@@ -95,6 +94,11 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   virtual bool InputIsValid(AutofillFieldType type,
                             const string16& value) OVERRIDE {
     return true;
+  }
+
+  virtual std::vector<AutofillFieldType> InputsAreValid(
+      const DetailOutputMap& inputs) OVERRIDE {
+    return std::vector<AutofillFieldType>();
   }
 
   // Increase visibility for testing.

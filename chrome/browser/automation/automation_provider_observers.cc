@@ -23,8 +23,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -39,6 +37,8 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
@@ -357,8 +357,8 @@ void NavigationNotificationObserver::ConditionMet(
             &dict);
       } else {
         AutomationJSONReply(automation_, reply_message_.release()).SendError(
-            StringPrintf("Navigation failed with error code=%d.",
-                         navigation_result));
+            base::StringPrintf("Navigation failed with error code=%d.",
+                               navigation_result));
       }
     } else {
       IPC::ParamTraits<int>::Write(
@@ -2558,8 +2558,10 @@ void ProcessInfoObserver::OnDetailsAvailable() {
       std::string process_type = "Unknown";
       // The following condition avoids a DCHECK in debug builds when the
       // process type passed to |GetTypeNameInEnglish| is unknown.
-      if (iterator->type != content::PROCESS_TYPE_UNKNOWN)
-        process_type = content::GetProcessTypeNameInEnglish(iterator->type);
+      if (iterator->process_type != content::PROCESS_TYPE_UNKNOWN) {
+        process_type =
+            content::GetProcessTypeNameInEnglish(iterator->process_type);
+      }
       proc_data->SetString("child_process_type", process_type);
 
       // Renderer type, if this is a renderer process.

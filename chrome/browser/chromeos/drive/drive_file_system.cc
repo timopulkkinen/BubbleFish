@@ -10,8 +10,8 @@
 #include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/platform_file.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
@@ -218,12 +218,14 @@ DriveFileSystem::DriveFileSystem(
     google_apis::DriveServiceInterface* drive_service,
     google_apis::DriveUploaderInterface* uploader,
     DriveWebAppsRegistry* webapps_registry,
+    DriveResourceMetadata* resource_metadata,
     base::SequencedTaskRunner* blocking_task_runner)
     : profile_(profile),
       cache_(cache),
       uploader_(uploader),
       drive_service_(drive_service),
       webapps_registry_(webapps_registry),
+      resource_metadata_(resource_metadata),
       update_timer_(true /* retain_user_task */, true /* is_repeating */),
       last_update_check_error_(DRIVE_FILE_OK),
       hide_hosted_docs_(false),
@@ -237,20 +239,23 @@ DriveFileSystem::DriveFileSystem(
 }
 
 void DriveFileSystem::Reload() {
-  ResetResourceMetadata();
-
-  change_list_loader_->LoadFromServerIfNeeded(
-      DirectoryFetchInfo(),
-      base::Bind(&DriveFileSystem::NotifyInitialLoadFinishedAndRun,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Bind(&DriveFileSystem::OnUpdateChecked,
-                            weak_ptr_factory_.GetWeakPtr())));
+  resource_metadata_->Reset(base::Bind(&DriveFileSystem::ReloadAfterReset,
+                                       weak_ptr_factory_.GetWeakPtr()));
 }
 
 void DriveFileSystem::Initialize() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ResetResourceMetadata();
+  SetupChangeListLoader();
+
+  // Allocate the drive operation handlers.
+  drive_operations_.Init(scheduler_.get(),
+                         this,  // DriveFileSystemInterface
+                         cache_,
+                         resource_metadata_,
+                         uploader_,
+                         blocking_task_runner_,
+                         this);  // OperationObserver
 
   PrefService* pref_service = profile_->GetPrefs();
   hide_hosted_docs_ = pref_service->GetBoolean(prefs::kDisableDriveHostedFiles);
@@ -260,24 +265,20 @@ void DriveFileSystem::Initialize() {
   InitializePreferenceObserver();
 }
 
-void DriveFileSystem::ResetResourceMetadata() {
-  resource_metadata_.reset(
-      new DriveResourceMetadata(drive_service_->GetRootResourceId()));
-  change_list_loader_.reset(new ChangeListLoader(resource_metadata_.get(),
-                                         scheduler_.get(),
-                                         webapps_registry_,
-                                         cache_,
-                                         blocking_task_runner_));
-  change_list_loader_->AddObserver(this);
+void DriveFileSystem::ReloadAfterReset() {
+  SetupChangeListLoader();
 
-  // Allocate the drive operation handlers.
-  drive_operations_.Init(scheduler_.get(),
-                         this,  // DriveFileSystemInterface
-                         cache_,
-                         resource_metadata_.get(),
-                         uploader_,
-                         blocking_task_runner_,
-                         this);  // OperationObserver
+  change_list_loader_->LoadFromServerIfNeeded(
+      DirectoryFetchInfo(),
+      base::Bind(&DriveFileSystem::OnUpdateChecked,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void DriveFileSystem::SetupChangeListLoader() {
+  change_list_loader_.reset(new ChangeListLoader(resource_metadata_,
+                                                 scheduler_.get(),
+                                                 webapps_registry_));
+  change_list_loader_->AddObserver(this);
 }
 
 void DriveFileSystem::CheckForUpdates() {
@@ -285,7 +286,7 @@ void DriveFileSystem::CheckForUpdates() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DVLOG(1) << "CheckForUpdates";
 
-  if (resource_metadata_->loaded() && !change_list_loader_->refreshing()) {
+  if (change_list_loader_->loaded() && !change_list_loader_->refreshing()) {
     change_list_loader_->LoadFromServerIfNeeded(
         DirectoryFetchInfo(),
         base::Bind(&DriveFileSystem::OnUpdateChecked,
@@ -370,6 +371,7 @@ void DriveFileSystem::GetEntryInfoByResourceId(
     const std::string& resource_id,
     const GetEntryInfoWithFilePathCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!resource_id.empty());
   DCHECK(!callback.is_null());
 
   resource_metadata_->GetEntryInfoByResourceId(
@@ -406,29 +408,7 @@ void DriveFileSystem::LoadIfNeeded(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  if (resource_metadata_->loaded()) {
-    // The feed has already been loaded, so we have nothing to do, but post a
-    // task to the same thread, rather than calling it here, as
-    // LoadIfNeeded() is asynchronous.
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, DRIVE_FILE_OK));
-    return;
-  }
-
-  if (change_list_loader_->refreshing()) {
-    // If the change list loading is in progress, schedule the callback to
-    // run when it's ready (i.e. when the entire resource list is loaded, or
-    // the directory contents are available per "fast fetch").
-    change_list_loader_->ScheduleRun(directory_fetch_info, callback);
-    return;
-  }
-
-  change_list_loader_->Load(
-      directory_fetch_info,
-      base::Bind(&DriveFileSystem::NotifyInitialLoadFinishedAndRun,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback));
+  change_list_loader_->LoadIfNeeded(directory_fetch_info, callback);
 }
 
 void DriveFileSystem::TransferFileFromRemoteToLocal(
@@ -649,6 +629,7 @@ void DriveFileSystem::GetFileByResourceId(
     const GetFileCallback& get_file_callback,
     const google_apis::GetContentCallback& get_content_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!resource_id.empty());
   DCHECK(!get_file_callback.is_null());
 
   resource_metadata_->GetEntryInfoByResourceId(
@@ -839,7 +820,7 @@ void DriveFileSystem::GetEntryInfoByPath(const base::FilePath& file_path,
   // DriveResourceMetadata may know about the entry even if the resource
   // metadata is not yet fully loaded. For instance, DriveResourceMetadata()
   // always knows about the root directory. For "fast fetch"
-  // (crbug.com/178348) to work, it's needd to delay the resource metadata
+  // (crbug.com/178348) to work, it's needed to delay the resource metadata
   // loading until the first call to ReadDirectoryByPath().
   resource_metadata_->GetEntryInfoByPath(
       file_path,
@@ -914,7 +895,7 @@ void DriveFileSystem::ReadDirectoryByPath(
   DCHECK(!callback.is_null());
 
   // As described in GetEntryInfoByPath(), DriveResourceMetadata may know
-  // about the entry even if the file system is not yet fully loaded, hece we
+  // about the entry even if the file system is not yet fully loaded, hence we
   // should just ask DriveResourceMetadata first.
   resource_metadata_->GetEntryInfoByPath(
       directory_path,
@@ -1214,11 +1195,12 @@ void DriveFileSystem::OnFeedFromServerLoaded() {
                     OnFeedFromServerLoaded());
 }
 
-void DriveFileSystem::LoadFromCacheForTesting(
-    const FileOperationCallback& callback) {
+void DriveFileSystem::OnInitialFeedLoaded() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  change_list_loader_->LoadFromCache(callback);
+  FOR_EACH_OBSERVER(DriveFileSystemObserver,
+                    observers_,
+                    OnInitialLoadFinished());
 }
 
 void DriveFileSystem::OnFileDownloaded(
@@ -1329,20 +1311,6 @@ void DriveFileSystem::NotifyFileSystemToBeUnmounted() {
                     OnFileSystemBeingUnmounted());
 }
 
-void DriveFileSystem::NotifyInitialLoadFinishedAndRun(
-    const FileOperationCallback& callback,
-    DriveFileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  // Notify the observers that root directory has been loaded.
-  FOR_EACH_OBSERVER(DriveFileSystemObserver,
-                    observers_,
-                    OnInitialLoadFinished(error));
-
-  callback.Run(error);
-}
-
 void DriveFileSystem::AddUploadedFile(
     scoped_ptr<google_apis::ResourceEntry> entry,
     const base::FilePath& file_content_path,
@@ -1393,7 +1361,7 @@ void DriveFileSystem::GetMetadata(
   DCHECK(!callback.is_null());
 
   DriveFileSystemMetadata metadata;
-  metadata.loaded = resource_metadata_->loaded();
+  metadata.loaded = change_list_loader_->loaded();
   metadata.refreshing = change_list_loader_->refreshing();
 
   // Metadata related to delta update.
@@ -1423,7 +1391,7 @@ void DriveFileSystem::SetHideHostedDocuments(bool hide) {
 
   // Kick off directory refresh when this setting changes.
   FOR_EACH_OBSERVER(DriveFileSystemObserver, observers_,
-                    OnDirectoryChanged(base::FilePath(kDriveRootDirectory)));
+                    OnDirectoryChanged(util::GetDriveMyDriveRootPath()));
 }
 
 //============= DriveFileSystem: internal helper functions =====================

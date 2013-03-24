@@ -158,7 +158,7 @@ base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
   base::Time::Exploded the_time;
 
   base::Time::Now().LocalExplode(&the_time);
-  std::string filename(StringPrintf("%s%04d%02d%02d%02d%02d%02d%s",
+  std::string filename(base::StringPrintf("%s%04d%02d%02d%02d%02d%02d%s",
       kSnapshotBaseName, the_time.year, the_time.month, the_time.day_of_month,
       the_time.hour, the_time.minute, the_time.second, kSnapshotExtension));
 
@@ -168,7 +168,7 @@ base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
     std::string suffix;
     base::FilePath trial_file;
     do {
-      suffix = StringPrintf(" (%d)", ++index);
+      suffix = base::StringPrintf(" (%d)", ++index);
       trial_file = snapshot_file.InsertBeforeExtensionASCII(suffix);
     } while (file_util::PathExists(trial_file));
     snapshot_file = trial_file;
@@ -193,7 +193,7 @@ bool GetCurrentTabTitle(const Browser* browser, string16* title) {
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations) {
   content::TestNavigationObserver observer(
-      content::Source<NavigationController>(controller), NULL,
+      content::Source<NavigationController>(controller),
       number_of_navigations);
   base::RunLoop run_loop;
   observer.WaitForObservation(
@@ -226,7 +226,7 @@ Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url) {
 
 void NavigateToURL(chrome::NavigateParams* params) {
   content::TestNavigationObserver observer(
-      content::NotificationService::AllSources(), NULL, 1);
+      content::NotificationService::AllSources(), 1);
   chrome::Navigate(params);
   base::RunLoop run_loop;
   observer.WaitForObservation(
@@ -257,7 +257,6 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
       &tab_strip->GetActiveWebContents()->GetController() : NULL;
   content::TestNavigationObserver same_tab_observer(
       content::Source<NavigationController>(controller),
-      NULL,
       number_of_navigations);
 
   std::set<Browser*> initial_browsers;

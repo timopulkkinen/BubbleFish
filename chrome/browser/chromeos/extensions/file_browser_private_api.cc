@@ -220,6 +220,11 @@ void AddDriveMountPoint(
     Profile* profile,
     const std::string& extension_id,
     content::RenderViewHost* render_view_host) {
+  if (!render_view_host ||
+      !render_view_host->GetSiteInstance() || !render_view_host->GetProcess()) {
+    return;
+  }
+
   content::SiteInstance* site_instance = render_view_host->GetSiteInstance();
   fileapi::ExternalFileSystemMountPointProvider* provider =
       BrowserContext::GetStoragePartition(profile, site_instance)->
@@ -228,9 +233,6 @@ void AddDriveMountPoint(
     return;
 
   const base::FilePath mount_point = drive::util::GetDriveMountPointPath();
-  if (!render_view_host || !render_view_host->GetProcess())
-    return;
-
   // Grant R/W permissions to drive 'folder'. File API layer still
   // expects this to be satisfied.
   GrantFilePermissionsToHost(render_view_host,
@@ -1232,6 +1234,13 @@ bool SetDefaultTaskFileBrowserFunction::RunImpl() {
   return true;
 }
 
+struct FileBrowserFunction::GetSelectedFileInfoParams {
+  bool for_opening;
+  GetSelectedFileInfoCallback callback;
+  std::vector<base::FilePath> file_paths;
+  SelectedFileInfoList selected_files;
+};
+
 FileBrowserFunction::FileBrowserFunction() {
 }
 
@@ -1274,111 +1283,78 @@ base::FilePath FileBrowserFunction::GetLocalPathFromURL(const GURL& url) {
 
 void FileBrowserFunction::GetSelectedFileInfo(
     const UrlList& file_urls,
+    bool for_opening,
     GetSelectedFileInfoCallback callback) {
-  scoped_ptr<std::vector<base::FilePath> > file_paths(
-      new std::vector<base::FilePath>);
+  scoped_ptr<GetSelectedFileInfoParams> params(new GetSelectedFileInfoParams);
+  params->for_opening = for_opening;
+  params->callback = callback;
+
   for (size_t i = 0; i < file_urls.size(); ++i) {
     const GURL& file_url = file_urls[i];
     const base::FilePath path = GetLocalPathFromURL(file_url);
     if (!path.empty()) {
       DVLOG(1) << "Selected: file path: " << path.value();
-      file_paths->push_back(path);
+      params->file_paths.push_back(path);
     }
   }
 
-  scoped_ptr<SelectedFileInfoList> selected_files(new SelectedFileInfoList);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&FileBrowserFunction::GetSelectedFileInfoInternal,
                  this,
-                 base::Passed(&file_paths),
-                 base::Passed(&selected_files),
-                 callback));
+                 base::Passed(&params)));
 }
 
 void FileBrowserFunction::GetSelectedFileInfoInternal(
-      scoped_ptr<std::vector<base::FilePath> > file_paths,
-      scoped_ptr<SelectedFileInfoList> selected_files,
-      GetSelectedFileInfoCallback callback) {
-  for (size_t i = selected_files->size(); i < file_paths->size(); ++i) {
-    const base::FilePath& file_path = (*file_paths)[i];
-    if (drive::util::IsUnderDriveMountPoint(file_path)) {
-      GetCacheFileByPath(
+    scoped_ptr<GetSelectedFileInfoParams> params) {
+  for (size_t i = params->selected_files.size();
+       i < params->file_paths.size(); ++i) {
+    const base::FilePath& file_path = params->file_paths[i];
+    // When opening a drive file, we should get local file path.
+    if (params->for_opening &&
+        drive::util::IsUnderDriveMountPoint(file_path)) {
+      drive::DriveSystemService* system_service =
+          drive::DriveSystemServiceFactory::GetForProfile(profile_);
+      // |system_service| is NULL if Drive is disabled.
+      if (!system_service) {
+        ContinueGetSelectedFileInfo(params.Pass(),
+                                    drive::DRIVE_FILE_ERROR_FAILED,
+                                    base::FilePath(),
+                                    std::string(),
+                                    drive::REGULAR_FILE);
+        return;
+      }
+      system_service->file_system()->GetFileByPath(
           drive::util::ExtractDrivePath(file_path),
           base::Bind(&FileBrowserFunction::ContinueGetSelectedFileInfo,
                      this,
-                     base::Passed(&file_paths),
-                     base::Passed(&selected_files),
-                     callback));
+                     base::Passed(&params)));
       return;
     } else {
-      selected_files->push_back(
+      params->selected_files.push_back(
           ui::SelectedFileInfo(file_path, base::FilePath()));
     }
   }
-  callback.Run(*selected_files);
+  params->callback.Run(params->selected_files);
 }
 
 void FileBrowserFunction::ContinueGetSelectedFileInfo(
-    scoped_ptr<std::vector<base::FilePath> > file_paths,
-    scoped_ptr<SelectedFileInfoList> selected_files,
-    GetSelectedFileInfoCallback callback,
+    scoped_ptr<GetSelectedFileInfoParams> params,
     drive::DriveFileError error,
-    const base::FilePath& cache_file_path) {
-  const int index = selected_files->size();
-  const base::FilePath& file_path = (*file_paths)[index];
+    const base::FilePath& local_file_path,
+    const std::string& mime_type,
+    drive::DriveFileType file_type) {
+  const int index = params->selected_files.size();
+  const base::FilePath& file_path = params->file_paths[index];
   base::FilePath local_path;
   if (error == drive::DRIVE_FILE_OK) {
-    local_path = cache_file_path;
+    local_path = local_file_path;
   } else {
     DLOG(ERROR) << "Failed to get " << file_path.value()
                 << " with error code: " << error;
   }
-  selected_files->push_back(ui::SelectedFileInfo(file_path, local_path));
-  GetSelectedFileInfoInternal(file_paths.Pass(), selected_files.Pass(),
-                              callback);
-}
-
-void FileBrowserFunction::GetCacheFileByPath(
-    const base::FilePath& path,
-    const drive::GetFileFromCacheCallback& callback) {
-  drive::DriveSystemService* system_service =
-      drive::DriveSystemServiceFactory::GetForProfile(profile_);
-  // |system_service| is NULL if Drive is disabled.
-  if (!system_service) {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, drive::DRIVE_FILE_ERROR_FAILED, base::FilePath()));
-    return;
-  }
-  system_service->file_system()->GetEntryInfoByPath(
-      path,
-      base::Bind(&FileBrowserFunction::GetCacheFileByPathInternal,
-                 this,
-                 callback));
-}
-
-void FileBrowserFunction::GetCacheFileByPathInternal(
-    const drive::GetFileFromCacheCallback& callback,
-    drive::DriveFileError error,
-    scoped_ptr<drive::DriveEntryProto> entry_proto) {
-  if (error != drive::DRIVE_FILE_OK) {
-    callback.Run(error, base::FilePath());
-    return;
-  }
-  DCHECK(entry_proto);
-
-  drive::DriveSystemService* system_service =
-      drive::DriveSystemServiceFactory::GetForProfile(profile_);
-  // |system_service| is NULL if Drive is disabled.
-  if (!system_service ||
-      !entry_proto->has_file_specific_info()) {
-    callback.Run(drive::DRIVE_FILE_ERROR_FAILED, base::FilePath());
-    return;
-  }
-  system_service->cache()->GetFile(entry_proto->resource_id(),
-                                   entry_proto->file_specific_info().file_md5(),
-                                   callback);
+  params->selected_files.push_back(ui::SelectedFileInfo(file_path, local_path));
+  GetSelectedFileInfoInternal(params.Pass());
 }
 
 bool SelectFileFunction::RunImpl() {
@@ -1389,9 +1365,12 @@ bool SelectFileFunction::RunImpl() {
   args_->GetString(0, &file_url);
   UrlList file_paths;
   file_paths.push_back(GURL(file_url));
+  bool for_opening = false;
+  args_->GetBoolean(2, &for_opening);
 
   GetSelectedFileInfo(
       file_paths,
+      for_opening,
       base::Bind(&SelectFileFunction::GetSelectedFileInfoResponse, this));
   return true;
 }
@@ -1481,6 +1460,7 @@ bool SelectFilesFunction::RunImpl() {
 
   GetSelectedFileInfo(
       file_urls,
+      true,  // for_opening
       base::Bind(&SelectFilesFunction::GetSelectedFileInfoResponse, this));
   return true;
 }
@@ -1647,6 +1627,7 @@ bool RemoveMountFunction::RunImpl() {
   file_paths.push_back(GURL(mount_path));
   GetSelectedFileInfo(
       file_paths,
+      true,  // for_opening
       base::Bind(&RemoveMountFunction::GetSelectedFileInfoResponse, this));
   return true;
 }
@@ -1913,6 +1894,8 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING("DRIVE_DIRECTORY_LABEL", IDS_FILE_BROWSER_DRIVE_DIRECTORY_LABEL);
   SET_STRING("DRIVE_OFFLINE_COLLECTION_LABEL",
              IDS_FILE_BROWSER_DRIVE_OFFLINE_COLLECTION_LABEL);
+  SET_STRING("DRIVE_SHARED_WITH_ME_COLLECTION_LABEL",
+             IDS_FILE_BROWSER_DRIVE_SHARED_WITH_ME_COLLECTION_LABEL);
   SET_STRING("NAME_COLUMN_LABEL", IDS_FILE_BROWSER_NAME_COLUMN_LABEL);
   SET_STRING("SIZE_COLUMN_LABEL", IDS_FILE_BROWSER_SIZE_COLUMN_LABEL);
   SET_STRING("SIZE_BYTES", IDS_FILE_BROWSER_SIZE_BYTES);
@@ -1950,6 +1933,8 @@ bool FileDialogStringsFunction::RunImpl() {
              IDS_FILE_BROWSER_NEW_FOLDER_BUTTON_LABEL);
   SET_STRING("NEW_WINDOW_BUTTON_LABEL",
              IDS_FILE_BROWSER_NEW_WINDOW_BUTTON_LABEL);
+  SET_STRING("CHANGE_DEFAULT_APP_BUTTON_LABEL",
+             IDS_FILE_BROWSER_CHANGE_DEFAULT_APP_BUTTON_LABEL);
   SET_STRING("FILENAME_LABEL", IDS_FILE_BROWSER_FILENAME_LABEL);
   SET_STRING("PREPARING_LABEL", IDS_FILE_BROWSER_PREPARING_LABEL);
   SET_STRING("DRAGGING_MULTIPLE_ITEMS",
@@ -2047,7 +2032,8 @@ bool FileDialogStringsFunction::RunImpl() {
              IDS_FILE_BROWSER_ACTION_CHOICE_VIEW_FILES);
   SET_STRING("ACTION_CHOICE_WATCH_SINGLE_VIDEO",
              IDS_FILE_BROWSER_ACTION_CHOICE_WATCH_SINGLE_VIDEO);
-  SET_STRING("ACTION_CHOICE_OK", IDS_FILE_BROWSER_ACTION_CHOICE_OK);
+  SET_STRING("ACTION_CHOICE_ONCE", IDS_FILE_BROWSER_ACTION_CHOICE_ONCE);
+  SET_STRING("ACTION_CHOICE_ALWAYS", IDS_FILE_BROWSER_ACTION_CHOICE_ALWAYS);
   SET_STRING("ACTION_CHOICE_COUNTER_NO_MEDIA",
              IDS_FILE_BROWSER_ACTION_CHOICE_COUNTER_NO_MEDIA);
   SET_STRING("ACTION_CHOICE_COUNTER", IDS_FILE_BROWSER_ACTION_CHOICE_COUNTER);

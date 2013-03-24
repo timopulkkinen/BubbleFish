@@ -19,9 +19,9 @@
 #include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/web_apps.h"
+#include "extensions/common/extension_resource.h"
 #include "extensions/common/url_pattern.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,7 +44,7 @@ WebApplicationInfo::IconInfo GetIconInfo(const GURL& url, int size) {
 
   icon_file = icon_file.AppendASCII("extensions")
                        .AppendASCII("convert_web_app")
-                       .AppendASCII(StringPrintf("%i.png", size));
+                       .AppendASCII(base::StringPrintf("%i.png", size));
 
   result.url = url;
   result.width = size;
@@ -120,7 +120,8 @@ TEST_F(ExtensionFromWebApp, Basic) {
 
   const int sizes[] = {16, 48, 128};
   for (size_t i = 0; i < arraysize(sizes); ++i) {
-    GURL icon_url(web_app.app_url.Resolve(StringPrintf("%i.png", sizes[i])));
+    GURL icon_url(
+        web_app.app_url.Resolve(base::StringPrintf("%i.png", sizes[i])));
     web_app.icons.push_back(GetIconInfo(icon_url, sizes[i]));
   }
 
@@ -152,7 +153,7 @@ TEST_F(ExtensionFromWebApp, Basic) {
 
   EXPECT_EQ(web_app.icons.size(), IconsInfo::GetIcons(extension).map().size());
   for (size_t i = 0; i < web_app.icons.size(); ++i) {
-    EXPECT_EQ(StringPrintf("icons/%i.png", web_app.icons[i].width),
+    EXPECT_EQ(base::StringPrintf("icons/%i.png", web_app.icons[i].width),
               IconsInfo::GetIcons(extension).Get(
                   web_app.icons[i].width, ExtensionIconSet::MATCH_EXACTLY));
     ExtensionResource resource = IconsInfo::GetIconResource(

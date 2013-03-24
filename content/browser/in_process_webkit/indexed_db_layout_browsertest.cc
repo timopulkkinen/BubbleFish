@@ -133,7 +133,8 @@ IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, TransactionTests) {
   RunLayoutTests(kTransactionTests);
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, IntVersionTests1) {
+// TODO(jsbell): Enable after WebKit roll includes fix http://crbug.com/223101
+IN_PROC_BROWSER_TEST_F(IndexedDBLayoutTest, DISABLED_IntVersionTests1) {
   RunLayoutTests(kIntVersionTests1);
 }
 

@@ -178,6 +178,12 @@ void AutofillManager::CreateForWebContentsAndDelegate(
 
   contents->SetUserData(kAutofillManagerWebContentsUserDataKey,
                         new AutofillManager(contents, delegate));
+
+  // Trigger the lazy creation of AutocheckoutWhitelistManagerService, and
+  // schedule a fetch of the Autocheckout whitelist file if it's not already
+  // loaded. This helps ensure that the whitelist will be available by the time
+  // the user navigates to a form on which Autocheckout should be enabled.
+  delegate->GetAutocheckoutWhitelistManager();
 }
 
 // static
@@ -761,11 +767,10 @@ const std::vector<FormStructure*>& AutofillManager::GetFormStructures() {
 void AutofillManager::ShowRequestAutocompleteDialog(
     const FormData& form,
     const GURL& source_url,
-    const content::SSLStatus& ssl_status,
     autofill::DialogType dialog_type,
     const base::Callback<void(const FormStructure*)>& callback) {
   manager_delegate_->ShowRequestAutocompleteDialog(
-      form, source_url, ssl_status, *metric_logger_, dialog_type, callback);
+      form, source_url, *metric_logger_, dialog_type, callback);
 }
 
 void AutofillManager::RequestAutocompleteDialogClosed() {
@@ -811,8 +816,7 @@ void AutofillManager::OnSetDataList(const std::vector<string16>& values,
 
 void AutofillManager::OnRequestAutocomplete(
     const FormData& form,
-    const GURL& frame_url,
-    const content::SSLStatus& ssl_status) {
+    const GURL& frame_url) {
   if (!IsAutofillEnabled()) {
     ReturnAutocompleteResult(WebFormElement::AutocompleteResultErrorDisabled,
                              FormData());
@@ -823,8 +827,7 @@ void AutofillManager::OnRequestAutocomplete(
       base::Bind(&AutofillManager::ReturnAutocompleteData,
                  weak_ptr_factory_.GetWeakPtr());
   ShowRequestAutocompleteDialog(
-      form, frame_url, ssl_status,
-      autofill::DIALOG_TYPE_REQUEST_AUTOCOMPLETE, callback);
+      form, frame_url, autofill::DIALOG_TYPE_REQUEST_AUTOCOMPLETE, callback);
 }
 
 void AutofillManager::ReturnAutocompleteResult(
@@ -899,8 +902,8 @@ std::string AutofillManager::GetAutocheckoutURLPrefix() const {
     return std::string();
 
   autofill::autocheckout::WhitelistManager* whitelist_manager =
-      autofill::autocheckout::WhitelistManager::GetForBrowserContext(
-          web_contents()->GetBrowserContext());
+      manager_delegate_->GetAutocheckoutWhitelistManager();
+
   return whitelist_manager->GetMatchedURLPrefix(web_contents()->GetURL());
 }
 

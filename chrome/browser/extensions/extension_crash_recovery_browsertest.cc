@@ -27,7 +27,9 @@
 #include "content/public/common/result_codes.h"
 
 #if defined(ENABLE_MESSAGE_CENTER)
+#include "base/command_line.h"
 #include "ui/message_center/message_center.h"
+#include "ui/message_center/message_center_switches.h"
 #include "ui/message_center/notification_list.h"
 #endif
 
@@ -41,7 +43,7 @@ using extensions::Extension;
 #define MAYBE_ExtensionCrashRecoveryTest DISABLED_ExtensionCrashRecoveryTest
 #else
 #define MAYBE_ExtensionCrashRecoveryTest ExtensionCrashRecoveryTest
-#endif  // defined(OS_MAC) || defined(USE_AURA)
+#endif  // defined(OS_MACOSX) || defined(USE_AURA)
 
 class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
  protected:
@@ -121,6 +123,12 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
 class MessageCenterExtensionCrashRecoveryTest
     : public ExtensionCrashRecoveryTestBase {
  protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    ExtensionCrashRecoveryTestBase::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(
+        message_center::switches::kEnableRichNotifications);
+  }
+
   virtual void AcceptNotification(size_t index) OVERRIDE {
     message_center::MessageCenter* message_center =
         message_center::MessageCenter::Get();

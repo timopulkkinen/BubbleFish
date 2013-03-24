@@ -239,6 +239,8 @@ std::string GetFileSystemTypeString(FileSystemType type) {
       return "Drive";
     case kFileSystemTypeSyncable:
       return "Syncable";
+    case kFileSystemTypeNativeForPlatformApp:
+      return "NativeForPlatformApp";
     case kFileSystemTypeUnknown:
       return "Unknown";
   }
@@ -291,22 +293,23 @@ WebKit::WebFileError PlatformFileErrorToWebFileError(
 
 bool GetFileSystemPublicType(
     const std::string type_string,
-    WebKit::WebFileSystem::Type* type) {
+    WebKit::WebFileSystemType* type
+) {
   DCHECK(type);
   if (type_string == "Temporary") {
-    *type = WebKit::WebFileSystem::TypeTemporary;
+    *type = WebKit::WebFileSystemTypeTemporary;
     return true;
   }
   if (type_string == "Persistent") {
-    *type = WebKit::WebFileSystem::TypePersistent;
+    *type = WebKit::WebFileSystemTypePersistent;
     return true;
   }
   if (type_string == "Isolated") {
-    *type = WebKit::WebFileSystem::TypeIsolated;
+    *type = WebKit::WebFileSystemTypeIsolated;
     return true;
   }
   if (type_string == "External") {
-    *type = WebKit::WebFileSystem::TypeExternal;
+    *type = WebKit::WebFileSystemTypeExternal;
     return true;
   }
   NOTREACHED();

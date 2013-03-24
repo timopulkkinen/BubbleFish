@@ -7,15 +7,13 @@
 #include <android/native_window_jni.h>
 
 #include "base/bind.h"
-#include "cc/video_layer.h"
+#include "cc/layers/video_layer.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/common/android/surface_texture_bridge.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoLayer.h"
 #include "webkit/compositor_bindings/web_compositor_support_impl.h"
-#include "webkit/media/webvideoframe_impl.h"
 
 namespace {
 

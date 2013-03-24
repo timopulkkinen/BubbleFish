@@ -72,7 +72,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
@@ -118,6 +117,10 @@
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugins_resource_service.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "apps/app_shim/app_shim_host_manager_mac.h"
 #endif
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -265,6 +268,10 @@ void BrowserProcessImpl::StartTearDown() {
   // Delete aura after the metrics service has been deleted as it accesses
   // monitor information.
   aura::Env::DeleteInstance();
+#endif
+
+#if defined(OS_MACOSX)
+  app_shim_host_manager_.reset();
 #endif
 }
 
@@ -895,6 +902,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
       BookmarkPromptController::IsEnabled()) {
     bookmark_prompt_controller_.reset(new BookmarkPromptController());
   }
+#endif
+
+#if defined(OS_MACOSX)
+  app_shim_host_manager_.reset(new AppShimHostManager);
 #endif
 }
 

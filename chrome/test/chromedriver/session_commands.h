@@ -57,6 +57,7 @@ Status ExecuteGetCurrentWindowHandle(
 
 // Close the target window.
 Status ExecuteClose(
+    SessionMap* session_map,
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
@@ -83,6 +84,12 @@ Status ExecuteSetTimeout(
 
 // Set the timeout for asynchronous scripts.
 Status ExecuteSetScriptTimeout(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Set the amount of time the driver should wait when searching for elements.
+Status ExecuteImplicitlyWait(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);

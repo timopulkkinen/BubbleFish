@@ -35,6 +35,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/focus/focus_search.h"
@@ -405,13 +406,34 @@ void LauncherView::Init() {
   overflow_button_->set_context_menu_controller(this);
   ConfigureChildView(overflow_button_);
   AddChildView(overflow_button_);
+  UpdateFirstButtonPadding();
 
   // We'll layout when our bounds change.
 }
 
 void LauncherView::OnShelfAlignmentChanged() {
+  UpdateFirstButtonPadding();
   overflow_button_->OnShelfAlignmentChanged();
   LayoutToIdealBounds();
+  for (int i=0; i < view_model_->view_size(); ++i) {
+    // TODO: remove when AppIcon is a Launcher Button.
+    if (TYPE_APP_LIST == model_->items()[i].type) {
+      ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
+      static_cast<AppListButton*>(view_model_->view_at(i))->SetImageAlignment(
+          shelf->SelectValueForShelfAlignment(
+              views::ImageButton::ALIGN_CENTER,
+              views::ImageButton::ALIGN_LEFT,
+              views::ImageButton::ALIGN_RIGHT,
+              views::ImageButton::ALIGN_CENTER),
+          shelf->SelectValueForShelfAlignment(
+              views::ImageButton::ALIGN_TOP,
+              views::ImageButton::ALIGN_MIDDLE,
+              views::ImageButton::ALIGN_MIDDLE,
+              views::ImageButton::ALIGN_BOTTOM));
+    }
+    if (i >= first_visible_index_ && i <= last_visible_index_)
+      view_model_->view_at(i)->Layout();
+  }
   tooltip_->UpdateArrowLocation();
   if (overflow_bubble_.get())
     overflow_bubble_->Hide();
@@ -429,7 +451,8 @@ gfx::Rect LauncherView::GetIdealBoundsOfItemIcon(LauncherID id) {
   gfx::Rect icon_bounds = button->GetIconBounds();
   return gfx::Rect(ideal_bounds.x() + icon_bounds.x(),
                    ideal_bounds.y() + icon_bounds.y(),
-                   icon_bounds.width(), icon_bounds.height());
+                   icon_bounds.width(),
+                   icon_bounds.height());
 }
 
 void LauncherView::UpdatePanelIconPosition(LauncherID id,
@@ -523,15 +546,14 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
   // launcher (eg top edge on bottom-aligned launcher).
   int x = shelf->SelectValueForShelfAlignment(
       leading_inset(),
-      width() - kLauncherPreferredSize,
-      std::max(width() - kLauncherPreferredSize,
-               ShelfLayoutManager::kAutoHideSize + 1),
+      0,
+      0,
       leading_inset());
   int y = shelf->SelectValueForShelfAlignment(
       0,
       leading_inset(),
       leading_inset(),
-      height() - kLauncherPreferredSize);
+      0);
   int w = shelf->PrimaryAxisValue(kLauncherPreferredSize, width());
   int h = shelf->PrimaryAxisValue(height(), kLauncherPreferredSize);
   for (int i = 0; i < view_model_->view_size(); ++i) {
@@ -562,15 +584,13 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
   // leading inset (if there is one).
   if (view_model_->view_size() > 0) {
     view_model_->set_ideal_bounds(0, gfx::Rect(gfx::Size(
-        shelf->PrimaryAxisValue(leading_inset() + kLauncherPreferredSize,
-                                width()),
-        shelf->PrimaryAxisValue(height(),
-                                leading_inset() + kLauncherPreferredSize))));
+        shelf->PrimaryAxisValue(leading_inset() + w, w),
+        shelf->PrimaryAxisValue(h, leading_inset() + h))));
   }
 
   // Right aligned icons.
   int end_position = available_size - kButtonSpacing;
-  x = shelf->PrimaryAxisValue(end_position, leading_inset());
+  x = shelf->PrimaryAxisValue(end_position, 0);
   y = shelf->PrimaryAxisValue(0, end_position);
   for (int i = view_model_->view_size() - 1;
        i >= first_panel_index; --i) {
@@ -593,8 +613,8 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
     end_position = std::max(end_position, reserved_icon_space);
 
   bounds->overflow_bounds.set_size(gfx::Size(
-      shelf->PrimaryAxisValue(kLauncherPreferredSize, width()),
-      shelf->PrimaryAxisValue(height(), kLauncherPreferredSize)));
+      shelf->PrimaryAxisValue(w, width()),
+      shelf->PrimaryAxisValue(height(), h)));
   last_visible_index_ = DetermineLastVisibleIndex(
       end_position - leading_inset() - 2 * kLauncherPreferredSize);
   last_hidden_index_ = DetermineFirstVisiblePanelIndex(end_position) - 1;
@@ -614,15 +634,14 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
     if (last_visible_index_ == -1) {
       x = shelf->SelectValueForShelfAlignment(
           leading_inset(),
-          width() - kLauncherPreferredSize,
-          std::max(width() - kLauncherPreferredSize,
-                   ShelfLayoutManager::kAutoHideSize + 1),
+          0,
+          0,
           leading_inset());
       y = shelf->SelectValueForShelfAlignment(
           0,
           leading_inset(),
           leading_inset(),
-          height() - kLauncherPreferredSize);
+          0);
     } else if (last_visible_index_ == app_list_index) {
       x = view_model_->ideal_bounds(last_visible_index_).x();
       y = view_model_->ideal_bounds(last_visible_index_).y();
@@ -642,8 +661,8 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
     for (int i = first_panel_index; i <= last_hidden_index_; ++i)
       view_model_->set_ideal_bounds(i, gfx::Rect(x, y, w, h));
 
-    x = shelf->PrimaryAxisValue(x + kLauncherPreferredSize + kButtonSpacing, x);
-    y = shelf->PrimaryAxisValue(y, y + kLauncherPreferredSize + kButtonSpacing);
+    x = shelf->PrimaryAxisValue(x + w + kButtonSpacing, x);
+    y = shelf->PrimaryAxisValue(y, y + h + kButtonSpacing);
     app_list_bounds.set_x(x);
     app_list_bounds.set_y(y);
     view_model_->set_ideal_bounds(app_list_index, app_list_bounds);
@@ -694,8 +713,14 @@ void LauncherView::AnimateToIdealBounds() {
   IdealBounds ideal_bounds;
   CalculateIdealBounds(&ideal_bounds);
   for (int i = 0; i < view_model_->view_size(); ++i) {
-    bounds_animator_->AnimateViewTo(view_model_->view_at(i),
-                                    view_model_->ideal_bounds(i));
+    View* view = view_model_->view_at(i);
+    bounds_animator_->AnimateViewTo(view, view_model_->ideal_bounds(i));
+    // Now that the item animation starts, we have to make sure that the
+    // padding of the first gets properly transferred to the new first item.
+    if (i && view->border())
+      view->set_border(NULL);
+    else if (!i && !view->border())
+      UpdateFirstButtonPadding();
   }
   overflow_button_->SetBoundsRect(ideal_bounds.overflow_bounds);
 }
@@ -733,6 +758,18 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
     case TYPE_APP_LIST: {
       // TODO(dave): turn this into a LauncherButton too.
       AppListButton* button = new AppListButton(this, this);
+      ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
+      button->SetImageAlignment(
+          shelf->SelectValueForShelfAlignment(
+              views::ImageButton::ALIGN_CENTER,
+              views::ImageButton::ALIGN_LEFT,
+              views::ImageButton::ALIGN_RIGHT,
+              views::ImageButton::ALIGN_CENTER),
+          shelf->SelectValueForShelfAlignment(
+              views::ImageButton::ALIGN_TOP,
+              views::ImageButton::ALIGN_MIDDLE,
+              views::ImageButton::ALIGN_MIDDLE,
+              views::ImageButton::ALIGN_BOTTOM));
       view = button;
       break;
     }
@@ -907,6 +944,21 @@ void LauncherView::ToggleOverflowBubble() {
   Shell::GetInstance()->UpdateShelfVisibility();
 }
 
+void LauncherView::UpdateFirstButtonPadding() {
+  ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
+
+  // Creates an empty border for first launcher button to make included leading
+  // inset act as the button's padding. This is only needed on button creation
+  // and when shelf alignment changes.
+  if (view_model_->view_size() > 0) {
+    view_model_->view_at(0)->set_border(views::Border::CreateEmptyBorder(
+        shelf->PrimaryAxisValue(0, leading_inset()),
+        shelf->PrimaryAxisValue(leading_inset(), 0),
+        0,
+        0));
+  }
+}
+
 void LauncherView::OnFadeOutAnimationEnded() {
   AnimateToIdealBounds();
 
@@ -939,10 +991,7 @@ bool LauncherView::ShouldHideTooltip(const gfx::Point& cursor_location) {
     views::View* child = child_at(i);
     if (child == overflow_button_)
       continue;
-
-    // The tooltip shouldn't show over the app-list window.
-    if (child == GetAppListButtonView() &&
-        Shell::GetInstance()->GetAppListWindow())
+    if (!ShouldShowTooltipForView(child))
       continue;
 
     gfx::Rect child_bounds = child->GetMirroredBounds();
@@ -1207,10 +1256,7 @@ void LauncherView::PointerReleasedOnButton(views::View* view,
 }
 
 void LauncherView::MouseMovedOverButton(views::View* view) {
-  // Mouse cursor moves doesn't make effects on the app-list button if
-  // app-list bubble is already visible.
-  if (view == GetAppListButtonView() &&
-      Shell::GetInstance()->GetAppListWindow())
+  if (!ShouldShowTooltipForView(view))
     return;
 
   if (!tooltip_->IsVisible())
@@ -1218,10 +1264,7 @@ void LauncherView::MouseMovedOverButton(views::View* view) {
 }
 
 void LauncherView::MouseEnteredButton(views::View* view) {
-  // If mouse cursor enters to the app-list button but app-list bubble is
-  // already visible, we should not show the bubble in that case.
-  if (view == GetAppListButtonView() &&
-      Shell::GetInstance()->GetAppListWindow())
+  if (!ShouldShowTooltipForView(view))
     return;
 
   if (tooltip_->IsVisible()) {
@@ -1331,8 +1374,8 @@ bool LauncherView::ShowListMenuForView(const LauncherItem& item,
   menu_model.reset(delegate_->CreateApplicationMenu(item, event_flags));
 
   // Make sure we have a menu and it has at least two items in addition to the
-  // application title and the 2 spacing separators.
-  if (!menu_model.get() || menu_model->GetItemCount() <= 4)
+  // application title and the 3 spacing separators.
+  if (!menu_model.get() || menu_model->GetItemCount() <= 5)
     return false;
 
   ShowMenu(scoped_ptr<views::MenuModelAdapter>(
@@ -1390,6 +1433,12 @@ void LauncherView::ShowMenu(
     ash::ShelfAlignment align = RootWindowController::ForLauncher(
         GetWidget()->GetNativeView())->shelf()->GetAlignment();
     anchor_point = source->GetBoundsInScreen();
+
+    // Launcher items can have an asymmetrical border for spacing reasons.
+    // Adjust anchor location for this.
+    if (source->border())
+      anchor_point.Inset(source->border()->GetInsets());
+
     switch (align) {
       case ash::SHELF_ALIGNMENT_BOTTOM:
         menu_alignment = views::MenuItemView::BUBBLE_ABOVE;
@@ -1415,7 +1464,10 @@ void LauncherView::ShowMenu(
           views::MenuRunner::CONTEXT_MENU) == views::MenuRunner::MENU_DELETED)
     return;
 
-  closing_event_time_ = launcher_menu_runner_->closing_event_time();
+  // Unpinning an item will reset the |launcher_menu_runner_| before coming
+  // here.
+  if (launcher_menu_runner_.get())
+    closing_event_time_ = launcher_menu_runner_->closing_event_time();
   Shell::GetInstance()->UpdateShelfVisibility();
 }
 
@@ -1438,6 +1490,22 @@ bool LauncherView::IsUsableEvent(const ui::Event& event) {
   // TODO(skuhne): This time seems excessive, but it appears that the reposting
   // takes that long.  Need to come up with a better way of doing this.
   return (delta.InMilliseconds() < 0 || delta.InMilliseconds() > 130);
+}
+
+const LauncherItem* LauncherView::LauncherItemForView(
+    const views::View* view) const {
+  int view_index = view_model_->GetIndexOfView(view);
+  if (view_index == -1)
+    return NULL;
+  return &(model_->items()[view_index]);
+}
+
+bool LauncherView::ShouldShowTooltipForView(const views::View* view) const {
+  if (view == GetAppListButtonView() &&
+      Shell::GetInstance()->GetAppListWindow())
+    return false;
+  const LauncherItem* item = LauncherItemForView(view);
+  return (!item || delegate_->ShouldShowTooltip(*item));
 }
 
 }  // namespace internal

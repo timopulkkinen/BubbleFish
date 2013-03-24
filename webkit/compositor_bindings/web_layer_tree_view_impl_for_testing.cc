@@ -7,16 +7,16 @@
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/synchronization/lock.h"
-#include "cc/context_provider.h"
-#include "cc/fake_web_graphics_context_3d.h"
-#include "cc/input_handler.h"
-#include "cc/layer.h"
-#include "cc/layer_tree_host.h"
-#include "cc/output_surface.h"
-#include "cc/software_output_device.h"
-#include "cc/switches.h"
-#include "cc/thread.h"
-#include "cc/thread_impl.h"
+#include "cc/base/switches.h"
+#include "cc/base/thread.h"
+#include "cc/base/thread_impl.h"
+#include "cc/debug/fake_web_graphics_context_3d.h"
+#include "cc/input/input_handler.h"
+#include "cc/layers/layer.h"
+#include "cc/output/context_provider.h"
+#include "cc/output/output_surface.h"
+#include "cc/output/software_output_device.h"
+#include "cc/trees/layer_tree_host.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebInputHandler.h"
@@ -31,7 +31,14 @@
 #include "webkit/gpu/test_context_provider_factory.h"
 #include "webkit/support/test_webkit_platform_support.h"
 
-namespace WebKit {
+using WebKit::WebColor;
+using WebKit::WebGraphicsContext3D;
+using WebKit::WebRect;
+using WebKit::WebRenderingStats;
+using WebKit::WebSize;
+
+namespace webkit {
+
 WebLayerTreeViewImplForTesting::WebLayerTreeViewImplForTesting(
     webkit_support::LayerTreeViewType type,
     webkit_support::DRTLayerTreeViewClient* client)
@@ -45,7 +52,8 @@ bool WebLayerTreeViewImplForTesting::initialize(
   cc::LayerTreeSettings settings;
   // Accelerated animations are disabled for layout tests, but enabled for unit
   // tests.
-  settings.acceleratedAnimationEnabled = type_ == webkit_support::FAKE_CONTEXT;
+  settings.accelerated_animation_enabled =
+      type_ == webkit_support::FAKE_CONTEXT;
   layer_tree_host_ =
       cc::LayerTreeHost::Create(this, settings, compositor_thread.Pass());
   if (!layer_tree_host_.get())
@@ -57,7 +65,8 @@ void WebLayerTreeViewImplForTesting::setSurfaceReady() {
   layer_tree_host_->SetSurfaceReady();
 }
 
-void WebLayerTreeViewImplForTesting::setRootLayer(const WebLayer& root) {
+void WebLayerTreeViewImplForTesting::setRootLayer(
+    const WebKit::WebLayer& root) {
   layer_tree_host_->SetRootLayer(
       static_cast<const WebLayerImpl*>(&root)->layer());
 }
@@ -111,7 +120,7 @@ void WebLayerTreeViewImplForTesting::setPageScaleFactorAndLimits(
 }
 
 void WebLayerTreeViewImplForTesting::startPageScaleAnimation(
-    const WebPoint& scroll,
+    const WebKit::WebPoint& scroll,
     bool use_anchor,
     float new_page_scale,
     double duration_sec) {}
@@ -157,25 +166,17 @@ void WebLayerTreeViewImplForTesting::setDeferCommits(bool defer_commits) {
 
 void WebLayerTreeViewImplForTesting::renderingStats(WebRenderingStats&) const {}
 
-void WebLayerTreeViewImplForTesting::willBeginFrame() {}
-
-void WebLayerTreeViewImplForTesting::didBeginFrame() {}
-
-void WebLayerTreeViewImplForTesting::animate(
-    double monotonic_frame_begin_time) {
-}
-
-void WebLayerTreeViewImplForTesting::layout() {
+void WebLayerTreeViewImplForTesting::Layout() {
   if (client_)
     client_->Layout();
 }
 
-void WebLayerTreeViewImplForTesting::applyScrollAndScale(
+void WebLayerTreeViewImplForTesting::ApplyScrollAndScale(
     gfx::Vector2d scroll_delta,
     float page_scale) {}
 
 scoped_ptr<cc::OutputSurface>
-WebLayerTreeViewImplForTesting::createOutputSurface() {
+WebLayerTreeViewImplForTesting::CreateOutputSurface() {
   scoped_ptr<cc::OutputSurface> surface;
   switch (type_) {
     case webkit_support::FAKE_CONTEXT: {
@@ -201,22 +202,12 @@ WebLayerTreeViewImplForTesting::createOutputSurface() {
   return surface.Pass();
 }
 
-void WebLayerTreeViewImplForTesting::didRecreateOutputSurface(bool success) {}
-
 scoped_ptr<cc::InputHandler>
-WebLayerTreeViewImplForTesting::createInputHandler() {
+WebLayerTreeViewImplForTesting::CreateInputHandler() {
   return scoped_ptr<cc::InputHandler>();
 }
 
-void WebLayerTreeViewImplForTesting::willCommit() {}
-
-void WebLayerTreeViewImplForTesting::didCommit() {}
-
-void WebLayerTreeViewImplForTesting::didCommitAndDrawFrame() {}
-
-void WebLayerTreeViewImplForTesting::didCompleteSwapBuffers() {}
-
-void WebLayerTreeViewImplForTesting::scheduleComposite() {
+void WebLayerTreeViewImplForTesting::ScheduleComposite() {
   if (client_)
     client_->ScheduleComposite();
 }
@@ -233,4 +224,4 @@ WebLayerTreeViewImplForTesting::OffscreenContextProviderForCompositorThread() {
       OffscreenContextProviderForCompositorThread();
 }
 
-}  // namespace WebKit
+}  // namespace webkit

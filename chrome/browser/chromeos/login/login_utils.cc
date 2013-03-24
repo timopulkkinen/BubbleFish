@@ -17,9 +17,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner_util.h"
@@ -269,7 +269,7 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
     return;
 
   if (!UserManager::Get()->GetCurrentUserFlow()->ShouldLaunchBrowser()) {
-    UserManager::Get()->GetCurrentUserFlow()->LaunchExtraSteps();
+    UserManager::Get()->GetCurrentUserFlow()->LaunchExtraSteps(login_host);
     return;
   }
 

@@ -173,7 +173,7 @@ bool HistoryQuickProviderTest::UpdateURL(const history::URLRow& row) {
   DCHECK(index);
   history::URLIndexPrivateData* private_data = index->private_data();
   DCHECK(private_data);
-  return private_data->UpdateURL(row, index->languages_,
+  return private_data->UpdateURL(history_service_, row, index->languages_,
                                  index->scheme_whitelist_);
 }
 
@@ -227,8 +227,8 @@ void HistoryQuickProviderTest::RunTest(const string16 text,
                                        string16 expected_fill_into_edit) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
   MessageLoop::current()->RunUntilIdle();
-  AutocompleteInput input(text, string16::npos, string16(), false, false, true,
-                          AutocompleteInput::ALL_MATCHES);
+  AutocompleteInput input(text, string16::npos, string16(), GURL(),false, false,
+                          true, AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 

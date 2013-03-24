@@ -19,7 +19,7 @@ namespace wallet {
 namespace {
 
 const char kLegalDocumentUrl[] =
-    "https://wallet.google.com/customer/gadget/legaldocument.html?docId=";
+    "https://wallet.google.com/legaldocument?docId=";
 
 WalletItems::MaskedInstrument::Type
     TypeFromString(const std::string& type_string) {
@@ -42,6 +42,8 @@ WalletItems::MaskedInstrument::Type
 
 WalletItems::MaskedInstrument::Status
     StatusFromString(const std::string& status_string) {
+  if (status_string == "AMEX_NOT_SUPPORTED")
+    return WalletItems::MaskedInstrument::AMEX_NOT_SUPPORTED;
   if (status_string == "PENDING")
     return WalletItems::MaskedInstrument::PENDING;
   if (status_string == "VALID")

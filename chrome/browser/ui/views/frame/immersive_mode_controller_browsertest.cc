@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 
+#include "ash/ash_switches.h"
+#include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -32,11 +34,24 @@ gfx::Rect GetRectInWidget(views::View* view) {
 
 }  // namespace
 
-typedef InProcessBrowserTest ImmersiveModeControllerTest;
-
 // TODO(jamescook): If immersive mode becomes popular on CrOS, consider porting
 // it to other Aura platforms (win_aura, linux_aura).  http://crbug.com/163931
 #if defined(OS_CHROMEOS)
+
+class ImmersiveModeControllerTest : public InProcessBrowserTest {
+ public:
+  ImmersiveModeControllerTest() {}
+  virtual ~ImmersiveModeControllerTest() {}
+
+  // content::BrowserTestBase overrides:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(ash::switches::kAshImmersiveFullscreen);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ImmersiveModeControllerTest);
+};
+
 IN_PROC_BROWSER_TEST_F(ImmersiveModeControllerTest, ImmersiveMode) {
   ui::ScopedAnimationDurationScaleMode zero_duration_mode(
       ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
@@ -177,22 +192,6 @@ IN_PROC_BROWSER_TEST_F(ImmersiveModeControllerTest, ImmersiveMode) {
   // Releasing focus ends the reveal again.
   browser_view->GetFocusManager()->ClearFocus();
   EXPECT_FALSE(controller->IsRevealed());
-
-  // Reveal and lock causes a reveal.
-  controller->RevealAndLock(true);
-  EXPECT_TRUE(controller->IsRevealed());
-
-  // The views stay revealed even if the mouse is lost or focus is lost.
-  controller->OnRevealViewLostMouseForTest();
-  EXPECT_TRUE(controller->IsRevealed());
-  browser_view->SetFocusToLocationBar(false);
-  EXPECT_TRUE(controller->IsRevealed());
-  browser_view->GetFocusManager()->ClearFocus();
-  EXPECT_TRUE(controller->IsRevealed());
-
-  // Ending the lock ends the reveal.
-  controller->RevealAndLock(false);
-  EXPECT_FALSE(controller->IsRevealed());
 #endif  // defined(OS_WIN)
 
   // Window restore tracking is only implemented in the Aura port.
@@ -215,6 +214,70 @@ IN_PROC_BROWSER_TEST_F(ImmersiveModeControllerTest, ImmersiveMode) {
   ASSERT_TRUE(browser_view->IsFullscreen());
   ASSERT_TRUE(controller->enabled());
   controller->StartRevealForTest();
+}
+
+// GetRevealedLock() specific tests.
+IN_PROC_BROWSER_TEST_F(ImmersiveModeControllerTest, RevealedLock) {
+  scoped_ptr<ImmersiveModeController::RevealedLock> lock1(NULL);
+  scoped_ptr<ImmersiveModeController::RevealedLock> lock2(NULL);
+
+  ui::ScopedAnimationDurationScaleMode zero_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
+  ASSERT_TRUE(ImmersiveModeController::UseImmersiveFullscreen());
+
+  BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
+  ImmersiveModeController* controller =
+      browser_view->immersive_mode_controller();
+
+  // Immersive mode is not on by default.
+  EXPECT_FALSE(controller->enabled());
+
+  // 1) Test acquiring and releasing a revealed state lock while immersive mode
+  // is disabled. Acquiring or releasing the lock should have no effect till
+  // immersive mode is enabled.
+  lock1.reset(controller->GetRevealedLock());
+  EXPECT_FALSE(controller->enabled());
+  EXPECT_FALSE(controller->IsRevealed());
+  EXPECT_FALSE(controller->ShouldHideTopViews());
+
+  // Immersive mode should start in the revealed state due to the lock.
+  chrome::ToggleFullscreenMode(browser());
+  EXPECT_TRUE(controller->enabled());
+  EXPECT_TRUE(controller->IsRevealed());
+  EXPECT_FALSE(controller->ShouldHideTopViews());
+
+  chrome::ToggleFullscreenMode(browser());
+  EXPECT_FALSE(controller->enabled());
+  EXPECT_FALSE(controller->IsRevealed());
+  EXPECT_FALSE(controller->ShouldHideTopViews());
+
+  lock1.reset();
+  EXPECT_FALSE(controller->enabled());
+  EXPECT_FALSE(controller->IsRevealed());
+  EXPECT_FALSE(controller->ShouldHideTopViews());
+
+  // Immersive mode should start in the closed state because the lock is no
+  // longer held.
+  chrome::ToggleFullscreenMode(browser());
+  EXPECT_TRUE(controller->enabled());
+  EXPECT_FALSE(controller->IsRevealed());
+  EXPECT_TRUE(controller->ShouldHideTopViews());
+
+  // 2) Test that acquiring a revealed state lock reveals the top-of-window
+  // views if they are hidden.
+  controller->CancelReveal();
+  EXPECT_FALSE(controller->IsRevealed());
+  lock1.reset(controller->GetRevealedLock());
+  EXPECT_TRUE(controller->IsRevealed());
+
+  // 3) Test that the top-of-window views are only hidden when all of the locks
+  // are released.
+  lock2.reset(controller->GetRevealedLock());
+  lock1.reset();
+  EXPECT_TRUE(controller->IsRevealed());
+
+  lock2.reset();
+  EXPECT_FALSE(controller->IsRevealed());
 }
 
 // Shelf-specific immersive mode tests.

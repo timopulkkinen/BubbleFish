@@ -5,6 +5,7 @@
 #include "chrome/common/pref_names.h"
 
 #include "base/basictypes.h"
+#include "chrome/common/pref_font_webkit_names.h"
 
 namespace prefs {
 
@@ -178,23 +179,10 @@ const char kWebKitOldFantasyFontFamily[] =
 // If these change, the corresponding enums in the extension API
 // experimental.fontSettings.json must also change.
 const char* const kWebKitScriptsForFontFamilyMaps[] = {
-  "Afak", "Arab", "Armi", "Armn", "Avst", "Bali", "Bamu", "Bass", "Batk",
-  "Beng", "Blis", "Bopo", "Brah", "Brai", "Bugi", "Buhd", "Cakm", "Cans",
-  "Cari", "Cham", "Cher", "Cirt", "Copt", "Cprt", "Cyrl", "Cyrs", "Deva",
-  "Dsrt", "Dupl", "Egyd", "Egyh", "Egyp", "Elba", "Ethi", "Geor", "Geok",
-  "Glag", "Goth", "Gran", "Grek", "Gujr", "Guru", "Hang", "Hani", "Hano",
-  "Hans", "Hant", "Hebr", "Hluw", "Hmng", "Hung", "Inds", "Ital", "Java",
-  "Jpan", "Jurc", "Kali", "Khar", "Khmr", "Khoj", "Knda", "Kpel", "Kthi",
-  "Lana", "Laoo", "Latf", "Latg", "Latn", "Lepc", "Limb", "Lina", "Linb",
-  "Lisu", "Loma", "Lyci", "Lydi", "Mand", "Mani", "Maya", "Mend", "Merc",
-  "Mero", "Mlym", "Moon", "Mong", "Mroo", "Mtei", "Mymr", "Narb", "Nbat",
-  "Nkgb", "Nkoo", "Nshu", "Ogam", "Olck", "Orkh", "Orya", "Osma", "Palm",
-  "Perm", "Phag", "Phli", "Phlp", "Phlv", "Phnx", "Plrd", "Prti", "Rjng",
-  "Roro", "Runr", "Samr", "Sara", "Sarb", "Saur", "Sgnw", "Shaw", "Shrd",
-  "Sind", "Sinh", "Sora", "Sund", "Sylo", "Syrc", "Syre", "Syrj", "Syrn",
-  "Tagb", "Takr", "Tale", "Talu", "Taml", "Tang", "Tavt", "Telu", "Teng",
-  "Tfng", "Tglg", "Thaa", "Thai", "Tibt", "Tirh", "Ugar", "Vaii", "Visp",
-  "Wara", "Wole", "Xpeo", "Xsux", "Yiii", "Zmth", "Zsym", "Zyyy"
+#define EXPAND_SCRIPT_FONT(x, script_name) script_name ,
+#include "chrome/common/pref_font_script_names-inl.h"
+ALL_FONT_SCRIPTS("unused param")
+#undef EXPAND_SCRIPT_FONT
 };
 
 const size_t kWebKitScriptsForFontFamilyMapsLength =
@@ -204,19 +192,19 @@ const size_t kWebKitScriptsForFontFamilyMapsLength =
 // in pref_names_util.cc and the pref format in font_settings_api.cc must also
 // change.
 const char kWebKitStandardFontFamilyMap[] =
-    "webkit.webprefs.fonts.standard";
+    WEBKIT_WEBPREFS_FONTS_STANDARD;
 const char kWebKitFixedFontFamilyMap[] =
-    "webkit.webprefs.fonts.fixed";
+    WEBKIT_WEBPREFS_FONTS_FIXED;
 const char kWebKitSerifFontFamilyMap[] =
-    "webkit.webprefs.fonts.serif";
+    WEBKIT_WEBPREFS_FONTS_SERIF;
 const char kWebKitSansSerifFontFamilyMap[] =
-    "webkit.webprefs.fonts.sansserif";
+    WEBKIT_WEBPREFS_FONTS_SANSERIF;
 const char kWebKitCursiveFontFamilyMap[] =
-    "webkit.webprefs.fonts.cursive";
+    WEBKIT_WEBPREFS_FONTS_CURSIVE;
 const char kWebKitFantasyFontFamilyMap[] =
-    "webkit.webprefs.fonts.fantasy";
+    WEBKIT_WEBPREFS_FONTS_FANTASY;
 const char kWebKitPictographFontFamilyMap[] =
-    "webkit.webprefs.fonts.pictograph";
+    WEBKIT_WEBPREFS_FONTS_PICTOGRAPH;
 const char kWebKitStandardFontFamilyArabic[] =
     "webkit.webprefs.fonts.standard.Arab";
 const char kWebKitFixedFontFamilyArabic[] =
@@ -795,10 +783,8 @@ const char kUseSharedProxies[] = "settings.use_shared_proxies";
 // A boolean pref that enables the (private) pepper GetID() call.
 const char kEnableCrosDRM[] = "settings.privacy.drm_enabled";
 
-// A dictionary pref that specifies per-display overscan data.  Its key is the
-// display's ID and its value is a dictionary of canceling overscan pixels for
-// 'top', 'right', 'bottom', 'left'.
-const char kDisplayOverscans[] = "settings.display.overscans";
+// A dictionary pref that stores per display preferences.
+const char kDisplayProperties[] = "settings.display.properties";
 
 // A 64bit integer pref that specifies the name of the primary display device.
 const char kPrimaryDisplayID[] = "settings.display.primary_id";
@@ -833,12 +819,14 @@ const char kSessionStartTime[] = "session.start_time";
 const char kSessionLengthLimit[] = "session.length_limit";
 
 // Inactivity time in milliseconds while the system is on AC power before
-// the screen should be dimmed, turned off, or locked, or before
+// the screen should be dimmed, turned off, or locked, before an
+// IdleActionImminent D-Bus signal should be sent, or before
 // kPowerIdleAction should be performed.  0 disables the delay (N/A for
 // kPowerAcIdleDelayMs).
 const char kPowerAcScreenDimDelayMs[] = "power.ac_screen_dim_delay_ms";
 const char kPowerAcScreenOffDelayMs[] = "power.ac_screen_off_delay_ms";
 const char kPowerAcScreenLockDelayMs[] = "power.ac_screen_lock_delay_ms";
+const char kPowerAcIdleWarningDelayMs[] = "power.ac_idle_warning_delay_ms";
 const char kPowerAcIdleDelayMs[] = "power.ac_idle_delay_ms";
 
 // Similar delays while the system is on battery power.
@@ -848,6 +836,8 @@ const char kPowerBatteryScreenOffDelayMs[] =
     "power.battery_screen_off_delay_ms";
 const char kPowerBatteryScreenLockDelayMs[] =
     "power.battery_screen_lock_delay_ms";
+const char kPowerBatteryIdleWarningDelayMs[] =
+    "power.battery_idle_warning_delay_ms";
 const char kPowerBatteryIdleDelayMs[] =
     "power.battery_idle_delay_ms";
 
@@ -1285,6 +1275,9 @@ const char kBookmarkPromptImpressionCount[] =
 // fetch (i.e. when the Variations server responds with 200 or 304).
 const char kVariationsLastFetchTime[] = "variations_last_fetch_time";
 
+// String for the restrict parameter to be appended to the variations URL.
+const char kVariationsRestrictParameter[] = "variations_restrict_parameter";
+
 // String serialized form of variations seed protobuf.
 const char kVariationsSeed[] = "variations_seed";
 
@@ -1705,10 +1698,10 @@ const char kDevToolsRemoteEnabled[] = "devtools.remote_enabled";
 // Integer location of the vertical split bar in the browser view.
 const char kDevToolsVSplitLocation[] = "devtools.v_split_location";
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 // A boolean specifying whether a SPDY proxy is enabled.
 const char kSpdyProxyAuthEnabled[] = "spdy_proxy.enabled";
-#endif
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 // Boolean which stores if the user is allowed to signin to chrome.
 const char kSigninAllowed[] = "signin.allowed";
@@ -1950,6 +1943,23 @@ const char kHttpReceivedContentLength[] = "http_received_content_length";
 // was received over the network.
 const char kHttpOriginalContentLength[] = "http_original_content_length";
 
+#if defined(OS_ANDROID) || defined(OS_IOS)
+// A List pref that contains daily totals of the original size of all HTTP
+// that was received over the network.
+const char kDailyHttpOriginalContentLength[] =
+    "data_reduction.daily_original_length";
+
+// A List pref that contains daily totals of the size of all HTTP content that
+// has been received from the network.
+const char kDailyHttpReceivedContentLength[] =
+    "data_reduction.daily_received_length";
+
+// An int64 pref that contains an internal representation of midnight on the
+// date of the last update to |kDailyHttp{Original,Received}ContentLength|.
+const char kDailyHttpContentLengthLastUpdateDate[] =
+    "data_reduction.last_update_date";
+#endif
+
 // A pref holding the value of the policy used to disable capturing audio on
 // ChromeOS devices.
 const char kAudioCaptureAllowed[] = "hardware.audio_capture_enabled";
@@ -2012,6 +2022,14 @@ const char kOwnerPrimaryMouseButtonRight[] = "owner.mouse.primary_right";
 
 // Copy of owner tap-to-click option to use on login screen.
 const char kOwnerTapToClickEnabled[] = "owner.touchpad.enable_tap_to_click";
+
+// The length of device uptime after which an automatic reboot is scheduled,
+// expressed in seconds.
+const char kUptimeLimit[] = "automatic_reboot.uptime_limit";
+
+// Whether an automatic reboot should be scheduled when an update has been
+// applied and a reboot is required to complete the update process.
+const char kRebootAfterUpdate[] = "automatic_reboot.reboot_after_update";
 #endif
 
 // Whether there is a Flash version installed that supports clearing LSO data.

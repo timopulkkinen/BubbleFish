@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Type of a root directory.
  * @enum
@@ -11,7 +13,8 @@ var RootType = {
   ARCHIVE: 'archive',
   REMOVABLE: 'removable',
   DRIVE: 'drive',
-  DRIVE_OFFLINE: 'drive_offline'  // A fake root. Not the actual filesystem.
+  DRIVE_OFFLINE: 'drive_offline',  // A fake root. Not the actual filesystem.
+  DRIVE_SHARED_WITH_ME: 'drive_shared_with_me'  // A fake root.
 };
 
 /**
@@ -23,7 +26,8 @@ var RootDirectory = {
   ARCHIVE: '/archive',
   REMOVABLE: '/removable',
   DRIVE: '/drive',
-  DRIVE_OFFLINE: '/drive_offline'  // A fake root. Not the actual filesystem.
+  DRIVE_OFFLINE: '/drive_offline',  // A fake root. Not the actual filesystem.
+  DRIVE_SHARED_WITH_ME: '/drive_shared_with_me'  // A fake root.
 };
 
 /**
@@ -37,6 +41,18 @@ var DriveSubRootDirectory = {
 };
 
 var PathUtil = {};
+
+/**
+ * Checks if the given path represents a special search. Fake entries in
+ * RootDirectory correspond to special searches.
+ * @param {string} path Path to check.
+ * @return {boolean} True if the given path represents a special search.
+ */
+PathUtil.isSpecialSearchRoot = function(path) {
+  var type = PathUtil.getRootType(path);
+  return type == RootType.DRIVE_OFFLINE ||
+      type == RootType.DRIVE_SHARED_WITH_ME;
+};
 
 /**
  * @param {string} path Path starting with '/'.
@@ -118,7 +134,7 @@ PathUtil.getRootPath = function(path) {
 
   // TODO(haruki): Add support for "drive/root" and "drive/other".
   if (type == RootType.DOWNLOADS || type == RootType.DRIVE ||
-      type == RootType.DRIVE_OFFLINE)
+      type == RootType.DRIVE_OFFLINE || type == RootType.DRIVE_SHARED_WITH_ME)
     return PathUtil.getTopDirectory(path);
 
   if (type == RootType.ARCHIVE ||
@@ -202,6 +218,9 @@ PathUtil.getRootLabel = function(path) {
 
   if (path === RootDirectory.DRIVE_OFFLINE)
     return str('DRIVE_OFFLINE_COLLECTION_LABEL');
+
+  if (path === RootDirectory.DRIVE_SHARED_WITH_ME)
+    return str('DRIVE_SHARED_WITH_ME_COLLECTION_LABEL');
 
   return path;
 };

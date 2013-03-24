@@ -28,6 +28,7 @@
 #include "content/common/pepper_messages.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "content/common/quota_dispatcher.h"
+#include "content/common/sandbox_util.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
@@ -1606,6 +1607,16 @@ MouseLockDispatcher* PepperPluginDelegateImpl::GetMouseLockDispatcher(
   } else {
     return render_view_->mouse_lock_dispatcher();
   }
+}
+
+IPC::PlatformFileForTransit PepperPluginDelegateImpl::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    base::ProcessId target_process_id,
+    bool should_close_source) const {
+  return BrokerGetFileHandleForProcess(
+      handle,
+      target_process_id,
+      should_close_source);
 }
 
 }  // namespace content

@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/aura/window.h"
 
 using extensions::Extension;
 
@@ -59,6 +60,18 @@ bool AppShortcutLauncherItemController::HasWindow(aura::Window* window) const {
 
 bool AppShortcutLauncherItemController::IsOpen() const {
   return !app_controller_->GetV1ApplicationsFromAppId(app_id()).empty();
+}
+
+bool AppShortcutLauncherItemController::IsVisible() const {
+  // Return true if any browser window associated with the app is visible.
+  std::vector<content::WebContents*> content =
+      app_controller_->GetV1ApplicationsFromAppId(app_id());
+  for (size_t i = 0; i < content.size(); i++) {
+    Browser* browser = chrome::FindBrowserWithWebContents(content[i]);
+    if (browser && browser->window()->GetNativeWindow()->IsVisible())
+      return true;
+  }
+  return false;
 }
 
 void AppShortcutLauncherItemController::Launch(int event_flags) {
@@ -122,11 +135,9 @@ AppShortcutLauncherItemController::GetApplicationList() {
     content::WebContents* web_contents = content_list[i];
     // Get the icon.
     gfx::Image app_icon = app_controller_->GetAppListIcon(web_contents);
+    string16 title = app_controller_->GetAppListTitle(web_contents);
     items.push_back(new ChromeLauncherAppMenuItemTab(
-        web_contents->GetTitle(),
-        app_icon.IsEmpty() ? NULL : &app_icon,
-        web_contents,
-        i == 0));
+        title, &app_icon, web_contents, i == 0));
   }
   return items.Pass();
 }

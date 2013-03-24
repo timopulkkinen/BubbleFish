@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Responsible for showing banners in the file list.
  * @param {DirectoryModel} directoryModel The model.
@@ -18,15 +20,11 @@ function FileListBannerController(
   this.showOffers_ = showOffers;
   this.driveEnabled_ = false;
 
-  if (!util.boardIs('x86-mario') &&
-      !util.boardIs('x86-zgb') &&
-      !util.boardIs('x86-alex')) {
-    this.checkPromoAvailable_();
-  } else {
-    this.newWelcome_ = false;
-  }
+  this.initializeBanner_();
+  this.privateOnDirectoryChangedBound_ =
+      this.privateOnDirectoryChanged_.bind(this);
 
-  var handler = this.checkSpaceAndShowBanner_.bind(this);
+  var handler = this.checkSpaceAndMaybeShowBanner_.bind(this);
   this.directoryModel_.addEventListener('scan-completed', handler);
   this.directoryModel_.addEventListener('rescan-completed', handler);
   this.directoryModel_.addEventListener('directory-changed',
@@ -95,6 +93,18 @@ var DOWNLOADS_FAQ_URL =
  */
 var GOOGLE_DRIVE_ERROR_HELP_URL =
     'https://support.google.com/chromeos/?p=filemanager_driveerror';
+
+/**
+ * Initializes the banner to promote DRIVE.
+ * This method must be called before any of showing banner functions, and
+ * also before registering them as callbacks.
+ * @private
+ */
+FileListBannerController.prototype.initializeBanner_ = function() {
+  this.useNewWelcomeBanner_ = (!util.boardIs('x86-mario') &&
+                               !util.boardIs('x86-zgb') &&
+                               !util.boardIs('x86-alex'));
+};
 
 /**
  * @param {number} value How many times the Drive Welcome header banner
@@ -170,7 +180,7 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   var links = util.createChild(message, 'drive-welcome-links');
 
   var more;
-  if (this.newWelcome_) {
+  if (this.useNewWelcomeBanner_) {
     var welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE');
     if (util.boardIs('link'))
       welcomeTitle = str('DRIVE_WELCOME_TITLE_ALTERNATIVE_1TB');
@@ -188,7 +198,7 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   more.target = '_blank';
 
   var dismiss;
-  if (this.newWelcome_)
+  if (this.useNewWelcomeBanner_)
     dismiss = util.createChild(links, 'drive-welcome-button');
   else
     dismiss = util.createChild(links, 'plain-link');
@@ -198,52 +208,6 @@ FileListBannerController.prototype.showBanner_ = function(type, messageId) {
   dismiss.addEventListener('click', this.closeBanner_.bind(this));
 
   this.previousDirWasOnDrive_ = false;
-};
-
-/**
- * Desides whether to show a banner and if so which one.
- * @private
- */
-FileListBannerController.prototype.maybeShowBanner_ = function() {
-  if (!this.isOnDrive()) {
-    this.cleanupDriveWelcome_();
-    this.previousDirWasOnDrive_ = false;
-    return;
-  }
-
-  if (this.welcomeHeaderCounter_ >= WELCOME_HEADER_COUNTER_LIMIT ||
-      !this.directoryModel_.isDriveMounted())
-    return;
-
-  if (this.directoryModel_.getFileList().length == 0 &&
-      this.welcomeHeaderCounter_ == 0) {
-    // Only show the full page banner if the header banner was never shown.
-    // Do not increment the counter.
-    // The timeout below is required because sometimes another
-    // 'rescan-completed' event arrives shortly with non-empty file list.
-    var self = this;
-    setTimeout(this.preparePromo_.bind(this, function() {
-      var container = self.document_.querySelector('.dialog-container');
-      if (self.isOnDrive() &&
-          self.welcomeHeaderCounter_ == 0) {
-        self.showBanner_('page', 'DRIVE_WELCOME_TEXT_LONG');
-      }
-    }, 2000));
-  } else if (this.welcomeHeaderCounter_ < WELCOME_HEADER_COUNTER_LIMIT) {
-    // We do not want to increment the counter when the user navigates
-    // between different directories on Drive, but we increment the counter
-    // once anyway to prevent the full page banner from showing.
-     if (!this.previousDirWasOnDrive_ || this.welcomeHeaderCounter_ == 0) {
-       var self = this;
-       this.setWelcomeHeaderCounter_(this.welcomeHeaderCounter_ + 1);
-       this.preparePromo_(function() {
-         self.showBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
-       });
-     }
-   } else {
-     this.closeBanner_();
-   }
-   this.previousDirWasOnDrive_ = true;
 };
 
 /**
@@ -312,73 +276,6 @@ FileListBannerController.prototype.showLowDriveSpaceWarning_ =
     this.requestRelayout_(100);
   }
 };
-
-/**
- * Start or stop monitoring free space depending on the new value of current
- * directory path. In case the space is low shows a warning box.
- * @param {string} currentPath New path to the current directory.
- * @private
- */
-FileListBannerController.prototype.checkFreeSpace_ = function(currentPath) {
-  var self = this;
-  var scheduleCheck = function(timeout, root, threshold) {
-    if (self.checkFreeSpaceTimer_) {
-      clearTimeout(self.checkFreeSpaceTimer_);
-      self.checkFreeSpaceTimer_ = null;
-    }
-
-    if (timeout) {
-      self.checkFreeSpaceTimer_ = setTimeout(
-          doCheck, timeout, root, threshold);
-    }
-  };
-
-  var doCheck = function(root, threshold) {
-    // Remember our invocation timer, because getSizeStats is long and
-    // asynchronous call.
-    var selfTimer = self.checkFreeSpaceTimer_;
-
-    chrome.fileBrowserPrivate.getSizeStats(
-        util.makeFilesystemUrl(root),
-        function(sizeStats) {
-          // If new check started while we were in async getSizeStats call,
-          // then we shouldn't do anything.
-          if (selfTimer != self.checkFreeSpaceTimer_)
-            return;
-
-          // sizeStats is undefined, if some error occurs.
-          var ratio = (sizeStats && sizeStats.totalSizeKB > 0) ?
-              sizeStats.remainingSizeKB / sizeStats.totalSizeKB : 1;
-
-          var lowDiskSpace = ratio < threshold;
-
-          if (root == RootDirectory.DOWNLOADS)
-            self.showLowDownloadsSpaceWarning_(lowDiskSpace);
-          else
-            self.showLowDriveSpaceWarning_(lowDiskSpace, sizeStats);
-
-          // If disk space is low, check it more often. User can delete files
-          // manually and we should not bother her with warning in this case.
-          scheduleCheck(lowDiskSpace ? 1000 * 5 : 1000 * 30, root, threshold);
-        });
-  };
-
-  // TODO(kaznacheev): Unify the two low space warning.
-  var root = PathUtil.getTopDirectory(currentPath);
-  if (root === RootDirectory.DOWNLOADS) {
-    scheduleCheck(500, root, 0.2);
-    this.showLowDriveSpaceWarning_(false);
-  } else if (root === RootDirectory.DRIVE) {
-    scheduleCheck(500, root, 0.1);
-    this.showLowDownloadsSpaceWarning_(false);
-  } else {
-    scheduleCheck(0);
-
-    this.showLowDownloadsSpaceWarning_(false);
-    this.showLowDriveSpaceWarning_(false);
-  }
-};
-
 /**
  * Closes the Drive Welcome banner.
  * @private
@@ -390,29 +287,86 @@ FileListBannerController.prototype.closeBanner_ = function() {
 };
 
 /**
- * Shows or hides the Low Disk Space banner.
+ * Shows or hides the welcome banner for drive.
  * @private
  */
-FileListBannerController.prototype.checkSpaceAndShowBanner_ = function() {
+FileListBannerController.prototype.checkSpaceAndMaybeShowBanner_ = function() {
+  if (!this.isOnDrive()) {
+    // We are not on the drive file system. Do not show (close) the welcome
+    // banner.
+    this.cleanupDriveWelcome_();
+    this.previousDirWasOnDrive_ = false;
+    return;
+  }
+
+  if (this.welcomeHeaderCounter_ >= WELCOME_HEADER_COUNTER_LIMIT ||
+      !this.directoryModel_.isDriveMounted()) {
+    // The banner is already shown enough times or the drive FS is not mounted.
+    // So, do nothing here.
+    return;
+  }
+
+  if (!this.showOffers_) {
+    // Because it is not necessary to show the offer, set
+    // |useNewWelcomeBanner_| false here. Note that it probably should be able
+    // to do this in the constructor, but there remains non-trivial path,
+    // which may be causes |useNewWelcomeBanner_| == true's behavior even
+    // if |showOffers_| is false.
+    // TODO(hidehiko): Make sure if it is expected or not, and simplify
+    // |showOffers_| if possible.
+    this.useNewWelcomeBanner_ = false;
+  }
+
   var self = this;
-  this.preparePromo_(function() {
-    if (self.newWelcome_ && self.isOnDrive()) {
-      chrome.fileBrowserPrivate.getSizeStats(
-          util.makeFilesystemUrl(self.directoryModel_.getCurrentRootPath()),
-          function(result) {
-            var offerSpaceKb = 100 * 1024 * 1024;  // 100GB.
-            if (util.boardIs('link'))
-              offerSpaceKb = 1024 * 1024 * 1024;  // 1TB.
-            if (result && result.totalSizeKB >= offerSpaceKb)
-              self.newWelcome_ = false;
-            if (!self.showOffers_)
-              self.newWelcome_ = false;
-            self.maybeShowBanner_();
-          });
-    } else {
-      self.maybeShowBanner_();
+  if (self.useNewWelcomeBanner_) {
+    // getSizeStats for Drive file system accesses to the server, so we should
+    // minimize the invocation.
+    chrome.fileBrowserPrivate.getSizeStats(
+        util.makeFilesystemUrl(self.directoryModel_.getCurrentRootPath()),
+        function(result) {
+          var offerSpaceKb = util.boardIs('link') ?
+              1024 * 1024 * 1024 :  // 1TB.
+              100 * 1024 * 1024;  // 100GB.
+          if (result && result.totalSizeKB >= offerSpaceKb) {
+            self.useNewWelcomeBanner_ = false;
+          }
+          self.maybeShowBanner_();
+        });
+  } else {
+    self.maybeShowBanner_();
+  }
+};
+
+/**
+ * Decides which banner should be shown, and show it. This method is designed
+ * to be called only from checkSpaceAndMaybeShowBanner_.
+ * @private
+ */
+FileListBannerController.prototype.maybeShowBanner_ = function() {
+  if (this.directoryModel_.getFileList().length == 0 &&
+      this.welcomeHeaderCounter_ == 0) {
+    // Only show the full page banner if the header banner was never shown.
+    // Do not increment the counter.
+    // The timeout below is required because sometimes another
+    // 'rescan-completed' event arrives shortly with non-empty file list.
+    var self = this;
+    setTimeout(
+        function() {
+          if (self.isOnDrive() && self.welcomeHeaderCounter_ == 0) {
+            self.showBanner_('page', 'DRIVE_WELCOME_TEXT_LONG');
+          }
+        },
+        2000);
+  } else {
+    // We do not want to increment the counter when the user navigates
+    // between different directories on Drive, but we increment the counter
+    // once anyway to prevent the full page banner from showing.
+    if (!this.previousDirWasOnDrive_ || this.welcomeHeaderCounter_ == 0) {
+      this.setWelcomeHeaderCounter_(this.welcomeHeaderCounter_ + 1);
+      this.showBanner_('header', 'DRIVE_WELCOME_TEXT_SHORT');
     }
-  });
+  }
+  this.previousDirWasOnDrive_ = true;
 };
 
 /**
@@ -442,7 +396,22 @@ FileListBannerController.prototype.showDriveWelcome_ = function(type) {
  * @private
  */
 FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
-  this.checkFreeSpace_(this.directoryModel_.getCurrentDirPath());
+  var root = PathUtil.getTopDirectory(event.newDirEntry.fullPath);
+  // Show (or hide) the low space warning.
+  this.maybeShowLowSpaceWarning_(root);
+
+  // Add or remove listener to show low space warning, if necessary.
+  var isLowSpaceWarningTarget = this.isLowSpaceWarningTarget_(root);
+  var previousRoot = PathUtil.getTopDirectory(event.previousDirEntry.fullPath);
+  if (isLowSpaceWarningTarget !== this.isLowSpaceWarningTarget_(previousRoot)) {
+    if (isLowSpaceWarningTarget) {
+      chrome.fileBrowserPrivate.onDirectoryChanged.addListener(
+          this.privateOnDirectoryChangedBound_);
+    } else {
+      chrome.fileBrowserPrivate.onDirectoryChanged.removeListener(
+          this.privateOnDirectoryChangedBound_);
+    }
+  }
 
   if (!this.isOnDrive())
     this.cleanupDriveWelcome_();
@@ -450,6 +419,80 @@ FileListBannerController.prototype.onDirectoryChanged_ = function(event) {
   this.updateDriveUnmountedPanel_();
   if (this.isOnDrive())
     this.unmountedPanel_.classList.remove('retry-enabled');
+};
+
+/**
+ * @param {string} root Root directory to be checked.
+ * @return {boolean} true if the file system specified by |root| is a target
+ *     to show low space warning. Otherwise false.
+ * @private
+ */
+FileListBannerController.prototype.isLowSpaceWarningTarget_ = function(root) {
+  return (root == RootDirectory.DOWNLOADS || root == RootDirectory.DRIVE);
+};
+
+/**
+ * Callback which is invoked when the file system has been changed.
+ * @param {Object} event chrome.fileBrowserPrivate.onDirectoryChanged event.
+ * @private
+ */
+FileListBannerController.prototype.privateOnDirectoryChanged_ = function(
+    event) {
+  var currentRoot = PathUtil.getTopDirectory(
+      this.directoryModel_.getCurrentDirPath());
+  var eventRoot = PathUtil.getTopDirectory(
+      util.extractFilePath(event.directoryUrl));
+  if (currentRoot == eventRoot) {
+    // The file system we are currently on is changed.
+    // So, check the free space.
+    this.maybeShowLowSpaceWarning_(eventRoot);
+  }
+};
+
+/**
+ * Shows or hides the low space warning.
+ * @param {string} root Root directory of the file system, which we are
+ *     interested in.
+ * @private
+ */
+FileListBannerController.prototype.maybeShowLowSpaceWarning_ = function(root) {
+  // TODO(kaznacheev): Unify the two low space warning.
+  var threshold = 0;
+  if (root === RootDirectory.DOWNLOADS) {
+    this.showLowDriveSpaceWarning_(false);
+    threshold = 0.2;
+  } else if (root === RootDirectory.DRIVE) {
+    this.showLowDownloadsSpaceWarning_(false);
+    threshold = 0.1;
+  } else {
+    // If the current file system is neither the DOWNLOAD nor the DRIVE,
+    // just hide the warning.
+    this.showLowDownloadsSpaceWarning_(false);
+    this.showLowDriveSpaceWarning_(false);
+    return;
+  }
+
+  var self = this;
+  chrome.fileBrowserPrivate.getSizeStats(
+      util.makeFilesystemUrl(root),
+      function(sizeStats) {
+        var currentRoot = PathUtil.getTopDirectory(
+            self.directoryModel_.getCurrentDirPath());
+        if (root != currentRoot) {
+          // This happens when the current directory is moved during requesting
+          // the file system size. Just ignore it.
+          return;
+        }
+
+        // sizeStats is undefined, if some error occurs.
+        var remainingRatio = (sizeStats && sizeStats.totalSizeKB > 0) ?
+            (sizeStats.remainingSizeKB / sizeStats.totalSizeKB) : 1;
+        var isLowDiskSpace = remainingRatio < threshold;
+        if (root == RootDirectory.DOWNLOADS)
+          self.showLowDownloadsSpaceWarning_(isLowDiskSpace);
+        else
+          self.showLowDriveSpaceWarning_(isLowDiskSpace, sizeStats);
+      });
 };
 
 /**
@@ -567,29 +610,4 @@ FileListBannerController.prototype.updateDriveUnmountedPanel_ = function() {
   } else {
     node.removeAttribute('drive');
   }
-};
-
-/**
- * Detects what type of promo should be shown.
- * @private
- */
-FileListBannerController.prototype.checkPromoAvailable_ = function() {
-  this.newWelcome_ = true;
-  if (this.promoCallbacks_) {
-    for (var i = 0; i < this.promoCallbacks_.length; i++)
-      this.promoCallbacks_[i]();
-    this.promoCallbacks_ = undefined;
-  }
-};
-
-/**
- * @param {function} completeCallback To be called (may be directly) when
- *                                    this.newWelcome_ get ready.
- * @private
- */
-FileListBannerController.prototype.preparePromo_ = function(completeCallback) {
-  if (this.newWelcome_ !== undefined)
-    completeCallback();
-  else
-    (this.promoCallbacks_ = this.promoCallbacks_ || []).push(completeCallback);
 };

@@ -44,27 +44,6 @@ DriveCacheEntry ToCacheEntry(int cache_state);
 // Returns true if the cache state of the given two cache entries are equal.
 bool CacheStatesEqual(const DriveCacheEntry& a, const DriveCacheEntry& b);
 
-// Copies |error| to |output|. Used to run asynchronous functions that take
-// FileOperationCallback from tests.
-void CopyErrorCodeFromFileOperationCallback(DriveFileError* output,
-                                            DriveFileError error);
-
-// Copies |error| and |moved_file_path| to |out_error| and |out_file_path|.
-// Used to run asynchronous functions that take FileMoveCallback from tests.
-void CopyResultsFromFileMoveCallback(DriveFileError* out_error,
-                                     base::FilePath* out_file_path,
-                                     DriveFileError error,
-                                     const base::FilePath& moved_file_path);
-
-// Copies |error| and |entry_proto| to |out_error| and |out_entry_proto|
-// respectively. Used to run asynchronous functions that take
-// GetEntryInfoCallback from tests.
-void CopyResultsFromGetEntryInfoCallback(
-    DriveFileError* out_error,
-    scoped_ptr<DriveEntryProto>* out_entry_proto,
-    DriveFileError error,
-    scoped_ptr<DriveEntryProto> entry_proto);
-
 // Copies |error| and |entries| to |out_error| and |out_entries|
 // respectively. Used to run asynchronous functions that take
 // ReadDirectoryCallback from tests.
@@ -83,24 +62,6 @@ void CopyResultsFromReadDirectoryByPathCallback(
     DriveFileError error,
     bool /* hide_hosted_documents */,
     scoped_ptr<DriveEntryProtoVector> entries);
-
-// Copies |error|, |drive_file_path|, and |entry_proto| to |out_error|,
-// |out_drive_file_path|, and |out_entry_proto| respectively. Used to run
-// asynchronous functions that take GetEntryInfoWithbase::FilePathCallback from
-// tests.
-void CopyResultsFromGetEntryInfoWithFilePathCallback(
-    DriveFileError* out_error,
-    base::FilePath* out_drive_file_path,
-    scoped_ptr<DriveEntryProto>* out_entry_proto,
-    DriveFileError error,
-    const base::FilePath& drive_file_path,
-    scoped_ptr<DriveEntryProto> entry_proto);
-
-// Copies |result| to |out_result|. Used to run asynchronous functions
-// that take GetEntryInfoPairCallback from tests.
-void CopyResultsFromGetEntryInfoPairCallback(
-    scoped_ptr<EntryInfoPairResult>* out_result,
-    scoped_ptr<EntryInfoPairResult> result);
 
 // Copies |success| to |out_success|. Used to run asynchronous functions that
 // take InitializeCacheCallback from tests.
@@ -167,11 +128,21 @@ void CopyResultsFromCloseFileCallbackAndQuit(DriveFileError* out_error,
 bool LoadChangeFeed(const std::string& relative_path,
                     ChangeListLoader* change_list_loader,
                     bool is_delta_feed,
+                    const std::string& root_resource_id,
                     int64 root_feed_changestamp);
 
-// DriveCache has private destructor, so it is impossible to delete the
-// instance directly. This method delete it correctly.
-void DeleteDriveCache(DriveCache* drive_cache);
+// Helper to destroy objects which needs Destroy() to be called on destruction.
+// Note: When using this helper, you should destruct objects before
+// BrowserThread.
+struct DestroyHelperForTests {
+  template<typename T>
+  void operator()(T* object) const {
+    if (object) {
+      object->Destroy();
+      google_apis::test_util::RunBlockingPoolTask();  // Finish destruction.
+    }
+  }
+};
 
 }  // namespace test_util
 }  // namespace drive

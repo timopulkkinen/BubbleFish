@@ -10,8 +10,8 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "cc/delegated_frame_data.h"
-#include "cc/layer.h"
+#include "cc/layers/layer.h"
+#include "cc/output/delegated_frame_data.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor_observer.h"
@@ -169,7 +169,7 @@ class TestLayerDelegate : public LayerDelegate {
   int color_index() const { return color_index_; }
 
   std::string ToScaleString() const {
-    return StringPrintf("%.1f %.1f", scale_x_, scale_y_);
+    return base::StringPrintf("%.1f %.1f", scale_x_, scale_y_);
   }
 
   float device_scale_factor() const {

@@ -46,8 +46,23 @@ class CreateDirectoryOperationTest
         "chromeos/gdata/account_metadata.json");
     fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
 
-    metadata_.reset(
-        new DriveResourceMetadata(fake_drive_service_->GetRootResourceId()));
+    fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
+    cache_.reset(new DriveCache(DriveCache::GetCacheRootPath(profile_.get()),
+                                blocking_task_runner_,
+                                fake_free_disk_space_getter_.get()));
+    cache_->RequestInitializeForTesting();
+    google_apis::test_util::RunBlockingPoolTask();
+
+    metadata_.reset(new DriveResourceMetadata(
+        fake_drive_service_->GetRootResourceId(),
+        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+        blocking_task_runner_));
+
+    DriveFileError error = DRIVE_FILE_ERROR_FAILED;
+    metadata_->Initialize(
+        google_apis::test_util::CreateCopyResultCallback(&error));
+    google_apis::test_util::RunBlockingPoolTask();
+    ASSERT_EQ(DRIVE_FILE_OK, error);
 
     scheduler_.reset(
         new DriveScheduler(profile_.get(), fake_drive_service_.get(), NULL));
@@ -55,22 +70,12 @@ class CreateDirectoryOperationTest
 
     drive_web_apps_registry_.reset(new DriveWebAppsRegistry);
 
-    fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
-    cache_ = new DriveCache(
-        DriveCache::GetCacheRootPath(profile_.get()),
-        blocking_task_runner_,
-        fake_free_disk_space_getter_.get());
-
     change_list_loader_.reset(new ChangeListLoader(
-        metadata_.get(), scheduler_.get(), drive_web_apps_registry_.get(),
-        cache_, blocking_task_runner_));
+        metadata_.get(), scheduler_.get(), drive_web_apps_registry_.get()));
 
-    DriveFileError error = DRIVE_FILE_OK;
     change_list_loader_->LoadFromServerIfNeeded(
         DirectoryFetchInfo(),
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                   &error));
-    cache_->RequestInitializeForTesting();
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
 
     operation_.reset(
@@ -80,7 +85,7 @@ class CreateDirectoryOperationTest
   virtual void TearDown() OVERRIDE {
     operation_.reset();
     change_list_loader_.reset();
-    test_util::DeleteDriveCache(cache_);
+    cache_.reset();
     fake_free_disk_space_getter_.reset();
     drive_web_apps_registry_.reset();
     scheduler_.reset();
@@ -110,6 +115,7 @@ class CreateDirectoryOperationTest
     return test_util::LoadChangeFeed(filename,
                                      change_list_loader_.get(),
                                      false,  // is_delta_feed
+                                     fake_drive_service_->GetRootResourceId(),
                                      0);
   }
 
@@ -127,14 +133,12 @@ class CreateDirectoryOperationTest
   scoped_ptr<TestingProfile> profile_;
 
   scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
-  scoped_ptr<DriveResourceMetadata> metadata_;
+  scoped_ptr<DriveResourceMetadata, test_util::DestroyHelperForTests> metadata_;
   scoped_ptr<DriveScheduler> scheduler_;
   scoped_ptr<DriveWebAppsRegistry> drive_web_apps_registry_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
 
-  // The way to delete the DriveCache instance is a bit tricky, so here we use
-  // a raw point. See TearDown method for how to delete it.
-  DriveCache* cache_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache_;
   scoped_ptr<ChangeListLoader> change_list_loader_;
 
   scoped_ptr<CreateDirectoryOperation> operation_;

@@ -31,6 +31,7 @@
 #include "remoting/host/host_main.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/sas_injector.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/host/win/host_service.h"
 #include "remoting/host/win/worker_process_launcher.h"
 #include "remoting/host/win/wts_session_process_delegate.h"
@@ -57,6 +58,10 @@ const wchar_t kDaemonIpcSecurityDescriptor[] =
 // line to the host process.
 const char* kCopiedSwitchNames[] = { switches::kV, switches::kVModule };
 
+// The default screen dimensions for an RDP session.
+const int kDefaultRdpScreenWidth = 1024;
+const int kDefaultRdpScreenHeight = 768;
+
 // RDC 6.1 (W2K8) supports dimensions of up to 4096x2048.
 const int kMaxRdpScreenWidth = 4096;
 const int kMaxRdpScreenHeight = 2048;
@@ -65,9 +70,8 @@ const int kMaxRdpScreenHeight = 2048;
 const int kMinRdpScreenWidth = 800;
 const int kMinRdpScreenHeight = 600;
 
-// Default dots per inch is 96 DPI.
-const int kDefaultDpiX = 96;
-const int kDefaultDpiY = 96;
+// Default dots per inch used by RDP is 96 DPI.
+const int kDefaultRdpDpi = 96;
 
 // The session attach notification should arrive within 30 seconds.
 const int kSessionAttachTimeoutSeconds = 30;
@@ -88,6 +92,9 @@ class ConsoleSession : public DesktopSessionWin {
   virtual ~ConsoleSession();
 
  protected:
+  // DesktopSession overrides.
+  virtual void SetScreenResolution(const ScreenResolution& resolution) OVERRIDE;
+
   // DesktopSessionWin overrides.
   virtual void InjectSas() OVERRIDE;
 
@@ -113,13 +120,16 @@ class RdpSession : public DesktopSessionWin {
   virtual ~RdpSession();
 
   // Performs the part of initialization that can fail.
-  bool Initialize(const DesktopSessionParams& params);
+  bool Initialize(const ScreenResolution& resolution);
 
   // Mirrors IRdpDesktopSessionEventHandler.
   void OnRdpConnected(const net::IPEndPoint& client_endpoint);
   void OnRdpClosed();
 
  protected:
+  // DesktopSession overrides.
+  virtual void SetScreenResolution(const ScreenResolution& resolution) OVERRIDE;
+
   // DesktopSessionWin overrides.
   virtual void InjectSas() OVERRIDE;
 
@@ -174,7 +184,15 @@ ConsoleSession::ConsoleSession(
 ConsoleSession::~ConsoleSession() {
 }
 
+void ConsoleSession::SetScreenResolution(const ScreenResolution& resolution) {
+  // Do nothing. The screen resolution of the console session is controlled by
+  // the DesktopSessionAgent instance running in that session.
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+}
+
 void ConsoleSession::InjectSas() {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
   if (!sas_injector_)
     sas_injector_ = SasInjector::Create();
   if (!sas_injector_->InjectSas())
@@ -195,7 +213,7 @@ RdpSession::RdpSession(
 RdpSession::~RdpSession() {
 }
 
-bool RdpSession::Initialize(const DesktopSessionParams& params) {
+bool RdpSession::Initialize(const ScreenResolution& resolution) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   // Create the RDP wrapper object.
@@ -207,30 +225,23 @@ bool RdpSession::Initialize(const DesktopSessionParams& params) {
     return false;
   }
 
-  // DaemonProcess::CreateDesktopSession() varifies that |client_dpi_| and
-  // |client_size_| are positive.
-  DCHECK(params.client_dpi_.x() >= 0 && params.client_dpi_.y() >= 0);
-  DCHECK(params.client_size_.width() >= 0 && params.client_size_.height() >= 0);
+  // DaemonProcess::CreateDesktopSession() verifies that the resolution is
+  // valid.
+  DCHECK(resolution.IsValid());
 
-  // Handle the default DPI.
-  SkIPoint client_dpi = params.client_dpi_;
-  if (!client_dpi.x())
-    client_dpi.setX(kDefaultDpiX);
-  if (!client_dpi.y())
-    client_dpi.setY(kDefaultDpiY);
+  ScreenResolution local_resolution = resolution;
 
-  // Make sure there will be no integer overflow while scaling the client
+  // If the screen resolution is not specified, use the default screen
   // resolution.
-  SkISize client_size = SkISize::Make(
-      std::min(params.client_size_.width(),
-               std::numeric_limits<int32_t>::max() / kDefaultDpiX),
-      std::min(params.client_size_.height(),
-               std::numeric_limits<int32_t>::max() / kDefaultDpiY));
+  if (local_resolution.IsEmpty()) {
+    local_resolution.dimensions_.set(kDefaultRdpScreenWidth,
+                                     kDefaultRdpScreenHeight);
+    local_resolution.dpi_.set(kDefaultRdpDpi, kDefaultRdpDpi);
+  }
 
-  // Scale the client resolution assiming RDP gives us the default 96 DPI.
-  SkISize host_size = SkISize::Make(
-      client_size.width() * kDefaultDpiX / client_dpi.x(),
-      client_size.height() * kDefaultDpiY / client_dpi.y());
+  // Get the screen dimensions assuming the default DPI.
+  SkISize host_size = local_resolution.ScaleDimensionsToDpi(
+      SkIPoint::Make(kDefaultRdpDpi, kDefaultRdpDpi));
 
   // Make sure that the host resolution is within the limits supported by RDP.
   host_size = SkISize::Make(
@@ -267,9 +278,19 @@ void RdpSession::OnRdpClosed() {
   OnPermanentError();
 }
 
+void RdpSession::SetScreenResolution(const ScreenResolution& resolution) {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  // TODO(alexeypa): implement resize-to-client for RDP sessions here.
+  // See http://crbug.com/137696.
+  NOTIMPLEMENTED();
+}
+
 void RdpSession::InjectSas() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
+  // TODO(alexeypa): implement SAS injection for RDP sessions here.
+  // See http://crbug.com/137696.
   NOTIMPLEMENTED();
 }
 
@@ -357,7 +378,7 @@ scoped_ptr<DesktopSession> DesktopSessionWin::CreateForConsole(
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     DaemonProcess* daemon_process,
     int id,
-    const DesktopSessionParams& params) {
+    const ScreenResolution& resolution) {
   scoped_ptr<ConsoleSession> session(new ConsoleSession(
       caller_task_runner, io_task_runner, daemon_process, id,
       HostService::GetInstance()));
@@ -371,11 +392,11 @@ scoped_ptr<DesktopSession> DesktopSessionWin::CreateForVirtualTerminal(
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     DaemonProcess* daemon_process,
     int id,
-    const DesktopSessionParams& params) {
+    const ScreenResolution& resolution) {
   scoped_ptr<RdpSession> session(new RdpSession(
       caller_task_runner, io_task_runner, daemon_process, id,
       HostService::GetInstance()));
-  if (!session->Initialize(params))
+  if (!session->Initialize(resolution))
     return scoped_ptr<DesktopSession>();
 
   return session.PassAs<DesktopSession>();

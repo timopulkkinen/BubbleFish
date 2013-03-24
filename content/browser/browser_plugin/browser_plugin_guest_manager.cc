@@ -40,8 +40,6 @@ BrowserPluginGuestManager* BrowserPluginGuestManager::Create() {
 BrowserPluginGuest* BrowserPluginGuestManager::CreateGuest(
     SiteInstance* embedder_site_instance,
     int instance_id,
-    int routing_id,
-    BrowserPluginGuest* guest_opener,
     const BrowserPluginHostMsg_CreateGuest_Params& params) {
   SiteInstance* guest_site_instance = NULL;
   int embedder_render_process_id =
@@ -77,45 +75,36 @@ BrowserPluginGuest* BrowserPluginGuestManager::CreateGuest(
         embedder_site_instance->GetRelatedSiteInstance(GURL(params.src));
   } else {
     const std::string& host = embedder_site_instance->GetSiteURL().host();
+
     std::string url_encoded_partition = net::EscapeQueryParamValue(
         params.storage_partition_id, false);
+    // The SiteInstance of a given webview tag is based on the fact that it's
+    // a guest process in addition to which platform application the tag
+    // belongs to and what storage partition is in use, rather than the URL
+    // that the tag is being navigated to.
+    GURL guest_site(
+        base::StringPrintf("%s://%s/%s?%s", chrome::kGuestScheme,
+                            host.c_str(),
+                            params.persist_storage ? "persist" : "",
+                            url_encoded_partition.c_str()));
 
-    if (guest_opener) {
-      guest_site_instance = guest_opener->GetWebContents()->GetSiteInstance();
-    } else {
-      // The SiteInstance of a given webview tag is based on the fact that it's
-      // a guest process in addition to which platform application the tag
-      // belongs to and what storage partition is in use, rather than the URL
-      // that the tag is being navigated to.
-      GURL guest_site(
-          base::StringPrintf("%s://%s/%s?%s", chrome::kGuestScheme,
-                             host.c_str(),
-                             params.persist_storage ? "persist" : "",
-                             url_encoded_partition.c_str()));
-
-      // If we already have a webview tag in the same app using the same storage
-      // partition, we should use the same SiteInstance so the existing tag and
-      // the new tag can script each other.
-      guest_site_instance = GetGuestSiteInstance(guest_site);
-      if (!guest_site_instance) {
-        // Create the SiteInstance in a new BrowsingInstance, which will ensure
-        // that webview tags are also not allowed to send messages across
-        // different partitions.
-        guest_site_instance = SiteInstance::CreateForURL(
-            embedder_site_instance->GetBrowserContext(), guest_site);
-      }
+    // If we already have a webview tag in the same app using the same storage
+    // partition, we should use the same SiteInstance so the existing tag and
+    // the new tag can script each other.
+    guest_site_instance = GetGuestSiteInstance(guest_site);
+    if (!guest_site_instance) {
+      // Create the SiteInstance in a new BrowsingInstance, which will ensure
+      // that webview tags are also not allowed to send messages across
+      // different partitions.
+      guest_site_instance = SiteInstance::CreateForURL(
+          embedder_site_instance->GetBrowserContext(), guest_site);
     }
   }
 
-  WebContentsImpl* opener_web_contents = static_cast<WebContentsImpl*>(
-      guest_opener ? guest_opener->GetWebContents() : NULL);
   return WebContentsImpl::CreateGuest(
       embedder_site_instance->GetBrowserContext(),
       guest_site_instance,
-      routing_id,
-      opener_web_contents,
-      instance_id,
-      params);
+      instance_id);
 }
 
 BrowserPluginGuest* BrowserPluginGuestManager::GetGuestByInstanceID(
@@ -177,17 +166,13 @@ bool BrowserPluginGuestManager::CanEmbedderAccessGuest(
     BrowserPluginGuest* guest) {
   // An embedder can access |guest| if the guest has not been attached and its
   // opener's embedder lives in the same process as the given embedder.
-  if (!guest->embedder_web_contents()) {
-    WebContentsImpl* opener = guest->GetWebContents()->opener();
-    if (!opener)
-      return false;
-
-    BrowserPluginGuest* guest_opener = opener->GetBrowserPluginGuest();
-    if (!guest_opener)
+  if (!guest->attached()) {
+    if (!guest->opener())
       return false;
 
     return embedder_render_process_id ==
-        guest_opener->embedder_web_contents()->GetRenderProcessHost()->GetID();
+        guest->opener()->embedder_web_contents()->GetRenderProcessHost()->
+            GetID();
   }
 
   return embedder_render_process_id ==

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * @param {Element} container Content container.
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
@@ -1713,12 +1715,15 @@ Mosaic.Tile.prototype.init = function(metadata, onImageMeasured) {
   this.markUnloaded();
   this.left_ = null;  // Mark as not laid out.
 
+  // Use embedded thumbnails on Drive, since they have higher resolution.
   this.thumbnailLoader_ = new ThumbnailLoader(
       this.getItem().getUrl(),
       ThumbnailLoader.LoaderType.CANVAS,
       metadata,
       undefined,  // Media type.
-      ThumbnailLoader.UseEmbedded.NO_EMBEDDED);
+      FileType.isOnDrive(this.getItem().getUrl()) ?
+          ThumbnailLoader.UseEmbedded.USE_EMBEDDED :
+          ThumbnailLoader.UseEmbedded.NO_EMBEDDED);
 
   var setDimensions = function(width, height) {
     if (width > height) {

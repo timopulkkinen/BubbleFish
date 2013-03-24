@@ -245,7 +245,7 @@ void HistoryURLProviderTest::RunTest(const string16 text,
                                      bool prevent_inline_autocomplete,
                                      const std::string* expected_urls,
                                      size_t num_results) {
-  AutocompleteInput input(text, string16::npos, desired_tld,
+  AutocompleteInput input(text, string16::npos, desired_tld, GURL(),
                           prevent_inline_autocomplete, false, true,
                           AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
@@ -272,8 +272,8 @@ void HistoryURLProviderTest::RunTest(const string16 text,
 
 void HistoryURLProviderTest::RunAdjustOffsetTest(const string16 text,
                                                  size_t expected_offset) {
-  AutocompleteInput input(text, string16::npos, string16(), false, false, true,
-                          AutocompleteInput::ALL_MATCHES);
+  AutocompleteInput input(text, string16::npos, string16(), GURL(), false,
+                          false, true, AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
     MessageLoop::current()->Run();
@@ -456,35 +456,6 @@ TEST_F(HistoryURLProviderTest, WhatYouTyped) {
   const std::string results_3[] = {"https://wytmatch%20foo%20bar/"};
   RunTest(ASCIIToUTF16("https://wytmatch foo bar"), string16(), false,
           results_3, arraysize(results_3));
-
-  // Test the corner case where a user has fully typed a previously visited
-  // intranet address and is now hitting ctrl-enter, which completes to a
-  // previously unvisted internet domain.
-  const std::string binky_results[] = {"http://binky/"};
-  const std::string binky_com_results[] = {
-    "http://www.binky.com/",
-    "http://binky/",
-  };
-  RunTest(ASCIIToUTF16("binky"), string16(), false, binky_results,
-          arraysize(binky_results));
-  RunTest(ASCIIToUTF16("binky"), ASCIIToUTF16("com"), false, binky_com_results,
-          arraysize(binky_com_results));
-
-  // Test the related case where a user has fully typed a previously visited
-  // intranet address and is now hitting ctrl-enter, which completes to a
-  // previously visted internet domain.
-  const std::string winky_results[] = {
-    "http://winky/",
-    "http://www.winky.com/",
-  };
-  const std::string winky_com_results[] = {
-    "http://www.winky.com/",
-    "http://winky/",
-  };
-  RunTest(ASCIIToUTF16("winky"), string16(), false, winky_results,
-          arraysize(winky_results));
-  RunTest(ASCIIToUTF16("winky"), ASCIIToUTF16("com"), false, winky_com_results,
-          arraysize(winky_com_results));
 }
 
 TEST_F(HistoryURLProviderTest, Fixup) {
@@ -547,8 +518,8 @@ TEST_F(HistoryURLProviderTest, EmptyVisits) {
   // Wait for history to create the in memory DB.
   profile_->BlockUntilHistoryProcessesPendingRequests();
 
-  AutocompleteInput input(ASCIIToUTF16("p"), string16::npos, string16(), false,
-                          false, true, AutocompleteInput::ALL_MATCHES);
+  AutocompleteInput input(ASCIIToUTF16("p"), string16::npos, string16(), GURL(),
+                          false, false, true, AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
   // HistoryURLProvider shouldn't be done (waiting on async results).
   EXPECT_FALSE(autocomplete_->done());
@@ -584,7 +555,8 @@ TEST_F(HistoryURLProviderTestNoDB, NavigateWithoutDB) {
 
 TEST_F(HistoryURLProviderTest, DontAutocompleteOnTrailingWhitespace) {
   AutocompleteInput input(ASCIIToUTF16("slash "), string16::npos, string16(),
-                          false, false, true, AutocompleteInput::ALL_MATCHES);
+                          GURL(), false, false, true,
+                          AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
     MessageLoop::current()->Run();
@@ -713,7 +685,7 @@ TEST_F(HistoryURLProviderTest, CrashDueToFixup) {
   };
   for (size_t i = 0; i < arraysize(test_cases); ++i) {
     AutocompleteInput input(ASCIIToUTF16(test_cases[i]), string16::npos,
-                            string16(), false, false, true,
+                            string16(), GURL(), false, false, true,
                             AutocompleteInput::ALL_MATCHES);
     autocomplete_->Start(input, false);
     if (!autocomplete_->done())

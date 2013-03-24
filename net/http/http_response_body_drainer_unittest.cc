@@ -77,6 +77,7 @@ class MockHttpStream : public HttpStream {
 
   // HttpStream implementation.
   virtual int InitializeStream(const HttpRequestInfo* request_info,
+                               RequestPriority priority,
                                const BoundNetLog& net_log,
                                const CompletionCallback& callback) OVERRIDE {
     return ERR_UNEXPECTED;
@@ -97,7 +98,6 @@ class MockHttpStream : public HttpStream {
   }
 
   virtual bool CanFindEndOfResponse() const OVERRIDE { return true; }
-  virtual bool IsMoreDataBuffered() const OVERRIDE { return false; }
   virtual bool IsConnectionReused() const OVERRIDE { return false; }
   virtual void SetConnectionReused() OVERRIDE {}
   virtual bool IsConnectionReusable() const OVERRIDE { return false; }

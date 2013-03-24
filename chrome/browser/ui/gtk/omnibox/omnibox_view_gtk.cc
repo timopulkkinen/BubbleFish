@@ -19,9 +19,9 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -181,11 +181,11 @@ void DoWriteURLToClipboard(const GURL& url,
 OmniboxViewGtk::OmniboxViewGtk(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                Browser* browser,
+                               Profile* profile,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
                                GtkWidget* location_bar)
-    : OmniboxView(browser->profile(), controller, toolbar_model,
-                  command_updater),
+    : OmniboxView(profile, controller, toolbar_model, command_updater),
       browser_(browser),
       text_view_(NULL),
       tag_table_(NULL),
@@ -201,7 +201,7 @@ OmniboxViewGtk::OmniboxViewGtk(OmniboxEditController* controller,
       security_level_(ToolbarModel::NONE),
       mark_set_handler_id_(0),
       button_1_pressed_(false),
-      theme_service_(GtkThemeService::GetFrom(browser->profile())),
+      theme_service_(GtkThemeService::GetFrom(profile)),
       enter_was_pressed_(false),
       tab_was_pressed_(false),
       paste_clipboard_requested_(false),
@@ -1256,7 +1256,7 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
     gtk_widget_show(copy_url_menuitem);
   }
 
- // Paste and Go menu item.
+  // Paste and Go menu item.
   GtkWidget* paste_go_menuitem = gtk_menu_item_new_with_mnemonic(
       ui::ConvertAcceleratorsFromWindowsStyle(l10n_util::GetStringUTF8(
           model()->IsPasteAndSearch(sanitized_text_for_paste_and_go_) ?
@@ -1463,9 +1463,13 @@ void OmniboxViewGtk::HandleInsertText(GtkTextBuffer* buffer,
       base::WriteUnicodeCharacter(c, &filtered_text);
   }
 
-  if (model()->is_pasting())
-    filtered_text = StripJavascriptSchemas(
-        CollapseWhitespace(filtered_text, true));
+  if (model()->is_pasting()) {
+    // If the user is pasting all-whitespace, paste a single space
+    // rather than nothing, since pasting nothing feels broken.
+    filtered_text = CollapseWhitespace(filtered_text, true);
+    filtered_text = filtered_text.empty() ? ASCIIToUTF16(" ") :
+        StripJavascriptSchemas(filtered_text);
+  }
 
   if (!filtered_text.empty()) {
     // Avoid inserting the text after the Instant anchor.
@@ -1635,8 +1639,7 @@ void OmniboxViewGtk::EmphasizeURLComponents() {
   // And Go system uses.
   url_parse::Component scheme, host;
   string16 text(GetText());
-  AutocompleteInput::ParseForEmphasizeComponents(
-      text, model()->GetDesiredTLD(), &scheme, &host);
+  AutocompleteInput::ParseForEmphasizeComponents(text, &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
 
   // Set the baseline emphasis.

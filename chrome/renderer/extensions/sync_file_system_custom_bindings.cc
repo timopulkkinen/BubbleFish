@@ -50,7 +50,8 @@ v8::Handle<v8::Value> SyncFileSystemCustomBindings::GetSyncFileSystemObject(
 
   WebKit::WebFrame* webframe =
       WebKit::WebFrame::frameForContext(v8_context());
-  return webframe->createFileSystem(WebKit::WebFileSystem::TypeExternal,
+  return webframe->createFileSystem(
+                                    WebKit::WebFileSystemTypeExternal,
                                     WebKit::WebString::fromUTF8(name),
                                     WebKit::WebString::fromUTF8(root_url));
 }

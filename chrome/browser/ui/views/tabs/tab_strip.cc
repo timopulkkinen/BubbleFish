@@ -1084,7 +1084,7 @@ void TabStrip::MaybeStartDrag(
   // . Real mouse event and control is down. This is mostly for testing.
   DCHECK(event.type() == ui::ET_MOUSE_PRESSED ||
          event.type() == ui::ET_GESTURE_BEGIN);
-  if (adjust_layout_ &&
+  if (touch_layout_.get() &&
       ((event.type() == ui::ET_MOUSE_PRESSED &&
         (((event.flags() & ui::EF_FROM_TOUCH) &&
           static_cast<const ui::MouseEvent&>(event).IsLeftMouseButton()) ||
@@ -1093,6 +1093,20 @@ void TabStrip::MaybeStartDrag(
        (event.type() == ui::ET_GESTURE_BEGIN && !event.IsControlDown()))) {
     move_behavior = TabDragController::MOVE_VISIBILE_TABS;
   }
+
+  views::Widget* widget = GetWidget();
+
+  // Don't allow detaching from maximized windows (in ash) when all the tabs are
+  // selected and only one display. Since the window is maximized we know there
+  // are no other tabbed browsers the user can drag to.
+  const chrome::HostDesktopType host_desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(widget->GetNativeView());
+  if (host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH &&
+      widget->IsMaximized() &&
+      static_cast<int>(tabs.size()) == tab_count() &&
+      gfx::Screen::GetScreenFor(widget->GetNativeView())->GetNumDisplays() == 1)
+    detach_behavior = TabDragController::NOT_DETACHABLE;
+
 #if defined(OS_WIN)
   // It doesn't make sense to drag tabs out on Win8's single window Metro mode.
   if (win8::IsSingleWindowMetroMode())
@@ -1101,7 +1115,7 @@ void TabStrip::MaybeStartDrag(
   // Gestures don't automatically do a capture. We don't allow multiple drags at
   // the same time, so we explicitly capture.
   if (event.type() == ui::ET_GESTURE_BEGIN)
-    GetWidget()->SetCapture(this);
+    widget->SetCapture(this);
   drag_controller_.reset(new TabDragController);
   drag_controller_->Init(
       this, tab, tabs, gfx::Point(x, y), event.x(), selection_model,
@@ -1506,6 +1520,17 @@ void TabStrip::OnGestureEvent(ui::GestureEvent* event) {
       if (drag_controller_.get())
         drag_controller_->SetMoveBehavior(TabDragController::REORDER);
       break;
+
+    case ui::ET_GESTURE_LONG_TAP: {
+      EndDrag(END_DRAG_CANCEL);
+      gfx::Point local_point = event->location();
+      Tab* tab = FindTabForEvent(local_point);
+      if (tab) {
+        ConvertPointToScreen(this, &local_point);
+        ShowContextMenuForTab(tab, local_point);
+      }
+      break;
+    }
 
     case ui::ET_GESTURE_SCROLL_UPDATE:
       ContinueDrag(this, *event);
@@ -2493,17 +2518,23 @@ int TabStrip::GetStartXForNormalTabs() const {
 }
 
 Tab* TabStrip::FindTabForEvent(const gfx::Point& point) {
-  DCHECK(touch_layout_.get());
-  int active_tab_index = touch_layout_->active_index();
-  Tab* tab = NULL;
-  if (active_tab_index != -1) {
-    tab = FindTabForEventFrom(point, active_tab_index, -1);
-    if (!tab)
-      tab = FindTabForEventFrom(point, active_tab_index + 1, 1);
-  } else if (tab_count()) {
-    tab = FindTabForEventFrom(point, 0, 1);
+  if (touch_layout_.get()) {
+    int active_tab_index = touch_layout_->active_index();
+    if (active_tab_index != -1) {
+      Tab* tab = FindTabForEventFrom(point, active_tab_index, -1);
+      if (!tab)
+        tab = FindTabForEventFrom(point, active_tab_index + 1, 1);
+      return tab;
+    } else if (tab_count()) {
+      return FindTabForEventFrom(point, 0, 1);
+    }
+  } else {
+    for (int i = 0; i < tab_count(); ++i) {
+      if (IsPointInTab(tab_at(i), point))
+        return tab_at(i);
+    }
   }
-  return tab;
+  return NULL;
 }
 
 Tab* TabStrip::FindTabForEventFrom(const gfx::Point& point,

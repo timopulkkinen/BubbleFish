@@ -770,6 +770,10 @@ void RenderWidgetHostViewWin::RenderViewGone(base::TerminationStatus status,
   Destroy();
 }
 
+bool RenderWidgetHostViewWin::CanSubscribeFrame() const {
+  return render_widget_host_ != NULL;
+}
+
 void RenderWidgetHostViewWin::WillWmDestroy() {
   CleanupCompositorWindow();
 }
@@ -884,7 +888,7 @@ void RenderWidgetHostViewWin::ProcessAckedTouchEvent(
   DCHECK(touch_events_enabled_);
 
   ScopedVector<ui::TouchEvent> events;
-  if (!MakeUITouchEventsFromWebTouchEvents(touch, &events))
+  if (!MakeUITouchEventsFromWebTouchEvents(touch, &events, LOCAL_COORDINATES))
     return;
 
   ui::EventResult result = (ack_result ==
@@ -2090,8 +2094,11 @@ bool WebTouchState::UpdateTouchPoint(
   int radius_x = 1;
   int radius_y = 1;
   if (touch_input->dwMask & TOUCHINPUTMASKF_CONTACTAREA) {
-    radius_x = TOUCH_COORD_TO_PIXEL(touch_input->cxContact);
-    radius_y = TOUCH_COORD_TO_PIXEL(touch_input->cyContact);
+    // Some touch drivers send a contact area of "-1", yet flag it as valid.
+    radius_x = std::max(1,
+        static_cast<int>(TOUCH_COORD_TO_PIXEL(touch_input->cxContact)));
+    radius_y = std::max(1,
+        static_cast<int>(TOUCH_COORD_TO_PIXEL(touch_input->cyContact)));
   }
 
   // Detect and exclude stationary moves.
@@ -2315,11 +2322,16 @@ bool RenderWidgetHostViewWin::LockMouse() {
 
   move_to_center_request_.pending = false;
   last_mouse_position_.locked_global = last_mouse_position_.unlocked_global;
-  MoveCursorToCenterIfNecessary();
 
+  // Must set the clip rectangle before MoveCursorToCenterIfNecessary()
+  // so that if the cursor is moved it uses the clip rect set to the window
+  // rect. Otherwise, MoveCursorToCenterIfNecessary() may move the cursor
+  // to the center of the screen, and then we would clip to the window
+  // rect, thus moving the cursor and causing a movement delta.
   CRect rect;
   GetWindowRect(&rect);
   ::ClipCursor(&rect);
+  MoveCursorToCenterIfNecessary();
 
   return true;
 }

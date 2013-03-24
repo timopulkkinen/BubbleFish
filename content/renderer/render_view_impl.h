@@ -105,7 +105,6 @@ class WebMediaPlayerManagerAndroid;
 namespace WebKit {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
-class WebCompositorOutputSurface;
 class WebDOMMessageEvent;
 class WebDataSource;
 class WebDateTimeChooserCompletion;
@@ -337,24 +336,6 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_MACOSX)
   // Starts plugin IME.
   void StartPluginIme();
-
-  // Helper routines for accelerated plugin support. Used by the
-  // WebPluginDelegateProxy, which has a pointer to the RenderView.
-  gfx::PluginWindowHandle AllocateFakePluginWindowHandle(bool opaque,
-                                                         bool root);
-  void DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window);
-  void AcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
-                                      int32 width,
-                                      int32 height,
-                                      uint64 io_surface_identifier);
-  TransportDIB::Handle AcceleratedSurfaceAllocTransportDIB(size_t size);
-  void AcceleratedSurfaceFreeTransportDIB(TransportDIB::Id dib_id);
-  void AcceleratedSurfaceSetTransportDIB(gfx::PluginWindowHandle window,
-                                         int32 width,
-                                         int32 height,
-                                         TransportDIB::Handle transport_dib);
-  void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
-                                        uint64 surface_id);
 #endif
 
   void RegisterPluginDelegate(WebPluginDelegateProxy* delegate);
@@ -399,6 +380,9 @@ class CONTENT_EXPORT RenderViewImpl
   // of |enable|. This is used for layout tests that need to control the focus
   // synchronously from the renderer.
   void SetFocusAndActivateForTesting(bool enable);
+
+  // Change the device scale factor and force the compositor to resize.
+  void SetDeviceScaleFactorForTesting(float factor);
 
   // IPC::Listener implementation ----------------------------------------------
 
@@ -448,8 +432,6 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void didStopLoading();
   virtual void didChangeLoadProgress(WebKit::WebFrame* frame,
                                      double load_progress);
-  virtual bool isSmartInsertDeleteEnabled();
-  virtual bool isSelectTrailingWhitespaceEnabled();
   virtual void didCancelCompositionOnSelectionChange();
   virtual void didChangeSelection(bool is_selection_empty);
   virtual void didExecuteCommand(const WebKit::WebString& command_name);
@@ -659,12 +641,12 @@ class CONTENT_EXPORT RenderViewImpl
                                          int active_match_ordinal,
                                          const WebKit::WebRect& sel);
   virtual void openFileSystem(WebKit::WebFrame* frame,
-                              WebKit::WebFileSystem::Type type,
+                              WebKit::WebFileSystemType type,
                               long long size,
                               bool create,
                               WebKit::WebFileSystemCallbacks* callbacks);
   virtual void deleteFileSystem(WebKit::WebFrame* frame,
-                                WebKit::WebFileSystem::Type type,
+                                WebKit::WebFileSystemType type,
                                 WebKit::WebFileSystemCallbacks* callbacks);
   virtual void queryStorageUsageAndQuota(
       WebKit::WebFrame* frame,
@@ -778,6 +760,7 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void Close() OVERRIDE;
   virtual void OnResize(const gfx::Size& new_size,
                         const gfx::Size& physical_backing_size,
+                        float overdraw_bottom_height,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen) OVERRIDE;
   virtual void WillInitiatePaint() OVERRIDE;
@@ -1384,13 +1367,6 @@ class CONTENT_EXPORT RenderViewImpl
   // These store the "has scrollbars" state last sent to the browser.
   bool cached_has_main_frame_horizontal_scrollbar_;
   bool cached_has_main_frame_vertical_scrollbar_;
-
-#if defined(OS_MACOSX)
-  // Track the fake plugin window handles allocated on the browser side for
-  // the accelerated compositor and (currently) accelerated plugins so that
-  // we can discard them when the view goes away.
-  std::set<gfx::PluginWindowHandle> fake_plugin_window_handles_;
-#endif
 
   // Helper objects ------------------------------------------------------------
 

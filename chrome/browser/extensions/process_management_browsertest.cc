@@ -19,7 +19,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 
 using content::NavigationController;
 using content::WebContents;
@@ -38,9 +38,8 @@ class ProcessManagementTest : public ExtensionBrowserTest {
 }  // namespace
 
 
-// TODO(nasko): Timeouts on Windows: crbug.com/173137
-// V8 error on Linux: https://code.google.com/p/v8/issues/detail?id=2533
-#if defined(OS_WIN) || defined(OS_LINUX)
+// TODO(nasko): crbug.com/173137
+#if defined(OS_WIN)
 #define MAYBE_ProcessOverflow DISABLED_ProcessOverflow
 #else
 #define MAYBE_ProcessOverflow ProcessOverflow

@@ -7,10 +7,11 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
+#include "chrome/browser/ui/sad_tab.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_entry.h"
@@ -50,6 +51,9 @@ BookmarkTabHelper::~BookmarkTabHelper() {
 
 bool BookmarkTabHelper::ShouldShowBookmarkBar() const {
   if (web_contents()->ShowingInterstitialPage())
+    return false;
+
+  if (chrome::SadTab::ShouldShow(web_contents()->GetCrashedStatus()))
     return false;
 
   if (!browser_defaults::bookmarks_enabled)

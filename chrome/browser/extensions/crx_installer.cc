@@ -23,6 +23,7 @@
 #include "base/version.h"
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/browser/extensions/convert_web_app.h"
+#include "chrome/browser/extensions/crx_installer_error.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -325,7 +326,7 @@ CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
       // For self-hosted apps, verify that the entire extent is on the same
       // host (or a subdomain of the host) the download happened from.  There's
       // no way for us to verify that the app controls any other hosts.
-      URLPattern pattern(UserScript::kValidUserScriptSchemes);
+      URLPattern pattern(UserScript::ValidUserScriptSchemes());
       pattern.SetHost(download_url_.host());
       pattern.SetMatchSubdomains(true);
 
@@ -431,7 +432,18 @@ void CrxInstaller::OnRequirementsChecked(
   ManagedUserService* service =
       ManagedUserServiceFactory::GetForProfile(profile_);
   if (service->ProfileIsManaged()) {
-        service->RequestAuthorization(
+    // Extensions which should be installed by policy are installed without
+    // using the ExtensionInstallPrompt. In that case, |client_| is NULL.
+    if (client_ == NULL) {
+      // Automatically set authorization
+      OnAuthorizationResult(true);
+      return;
+    }
+    // parent_web_contents could be NULL when the client is instantiated from
+    // ExtensionEnableFlow, but that code path does not lead to here.
+    CHECK(client_->parent_web_contents());
+    service->RequestAuthorization(
+        client_->parent_web_contents(),
         base::Bind(&CrxInstaller::OnAuthorizationResult,
                    this));
     return;

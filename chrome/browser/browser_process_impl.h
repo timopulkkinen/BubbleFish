@@ -16,7 +16,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "chrome/browser/browser_process.h"
@@ -43,6 +43,10 @@ class PolicyService;
 
 #if defined(OS_WIN) && defined(USE_AURA)
 class MetroViewerProcessHost;
+#endif
+
+#if defined(OS_MACOSX)
+class AppShimHostManager;
 #endif
 
 // Real implementation of BrowserProcess that creates and returns the services.
@@ -297,6 +301,11 @@ class BrowserProcessImpl : public BrowserProcess,
   // Hosts the channel for the Windows 8 metro viewer process which runs in
   // the ASH environment.
   scoped_ptr<MetroViewerProcessHost> metro_viewer_process_host_;
+#endif
+
+#if defined(OS_MACOSX)
+  // Hosts the IPC channel factory that App Shims connect to on Mac.
+  scoped_ptr<AppShimHostManager> app_shim_host_manager_;
 #endif
 
   // TODO(eroman): Remove this when done debugging 113031. This tracks

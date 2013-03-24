@@ -58,9 +58,6 @@ const char kAshDisableNewNetworkStatusArea[] =
 // Disable the per application grouping version of the launcher.
 const char kAshDisablePerAppLauncher[] = "ash-disable-per-app-launcher";
 
-// Disables immersive fullscreen mode.
-const char kAshDisableImmersiveMode[] = "ash-disable-immersive-mode";
-
 // Disables display rotation.
 const char kAshDisableDisplayRotation[] = "ash-disable-display-rotation";
 
@@ -94,6 +91,9 @@ const char kAshEnableWorkspaceScrubbing[] = "ash-enable-workspace-scrubbing";
 // "1024x768*2" sets the scale factor to 2 for a high DPI display.
 const char kAshHostWindowBounds[] = "ash-host-window-bounds";
 
+// Enable immersive fullscreen mode.
+const char kAshImmersiveFullscreen[] = "ash-immersive-fullscreen";
+
 // Hides the small tab indicators at the top of the screen during immersive
 // fullscreen mode.
 const char kAshImmersiveHideTabIndicators[] =
@@ -101,12 +101,6 @@ const char kAshImmersiveHideTabIndicators[] =
 
 // Specifies the internal display's ui scale.
 const char kAshInternalDisplayUIScale[] = "ash-internal-display-ui-scale";
-
-// Overrides all displays' orientation. The value should be one of 0
-// (normal), 1 (90 degrees clockwise), 2 (180 degrees) or 3 (270
-// degrees clockwise).
-const char kAshOverrideDisplayOrientation[] =
-    "ash-override-display-orientation";
 
 // Specifies the layout mode and offsets for the secondary display for
 // testing. The format is "<t|r|b|l>,<offset>" where t=TOP, r=RIGHT,

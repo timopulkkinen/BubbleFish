@@ -327,35 +327,53 @@ class LoggingNativeHandler : public ObjectBackedNativeHandler {
       : ObjectBackedNativeHandler(context) {
     RouteFunction("DCHECK",
         base::Bind(&LoggingNativeHandler::Dcheck, base::Unretained(this)));
+    RouteFunction("CHECK",
+        base::Bind(&LoggingNativeHandler::Check, base::Unretained(this)));
+  }
+
+  v8::Handle<v8::Value> Check(const v8::Arguments& args) {
+    bool check_value;
+    std::string error_message;
+    ParseArgs(args, &check_value, &error_message);
+    CHECK(check_value) << error_message;
+    return v8::Undefined();
   }
 
   v8::Handle<v8::Value> Dcheck(const v8::Arguments& args) {
-    CHECK_LE(args.Length(), 2);
-    bool check_value = args[0]->BooleanValue();
+    bool check_value;
     std::string error_message;
+    ParseArgs(args, &check_value, &error_message);
+    DCHECK(check_value) << error_message;
+    return v8::Undefined();
+  }
+
+ private:
+  void ParseArgs(const v8::Arguments& args,
+                 bool* check_value,
+                 std::string* error_message) {
+    CHECK_LE(args.Length(), 2);
+    *check_value = args[0]->BooleanValue();
     if (args.Length() == 2)
-      error_message = "Error: " + std::string(*v8::String::AsciiValue(args[1]));
+      *error_message = "Error: " + std::string(
+          *v8::String::AsciiValue(args[1]));
 
     v8::Handle<v8::StackTrace> stack_trace =
         v8::StackTrace::CurrentStackTrace(10);
     if (stack_trace.IsEmpty() || stack_trace->GetFrameCount() <= 0) {
-      error_message += "\n    <no stack trace>";
+      *error_message += "\n    <no stack trace>";
     } else {
       for (size_t i = 0; i < (size_t) stack_trace->GetFrameCount(); ++i) {
         v8::Handle<v8::StackFrame> frame = stack_trace->GetFrame(i);
         CHECK(!frame.IsEmpty());
-        error_message += base::StringPrintf("\n    at %s (%s:%d:%d)",
+        *error_message += base::StringPrintf("\n    at %s (%s:%d:%d)",
             ToStringOrDefault(frame->GetFunctionName(), "<anonymous>").c_str(),
             ToStringOrDefault(frame->GetScriptName(), "<anonymous>").c_str(),
             frame->GetLineNumber(),
             frame->GetColumn());
       }
     }
-    DCHECK(check_value) << error_message;
-    return v8::Undefined();
   }
 
- private:
   std::string ToStringOrDefault(const v8::Handle<v8::String>& v8_string,
                                   const std::string& dflt) {
     if (v8_string.IsEmpty())
@@ -789,8 +807,6 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("bluetooth", IDR_BLUETOOTH_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("browserAction",
                              IDR_BROWSER_ACTION_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("contentSettings",
-                             IDR_CONTENT_SETTINGS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contextMenus",
                              IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("declarativeContent",
@@ -825,7 +841,6 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_PAGE_CAPTURE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("permissions", IDR_PERMISSIONS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("storage", IDR_STORAGE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("syncFileSystem",
                              IDR_SYNC_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("systemIndicator",
@@ -834,12 +849,16 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("ttsEngine", IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("types", IDR_TYPES_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("webRequest", IDR_WEB_REQUEST_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("webRequestInternal",
                              IDR_WEB_REQUEST_INTERNAL_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("binding", IDR_BINDING_JS);
+
+  // Custom types sources.
+  source_map_.RegisterSource("ChromeSetting", IDR_CHROME_SETTING_JS);
+  source_map_.RegisterSource("StorageArea", IDR_STORAGE_AREA_JS);
+  source_map_.RegisterSource("ContentSetting", IDR_CONTENT_SETTING_JS);
 
   // Platform app sources that are not API-specific..
   source_map_.RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
@@ -849,6 +868,12 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("webViewExperimental",
                              IDR_WEB_VIEW_EXPERIMENTAL_JS);
   source_map_.RegisterSource("denyWebView", IDR_WEB_VIEW_DENY_JS);
+  source_map_.RegisterSource("adView", IDR_AD_VIEW_JS);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAdviewSrcAttribute)) {
+    source_map_.RegisterSource("adViewCustom", IDR_AD_VIEW_CUSTOM_JS);
+  }
+  source_map_.RegisterSource("denyAdView", IDR_AD_VIEW_DENY_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
   source_map_.RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
@@ -950,38 +975,29 @@ void Dispatcher::DidCreateScriptContext(
 
   GetOrCreateChrome(v8_context);
 
-  // Loading JavaScript is expensive, so only run the full API bindings
-  // generation mechanisms in extension pages (NOT all web pages).
-  switch (context_type) {
-    case Feature::UNSPECIFIED_CONTEXT:
-    case Feature::WEB_PAGE_CONTEXT:
-      // TODO(kalman): see comment below about ExtensionAPI.
-      InstallBindings(module_system.get(), v8_context, "app");
-      InstallBindings(module_system.get(), v8_context, "webstore");
-      break;
-    case Feature::BLESSED_EXTENSION_CONTEXT:
-    case Feature::UNBLESSED_EXTENSION_CONTEXT:
-    case Feature::CONTENT_SCRIPT_CONTEXT: {
-      if (extension && !extension->is_platform_app())
-        module_system->Require("miscellaneous_bindings");
-      module_system->Require("json");  // see paranoid comment in json.js
+  if (extension && !extension->is_platform_app())
+    module_system->Require("miscellaneous_bindings");
 
-      // TODO(kalman): move this code back out of the switch and execute it
-      // regardless of |context_type|. ExtensionAPI knows how to return the
-      // correct APIs, however, until it doesn't have a 2MB overhead we can't
-      // load it in every process.
-      RegisterSchemaGeneratedBindings(module_system.get(),
-                                      context,
-                                      v8_context);
-      break;
-    }
-  }
+  // See paranoid comment in json.js. Don't require in web contexts due to the
+  // v8 performance hit of requiring things. Luckily, we don't need it yet.
+  // See http://crbug.com/223170
+  if (context_type != Feature::WEB_PAGE_CONTEXT)
+    module_system->Require("json");
 
+  RegisterSchemaGeneratedBindings(module_system.get(),
+                                  context,
+                                  v8_context);
+
+  bool is_within_platform_app = IsWithinPlatformApp(frame);
   // Inject custom JS into the platform app context.
-  if (IsWithinPlatformApp(frame))
+  if (is_within_platform_app)
     module_system->Require("platformApp");
 
-  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
+  // Only platform apps support the <webview> tag, because the "webView" and
+  // "denyWebView" modules will affect the performance of DOM modifications
+  // (http://crbug.com/196453).
+  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT &&
+      is_within_platform_app) {
     // Note: setting up the WebView class here, not the chrome.webview API.
     // The API will be automatically set up when first used.
     if (extension->HasAPIPermission(APIPermission::kWebView)) {
@@ -990,6 +1006,22 @@ void Dispatcher::DidCreateScriptContext(
         module_system->Require("webViewExperimental");
     } else {
       module_system->Require("denyWebView");
+    }
+  }
+
+  // Same comment as above for <adview> tag.
+  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT &&
+      is_within_platform_app) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAdview)) {
+      if (extension->HasAPIPermission(APIPermission::kAdView)) {
+        if (CommandLine::ForCurrentProcess()->HasSwitch(
+                switches::kEnableAdviewSrcAttribute)) {
+          module_system->Require("adViewCustom");
+        }
+        module_system->Require("adView");
+      } else {
+        module_system->Require("denyAdView");
+      }
     }
   }
 

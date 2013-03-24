@@ -13,13 +13,15 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "cc/layer.h"
+#include "cc/layers/layer.h"
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/load_url_params.h"
+#include "content/browser/android/media_player_manager_android.h"
+#include "content/browser/android/sync_input_event_filter.h"
 #include "content/browser/android/touch_point.h"
+#include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/java/java_bound_object.h"
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
-#include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
@@ -587,6 +589,17 @@ void ContentViewCoreImpl::ShowDisambiguationPopup(
                                                java_bitmap.obj());
 }
 
+void ContentViewCoreImpl::RequestExternalVideoSurface(int player_id) {
+  JNIEnv* env = AttachCurrentThread();
+
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  Java_ContentViewCore_requestExternalVideoSurface(
+      env, obj.obj(), static_cast<jint>(player_id));
+}
+
 gfx::Size ContentViewCoreImpl::GetPhysicalBackingSize() const {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
@@ -609,6 +622,23 @@ gfx::Size ContentViewCoreImpl::GetViewportSizePix() const {
 gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
   return gfx::ToCeiledSize(
       gfx::ScaleSize(GetViewportSizePix(), 1.0f / GetDpiScale()));
+}
+
+float ContentViewCoreImpl::GetOverdrawBottomHeightDip() const {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return 0.f;
+  return Java_ContentViewCore_getOverdrawBottomHeightPix(env, j_obj.obj())
+      / GetDpiScale();
+}
+
+InputEventAckState ContentViewCoreImpl::FilterInputEvent(
+    const WebKit::WebInputEvent& input_event) {
+  if (!input_event_filter_)
+    return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+
+  return input_event_filter_->HandleInputEvent(input_event);
 }
 
 void ContentViewCoreImpl::AttachLayer(scoped_refptr<cc::Layer> layer) {
@@ -789,6 +819,14 @@ float ContentViewCoreImpl::GetTouchPaddingDip() {
 
 float ContentViewCoreImpl::GetDpiScale() const {
   return dpi_scale_;
+}
+
+void ContentViewCoreImpl::SetInputHandler(
+    WebKit::WebCompositorInputHandler* input_handler) {
+  if (!input_event_filter_)
+    input_event_filter_.reset(new SyncInputEventFilter);
+
+  input_event_filter_->SetInputHandler(input_handler);
 }
 
 jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
@@ -1158,6 +1196,29 @@ jboolean ContentViewCoreImpl::ConsumePendingRendererFrame(JNIEnv* env,
   bool had_pending_frame = renderer_frame_pending_;
   renderer_frame_pending_ = false;
   return had_pending_frame;
+}
+
+void ContentViewCoreImpl::AttachExternalVideoSurface(JNIEnv* env,
+                                                     jobject obj,
+                                                     jint player_id,
+                                                     jobject jsurface) {
+  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
+      web_contents_->GetRenderViewHost());
+  if (rvhi && rvhi->media_player_manager()) {
+    rvhi->media_player_manager()->AttachExternalVideoSurface(
+        static_cast<int>(player_id), jsurface);
+  }
+}
+
+void ContentViewCoreImpl::DetachExternalVideoSurface(JNIEnv* env,
+                                                     jobject obj,
+                                                     jint player_id) {
+  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
+      web_contents_->GetRenderViewHost());
+  if (rvhi && rvhi->media_player_manager()) {
+    rvhi->media_player_manager()->DetachExternalVideoSurface(
+        static_cast<int>(player_id));
+  }
 }
 
 jboolean ContentViewCoreImpl::IsRenderWidgetHostViewReady(JNIEnv* env,

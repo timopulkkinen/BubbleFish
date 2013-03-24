@@ -18,24 +18,23 @@
 #include "remoting/host/desktop_session.h"
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_status_observer.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/protocol/transport.h"
-
-namespace {
-
-std::ostream& operator<<(std::ostream& os, const SkIPoint& point) {
-  return os << "(" << point.x() << ", " << point.y() << ")";
-}
-
-std::ostream& operator<<(std::ostream& os, const SkISize& size) {
-  return os << size.width() << "x" << size.height();
-}
-
-}  // namespace
 
 namespace remoting {
 
+namespace {
+
 // This is used for tagging system event logs.
 const char kApplicationName[] = "chromoting";
+
+std::ostream& operator<<(std::ostream& os, const ScreenResolution& resolution) {
+  return os << resolution.dimensions_.width() << "x"
+            << resolution.dimensions_.height() << " at "
+            << resolution.dpi_.x() << "x" << resolution.dpi_.y() << " DPI";
+}
+
+}  // namespace
 
 DaemonProcess::~DaemonProcess() {
   DCHECK(!config_watcher_.get());
@@ -95,6 +94,8 @@ bool DaemonProcess::OnMessageReceived(const IPC::Message& message) {
                         CreateDesktopSession)
     IPC_MESSAGE_HANDLER(ChromotingNetworkHostMsg_DisconnectTerminal,
                         CloseDesktopSession)
+    IPC_MESSAGE_HANDLER(ChromotingNetworkDaemonMsg_SetScreenResolution,
+                        SetScreenResolution)
     IPC_MESSAGE_HANDLER(ChromotingNetworkDaemonMsg_AccessDenied,
                         OnAccessDenied)
     IPC_MESSAGE_HANDLER(ChromotingNetworkDaemonMsg_ClientAuthenticated,
@@ -128,11 +129,11 @@ void DaemonProcess::OnPermanentError() {
 void DaemonProcess::CloseDesktopSession(int terminal_id) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  // Validate the supplied terminal ID. An attempt to close a desktop session
-  // with an ID that couldn't possibly have been allocated is considered
-  // a protocol error and the network process will be restarted.
-  if (!IsTerminalIdKnown(terminal_id)) {
-    LOG(ERROR) << "An invalid terminal ID. terminal_id=" << terminal_id;
+  // Validate the supplied terminal ID. An attempt to use a desktop session ID
+  // that couldn't possibly have been allocated is considered a protocol error
+  // and the network process will be restarted.
+  if (!WasTerminalIdAllocated(terminal_id)) {
+    LOG(ERROR) << "Invalid terminal ID: " << terminal_id;
     CrashNetworkProcess(FROM_HERE);
     return;
   }
@@ -171,15 +172,15 @@ DaemonProcess::DaemonProcess(
 }
 
 void DaemonProcess::CreateDesktopSession(int terminal_id,
-                                         const DesktopSessionParams& params,
+                                         const ScreenResolution& resolution,
                                          bool virtual_terminal) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   // Validate the supplied terminal ID. An attempt to create a desktop session
   // with an ID that could possibly have been allocated already is considered
   // a protocol error and the network process will be restarted.
-  if (IsTerminalIdKnown(terminal_id)) {
-    LOG(ERROR) << "An invalid terminal ID. terminal_id=" << terminal_id;
+  if (WasTerminalIdAllocated(terminal_id)) {
+    LOG(ERROR) << "Invalid terminal ID: " << terminal_id;
     CrashNetworkProcess(FROM_HERE);
     return;
   }
@@ -187,25 +188,16 @@ void DaemonProcess::CreateDesktopSession(int terminal_id,
   // Terminal IDs cannot be reused. Update the expected next terminal ID.
   next_terminal_id_ = std::max(next_terminal_id_, terminal_id + 1);
 
-  // Validate |params|.
-  if (params.client_dpi_.x() < 0 || params.client_dpi_.y() < 0) {
-    LOG(ERROR) << "Invalid DPI of the remote screen specified: "
-               << params.client_dpi_;
-    SendToNetwork(
-        new ChromotingDaemonNetworkMsg_TerminalDisconnected(terminal_id));
-    return;
-  }
-  if (params.client_size_.width() < 0 || params.client_size_.height() < 0) {
-    LOG(ERROR) << "Invalid resolution of the remote screen specified: "
-               << params.client_size_;
-    SendToNetwork(
-        new ChromotingDaemonNetworkMsg_TerminalDisconnected(terminal_id));
+  // Validate |resolution| and restart the sender if it is not valid.
+  if (!resolution.IsValid()) {
+    LOG(ERROR) << "Invalid resolution specified: " << resolution;
+    CrashNetworkProcess(FROM_HERE);
     return;
   }
 
   // Create the desktop session.
   scoped_ptr<DesktopSession> session = DoCreateDesktopSession(
-      terminal_id, params, virtual_terminal);
+      terminal_id, resolution, virtual_terminal);
   if (!session) {
     LOG(ERROR) << "Failed to create a desktop session.";
     SendToNetwork(
@@ -215,6 +207,42 @@ void DaemonProcess::CreateDesktopSession(int terminal_id,
 
   VLOG(1) << "Daemon: opened desktop session " << terminal_id;
   desktop_sessions_.push_back(session.release());
+}
+
+void DaemonProcess::SetScreenResolution(int terminal_id,
+                                        const ScreenResolution& resolution) {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  // Validate the supplied terminal ID. An attempt to use a desktop session ID
+  // that couldn't possibly have been allocated is considered a protocol error
+  // and the network process will be restarted.
+  if (!WasTerminalIdAllocated(terminal_id)) {
+    LOG(ERROR) << "Invalid terminal ID: " << terminal_id;
+    CrashNetworkProcess(FROM_HERE);
+    return;
+  }
+
+  // Validate |resolution| and restart the sender if it is not valid.
+  if (!resolution.IsValid()) {
+    LOG(ERROR) << "Invalid resolution specified: " << resolution;
+    CrashNetworkProcess(FROM_HERE);
+    return;
+  }
+
+  DesktopSessionList::iterator i;
+  for (i = desktop_sessions_.begin(); i != desktop_sessions_.end(); ++i) {
+    if ((*i)->id() == terminal_id) {
+      break;
+    }
+  }
+
+  // It is OK if the terminal ID wasn't found. There is a race between
+  // the network and daemon processes. Each frees its own resources first and
+  // notifies the other party if there was something to clean up.
+  if (i == desktop_sessions_.end())
+    return;
+
+  (*i)->SetScreenResolution(resolution);
 }
 
 void DaemonProcess::CrashNetworkProcess(
@@ -249,7 +277,7 @@ void DaemonProcess::Initialize() {
   LaunchNetworkProcess();
 }
 
-bool DaemonProcess::IsTerminalIdKnown(int terminal_id) {
+bool DaemonProcess::WasTerminalIdAllocated(int terminal_id) {
   return terminal_id < next_terminal_id_;
 }
 
