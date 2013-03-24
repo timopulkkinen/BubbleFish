@@ -27,7 +27,9 @@
 #include "ppapi/c/dev/ppb_trace_event_dev.h"
 #include "ppapi/c/dev/ppb_truetype_font_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
+#include "ppapi/c/dev/ppb_var_array_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
+#include "ppapi/c/dev/ppb_var_dictionary_dev.h"
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/dev/ppb_view_dev.h"
 #include "ppapi/c/ppb_audio_config.h"
@@ -95,7 +97,6 @@
 #include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppb_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
-#include "ppapi/proxy/ppb_pdf_proxy.h"
 #include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_testing_proxy.h"
@@ -239,7 +240,6 @@ InterfaceList::InterfaceList() {
   // Do not add more stuff here, they should be added to interface_list*.h
   // TODO(brettw) remove these.
   AddPPB(PPB_Instance_Proxy::GetInfoPrivate(), PERMISSION_PRIVATE);
-  AddPPB(PPB_PDF_Proxy::GetInfo(), PERMISSION_PRIVATE);
   AddPPB(PPB_URLLoader_Proxy::GetTrustedInfo(), PERMISSION_PRIVATE);
   AddPPB(PPB_Var_Deprecated_Proxy::GetInfo(), PERMISSION_DEV);
 

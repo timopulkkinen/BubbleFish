@@ -8,6 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/pending_task.h"
+#include "base/string_piece.h"
 #include "base/string_util.h"
 #include "net/base/cert_test_util.h"
 #include "net/base/host_cache.h"
@@ -35,6 +36,10 @@ namespace {
 static const char kTestUrl[] = "http://www.example.org/";
 static const char kTestHost[] = "www.example.org";
 static const int kTestPort = 80;
+
+const char kBodyData[] = "Body data";
+const size_t kBodyDataSize = arraysize(kBodyData);
+const base::StringPiece kBodyDataStringPiece(kBodyData, kBodyDataSize);
 
 static int g_delta_seconds = 0;
 base::TimeTicks TheNearFuture() {
@@ -100,6 +105,18 @@ class SpdySessionSpdy3Test : public PlatformTest {
                                        HttpNetworkSession::NORMAL_SOCKET_POOL),
                                    BoundNetLog()));
     return session->InitializeWithSocket(connection.release(), false, OK);
+  }
+
+  void StallSessionSend(SpdySession* session) {
+    // Reduce the send window size to 0 to stall.
+    while (session->session_send_window_size_ > 0) {
+      session->DecreaseSendWindowSize(
+          std::min(kMaxSpdyFrameChunkSize, session->session_send_window_size_));
+    }
+  }
+
+  void UnstallSessionSend(SpdySession* session, int32 delta_window_size) {
+    session->IncreaseSendWindowSize(delta_window_size);
   }
 
   scoped_refptr<TransportSocketParams> transport_params_;
@@ -394,8 +411,6 @@ TEST_F(SpdySessionSpdy3Test, FailedPing) {
   session = NULL;
 }
 
-// TODO(kristianm): Could also test with more sessions where some are idle,
-// and more than one session to a HostPortPair.
 TEST_F(SpdySessionSpdy3Test, CloseIdleSessions) {
   CreateNetworkSession();
 
@@ -686,21 +701,42 @@ TEST_F(SpdySessionSpdy3Test, SendSettingsOnNewSession) {
 }
 
 namespace {
-// This test has two variants, one for each style of closing the connection.
-// If |clean_via_close_current_sessions| is false, the sessions are closed
-// manually, calling SpdySessionPool::Remove() directly.  If it is true,
+
+// Specifies the style for closing the connection.
+enum SpdyPoolCloseSessionsType {
+  SPDY_POOL_CLOSE_SESSIONS_MANUALLY,
+  SPDY_POOL_CLOSE_CURRENT_SESSIONS,
+  SPDY_POOL_CLOSE_IDLE_SESSIONS,
+};
+
+// This test has three variants, one for each style of closing the connection.
+// If |clean_via_close_current_sessions| is SPDY_POOL_CLOSE_SESSIONS_MANUALLY,
+// the sessions are closed manually, calling SpdySessionPool::Remove() directly.
+// If |clean_via_close_current_sessions| is SPDY_POOL_CLOSE_CURRENT_SESSIONS,
 // sessions are closed with SpdySessionPool::CloseCurrentSessions().
-void IPPoolingTest(bool clean_via_close_current_sessions) {
+// If |clean_via_close_current_sessions| is SPDY_POOL_CLOSE_IDLE_SESSIONS,
+// sessions are closed with SpdySessionPool::CloseIdleSessions().
+void IPPoolingTest(SpdyPoolCloseSessionsType close_sessions_type) {
   const int kTestPort = 80;
   struct TestHosts {
+    std::string url;
     std::string name;
     std::string iplist;
     HostPortProxyPair pair;
     AddressList addresses;
   } test_hosts[] = {
-    { "www.foo.com",    "192.0.2.33,192.168.0.1,192.168.0.5" },
-    { "images.foo.com", "192.168.0.2,192.168.0.3,192.168.0.5,192.0.2.33" },
-    { "js.foo.com",     "192.168.0.4,192.168.0.3" },
+    { "http:://www.foo.com",
+      "www.foo.com",
+      "192.0.2.33,192.168.0.1,192.168.0.5"
+    },
+    { "http://js.foo.com",
+      "js.foo.com",
+      "192.168.0.2,192.168.0.3,192.168.0.5,192.0.2.33"
+    },
+    { "http://images.foo.com",
+      "images.foo.com",
+      "192.168.0.4,192.168.0.3"
+    },
   };
 
   SpdySessionDependencies session_deps;
@@ -807,13 +843,58 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
   EXPECT_TRUE(spdy_session_pool->HasSession(test_hosts[1].pair));
 
   // Cleanup the sessions.
-  if (!clean_via_close_current_sessions) {
-    spdy_session_pool->Remove(session);
-    session = NULL;
-    spdy_session_pool->Remove(session2);
-    session2 = NULL;
-  } else {
-    spdy_session_pool->CloseCurrentSessions(net::ERR_ABORTED);
+  switch (close_sessions_type) {
+    case SPDY_POOL_CLOSE_SESSIONS_MANUALLY:
+      spdy_session_pool->Remove(session);
+      session = NULL;
+      spdy_session_pool->Remove(session2);
+      session2 = NULL;
+      break;
+    case SPDY_POOL_CLOSE_CURRENT_SESSIONS:
+      spdy_session_pool->CloseCurrentSessions(net::ERR_ABORTED);
+      break;
+    case SPDY_POOL_CLOSE_IDLE_SESSIONS:
+      GURL url(test_hosts[0].url);
+      scoped_refptr<SpdyStream> spdy_stream =
+          CreateStreamSynchronously(session, url, MEDIUM, BoundNetLog());
+      GURL url1(test_hosts[1].url);
+      scoped_refptr<SpdyStream> spdy_stream1 =
+          CreateStreamSynchronously(session1, url1, MEDIUM, BoundNetLog());
+      GURL url2(test_hosts[2].url);
+      scoped_refptr<SpdyStream> spdy_stream2 =
+          CreateStreamSynchronously(session2, url2, MEDIUM, BoundNetLog());
+
+      // Close streams to make spdy_session and spdy_session1 inactive.
+      session->CloseCreatedStream(spdy_stream, OK);
+      session1->CloseCreatedStream(spdy_stream1, OK);
+
+      // Check spdy_session and spdy_session1 are not closed.
+      EXPECT_FALSE(session->is_active());
+      EXPECT_FALSE(session->IsClosed());
+      EXPECT_FALSE(session1->is_active());
+      EXPECT_FALSE(session1->IsClosed());
+      EXPECT_TRUE(session2->is_active());
+      EXPECT_FALSE(session2->IsClosed());
+
+      // Test that calling CloseIdleSessions, does not cause a crash.
+      // http://crbug.com/181400
+      spdy_session_pool->CloseIdleSessions();
+
+      // Verify spdy_session and spdy_session1 are closed.
+      EXPECT_FALSE(session->is_active());
+      EXPECT_TRUE(session->IsClosed());
+      EXPECT_FALSE(session1->is_active());
+      EXPECT_TRUE(session1->IsClosed());
+      EXPECT_TRUE(session2->is_active());
+      EXPECT_FALSE(session2->IsClosed());
+
+      spdy_stream = NULL;
+      spdy_stream1 = NULL;
+      spdy_stream2->Cancel();
+      spdy_stream2 = NULL;
+      spdy_session_pool->Remove(session2);
+      session2 = NULL;
+      break;
   }
 
   // Verify that the map is all cleaned up.
@@ -825,11 +906,15 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
 }  // namespace
 
 TEST_F(SpdySessionSpdy3Test, IPPooling) {
-  IPPoolingTest(false);
+  IPPoolingTest(SPDY_POOL_CLOSE_SESSIONS_MANUALLY);
 }
 
 TEST_F(SpdySessionSpdy3Test, IPPoolingCloseCurrentSessions) {
-  IPPoolingTest(true);
+  IPPoolingTest(SPDY_POOL_CLOSE_CURRENT_SESSIONS);
+}
+
+TEST_F(SpdySessionSpdy3Test, IPPoolingCloseIdleSessions) {
+  IPPoolingTest(SPDY_POOL_CLOSE_IDLE_SESSIONS);
 }
 
 TEST_F(SpdySessionSpdy3Test, ClearSettingsStorageOnIPAddressChanged) {
@@ -948,19 +1033,10 @@ TEST_F(SpdySessionSpdy3Test, OutOfOrderSynStreams) {
   ASSERT_TRUE(spdy_stream2.get() != NULL);
   EXPECT_EQ(0u, spdy_stream2->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url.scheme();
-  (*headers)[":host"] = url.host();
-  (*headers)[":path"] = url.path();
-  (*headers)[":version"] = "HTTP/1.1";
-  scoped_ptr<SpdyHeaderBlock> headers2(new SpdyHeaderBlock);
-  *headers2 = *headers;
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
 
-  spdy_stream2->set_spdy_headers(headers2.Pass());
+  spdy_stream2->set_spdy_headers(ConstructGetHeaderBlock(url.spec()));
   EXPECT_TRUE(spdy_stream2->HasUrl());
 
   spdy_stream1->SendRequest(false);
@@ -1020,19 +1096,10 @@ TEST_F(SpdySessionSpdy3Test, CancelStream) {
   ASSERT_TRUE(spdy_stream2.get() != NULL);
   EXPECT_EQ(0u, spdy_stream2->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-  scoped_ptr<SpdyHeaderBlock> headers2(new SpdyHeaderBlock);
-  *headers2 = *headers;
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
 
-  spdy_stream2->set_spdy_headers(headers2.Pass());
+  spdy_stream2->set_spdy_headers(ConstructGetHeaderBlock(url2.spec()));
   EXPECT_TRUE(spdy_stream2->HasUrl());
 
   spdy_stream1->SendRequest(false);
@@ -1093,21 +1160,12 @@ TEST_F(SpdySessionSpdy3Test, CloseSessionWithTwoCreatedStreams) {
   ASSERT_TRUE(spdy_stream2.get() != NULL);
   EXPECT_EQ(0u, spdy_stream2->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)["method"] = "GET";
-  (*headers)["scheme"] = url1.scheme();
-  (*headers)["host"] = url1.host();
-  (*headers)["url"] = url1.path();
-  (*headers)["version"] = "HTTP/1.1";
-  scoped_ptr<SpdyHeaderBlock> headers2(new SpdyHeaderBlock);
-  *headers2 = *headers;
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   test::ClosingDelegate delegate1(spdy_stream1.get());
   spdy_stream1->SetDelegate(&delegate1);
 
-  spdy_stream2->set_spdy_headers(headers2.Pass());
+  spdy_stream2->set_spdy_headers(ConstructGetHeaderBlock(url2.spec()));
   EXPECT_TRUE(spdy_stream2->HasUrl());
   test::ClosingDelegate delegate2(spdy_stream2.get());
   spdy_stream2->SetDelegate(&delegate2);
@@ -1350,18 +1408,7 @@ TEST_F(SpdySessionSpdy3Test, CloseTwoStalledCreateStream) {
   EXPECT_EQ(1u, session->num_active_streams() + session->num_created_streams());
   EXPECT_EQ(2u, session->pending_create_stream_queues(LOWEST));
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-  scoped_ptr<SpdyHeaderBlock> headers2(new SpdyHeaderBlock);
-  *headers2 = *headers;
-  scoped_ptr<SpdyHeaderBlock> headers3(new SpdyHeaderBlock);
-  *headers3 = *headers;
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   spdy_stream1->SendRequest(false);
 
@@ -1373,7 +1420,7 @@ TEST_F(SpdySessionSpdy3Test, CloseTwoStalledCreateStream) {
   EXPECT_EQ(0u, session->pending_create_stream_queues(LOWEST));
 
   scoped_refptr<SpdyStream> stream2 = request2.ReleaseStream();
-  stream2->set_spdy_headers(headers2.Pass());
+  stream2->set_spdy_headers(ConstructGetHeaderBlock(url2.spec()));
   EXPECT_TRUE(stream2->HasUrl());
   stream2->SendRequest(false);
 
@@ -1385,7 +1432,7 @@ TEST_F(SpdySessionSpdy3Test, CloseTwoStalledCreateStream) {
   EXPECT_EQ(0u, session->pending_create_stream_queues(LOWEST));
 
   scoped_refptr<SpdyStream> stream3 = request3.ReleaseStream();
-  stream3->set_spdy_headers(headers3.Pass());
+  stream3->set_spdy_headers(ConstructGetHeaderBlock(url3.spec()));
   EXPECT_TRUE(stream3->HasUrl());
   stream3->SendRequest(false);
 
@@ -1702,14 +1749,7 @@ TEST_F(SpdySessionSpdy3Test, ReadDataWithoutYielding) {
   ASSERT_TRUE(spdy_stream1.get() != NULL);
   EXPECT_EQ(0u, spdy_stream1->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   spdy_stream1->SendRequest(false);
 
@@ -1792,14 +1832,7 @@ TEST_F(SpdySessionSpdy3Test, TestYieldingDuringReadData) {
   ASSERT_TRUE(spdy_stream1.get() != NULL);
   EXPECT_EQ(0u, spdy_stream1->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   spdy_stream1->SendRequest(false);
 
@@ -1905,14 +1938,7 @@ TEST_F(SpdySessionSpdy3Test, TestYieldingDuringAsyncReadData) {
   ASSERT_TRUE(spdy_stream1.get() != NULL);
   EXPECT_EQ(0u, spdy_stream1->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   spdy_stream1->SendRequest(false);
 
@@ -1980,14 +2006,7 @@ TEST_F(SpdySessionSpdy3Test, GoAwayWhileInDoLoop) {
   ASSERT_TRUE(spdy_stream1.get() != NULL);
   EXPECT_EQ(0u, spdy_stream1->stream_id());
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-
-  spdy_stream1->set_spdy_headers(headers.Pass());
+  spdy_stream1->set_spdy_headers(ConstructGetHeaderBlock(url1.spec()));
   EXPECT_TRUE(spdy_stream1->HasUrl());
   spdy_stream1->SendRequest(false);
 
@@ -2255,6 +2274,8 @@ TEST_F(SpdySessionSpdy3Test, SessionFlowControlInactiveStream31) {
 // Send data back and forth; the send and receive windows should
 // change appropriately.
 TEST_F(SpdySessionSpdy3Test, SessionFlowControlEndToEnd31) {
+  const char kStreamUrl[] = "http://www.google.com/";
+
   session_deps_.enable_spdy_31 = true;
 
   const int32 msg_data_size = 100;
@@ -2262,38 +2283,12 @@ TEST_F(SpdySessionSpdy3Test, SessionFlowControlEndToEnd31) {
 
   MockConnect connect_data(SYNCHRONOUS, OK);
 
-  const SpdyHeaderInfo kSynStartHeader = {
-    SYN_STREAM,
-    1,
-    0,
-    ConvertRequestPriorityToSpdyPriority(MEDIUM, 3),
-    0,
-    CONTROL_FLAG_NONE,
-    false,
-    RST_STREAM_INVALID,
-    NULL,
-    0,
-    DATA_FLAG_NONE
-  };
-  static const char* const kGetHeaders[] = {
-    ":method",
-    "GET",
-    ":scheme",
-    "http",
-    ":host",
-    "www.google.com",
-    ":path",
-    "/",
-    ":version",
-    "HTTP/1.1",
-  };
   scoped_ptr<SpdyFrame> initial_window_update(
       ConstructSpdyWindowUpdate(
           kSessionFlowControlStreamId,
           kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
   scoped_ptr<SpdyFrame> req(
-      ConstructSpdyPacket(
-          kSynStartHeader, NULL, 0, kGetHeaders, arraysize(kGetHeaders) / 2));
+      ConstructSpdyPost(kStreamUrl, 1, msg_data_size, MEDIUM, NULL, 0));
   scoped_ptr<SpdyFrame> msg(
       ConstructSpdyBodyFrame(1, msg_data.data(), msg_data_size, false));
   MockWrite writes[] = {
@@ -2329,26 +2324,18 @@ TEST_F(SpdySessionSpdy3Test, SessionFlowControlEndToEnd31) {
 
   scoped_refptr<SpdySession> session = CreateInitializedSession();
 
-  GURL url1("http://www.google.com");
+  GURL url(kStreamUrl);
   scoped_refptr<SpdyStream> stream =
-      CreateStreamSynchronously(session, url1, MEDIUM, BoundNetLog());
+      CreateStreamSynchronously(session, url, MEDIUM, BoundNetLog());
   ASSERT_TRUE(stream.get() != NULL);
   EXPECT_EQ(0u, stream->stream_id());
 
-  scoped_refptr<IOBufferWithSize> buf(new IOBufferWithSize(msg_data_size));
-  memcpy(buf->data(), msg_data.data(), msg_data_size);
   test::StreamDelegateSendImmediate delegate(
-      stream.get(), scoped_ptr<SpdyHeaderBlock>(), buf.get());
+      stream.get(), scoped_ptr<SpdyHeaderBlock>(), msg_data);
   stream->SetDelegate(&delegate);
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
-  (*headers)[":method"] = "GET";
-  (*headers)[":scheme"] = url1.scheme();
-  (*headers)[":host"] = url1.host();
-  (*headers)[":path"] = url1.path();
-  (*headers)[":version"] = "HTTP/1.1";
-
-  stream->set_spdy_headers(headers.Pass());
+  stream->set_spdy_headers(
+      ConstructPostHeaderBlock(url.spec(), msg_data_size));
   EXPECT_TRUE(stream->HasUrl());
   EXPECT_EQ(ERR_IO_PENDING, stream->SendRequest(true));
 
@@ -2403,6 +2390,590 @@ TEST_F(SpdySessionSpdy3Test, SessionFlowControlEndToEnd31) {
   stream->Close();
 
   EXPECT_EQ(OK, delegate.WaitForClose());
+}
+
+// Cause a stall by reducing the flow control send window to 0. The
+// stream should resume when that window is then increased.
+TEST_F(SpdySessionSpdy3Test, ResumeAfterSendWindowSizeIncrease31) {
+  const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  session_deps_.enable_spdy_31 = true;
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  scoped_ptr<SpdyFrame> initial_window_update(
+      ConstructSpdyWindowUpdate(
+          kSessionFlowControlStreamId,
+          kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
+  scoped_ptr<SpdyFrame> req(
+      ConstructSpdyPost(kStreamUrl, 1, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> msg(
+      ConstructSpdyBodyFrame(1, kBodyData, kBodyDataSize, false));
+  MockWrite writes[] = {
+    CreateMockWrite(*initial_window_update, 0),
+    CreateMockWrite(*req, 1),
+    CreateMockWrite(*msg, 3),
+  };
+
+  scoped_ptr<SpdyFrame> resp(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> echo(
+      ConstructSpdyBodyFrame(1, kBodyData, kBodyDataSize, false));
+  MockRead reads[] = {
+    CreateMockRead(*resp, 2),
+    CreateMockRead(*echo, 4),
+    MockRead(ASYNC, 0, 0, 5), // EOF
+  };
+
+  DeterministicSocketData data(reads, arraysize(reads),
+                               writes, arraysize(writes));
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  data.set_connect_data(connect_data);
+
+  session_deps_.deterministic_socket_factory->AddSocketDataProvider(&data);
+
+  CreateDeterministicNetworkSession();
+  scoped_refptr<SpdySession> session = GetSession(pair_);
+  InitializeSession(
+      http_session_.get(), session.get(), test_host_port_pair_);
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+
+  scoped_refptr<SpdyStream> stream =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream.get() != NULL);
+
+  test::StreamDelegateWithBody delegate(stream.get(), kBodyDataStringPiece);
+  stream->SetDelegate(&delegate);
+
+  EXPECT_FALSE(stream->HasUrl());
+
+  stream->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream->SendRequest(true));
+
+  data.RunFor(3);
+
+  EXPECT_FALSE(stream->send_stalled_by_flow_control());
+
+  StallSessionSend(session);
+
+  EXPECT_EQ(ERR_IO_PENDING, delegate.OnSendBody());
+
+  EXPECT_TRUE(stream->send_stalled_by_flow_control());
+
+  UnstallSessionSend(session, kBodyDataSize);
+
+  EXPECT_FALSE(stream->send_stalled_by_flow_control());
+
+  data.RunFor(3);
+
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate.WaitForClose());
+
+  EXPECT_TRUE(delegate.send_headers_completed());
+  EXPECT_EQ("200", delegate.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate.GetResponseHeaderValue(":version"));
+  EXPECT_EQ(kBodyDataStringPiece.as_string(), delegate.received_data());
+  EXPECT_EQ(static_cast<int>(kBodyDataSize), delegate.body_data_sent());
+}
+
+// Cause a stall by reducing the flow control send window to 0. The
+// streams should resume in priority order when that window is then
+// increased.
+TEST_F(SpdySessionSpdy3Test, ResumeByPriorityAfterSendWindowSizeIncrease31) {
+  const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  session_deps_.enable_spdy_31 = true;
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  scoped_ptr<SpdyFrame> initial_window_update(
+      ConstructSpdyWindowUpdate(
+          kSessionFlowControlStreamId,
+          kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
+  scoped_ptr<SpdyFrame> req1(
+      ConstructSpdyPost(kStreamUrl, 1, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> req2(
+      ConstructSpdyPost(kStreamUrl, 3, kBodyDataSize, MEDIUM, NULL, 0));
+  scoped_ptr<SpdyFrame> msg1(
+      ConstructSpdyBodyFrame(3, kBodyData, kBodyDataSize, false));
+  scoped_ptr<SpdyFrame> msg2(
+      ConstructSpdyBodyFrame(1, kBodyData, kBodyDataSize, false));
+  MockWrite writes[] = {
+    CreateMockWrite(*initial_window_update, 0),
+    CreateMockWrite(*req1, 1),
+    CreateMockWrite(*req2, 3),
+    CreateMockWrite(*msg1, 5),
+    CreateMockWrite(*msg2, 7),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> echo1(
+      ConstructSpdyBodyFrame(3, kBodyData, kBodyDataSize, false));
+  scoped_ptr<SpdyFrame> echo2(
+      ConstructSpdyBodyFrame(1, kBodyData, kBodyDataSize, false));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 2),
+    CreateMockRead(*resp2, 4),
+    CreateMockRead(*echo1, 6),
+    CreateMockRead(*echo2, 8),
+    MockRead(ASYNC, 0, 0, 9), // EOF
+  };
+
+  DeterministicSocketData data(reads, arraysize(reads),
+                               writes, arraysize(writes));
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  data.set_connect_data(connect_data);
+
+  session_deps_.deterministic_socket_factory->AddSocketDataProvider(&data);
+
+  CreateDeterministicNetworkSession();
+  scoped_refptr<SpdySession> session = GetSession(pair_);
+  InitializeSession(
+      http_session_.get(), session.get(), test_host_port_pair_);
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+
+  scoped_refptr<SpdyStream> stream1 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream1.get() != NULL);
+
+  test::StreamDelegateWithBody delegate1(stream1.get(), kBodyDataStringPiece);
+  stream1->SetDelegate(&delegate1);
+
+  EXPECT_FALSE(stream1->HasUrl());
+
+  stream1->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream1->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream1->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream1->SendRequest(true));
+
+  data.RunFor(3);
+  EXPECT_EQ(1u, stream1->stream_id());
+
+  scoped_refptr<SpdyStream> stream2 =
+      CreateStreamSynchronously(session, url, MEDIUM, BoundNetLog());
+  ASSERT_TRUE(stream2.get() != NULL);
+
+  test::StreamDelegateWithBody delegate2(stream2.get(), kBodyDataStringPiece);
+  stream2->SetDelegate(&delegate2);
+
+  EXPECT_FALSE(stream2->HasUrl());
+
+  stream2->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream2->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream2->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream2->SendRequest(true));
+
+  data.RunFor(2);
+  EXPECT_EQ(3u, stream2->stream_id());
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  StallSessionSend(session);
+
+  EXPECT_EQ(ERR_IO_PENDING, delegate1.OnSendBody());
+  EXPECT_EQ(ERR_IO_PENDING, delegate2.OnSendBody());
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_TRUE(stream2->send_stalled_by_flow_control());
+
+  // This should unstall only stream2.
+  UnstallSessionSend(session, kBodyDataSize);
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  data.RunFor(2);
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  // This should then unstall stream1.
+  UnstallSessionSend(session, kBodyDataSize);
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  data.RunFor(3);
+
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate1.WaitForClose());
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate2.WaitForClose());
+
+  EXPECT_TRUE(delegate1.send_headers_completed());
+  EXPECT_EQ("200", delegate1.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate1.GetResponseHeaderValue(":version"));
+  EXPECT_EQ(kBodyDataStringPiece.as_string(), delegate1.received_data());
+  EXPECT_EQ(static_cast<int>(kBodyDataSize), delegate1.body_data_sent());
+
+  EXPECT_TRUE(delegate2.send_headers_completed());
+  EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate2.GetResponseHeaderValue(":version"));
+  EXPECT_EQ(kBodyDataStringPiece.as_string(), delegate2.received_data());
+  EXPECT_EQ(static_cast<int>(kBodyDataSize), delegate2.body_data_sent());
+}
+
+// Delegate that closes a given stream after sending its body.
+class StreamClosingDelegate : public test::StreamDelegateWithBody {
+ public:
+  StreamClosingDelegate(const scoped_refptr<SpdyStream>& stream,
+                        base::StringPiece data)
+      : StreamDelegateWithBody(stream, data) {}
+
+  virtual ~StreamClosingDelegate() {}
+
+  void set_stream_to_close(const scoped_refptr<SpdyStream>& stream_to_close) {
+    stream_to_close_ = stream_to_close;
+  }
+
+  virtual int OnSendBody() OVERRIDE {
+    int rv = test::StreamDelegateWithBody::OnSendBody();
+    if (stream_to_close_) {
+      stream_to_close_->Close();
+      stream_to_close_ = NULL;
+    }
+    return rv;
+  }
+
+ private:
+  scoped_refptr<SpdyStream> stream_to_close_;
+};
+
+// Cause a stall by reducing the flow control send window to
+// 0. Unstalling the session should properly handle deleted streams.
+TEST_F(SpdySessionSpdy3Test, SendWindowSizeIncreaseWithDeletedStreams31) {
+  const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  session_deps_.enable_spdy_31 = true;
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  scoped_ptr<SpdyFrame> initial_window_update(
+      ConstructSpdyWindowUpdate(
+          kSessionFlowControlStreamId,
+          kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
+  scoped_ptr<SpdyFrame> req1(
+      ConstructSpdyPost(kStreamUrl, 1, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> req2(
+      ConstructSpdyPost(kStreamUrl, 3, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> req3(
+      ConstructSpdyPost(kStreamUrl, 5, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> msg2(
+      ConstructSpdyBodyFrame(3, kBodyData, kBodyDataSize, false));
+  MockWrite writes[] = {
+    CreateMockWrite(*initial_window_update, 0),
+    CreateMockWrite(*req1, 1),
+    CreateMockWrite(*req2, 3),
+    CreateMockWrite(*req3, 5),
+    CreateMockWrite(*msg2, 7),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> resp3(ConstructSpdyGetSynReply(NULL, 0, 5));
+  scoped_ptr<SpdyFrame> echo2(
+      ConstructSpdyBodyFrame(3, kBodyData, kBodyDataSize, false));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 2),
+    CreateMockRead(*resp2, 4),
+    CreateMockRead(*resp3, 6),
+    CreateMockRead(*echo2, 8),
+    MockRead(ASYNC, 0, 0, 9), // EOF
+  };
+
+  DeterministicSocketData data(reads, arraysize(reads),
+                               writes, arraysize(writes));
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  data.set_connect_data(connect_data);
+
+  session_deps_.deterministic_socket_factory->AddSocketDataProvider(&data);
+
+  CreateDeterministicNetworkSession();
+  scoped_refptr<SpdySession> session = GetSession(pair_);
+  InitializeSession(
+      http_session_.get(), session.get(), test_host_port_pair_);
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+
+  scoped_refptr<SpdyStream> stream1 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream1.get() != NULL);
+
+  test::StreamDelegateWithBody delegate1(stream1.get(), kBodyDataStringPiece);
+  stream1->SetDelegate(&delegate1);
+
+  EXPECT_FALSE(stream1->HasUrl());
+
+  stream1->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream1->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream1->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream1->SendRequest(true));
+
+  data.RunFor(3);
+  EXPECT_EQ(1u, stream1->stream_id());
+
+  scoped_refptr<SpdyStream> stream2 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream2.get() != NULL);
+
+  StreamClosingDelegate delegate2(stream2.get(), kBodyDataStringPiece);
+  stream2->SetDelegate(&delegate2);
+
+  EXPECT_FALSE(stream2->HasUrl());
+
+  stream2->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream2->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream2->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream2->SendRequest(true));
+
+  data.RunFor(2);
+  EXPECT_EQ(3u, stream2->stream_id());
+
+  scoped_refptr<SpdyStream> stream3 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream3.get() != NULL);
+
+  test::StreamDelegateWithBody delegate3(stream3.get(), kBodyDataStringPiece);
+  stream3->SetDelegate(&delegate3);
+
+  EXPECT_FALSE(stream3->HasUrl());
+
+  stream3->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream3->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream3->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream3->SendRequest(true));
+
+  data.RunFor(2);
+  EXPECT_EQ(5u, stream3->stream_id());
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream3->send_stalled_by_flow_control());
+
+  StallSessionSend(session);
+
+  EXPECT_EQ(ERR_IO_PENDING, delegate1.OnSendBody());
+  EXPECT_EQ(ERR_IO_PENDING, delegate2.OnSendBody());
+  EXPECT_EQ(ERR_IO_PENDING, delegate3.OnSendBody());
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_TRUE(stream2->send_stalled_by_flow_control());
+  EXPECT_TRUE(stream3->send_stalled_by_flow_control());
+
+  SpdyStreamId stream_id1 = stream1->stream_id();
+  SpdyStreamId stream_id2 = stream2->stream_id();
+  SpdyStreamId stream_id3 = stream3->stream_id();
+
+  // Close stream1 preemptively.
+  stream1 = NULL;
+  session->CloseStream(stream_id1, ERR_CONNECTION_CLOSED);
+
+  EXPECT_FALSE(session->IsStreamActive(stream_id1));
+  EXPECT_TRUE(session->IsStreamActive(stream_id2));
+  EXPECT_TRUE(session->IsStreamActive(stream_id3));
+
+  // Unstall stream2, which should then close stream3.
+  delegate2.set_stream_to_close(stream3);
+  stream3 = NULL;
+  UnstallSessionSend(session, kBodyDataSize);
+
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+  EXPECT_FALSE(session->IsStreamActive(stream_id1));
+  EXPECT_TRUE(session->IsStreamActive(stream_id2));
+  EXPECT_FALSE(session->IsStreamActive(stream_id3));
+
+  data.RunFor(3);
+
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate1.WaitForClose());
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate2.WaitForClose());
+  EXPECT_EQ(OK, delegate3.WaitForClose());
+
+  EXPECT_TRUE(delegate1.send_headers_completed());
+  EXPECT_EQ("200", delegate1.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate1.GetResponseHeaderValue(":version"));
+  EXPECT_EQ("", delegate1.received_data());
+  EXPECT_EQ(0, delegate1.body_data_sent());
+
+  EXPECT_TRUE(delegate2.send_headers_completed());
+  EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate2.GetResponseHeaderValue(":version"));
+  EXPECT_EQ(kBodyDataStringPiece.as_string(), delegate2.received_data());
+  EXPECT_EQ(static_cast<int>(kBodyDataSize), delegate2.body_data_sent());
+
+  EXPECT_TRUE(delegate3.send_headers_completed());
+  EXPECT_EQ("200", delegate3.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate3.GetResponseHeaderValue(":version"));
+  EXPECT_EQ("", delegate3.received_data());
+  EXPECT_EQ(0, delegate3.body_data_sent());
+}
+
+// Delegate that closes a given session after sending its body.
+class SessionClosingDelegate : public test::StreamDelegateWithBody {
+ public:
+  SessionClosingDelegate(const scoped_refptr<SpdyStream>& stream,
+                         base::StringPiece data)
+      : StreamDelegateWithBody(stream, data) {}
+
+  virtual ~SessionClosingDelegate() {}
+
+  void set_session_to_close(
+      const scoped_refptr<SpdySession>& session_to_close) {
+    session_to_close_ = session_to_close;
+  }
+
+  virtual int OnSendBody() OVERRIDE {
+    int rv = test::StreamDelegateWithBody::OnSendBody();
+    if (session_to_close_) {
+      session_to_close_->CloseSessionOnError(
+          ERR_CONNECTION_CLOSED,
+          true,
+          "Closed by SessionClosingDelegate");
+      session_to_close_ = NULL;
+    }
+    return rv;
+  }
+
+ private:
+  scoped_refptr<SpdySession> session_to_close_;
+};
+
+// Cause a stall by reducing the flow control send window to
+// 0. Unstalling the session should properly handle the session itself
+// being closed.
+TEST_F(SpdySessionSpdy3Test, SendWindowSizeIncreaseWithDeletedSession31) {
+  const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  session_deps_.enable_spdy_31 = true;
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  scoped_ptr<SpdyFrame> initial_window_update(
+      ConstructSpdyWindowUpdate(
+          kSessionFlowControlStreamId,
+          kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
+  scoped_ptr<SpdyFrame> req1(
+      ConstructSpdyPost(kStreamUrl, 1, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> req2(
+      ConstructSpdyPost(kStreamUrl, 3, kBodyDataSize, LOWEST, NULL, 0));
+  scoped_ptr<SpdyFrame> msg2(
+      ConstructSpdyBodyFrame(3, kBodyData, kBodyDataSize, false));
+  MockWrite writes[] = {
+    CreateMockWrite(*initial_window_update, 0),
+    CreateMockWrite(*req1, 1),
+    CreateMockWrite(*req2, 3),
+    CreateMockWrite(*msg2, 5),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 2),
+    CreateMockRead(*resp2, 4),
+    MockRead(ASYNC, 0, 0, 6), // EOF
+  };
+
+  DeterministicSocketData data(reads, arraysize(reads),
+                               writes, arraysize(writes));
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  data.set_connect_data(connect_data);
+
+  session_deps_.deterministic_socket_factory->AddSocketDataProvider(&data);
+
+  CreateDeterministicNetworkSession();
+  scoped_refptr<SpdySession> session = GetSession(pair_);
+  InitializeSession(
+      http_session_.get(), session.get(), test_host_port_pair_);
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+
+  scoped_refptr<SpdyStream> stream1 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream1.get() != NULL);
+
+  SessionClosingDelegate delegate1(stream1.get(), kBodyDataStringPiece);
+  stream1->SetDelegate(&delegate1);
+
+  EXPECT_FALSE(stream1->HasUrl());
+
+  stream1->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream1->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream1->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream1->SendRequest(true));
+
+  data.RunFor(3);
+  EXPECT_EQ(1u, stream1->stream_id());
+
+  scoped_refptr<SpdyStream> stream2 =
+      CreateStreamSynchronously(session, url, LOWEST, BoundNetLog());
+  ASSERT_TRUE(stream2.get() != NULL);
+
+  test::StreamDelegateWithBody delegate2(stream2.get(), kBodyDataStringPiece);
+  stream2->SetDelegate(&delegate2);
+
+  EXPECT_FALSE(stream2->HasUrl());
+
+  stream2->set_spdy_headers(
+      ConstructPostHeaderBlock(kStreamUrl, kBodyDataSize));
+  EXPECT_TRUE(stream2->HasUrl());
+  EXPECT_EQ(kStreamUrl, stream2->GetUrl().spec());
+
+  EXPECT_EQ(ERR_IO_PENDING, stream2->SendRequest(true));
+
+  data.RunFor(2);
+  EXPECT_EQ(3u, stream2->stream_id());
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  StallSessionSend(session);
+
+  EXPECT_EQ(ERR_IO_PENDING, delegate1.OnSendBody());
+  EXPECT_EQ(ERR_IO_PENDING, delegate2.OnSendBody());
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_TRUE(stream2->send_stalled_by_flow_control());
+
+  EXPECT_TRUE(spdy_session_pool_->HasSession(pair_));
+
+  // Unstall stream1, which should then close the session.
+  delegate1.set_session_to_close(session);
+  stream1 = NULL;
+  stream2 = NULL;
+  UnstallSessionSend(session, kBodyDataSize);
+  session = NULL;
+
+  EXPECT_FALSE(spdy_session_pool_->HasSession(pair_));
+
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate1.WaitForClose());
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, delegate2.WaitForClose());
+
+  EXPECT_TRUE(delegate1.send_headers_completed());
+  EXPECT_EQ("200", delegate1.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate1.GetResponseHeaderValue(":version"));
+  EXPECT_EQ("", delegate1.received_data());
+  EXPECT_EQ(0, delegate1.body_data_sent());
+
+  EXPECT_TRUE(delegate2.send_headers_completed());
+  EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
+  EXPECT_EQ("HTTP/1.1", delegate2.GetResponseHeaderValue(":version"));
+  EXPECT_EQ("", delegate2.received_data());
+  EXPECT_EQ(0, delegate2.body_data_sent());
 }
 
 }  // namespace net

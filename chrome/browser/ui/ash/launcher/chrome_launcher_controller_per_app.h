@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/display/display_controller.h"
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
 #include "ash/shelf/shelf_types.h"
@@ -18,7 +19,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_observer.h"
 #include "chrome/browser/ui/ash/app_sync_ui_state_observer.h"
@@ -62,6 +63,7 @@ class WebContents;
 // * Shortcuts have no LauncherItemController.
 class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
                                        public ash::ShellObserver,
+                                       public ash::DisplayController::Observer,
                                        public ChromeLauncherController,
                                        public content::NotificationObserver,
                                        public PrefServiceSyncableObserver,
@@ -244,7 +246,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
 
   // Returns the extension identified by |app_id|.
   virtual const extensions::Extension* GetExtensionForAppID(
-      const std::string& app_id) OVERRIDE;
+      const std::string& app_id) const OVERRIDE;
 
   // ash::LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
@@ -259,6 +261,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
       int event_flags) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
+  virtual bool ShouldShowTooltip(const ash::LauncherItem& item) OVERRIDE;
 
   // ash::LauncherModelObserver overrides:
   virtual void LauncherItemAdded(int index) OVERRIDE;
@@ -275,6 +278,10 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
 
   // ash::ShellObserver overrides:
   virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
+
+  // ash::DisplayController::Observer overrides:
+  virtual void OnDisplayConfigurationChanging() OVERRIDE;
+  virtual void OnDisplayConfigurationChanged() OVERRIDE;
 
   // PrefServiceSyncableObserver overrides:
   virtual void OnIsSyncingChanged() OVERRIDE;
@@ -308,13 +315,22 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   bool IsWebContentHandledByApplication(content::WebContents* web_contents,
                                         const std::string& app_id);
 
-  // Get the favicon for the application list by giving the |web_contents|.
+  // Get the favicon for the application list entry for |web_contents|.
   // Note that for incognito windows the incognito icon will be returned.
+  // If |web_contents| has not loaded, returns the default favicon.
   gfx::Image GetAppListIcon(content::WebContents* web_contents) const;
 
-  // Get the favicon for the browser list by giving the |web_contents|.
+  // Get the title for the applicatoin list entry for |web_contents|.
+  // If |web_contents| has not loaded, returns "Net Tab".
+  string16 GetAppListTitle(content::WebContents* web_contents) const;
+
+  // Get the favicon for the browser list entry for |web_contents|.
   // Note that for incognito windows the incognito icon will be returned.
   gfx::Image GetBrowserListIcon(content::WebContents* web_contents) const;
+
+  // Get the title for the browser list entry for |web_contents|.
+  // If |web_contents| has not loaded, returns "Net Tab".
+  string16 GetBrowserListTitle(content::WebContents* web_contents) const;
 
   // Overridden from chrome::BrowserListObserver.
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
@@ -339,6 +355,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
  private:
   friend class ChromeLauncherControllerPerAppTest;
   friend class LauncherPerAppAppBrowserTest;
+  friend class LauncherPlatformPerAppAppBrowserTest;
 
   // Creates a new app shortcut item and controller on the launcher at |index|.
    // Use kInsertItemAtEnd to add a shortcut as the last item.

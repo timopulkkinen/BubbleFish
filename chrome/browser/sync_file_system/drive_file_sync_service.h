@@ -49,9 +49,6 @@ class DriveFileSyncService
       public base::NonThreadSafe,
       public syncer::InvalidationHandler {
  public:
-  typedef base::Callback<void(SyncStatusCode status,
-                              const std::string& resource_id)>
-      ResourceIdCallback;
   static const char kServiceName[];
   static ConflictResolutionPolicy kDefaultPolicy;
 
@@ -81,7 +78,13 @@ class DriveFileSyncService
   virtual void UnregisterOriginForTrackingChanges(
       const GURL& origin,
       const SyncStatusCallback& callback) OVERRIDE;
-  virtual void DeleteOriginDirectory(
+  virtual void EnableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) OVERRIDE;
+  virtual void DisableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) OVERRIDE;
+  virtual void UninstallOrigin(
       const GURL& origin,
       const SyncStatusCallback& callback) OVERRIDE;
   virtual void ProcessRemoteChange(const SyncFileCallback& callback) OVERRIDE;
@@ -273,32 +276,29 @@ class DriveFileSyncService
   void DidInitializeMetadataStore(scoped_ptr<TaskToken> token,
                                   SyncStatusCode status,
                                   bool created);
-  void UnregisterInactiveExtensionsIds();
+  void UpdateRegisteredOrigins();
 
   void GetSyncRootDirectory(scoped_ptr<TaskToken> token,
-                            const ResourceIdCallback& callback);
+                            const SyncStatusCallback& callback);
   void DidGetSyncRootDirectory(scoped_ptr<TaskToken> token,
-                               const ResourceIdCallback& callback,
+                               const SyncStatusCallback& callback,
                                google_apis::GDataErrorCode error,
                                const std::string& sync_root_resource_id);
   void DidGetSyncRootForRegisterOrigin(
       const GURL& origin,
       const SyncStatusCallback& callback,
-      SyncStatusCode status,
-      const std::string& sync_root_resource_id);
+      SyncStatusCode status);
   void StartBatchSyncForOrigin(const GURL& origin,
                                const std::string& resource_id);
-  void GetDriveDirectoryForOrigin(const GURL& origin,
-                                  const SyncStatusCallback& callback,
-                                  const std::string& sync_root_resource_id);
   void DidGetDriveDirectoryForOrigin(scoped_ptr<TaskToken> token,
                                      const GURL& origin,
                                      const SyncStatusCallback& callback,
                                      google_apis::GDataErrorCode error,
                                      const std::string& resource_id);
-  void DidDeleteOriginDirectory(scoped_ptr<TaskToken> token,
-                                const SyncStatusCallback& callback,
-                                google_apis::GDataErrorCode error);
+  void DidUninstallOrigin(scoped_ptr<TaskToken> token,
+                          const GURL& origin,
+                          const SyncStatusCallback& callback,
+                          google_apis::GDataErrorCode error);
   void DidGetLargestChangeStampForBatchSync(scoped_ptr<TaskToken> token,
                                             const GURL& origin,
                                             const std::string& resource_id,
@@ -310,7 +310,7 @@ class DriveFileSyncService
       int64 largest_changestamp,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceList> feed);
-  void DidRemoveOriginOnMetadataStore(
+  void DidChangeOriginOnMetadataStore(
       scoped_ptr<TaskToken> token,
       const SyncStatusCallback& callback,
       SyncStatusCode status);
@@ -428,6 +428,9 @@ class DriveFileSyncService
                                         SyncFileStatus sync_status,
                                         SyncAction action_taken,
                                         SyncDirection direction);
+
+  void HandleSyncRootDirectoryChange(const google_apis::ResourceEntry& entry);
+  void HandleOriginRootDirectoryChange(const google_apis::ResourceEntry& entry);
 
   scoped_ptr<DriveMetadataStore> metadata_store_;
   scoped_ptr<DriveFileSyncClientInterface> sync_client_;

@@ -16,31 +16,23 @@ IndexedDBBrowserTest.VersionChangeCrashResilience
 IndexedDBBrowserTest.ValueSizeTest
 IndexedDBBrowserTest.ConnectionsClosedOnTabClose
 CrossPlatformAccessibilityBrowserTest.*
-GpuCrashTest.MANUAL_WebkitLoseContext
 DatabaseTest.*
 
 # Failures
 WorkerLayoutTest.*
 MediaLayoutTest.*
 IndexedDBLayoutTest.*
-ContentBrowserTest.MANUAL_ShouldntRun
 RenderViewHostTest.BaseURLParam
 OffTheRecordClipboardTest.ClearContentData
 FileSystemLayoutTest.*
-GpuPixelTestCanvas2DSD.MANUAL_Canvas2DRedBoxSD
 GpuPixelBrowserTest.*
 BlobLayoutTest.XhrResponseBlob
 FileSystemBrowserTestWithLowQuota.QuotaTest
 BlobLayoutTest.*
 ChildProcessSecurityPolicyInProcessBrowserTest.NoLeak
 
-# Failure, see crbug/189186
-GpuPixelTestBrowserPlugin.MANUAL_BrowserPluginBlueBox
-
 # Crashes
 WorkerXHRHttpLayoutTest.Tests
-GpuCrashTest.MANUAL_Kill
-DownloadContentTest.ResumeInterruptedDownload
 
 # Needs to start the test server before
 # BrowserTestBase::SetUpCommandLine is called, but on Android
@@ -52,9 +44,6 @@ BrowserPluginHostTest.*
 BrowserPluginTest.*
 PluginTest.*
 
-# http://crbug.com/181069
-WebrtcBrowserTest.*
-
 # http://crbug.com/187500
 RenderViewImplTest.*
 RendererAccessibilityTest.EditableTextModeFocusNotifications
@@ -62,6 +51,22 @@ RendererAccessibilityTest.SendFullAccessibilityTreeOnReload
 RendererAccessibilityTest.HideAccessibilityObject
 RendererAccessibilityTest.ShowAccessibilityObject
 RenderWidgetTest.OnMsgPaintAtSize
+PasswordFormConversionUtilsTest.ValidWebFormElementToPasswordForm
+PasswordFormConversionUtilsTest.InvalidWebFormElementToPasswordForm
 
 # Multiple test servers support: http://crbug/187570
 RenderViewHostManagerTest.*
+
+# http://crbug.com/215894
+DownloadContentTest.ResumeInterruptedDownload
+DownloadContentTest.ResumeInterruptedDownloadNoRange
+DownloadContentTest.ResumeInterruptedDownloadNoVerifiers
+DownloadContentTest.ResumeInterruptedDownloadBadPrecondition
+DownloadContentTest.ResumeWithDeletedFile
+
+# http://crbug.com/181069
+WebrtcBrowserTest.CanSetupVideoCall
+WebrtcBrowserTest.CanSetupAudioAndVideoCall
+WebrtcBrowserTest.CanSetupAudioAndVideoCallWithoutMsidAndBundle
+WebrtcBrowserTest.CallWithDataOnly
+WebrtcBrowserTest.CallWithDataAndMedia

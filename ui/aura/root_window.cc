@@ -266,7 +266,7 @@ void RootWindow::OnMouseEventsEnableStateChanged(bool enabled) {
 void RootWindow::MoveCursorTo(const gfx::Point& location_in_dip) {
   gfx::Point3F point_3f(location_in_dip);
   GetRootTransform().TransformPoint(point_3f);
-  host_->MoveCursorTo(gfx::ToRoundedPoint(point_3f.AsPointF()));
+  host_->MoveCursorTo(gfx::ToFlooredPoint(point_3f.AsPointF()));
   SetLastMouseLocation(this, location_in_dip);
   client::CursorClient* cursor_client = client::GetCursorClient(this);
   if (cursor_client) {
@@ -398,13 +398,13 @@ void RootWindow::ConvertPointFromNativeScreen(gfx::Point* point) const {
 void RootWindow::ConvertPointToHost(gfx::Point* point) const {
   gfx::Point3F point_3f(*point);
   GetRootTransform().TransformPoint(point_3f);
-  *point = gfx::ToRoundedPoint(point_3f.AsPointF());
+  *point = gfx::ToFlooredPoint(point_3f.AsPointF());
 }
 
 void RootWindow::ConvertPointFromHost(gfx::Point* point) const {
   gfx::Point3F point_3f(*point);
   GetRootTransform().TransformPointReverse(point_3f);
-  *point = gfx::ToRoundedPoint(point_3f.AsPointF());
+  *point = gfx::ToFlooredPoint(point_3f.AsPointF());
 }
 
 void RootWindow::ProcessedTouchEvent(ui::TouchEvent* event,
@@ -669,8 +669,28 @@ void RootWindow::ClearMouseHandlers() {
 ////////////////////////////////////////////////////////////////////////////////
 // RootWindow, private:
 
-void RootWindow::TransformEventForDeviceScaleFactor(ui::LocatedEvent* event) {
+void RootWindow::TransformEventForDeviceScaleFactor(bool keep_inside_root,
+                                                    ui::LocatedEvent* event) {
   event->UpdateForRootTransform(GetRootTransform());
+#if defined(OS_CHROMEOS)
+  const gfx::Rect& root_bounds = bounds();
+  if (keep_inside_root &
+      host_->GetBounds().Contains(event->system_location()) &&
+      !root_bounds.Contains(event->root_location())) {
+    // Make sure that the mouse location inside the host window gets
+    // translated inside root window.
+    // TODO(oshima): This is (hopefully) short term bandaid to deal
+    // with calculation error in inverted matrix. We'll try better
+    // alternative (crbug.com/222483) for m28.
+    int x = event->location().x();
+    int y = event->location().y();
+    x = std::min(std::max(x, root_bounds.x()), root_bounds.right());
+    y = std::min(std::max(y, root_bounds.y()), root_bounds.bottom());
+    const gfx::Point new_location(x, y);
+    event->set_location(new_location);
+    event->set_root_location(new_location);
+  }
+#endif  // defined(OS_CHROMEOS)
 }
 
 void RootWindow::HandleMouseMoved(const ui::MouseEvent& event, Window* target) {
@@ -807,10 +827,10 @@ void RootWindow::UpdateWindowSize(const gfx::Size& host_size) {
   new_bounds.Scale(root_window_scale_ * root_window_scale_);
   // Ignore the origin because RootWindow's insets are handled by
   // the transform.
-  // Round the size because the bounds is no longer aligned to
+  // Floor the size because the bounds is no longer aligned to
   // backing pixel when |root_window_scale_| is specified
   // (850 height at 1.25 scale becomes 1062.5 for example.)
-  SetBounds(gfx::Rect(gfx::ToRoundedSize(new_bounds.size())));
+  SetBounds(gfx::Rect(gfx::ToFlooredSize(new_bounds.size())));
 }
 
 void RootWindow::OnWindowAddedToRootWindow(Window* attached) {
@@ -884,7 +904,7 @@ bool RootWindow::OnHostMouseEvent(ui::MouseEvent* event) {
 bool RootWindow::OnHostScrollEvent(ui::ScrollEvent* event) {
   DispatchHeldEvents();
 
-  TransformEventForDeviceScaleFactor(event);
+  TransformEventForDeviceScaleFactor(false, event);
   SetLastMouseLocation(this, event->location());
   synthesize_mouse_move_ = false;
 
@@ -930,7 +950,7 @@ bool RootWindow::OnHostTouchEvent(ui::TouchEvent* event) {
     default:
       break;
   }
-  TransformEventForDeviceScaleFactor(event);
+  TransformEventForDeviceScaleFactor(false, event);
   bool handled = false;
   Window* target = client::GetCaptureWindow(this);
   if (!target) {
@@ -1031,7 +1051,7 @@ RootWindow* RootWindow::AsRootWindow() {
 // RootWindow, private:
 
 bool RootWindow::DispatchMouseEventImpl(ui::MouseEvent* event) {
-  TransformEventForDeviceScaleFactor(event);
+  TransformEventForDeviceScaleFactor(true, event);
   Window* target = mouse_pressed_handler_ ?
       mouse_pressed_handler_ : client::GetCaptureWindow(this);
   if (!target)
@@ -1134,17 +1154,20 @@ void RootWindow::SynthesizeMouseMoveEvent() {
   if (!synthesize_mouse_move_)
     return;
   synthesize_mouse_move_ = false;
-  gfx::Point3F point(GetLastMouseLocationInRoot());
-  GetRootTransform().TransformPoint(point);
-  gfx::Point orig_mouse_location = gfx::ToFlooredPoint(point.AsPointF());
+  gfx::Point root_mouse_location = GetLastMouseLocationInRoot();
+  if (!bounds().Contains(root_mouse_location))
+    return;
+  gfx::Point host_mouse_location = root_mouse_location;
+  ConvertPointToHost(&host_mouse_location);
 
   // TODO(derat|oshima): Don't use mouse_button_flags_ as it's
   // currently broken. See/ crbug.com/107931.
   ui::MouseEvent event(ui::ET_MOUSE_MOVED,
-                       orig_mouse_location,
-                       orig_mouse_location,
+                       host_mouse_location,
+                       host_mouse_location,
                        ui::EF_IS_SYNTHESIZED);
-  event.set_system_location(Env::GetInstance()->last_mouse_location());
+  ConvertPointToNativeScreen(&root_mouse_location);
+  event.set_system_location(root_mouse_location);
   OnHostMouseEvent(&event);
 }
 

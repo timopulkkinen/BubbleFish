@@ -97,13 +97,6 @@ std::string GetDriveUserAgent() {
 
 }  // namespace
 
-void DriveSystemService::DriveCacheDeleter::operator()(
-    DriveCache* cache) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (cache)
-    cache->Destroy();
-}
-
 DriveSystemService::DriveSystemService(
     Profile* profile,
     google_apis::DriveServiceInterface* test_drive_service,
@@ -138,12 +131,21 @@ DriveSystemService::DriveSystemService(
                               NULL /* free_disk_space_getter */));
   uploader_.reset(new google_apis::DriveUploader(drive_service_.get()));
   webapps_registry_.reset(new DriveWebAppsRegistry);
+
+  // We can call DriveCache::GetCacheDirectoryPath safely even before the cache
+  // gets initialized.
+  resource_metadata_.reset(new DriveResourceMetadata(
+      drive_service_->GetRootResourceId(),
+      cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+      blocking_task_runner_));
+
   file_system_.reset(test_file_system ? test_file_system :
                      new DriveFileSystem(profile_,
                                          cache(),
                                          drive_service_.get(),
                                          uploader(),
                                          webapps_registry(),
+                                         resource_metadata_.get(),
                                          blocking_task_runner_));
   file_write_helper_.reset(new FileWriteHelper(file_system()));
   download_handler_.reset(new DriveDownloadHandler(file_write_helper(),
@@ -165,8 +167,9 @@ void DriveSystemService::Initialize() {
   sync_client_->Initialize();
   drive_service_->Initialize(profile_);
   file_system_->Initialize();
-  cache_->RequestInitialize(base::Bind(&DriveSystemService::OnCacheInitialized,
-                                       weak_ptr_factory_.GetWeakPtr()));
+  cache_->RequestInitialize(
+      base::Bind(&DriveSystemService::InitializeAfterCacheInitialized,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void DriveSystemService::Shutdown() {
@@ -297,11 +300,28 @@ void DriveSystemService::RemoveDriveMountPoint() {
   event_logger_->Log("RemoveDriveMountPoint");
 }
 
-void DriveSystemService::OnCacheInitialized(bool success) {
+void DriveSystemService::InitializeAfterCacheInitialized(bool success) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!success) {
     LOG(WARNING) << "Failed to initialize the cache. Disabling Drive";
+    DisableDrive();
+    return;
+  }
+
+  resource_metadata_->Initialize(
+      base::Bind(
+          &DriveSystemService::InitializeAfterResourceMetadataInitialized,
+          weak_ptr_factory_.GetWeakPtr()));
+}
+
+void DriveSystemService::InitializeAfterResourceMetadataInitialized(
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (error != DRIVE_FILE_OK) {
+    LOG(WARNING) << "Failed to initialize resource metadata. Disabling Drive : "
+                 << error;
     DisableDrive();
     return;
   }

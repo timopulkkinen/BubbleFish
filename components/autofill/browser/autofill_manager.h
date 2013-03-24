@@ -17,7 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/string16.h"
 #include "base/supports_user_data.h"
 #include "base/time.h"
@@ -121,7 +121,6 @@ class AutofillManager : public content::WebContentsObserver,
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
       const GURL& source_url,
-      const content::SSLStatus& ssl_status,
       autofill::DialogType dialog_type,
       const base::Callback<void(const FormStructure*)>& callback);
 
@@ -265,8 +264,7 @@ class AutofillManager : public content::WebContentsObserver,
 
   // Requests an interactive autocomplete UI be shown.
   void OnRequestAutocomplete(const FormData& form,
-                             const GURL& frame_url,
-                             const content::SSLStatus& ssl_status);
+                             const GURL& frame_url);
 
   // Passes return data for an OnRequestAutocomplete call back to the page.
   void ReturnAutocompleteData(const FormStructure* result);

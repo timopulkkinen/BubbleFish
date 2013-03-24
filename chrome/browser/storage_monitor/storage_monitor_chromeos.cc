@@ -6,6 +6,7 @@
 
 #include "chrome/browser/storage_monitor/storage_monitor_chromeos.h"
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
@@ -13,8 +14,11 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/storage_monitor/media_storage_util.h"
+#include "chrome/browser/storage_monitor/media_transfer_protocol_device_observer_linux.h"
 #include "chrome/browser/storage_monitor/removable_device_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 
 namespace chromeos {
 
@@ -104,15 +108,31 @@ using content::BrowserThread;
 using chrome::StorageInfo;
 
 StorageMonitorCros::StorageMonitorCros() {
-  DCHECK(disks::DiskMountManager::GetInstance());
-  disks::DiskMountManager::GetInstance()->AddObserver(this);
-  CheckExistingMountPointsOnUIThread();
 }
 
 StorageMonitorCros::~StorageMonitorCros() {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
+    device::MediaTransferProtocolManager::Shutdown();
+  }
+
   disks::DiskMountManager* manager = disks::DiskMountManager::GetInstance();
   if (manager) {
     manager->RemoveObserver(this);
+  }
+}
+
+void StorageMonitorCros::Init() {
+  DCHECK(disks::DiskMountManager::GetInstance());
+  disks::DiskMountManager::GetInstance()->AddObserver(this);
+  CheckExistingMountPointsOnUIThread();
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
+    scoped_refptr<base::MessageLoopProxy> loop_proxy;
+    device::MediaTransferProtocolManager::Initialize(loop_proxy);
+
+    media_transfer_protocol_device_observer_.reset(
+        new chrome::MediaTransferProtocolDeviceObserverLinux());
+    media_transfer_protocol_device_observer_->SetNotifications(receiver());
   }
 }
 
@@ -210,6 +230,42 @@ uint64 StorageMonitorCros::GetStorageSize(
   MountMap::const_iterator info_it = mount_map_.find(device_location);
   return (info_it != mount_map_.end()) ?
       info_it->second.total_size_in_bytes : 0;
+}
+
+// Callback executed when the unmount call is run by DiskMountManager.
+// Forwards result to |EjectDevice| caller.
+void NotifyUnmountResult(
+    base::Callback<void(chrome::StorageMonitor::EjectStatus)> callback,
+    chromeos::MountError error_code) {
+  if (error_code == MOUNT_ERROR_NONE)
+    callback.Run(chrome::StorageMonitor::EJECT_OK);
+  else
+    callback.Run(chrome::StorageMonitor::EJECT_FAILURE);
+}
+
+void StorageMonitorCros::EjectDevice(
+    const std::string& device_id,
+    base::Callback<void(EjectStatus)> callback) {
+  std::string mount_path;
+  for (MountMap::const_iterator info_it = mount_map_.begin();
+       info_it != mount_map_.end(); ++info_it) {
+    if (info_it->second.device_id == device_id)
+      mount_path = info_it->first;
+  }
+
+  if (mount_path.empty()) {
+    callback.Run(EJECT_NO_SUCH_DEVICE);
+    return;
+  }
+
+  disks::DiskMountManager* manager = disks::DiskMountManager::GetInstance();
+  if (!manager) {
+    callback.Run(EJECT_FAILURE);
+    return;
+  }
+
+  manager->UnmountPath(mount_path, chromeos::UNMOUNT_OPTIONS_NONE,
+                       base::Bind(NotifyUnmountResult, callback));
 }
 
 void StorageMonitorCros::CheckMountedPathOnFileThread(

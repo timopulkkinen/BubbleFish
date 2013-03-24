@@ -52,12 +52,15 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
   virtual const SkBitmap& GetBackground() OVERRIDE;
   virtual gfx::Size GetPhysicalBackingSize() const OVERRIDE;
+  virtual float GetOverdrawBottomHeight() const OVERRIDE;
   virtual bool IsShowingContextMenu() const OVERRIDE;
   virtual void SetShowingContextMenu(bool showing_menu) OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
   virtual bool IsMouseLocked() OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual InputEventAckState FilterInputEvent(
+      const WebKit::WebInputEvent& input_event) OVERRIDE;
   virtual void SetPopupType(WebKit::WebPopupType popup_type) OVERRIDE;
   virtual WebKit::WebPopupType GetPopupType() OVERRIDE;
   virtual BrowserAccessibilityManager*
@@ -69,7 +72,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
       int mouse_event_y) OVERRIDE;
   virtual bool CanSubscribeFrame() const OVERRIDE;
   virtual void BeginFrameSubscription(
-      RenderWidgetHostViewFrameSubscriber* subscriber) OVERRIDE;
+      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) OVERRIDE;
   virtual void EndFrameSubscription() OVERRIDE;
   virtual void OnSwapCompositorFrame(
       scoped_ptr<cc::CompositorFrame> frame) OVERRIDE {}

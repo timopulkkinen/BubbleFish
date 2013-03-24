@@ -11,11 +11,11 @@
 #include "base/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
-#include "cc/layer.h"
-#include "cc/layer_tree_debug_state.h"
-#include "cc/layer_tree_host.h"
-#include "cc/switches.h"
-#include "cc/thread_impl.h"
+#include "cc/base/switches.h"
+#include "cc/base/thread_impl.h"
+#include "cc/debug/layer_tree_debug_state.h"
+#include "cc/layers/layer.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/gpu/input_handler_manager.h"
@@ -86,53 +86,54 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
   CommandLine* cmd = CommandLine::ForCurrentProcess();
 
   cc::LayerTreeSettings settings;
-  settings.acceleratePainting =
+  settings.accelerate_painting =
       cmd->HasSwitch(switches::kEnableAcceleratedPainting);
-  settings.renderVSyncEnabled = !cmd->HasSwitch(switches::kDisableGpuVsync);
-  settings.perTilePaintingEnabled =
+  settings.render_vsync_enabled = !cmd->HasSwitch(switches::kDisableGpuVsync);
+  settings.per_tile_painting_enabled =
       cmd->HasSwitch(cc::switches::kEnablePerTilePainting);
-  settings.acceleratedAnimationEnabled =
+  settings.accelerated_animation_enabled =
       !cmd->HasSwitch(cc::switches::kDisableThreadedAnimation);
 
-  int default_tile_width = settings.defaultTileSize.width();
+  int default_tile_width = settings.default_tile_size.width();
   if (cmd->HasSwitch(switches::kDefaultTileWidth)) {
     GetSwitchValueAsInt(*cmd, switches::kDefaultTileWidth, 1,
                         std::numeric_limits<int>::max(), &default_tile_width);
   }
-  int default_tile_height = settings.defaultTileSize.height();
+  int default_tile_height = settings.default_tile_size.height();
   if (cmd->HasSwitch(switches::kDefaultTileHeight)) {
     GetSwitchValueAsInt(*cmd, switches::kDefaultTileHeight, 1,
                         std::numeric_limits<int>::max(), &default_tile_height);
   }
-  settings.defaultTileSize = gfx::Size(default_tile_width, default_tile_height);
+  settings.default_tile_size = gfx::Size(default_tile_width,
+                                         default_tile_height);
 
-  int max_untiled_layer_width = settings.maxUntiledLayerSize.width();
+  int max_untiled_layer_width = settings.max_untiled_layer_size.width();
   if (cmd->HasSwitch(switches::kMaxUntiledLayerWidth)) {
     GetSwitchValueAsInt(*cmd, switches::kMaxUntiledLayerWidth, 1,
                         std::numeric_limits<int>::max(),
                         &max_untiled_layer_width);
   }
-  int max_untiled_layer_height = settings.maxUntiledLayerSize.height();
+  int max_untiled_layer_height = settings.max_untiled_layer_size.height();
   if (cmd->HasSwitch(switches::kMaxUntiledLayerHeight)) {
     GetSwitchValueAsInt(*cmd, switches::kMaxUntiledLayerHeight, 1,
                         std::numeric_limits<int>::max(),
                         &max_untiled_layer_height);
   }
 
-  settings.maxUntiledLayerSize = gfx::Size(max_untiled_layer_width,
+  settings.max_untiled_layer_size = gfx::Size(max_untiled_layer_width,
                                            max_untiled_layer_height);
 
-  settings.rightAlignedSchedulingEnabled =
+  settings.right_aligned_scheduling_enabled =
       cmd->HasSwitch(cc::switches::kEnableRightAlignedScheduling);
-  settings.implSidePainting = cc::switches::IsImplSidePaintingEnabled();
-  settings.useCheapnessEstimator =
+  settings.impl_side_painting = cc::switches::IsImplSidePaintingEnabled();
+  settings.use_cheapness_estimator =
       cmd->HasSwitch(cc::switches::kUseCheapnessEstimator);
-  settings.useColorEstimator =
-      cmd->HasSwitch(cc::switches::kUseColorEstimator);
-  settings.predictionBenchmarking =
+  settings.use_color_estimator =
+      !cmd->HasSwitch(cc::switches::kDisableColorEstimator);
+  settings.prediction_benchmarking =
       cmd->HasSwitch(cc::switches::kEnablePredictionBenchmarking);
 
-  settings.calculateTopControlsPosition =
+  settings.calculate_top_controls_position =
       cmd->HasSwitch(cc::switches::kEnableTopControlsPositionCalculation);
   if (cmd->HasSwitch(cc::switches::kTopControlsHeight)) {
     std::string controls_height_str =
@@ -140,17 +141,18 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
     double controls_height;
     if (base::StringToDouble(controls_height_str, &controls_height) &&
         controls_height > 0)
-      settings.topControlsHeight = controls_height;
+      settings.top_controls_height = controls_height;
   }
 
-  settings.compositorFrameMessage =
+  settings.compositor_frame_message =
       cmd->HasSwitch(cc::switches::kEnableCompositorFrameMessage);
 
-  if (settings.calculateTopControlsPosition &&
-      (settings.topControlsHeight <= 0 || !settings.compositorFrameMessage)) {
+  if (settings.calculate_top_controls_position &&
+      (settings.top_controls_height <= 0 ||
+       !settings.compositor_frame_message)) {
     DCHECK(false) << "Top controls repositioning enabled without valid height "
-                     "or compositorFrameMessage set.";
-    settings.calculateTopControlsPosition = false;
+                     "or compositor_frame_message set.";
+    settings.calculate_top_controls_position = false;
   }
 
   if (cmd->HasSwitch(cc::switches::kTopControlsShowThreshold)) {
@@ -159,7 +161,7 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
       double show_threshold;
       if (base::StringToDouble(top_threshold_str, &show_threshold) &&
           show_threshold >= 0.f && show_threshold <= 1.f)
-        settings.topControlsShowThreshold = show_threshold;
+        settings.top_controls_show_threshold = show_threshold;
   }
 
   if (cmd->HasSwitch(cc::switches::kTopControlsHideThreshold)) {
@@ -168,48 +170,52 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
       double hide_threshold;
       if (base::StringToDouble(top_threshold_str, &hide_threshold) &&
           hide_threshold >= 0.f && hide_threshold <= 1.f)
-        settings.topControlsHideThreshold = hide_threshold;
+        settings.top_controls_hide_threshold = hide_threshold;
   }
 
-  settings.partialSwapEnabled = widget->AllowPartialSwap() &&
+  settings.partial_swap_enabled = widget->AllowPartialSwap() &&
       cmd->HasSwitch(cc::switches::kEnablePartialSwap);
-  settings.backgroundColorInsteadOfCheckerboard =
+  settings.background_color_instead_of_checkerboard =
       cmd->HasSwitch(cc::switches::kBackgroundColorInsteadOfCheckerboard);
-  settings.showOverdrawInTracing =
+  settings.show_overdraw_in_tracing =
       cmd->HasSwitch(cc::switches::kTraceOverdraw);
 
-  settings.initialDebugState.showFPSCounter =
-      cmd->HasSwitch(switches::kShowFPSCounter);
-  settings.initialDebugState.showPaintRects =
+  // These flags should be mirrored by UI versions in ui/compositor/.
+  settings.initial_debug_state.show_debug_borders =
+      cmd->HasSwitch(cc::switches::kShowCompositedLayerBorders);
+  settings.initial_debug_state.show_fps_counter =
+      cmd->HasSwitch(cc::switches::kShowFPSCounter);
+  settings.initial_debug_state.show_paint_rects =
       cmd->HasSwitch(switches::kShowPaintRects);
-  settings.initialDebugState.showDebugBorders =
-      cmd->HasSwitch(switches::kShowCompositedLayerBorders);
-  settings.initialDebugState.showPlatformLayerTree =
-      cmd->HasSwitch(switches::kShowCompositedLayerTree);
-
-  settings.initialDebugState.showPropertyChangedRects =
+  settings.initial_debug_state.show_platform_layer_tree =
+      cmd->HasSwitch(cc::switches::kShowCompositedLayerTree);
+  settings.initial_debug_state.show_property_changed_rects =
       cmd->HasSwitch(cc::switches::kShowPropertyChangedRects);
-  settings.initialDebugState.showSurfaceDamageRects =
+  settings.initial_debug_state.show_surface_damage_rects =
       cmd->HasSwitch(cc::switches::kShowSurfaceDamageRects);
-  settings.initialDebugState.showScreenSpaceRects =
+  settings.initial_debug_state.show_screen_space_rects =
       cmd->HasSwitch(cc::switches::kShowScreenSpaceRects);
-  settings.initialDebugState.showReplicaScreenSpaceRects =
+  settings.initial_debug_state.show_replica_screen_space_rects =
       cmd->HasSwitch(cc::switches::kShowReplicaScreenSpaceRects);
-  settings.initialDebugState.showOccludingRects =
+  settings.initial_debug_state.show_occluding_rects =
       cmd->HasSwitch(cc::switches::kShowOccludingRects);
-  settings.initialDebugState.showNonOccludingRects =
+  settings.initial_debug_state.show_non_occluding_rects =
       cmd->HasSwitch(cc::switches::kShowNonOccludingRects);
-  settings.initialDebugState.setRecordRenderingStats(
+
+  settings.initial_debug_state.SetRecordRenderingStats(
       cmd->HasSwitch(switches::kEnableGpuBenchmarking));
-  settings.initialDebugState.traceAllRenderedFrames =
+  settings.initial_debug_state.trace_all_rendered_frames =
       cmd->HasSwitch(cc::switches::kTraceAllRenderedFrames);
 
   if (cmd->HasSwitch(cc::switches::kSlowDownRasterScaleFactor)) {
     const int kMinSlowDownScaleFactor = 0;
     const int kMaxSlowDownScaleFactor = INT_MAX;
-    GetSwitchValueAsInt(*cmd, cc::switches::kSlowDownRasterScaleFactor,
-                        kMinSlowDownScaleFactor, kMaxSlowDownScaleFactor,
-                        &settings.initialDebugState.slowDownRasterScaleFactor);
+    GetSwitchValueAsInt(
+        *cmd,
+        cc::switches::kSlowDownRasterScaleFactor,
+        kMinSlowDownScaleFactor,
+        kMaxSlowDownScaleFactor,
+        &settings.initial_debug_state.slow_down_raster_scale_factor);
   }
 
   if (cmd->HasSwitch(cc::switches::kNumRasterThreads)) {
@@ -219,26 +225,26 @@ scoped_ptr<RenderWidgetCompositor> RenderWidgetCompositor::Create(
     if (GetSwitchValueAsInt(*cmd, cc::switches::kNumRasterThreads,
                             kMinRasterThreads, kMaxRasterThreads,
                             &num_raster_threads))
-      settings.numRasterThreads = num_raster_threads;
+      settings.num_raster_threads = num_raster_threads;
   }
 
   if (cmd->HasSwitch(cc::switches::kLowResolutionContentsScaleFactor)) {
-    const int kMinScaleFactor = settings.minimumContentsScale;
+    const int kMinScaleFactor = settings.minimum_contents_scale;
     const int kMaxScaleFactor = 1;
     GetSwitchValueAsFloat(*cmd,
                           cc::switches::kLowResolutionContentsScaleFactor,
                           kMinScaleFactor, kMaxScaleFactor,
-                          &settings.lowResContentsScaleFactor);
+                          &settings.low_res_contents_scale_factor);
   }
 
 #if defined(OS_ANDROID)
   // TODO(danakj): Move these to the android code.
-  settings.canUseLCDText = false;
-  settings.maxPartialTextureUpdates = 0;
-  settings.useLinearFadeScrollbarAnimator = true;
-  settings.solidColorScrollbars = true;
-  settings.solidColorScrollbarColor = SkColorSetARGB(128, 128, 128, 128);
-  settings.solidColorScrollbarThicknessDIP = 3;
+  settings.can_use_lcd_text = false;
+  settings.max_partial_texture_updates = 0;
+  settings.use_linear_fade_scrollbar_animator = true;
+  settings.solid_color_scrollbars = true;
+  settings.solid_color_scrollbar_color = SkColorSetARGB(128, 128, 128, 128);
+  settings.solid_color_scrollbar_thickness_dip = 3;
 #endif
 
   if (!compositor->initialize(settings))
@@ -287,13 +293,18 @@ void RenderWidgetCompositor::EnableHidingTopControls(bool enable) {
   layer_tree_host_->EnableHidingTopControls(enable);
 }
 
+void RenderWidgetCompositor::SetOverdrawBottomHeight(
+    float overdraw_bottom_height) {
+  layer_tree_host_->SetOverdrawBottomHeight(overdraw_bottom_height);
+}
+
 bool RenderWidgetCompositor::initialize(cc::LayerTreeSettings settings) {
   scoped_ptr<cc::Thread> impl_thread;
   scoped_refptr<base::MessageLoopProxy> compositor_message_loop_proxy =
       RenderThreadImpl::current()->compositor_message_loop_proxy();
   threaded_ = !!compositor_message_loop_proxy;
   if (threaded_) {
-    impl_thread = cc::ThreadImpl::createForDifferentThread(
+    impl_thread = cc::ThreadImpl::CreateForDifferentThread(
         compositor_message_loop_proxy);
   }
   layer_tree_host_ = cc::LayerTreeHost::Create(this,
@@ -308,7 +319,7 @@ void RenderWidgetCompositor::setSurfaceReady() {
 
 void RenderWidgetCompositor::setRootLayer(const WebKit::WebLayer& layer) {
   layer_tree_host_->SetRootLayer(
-      static_cast<const WebKit::WebLayerImpl*>(&layer)->layer());
+      static_cast<const webkit::WebLayerImpl*>(&layer)->layer());
 }
 
 void RenderWidgetCompositor::clearRootLayer() {
@@ -394,7 +405,7 @@ void RenderWidgetCompositor::didStopFlinging() {
 }
 
 void RenderWidgetCompositor::registerForAnimations(WebKit::WebLayer* layer) {
-  cc::Layer* cc_layer = static_cast<WebKit::WebLayerImpl*>(layer)->layer();
+  cc::Layer* cc_layer = static_cast<webkit::WebLayerImpl*>(layer)->layer();
   cc_layer->layer_animation_controller()->SetAnimationRegistrar(
       layer_tree_host_->animation_registrar());
 }
@@ -415,60 +426,60 @@ void RenderWidgetCompositor::setDeferCommits(bool defer_commits) {
 
 void RenderWidgetCompositor::setShowFPSCounter(bool show) {
   cc::LayerTreeDebugState debug_state = layer_tree_host_->debug_state();
-  debug_state.showFPSCounter = show;
+  debug_state.show_fps_counter = show;
   layer_tree_host_->SetDebugState(debug_state);
 }
 
 void RenderWidgetCompositor::setShowPaintRects(bool show) {
   cc::LayerTreeDebugState debug_state = layer_tree_host_->debug_state();
-  debug_state.showPaintRects = show;
+  debug_state.show_paint_rects = show;
   layer_tree_host_->SetDebugState(debug_state);
 }
 
 void RenderWidgetCompositor::setShowDebugBorders(bool show) {
   cc::LayerTreeDebugState debug_state = layer_tree_host_->debug_state();
-  debug_state.showDebugBorders = show;
+  debug_state.show_debug_borders = show;
   layer_tree_host_->SetDebugState(debug_state);
 }
 
 void RenderWidgetCompositor::setContinuousPaintingEnabled(bool enabled) {
   cc::LayerTreeDebugState debug_state = layer_tree_host_->debug_state();
-  debug_state.continuousPainting = enabled;
+  debug_state.continuous_painting = enabled;
   layer_tree_host_->SetDebugState(debug_state);
 }
 
-void RenderWidgetCompositor::willBeginFrame() {
+void RenderWidgetCompositor::WillBeginFrame() {
   widget_->InstrumentWillBeginFrame();
   widget_->willBeginCompositorFrame();
 }
 
-void RenderWidgetCompositor::didBeginFrame() {
+void RenderWidgetCompositor::DidBeginFrame() {
   widget_->InstrumentDidBeginFrame();
 }
 
-void RenderWidgetCompositor::animate(double monotonic_frame_begin_time) {
-  widget_->webwidget()->animate(monotonic_frame_begin_time);
+void RenderWidgetCompositor::Animate(double frame_begin_time) {
+  widget_->webwidget()->animate(frame_begin_time);
 }
 
-void RenderWidgetCompositor::layout() {
+void RenderWidgetCompositor::Layout() {
   widget_->webwidget()->layout();
 }
 
-void RenderWidgetCompositor::applyScrollAndScale(gfx::Vector2d scroll_delta,
+void RenderWidgetCompositor::ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                                  float page_scale) {
   widget_->webwidget()->applyScrollAndScale(scroll_delta, page_scale);
 }
 
-scoped_ptr<cc::OutputSurface> RenderWidgetCompositor::createOutputSurface() {
+scoped_ptr<cc::OutputSurface> RenderWidgetCompositor::CreateOutputSurface() {
   return widget_->CreateOutputSurface();
 }
 
-void RenderWidgetCompositor::didRecreateOutputSurface(bool success) {
+void RenderWidgetCompositor::DidRecreateOutputSurface(bool success) {
   if (!success)
     widget_->webwidget()->didExitCompositingMode();
 }
 
-scoped_ptr<cc::InputHandler> RenderWidgetCompositor::createInputHandler() {
+scoped_ptr<cc::InputHandler> RenderWidgetCompositor::CreateInputHandler() {
   scoped_ptr<cc::InputHandler> ret;
   scoped_ptr<WebKit::WebInputHandler> web_handler(
       widget_->webwidget()->createInputHandler());
@@ -477,24 +488,24 @@ scoped_ptr<cc::InputHandler> RenderWidgetCompositor::createInputHandler() {
   return ret.Pass();
 }
 
-void RenderWidgetCompositor::willCommit() {
+void RenderWidgetCompositor::WillCommit() {
   widget_->InstrumentWillComposite();
 }
 
-void RenderWidgetCompositor::didCommit() {
+void RenderWidgetCompositor::DidCommit() {
   widget_->DidCommitCompositorFrame();
   widget_->didBecomeReadyForAdditionalInput();
 }
 
-void RenderWidgetCompositor::didCommitAndDrawFrame() {
+void RenderWidgetCompositor::DidCommitAndDrawFrame() {
   widget_->didCommitAndDrawCompositorFrame();
 }
 
-void RenderWidgetCompositor::didCompleteSwapBuffers() {
+void RenderWidgetCompositor::DidCompleteSwapBuffers() {
   widget_->didCompleteSwapBuffers();
 }
 
-void RenderWidgetCompositor::scheduleComposite() {
+void RenderWidgetCompositor::ScheduleComposite() {
   if (!suppress_schedule_composite_)
     widget_->scheduleComposite();
 }

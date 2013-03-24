@@ -13,8 +13,8 @@
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
@@ -449,7 +449,7 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
 
   url_parse::Component scheme, host;
   AutocompleteInput::ParseForEmphasizeComponents(
-      display_text, model()->GetDesiredTLD(), &scheme, &host);
+      display_text, &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
   if (emphasize) {
     [as addAttribute:NSForegroundColorAttributeName value:BaseTextColor()
@@ -607,11 +607,11 @@ gfx::NativeView OmniboxViewMac::GetRelativeWindowForPopup() const {
 }
 
 void OmniboxViewMac::SetInstantSuggestion(const string16& suggest_text) {
+  if (suggest_text == suggest_text_)
+    return;
   suggest_text_ = suggest_text;
-  AutocompleteTextFieldEditor* field_editor =
-      base::mac::ObjCCast<AutocompleteTextFieldEditor>([field_ currentEditor]);
-  [field_editor setInstantSuggestion:base::SysUTF16ToNSString(suggest_text)
-                           textColor:SuggestTextColor()];
+  [field_ setInstantSuggestion:base::SysUTF16ToNSString(suggest_text)
+                     textColor:SuggestTextColor()];
 }
 
 string16 OmniboxViewMac::GetInstantSuggestion() const {
@@ -900,7 +900,7 @@ bool OmniboxViewMac::CanPasteAndGo() {
 int OmniboxViewMac::GetPasteActionStringId() {
   string16 text(GetClipboardText());
   DCHECK(model()->CanPasteAndGo(text));
-  return model()->IsPasteAndSearch(GetClipboardText()) ?
+  return model()->IsPasteAndSearch(text) ?
       IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO;
 }
 
@@ -981,5 +981,5 @@ NSUInteger OmniboxViewMac::GetTextLength() const {
 
 bool OmniboxViewMac::IsCaretAtEnd() const {
   const NSRange selection = GetSelectedRange();
-  return selection.length == 0 && selection.location == GetTextLength();
+  return NSMaxRange(selection) == GetTextLength();
 }

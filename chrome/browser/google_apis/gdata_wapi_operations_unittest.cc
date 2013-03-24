@@ -141,6 +141,14 @@ class GDataWapiOperationsTest : public testing::Test {
         // matter.
         return test_util::CreateHttpResponseFromFile(
             test_util::GetTestFilePath("chromeos/gdata/testfile.txt"));
+      } else if (resource_id == "invalid_resource_id") {
+        // Check if this is an authorization request for an app.
+        // This emulates to return invalid formatted result from the server.
+        if (request.method == test_server::METHOD_PUT &&
+            request.content.find("<docs:authorizedApp>") != std::string::npos) {
+          return test_util::CreateHttpResponseFromFile(
+              test_util::GetTestFilePath("chromeos/gdata/testfile.txt"));
+        }
       }
     }
 
@@ -328,9 +336,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_DefaultFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data));
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
@@ -359,9 +367,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_ValidFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data));
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
@@ -392,9 +400,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_InvalidFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data));
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
@@ -417,9 +425,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_ValidResourceId) {
       request_context_getter_.get(),
       *url_generator_,
       "file:2_file_resource_id",  // resource ID
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data));
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
@@ -443,9 +451,9 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_InvalidResourceId) {
       request_context_getter_.get(),
       *url_generator_,
       "<invalid>",  // resource ID
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data));
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
@@ -466,8 +474,9 @@ TEST_F(GDataWapiOperationsTest, GetAccountMetadataOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultsFromGetAccountMetadataCallbackAndQuit,
-                 &result_code, &result_data),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
       true);  // Include installed apps.
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
@@ -505,8 +514,9 @@ TEST_F(GDataWapiOperationsTest,
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultsFromGetAccountMetadataCallbackAndQuit,
-                 &result_code, &result_data),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
       false);  // Exclude installed apps.
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
                    base::Bind(&test_util::DoNothingForReAuthenticateCallback));
@@ -540,8 +550,9 @@ TEST_F(GDataWapiOperationsTest, DeleteResourceOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
-                 &result_code),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code)),
       "file:2_file_resource_id",
       "");
 
@@ -565,8 +576,9 @@ TEST_F(GDataWapiOperationsTest, DeleteResourceOperationWithETag) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
-                 &result_code),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code)),
       "file:2_file_resource_id",
       "etag");
 
@@ -592,9 +604,9 @@ TEST_F(GDataWapiOperationsTest, CreateDirectoryOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
       "folder:root",
       "new directory");
 
@@ -628,9 +640,9 @@ TEST_F(GDataWapiOperationsTest, CopyHostedDocumentOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
       "document:5_document_resource_id",  // source resource ID
       "New Document");
 
@@ -661,8 +673,9 @@ TEST_F(GDataWapiOperationsTest, RenameResourceOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
-                 &result_code),
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code)),
       "file:2_file_resource_id",
       "New File");
 
@@ -695,11 +708,11 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_ValidFeed) {
   AuthorizeAppOperation* operation = new AuthorizeAppOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data),
-      test_server_.GetURL(
-          "/feeds/default/private/full/file:2_file_resource_id"),
+      *url_generator_,
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
+      "file:2_file_resource_id",
       "APP_ID");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
@@ -708,8 +721,8 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_ValidFeed) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/file:2_file_resource_id?v=3&alt=json"
-            "&showroot=true",
+  EXPECT_EQ("/feeds/default/private/full/file%3A2_file_resource_id"
+            "?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
@@ -731,10 +744,11 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_InvalidFeed) {
   AuthorizeAppOperation* operation = new AuthorizeAppOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
-                 &result_code,
-                 &result_data),
-      test_server_.GetURL("/files/chromeos/gdata/testfile.txt"),
+      *url_generator_,
+      CreateComposedCallback(
+          base::Bind(&test_util::RunAndQuit),
+          test_util::CreateCopyResultCallback(&result_code, &result_data)),
+      "invalid_resource_id",
       "APP_ID");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
@@ -743,7 +757,8 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_InvalidFeed) {
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
-  EXPECT_EQ("/files/chromeos/gdata/testfile.txt?v=3&alt=json&showroot=true",
+  EXPECT_EQ("/feeds/default/private/full/invalid_resource_id"
+            "?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
@@ -766,8 +781,9 @@ TEST_F(GDataWapiOperationsTest, AddResourceToDirectoryOperation) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
-                     &result_code),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code)),
           "folder:root",
           "file:2_file_resource_id");
 
@@ -800,8 +816,9 @@ TEST_F(GDataWapiOperationsTest, RemoveResourceFromDirectoryOperation) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
-                     &result_code),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code)),
           "folder:root",
           "file:2_file_resource_id");
 
@@ -832,9 +849,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewFile) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
           "text/plain",
           kUploadContent.size(),
@@ -933,9 +950,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
           "text/plain",
           kUploadContent.size(),
@@ -1130,9 +1147,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
           "text/plain",
           kUploadContent.size(),
@@ -1222,9 +1239,9 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
           "text/plain",
           kUploadContent.size(),
@@ -1315,9 +1332,9 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETag) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
           "text/plain",
           kUploadContent.size(),
@@ -1408,9 +1425,9 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETagConflict) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&test_util::CopyResultsFromInitiateUploadCallbackAndQuit,
-                     &result_code,
-                     &upload_url),
+          CreateComposedCallback(
+              base::Bind(&test_util::RunAndQuit),
+              test_util::CreateCopyResultCallback(&result_code, &upload_url)),
           base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
           "text/plain",
           kUploadContent.size(),

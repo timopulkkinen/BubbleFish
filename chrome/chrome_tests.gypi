@@ -195,11 +195,6 @@
         'browser/extensions/window_open_interactive_apitest.cc',
         'browser/extensions/extension_fullscreen_apitest.cc',
         'browser/extensions/extension_pointer_lock_apitest.cc',
-        'browser/instant/instant_browsertest.cc',
-        'browser/instant/instant_extended_browsertest.cc',
-        'browser/instant/instant_extended_manual_browsertest.cc',
-        'browser/instant/instant_test_utils.h',
-        'browser/instant/instant_test_utils.cc',
         'browser/mouseleave_browsertest.cc',
         'browser/notifications/desktop_notifications_unittest.cc',
         'browser/notifications/desktop_notifications_unittest.h',
@@ -231,6 +226,11 @@
         'browser/ui/panels/test_panel_notification_observer.h',
         'browser/ui/panels/test_panel_collection_squeeze_observer.cc',
         'browser/ui/panels/test_panel_collection_squeeze_observer.h',
+        'browser/ui/search/instant_browsertest.cc',
+        'browser/ui/search/instant_extended_browsertest.cc',
+        'browser/ui/search/instant_extended_manual_browsertest.cc',
+        'browser/ui/search/instant_test_utils.h',
+        'browser/ui/search/instant_test_utils.cc',
         'browser/ui/startup/startup_browser_creator_interactive_uitest.cc',
         'browser/ui/views/ash/tab_scrubber_browsertest.cc',
         'browser/ui/views/bookmarks/bookmark_bar_view_test.cc',
@@ -241,6 +241,7 @@
         'browser/ui/views/location_bar/star_view_browsertest.cc',
         'browser/ui/views/menu_item_view_test.cc',
         'browser/ui/views/menu_model_adapter_test.cc',
+        'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
         'browser/ui/views/panels/panel_view_browsertest.cc',
         'browser/ui/views/ssl_client_certificate_selector_browsertest.cc',
         'browser/ui/views/tabs/tab_drag_controller_interactive_uitest.cc',
@@ -452,8 +453,14 @@
         }, { # else: OS != "win"
           'sources!': [
             'browser/ui/views/ssl_client_certificate_selector_browsertest.cc',
+            'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
           ],
         }],  # OS != "win"
+        ['enable_message_center==0', {
+          'sources!': [
+            'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
+          ],
+        }],  # enable_message_center
       ],  # conditions
     },
     {
@@ -912,7 +919,6 @@
       'dependencies': [
         'chromedriver2_lib',
         '../base/base.gyp:base',
-        'test/chromedriver/third_party/jni/jni.gyp:jni',
       ],
       'include_dirs': [
         '..',
@@ -1124,7 +1130,6 @@
         'browser/chromeos/extensions/info_private_apitest.cc',
         'browser/chromeos/extensions/input_method_apitest_chromeos.cc',
         'browser/chromeos/extensions/networking_private_apitest.cc',
-        'browser/chromeos/extensions/power/power_api_browsertest.cc',
         'browser/chromeos/extensions/wallpaper_private_apitest.cc',
         'browser/chromeos/kiosk_mode/mock_kiosk_mode_settings.cc',
         'browser/chromeos/kiosk_mode/mock_kiosk_mode_settings.h',
@@ -1173,6 +1178,7 @@
         'browser/errorpage_browsertest.cc',
         'browser/extensions/active_tab_apitest.cc',
         'browser/extensions/activity_log_browsertest.cc',
+        'browser/extensions/ad_view_browsertest.cc',
         'browser/extensions/alert_apitest.cc',
         'browser/extensions/all_urls_apitest.cc',
         'browser/extensions/api/app_window/app_window_apitest.cc',
@@ -1235,7 +1241,6 @@
         'browser/extensions/api/serial/serial_apitest.cc',
         'browser/extensions/api/session_restore/session_restore_apitest.cc',
         'browser/extensions/api/socket/socket_apitest.cc',
-        'browser/extensions/api/streams_private/streams_resource_throttle_browsertest.cc',
         'browser/extensions/api/sync_file_system/sync_file_system_apitest.cc',
         'browser/extensions/api/system_indicator/system_indicator_apitest.cc',
         'browser/extensions/api/system_info_cpu/system_info_cpu_apitest.cc',
@@ -1474,7 +1479,6 @@
         'browser/ui/views/frame/browser_non_client_frame_view_ash_browsertest.cc',
         'browser/ui/views/frame/browser_view_browsertest.cc',
         'browser/ui/views/frame/immersive_mode_controller_browsertest.cc',
-        'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
         'browser/ui/views/select_file_dialog_extension_browsertest.cc',
         'browser/ui/views/sync/one_click_signin_bubble_view_browsertest.cc',
         'browser/ui/views/toolbar_view_browsertest.cc',
@@ -1634,6 +1638,10 @@
             'browser/extensions/extension_nacl_browsertest.cc',
             'browser/nacl_host/test/gdb_debug_stub_browsertest.cc',
           ],
+          'dependencies': [
+            # Runtime dependency.
+            '../ppapi/native_client/src/trusted/plugin/plugin.gyp:ppGoogleNaClPluginChrome',
+          ],
           'conditions': [
             ['disable_nacl_untrusted==0', {
               'sources': [
@@ -1697,7 +1705,7 @@
             'browser/printing/cloud_print/test/cloud_print_proxy_process_browsertest.cc',
             'browser/service/service_process_control_browsertest.cc',
             # chromeos does not use cross-platform panels
-	    'browser/ui/panels/panel_extension_browsertest.cc',
+            'browser/ui/panels/panel_extension_browsertest.cc',
           ],
           'dependencies': [
             '../dbus/dbus.gyp:dbus_test_support',
@@ -1820,7 +1828,6 @@
             'app/chrome_version.rc.version',
             # TODO(port): http://crbug.com/45770
             'browser/printing/printing_layout_browsertest.cc',
-            'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
             'browser/ui/views/app_list/app_list_controller_win_browsertest.cc',
           ],
         }],
@@ -1918,7 +1925,13 @@
         ['enable_message_center==0', {
           'sources!': [
             'browser/notifications/message_center_notifications_browsertest.cc',
-            'browser/ui/views/message_center/web_notification_tray_win_browsertest.cc',
+          ],
+        }],
+        ['enable_plugins==1', {
+          'dependencies': [
+            # Runtime dependency.
+            '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',
+            '../webkit/support/webkit_support.gyp:clearkeycdmadapter',
           ],
         }],
       ],  # conditions

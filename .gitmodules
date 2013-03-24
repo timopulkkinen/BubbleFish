@@ -186,6 +186,10 @@
 	path = third_party/cacheinvalidation/src
 	url = https://chromium.googlesource.com/external/google-cache-invalidation-api/src.git
 	os = all
+[submodule "third_party/chromite"]
+	path = third_party/chromite
+	url = https://chromium.googlesource.com/chromiumos/chromite.git
+	os = unix
 [submodule "third_party/cros_dbus_cplusplus/source"]
 	path = third_party/cros_dbus_cplusplus/source
 	url = https://chromium.googlesource.com/chromiumos/third_party/dbus-cplusplus.git
@@ -325,7 +329,7 @@
 [submodule "third_party/lss"]
 	path = third_party/lss
 	url = https://chromium.googlesource.com/external/linux-syscall-support/lss.git
-	os = unix
+	os = android,unix
 [submodule "third_party/mingw-w64/mingw/bin"]
 	path = third_party/mingw-w64/mingw/bin
 	url = https://chromium.googlesource.com/native_client/deps/third_party/mingw-w64/mingw/bin.git
@@ -345,7 +349,7 @@
 [submodule "third_party/openssl"]
 	path = third_party/openssl
 	url = https://chromium.googlesource.com/chromium/deps/openssl.git
-	os = unix
+	os = android,unix
 [submodule "third_party/opus/src"]
 	path = third_party/opus/src
 	url = https://chromium.googlesource.com/chromium/deps/opus.git
@@ -370,6 +374,10 @@
 	path = third_party/psyco_win32
 	url = https://chromium.googlesource.com/chromium/deps/psyco_win32.git
 	os = win
+[submodule "third_party/pyelftools"]
+	path = third_party/pyelftools
+	url = https://chromium.googlesource.com/chromiumos/third_party/pyelftools.git
+	os = unix
 [submodule "third_party/pyftpdlib/src"]
 	path = third_party/pyftpdlib/src
 	url = https://chromium.googlesource.com/external/pyftpdlib.git

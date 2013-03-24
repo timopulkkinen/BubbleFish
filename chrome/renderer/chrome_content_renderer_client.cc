@@ -101,6 +101,8 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 
+#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
+
 #if defined(ENABLE_AUTOMATION)
 #include "chrome/renderer/automation/automation_renderer_helper.h"
 #endif
@@ -131,6 +133,7 @@ using WebKit::WebVector;
 namespace {
 
 const char kWebViewTagName[] = "WEBVIEW";
+const char kAdViewTagName[] = "ADVIEW";
 
 // Explicitly register all extension ManifestHandlers needed to parse
 // fields used in the renderer.
@@ -186,6 +189,28 @@ bool SpellCheckReplacer::Visit(content::RenderView* render_view) {
   DCHECK(provider);
   provider->set_spellcheck(spellcheck_);
   return true;
+}
+
+// For certain sandboxed Pepper plugins, use the JavaScript Content Settings.
+bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
+  if (plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS &&
+      plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS) {
+    return false;
+  }
+
+  // Treat Native Client invocations like JavaScript.
+  if (plugin.name == ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName))
+    return true;
+
+#if defined(WIDEVINE_CDM_AVAILABLE)
+  // Treat CDM invocations like JavaScript.
+  if (plugin.name == ASCIIToUTF16(kWidevineCdmPluginName)) {
+    DCHECK(plugin.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS);
+    return true;
+  }
+#endif  // WIDEVINE_CDM_AVAILABLE
+
+  return false;
 }
 
 }  // namespace
@@ -248,7 +273,10 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_ui_scheme);
 
   WebString chrome_search_scheme(ASCIIToUTF16(chrome::kChromeSearchScheme));
-  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_search_scheme);
+  // The Instant process can only display the content but not read it.  Other
+  // processes can't display it or read it.
+  if (!command_line->HasSwitch(switches::kInstantProcess))
+    WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_search_scheme);
 
   WebString dev_tools_scheme(ASCIIToUTF16(chrome::kChromeDevToolsScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(dev_tools_scheme);
@@ -398,9 +426,16 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
     WebDocument document = frame->document();
     const Extension* extension =
         GetExtension(document.securityOrigin());
-    if (extension && extension->HasAPIPermission(
-        extensions::APIPermission::kWebView))
-      return false;
+    if (extension) {
+      const extensions::APIPermission::ID perms[] = {
+        extensions::APIPermission::kWebView,
+        extensions::APIPermission::kAdView
+      };
+      for (size_t i = 0; i < arraysize(perms); ++i) {
+        if (extension->HasAPIPermission(perms[i]))
+          return false;
+      }
+    }
   }
 
   ChromeViewHostMsg_GetPluginInfo_Output output;
@@ -448,7 +483,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
     const WebPluginParams& original_params,
     const ChromeViewHostMsg_GetPluginInfo_Output& output) {
   const ChromeViewHostMsg_GetPluginInfo_Status& status = output.status;
-  const webkit::WebPluginInfo& plugin = output.plugin;
+  const WebPluginInfo& plugin = output.plugin;
   const std::string& actual_mime_type = output.actual_mime_type;
   const string16& group_name = output.group_name;
   const std::string& identifier = output.group_identifier;
@@ -494,12 +529,10 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
     ContentSettingsObserver* observer =
         ContentSettingsObserver::Get(render_view);
 
-    bool is_nacl_plugin =
-        plugin.name ==
-            ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName);
-    ContentSettingsType content_type =
-        is_nacl_plugin ? CONTENT_SETTINGS_TYPE_JAVASCRIPT :
-                         CONTENT_SETTINGS_TYPE_PLUGINS;
+    const ContentSettingsType content_type =
+        ShouldUseJavaScriptSettingForPlugin(plugin) ?
+            CONTENT_SETTINGS_TYPE_JAVASCRIPT :
+            CONTENT_SETTINGS_TYPE_PLUGINS;
 
     if ((status_value ==
              ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized ||
@@ -524,7 +557,10 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kAllowed: {
         const char* kNaClMimeType = "application/x-nacl";
-        bool is_nacl_mime_type = actual_mime_type == kNaClMimeType;
+        const bool is_nacl_mime_type = actual_mime_type == kNaClMimeType;
+        const bool is_nacl_plugin =
+            plugin.name ==
+            ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName);
         bool is_nacl_unrestricted;
         if (is_nacl_plugin) {
           is_nacl_unrestricted = CommandLine::ForCurrentProcess()->HasSwitch(
@@ -540,18 +576,11 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
           const Extension* extension =
               extension_dispatcher_->extensions()->GetExtensionOrAppByURL(
                   ExtensionURLInfo(manifest_url));
-          bool is_extension_from_webstore =
-              extension && extension->from_webstore();
-          // Allow built-in extensions and extensions under development.
-          bool is_extension_unrestricted = extension &&
-              (extension->location() == extensions::Manifest::COMPONENT ||
-               extensions::Manifest::IsUnpackedLocation(extension->location()));
           GURL top_url = frame->top()->document().url();
           if (!IsNaClAllowed(manifest_url,
                              top_url,
                              is_nacl_unrestricted,
-                             is_extension_unrestricted,
-                             is_extension_from_webstore,
+                             extension,
                              &params)) {
             frame->addMessageToConsole(
                 WebConsoleMessage(
@@ -669,7 +698,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
 //  static
 GURL ChromeContentRendererClient::GetNaClContentHandlerURL(
     const std::string& actual_mime_type,
-    const webkit::WebPluginInfo& plugin) {
+    const WebPluginInfo& plugin) {
   // Look for the manifest URL among the MIME type's additonal parameters.
   const char* kNaClPluginManifestAttribute = "nacl";
   string16 nacl_attr = ASCIIToUTF16(kNaClPluginManifestAttribute);
@@ -691,8 +720,7 @@ bool ChromeContentRendererClient::IsNaClAllowed(
     const GURL& manifest_url,
     const GURL& top_url,
     bool is_nacl_unrestricted,
-    bool is_extension_unrestricted,
-    bool is_extension_from_webstore,
+    const Extension* extension,
     WebPluginParams* params) {
   // Temporarily allow these URLs to run NaCl apps. We should remove this
   // code when PNaCl ships.
@@ -701,6 +729,18 @@ bool ChromeContentRendererClient::IsNaClAllowed(
       (top_url.host() == "plus.google.com" ||
           top_url.host() == "plus.sandbox.google.com") &&
       top_url.path().find("/games") == 0;
+
+  bool is_extension_from_webstore =
+      extension && extension->from_webstore();
+
+  bool is_invoked_by_hosted_app = extension &&
+      extension->is_hosted_app() &&
+      extension->web_extent().MatchesURL(top_url);
+
+  // Allow built-in extensions and extensions under development.
+  bool is_extension_unrestricted = extension &&
+      (extension->location() == extensions::Manifest::COMPONENT ||
+       extensions::Manifest::IsUnpackedLocation(extension->location()));
 
   bool is_invoked_by_extension = top_url.SchemeIs("chrome-extension");
 
@@ -717,6 +757,7 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   bool is_nacl_allowed = is_nacl_unrestricted ||
                          is_whitelisted_url ||
                          is_nacl_pdf_viewer ||
+                         is_invoked_by_hosted_app ||
                          (is_invoked_by_extension &&
                              (is_extension_from_webstore ||
                                  is_extension_unrestricted));
@@ -893,6 +934,8 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
             ExtensionURLInfo(url));
     if (extension && extension->is_app()) {
       UMA_HISTOGRAM_ENUMERATION(
+          extension->is_platform_app() ?
+          extension_misc::kPlatformAppLaunchHistogram :
           extension_misc::kAppLaunchHistogram,
           extension_misc::APP_LAUNCH_CONTENT_NAVIGATION,
           extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
@@ -1105,28 +1148,28 @@ void ChromeContentRendererClient::RegisterPPAPIInterfaceFactories(
 
 bool ChromeContentRendererClient::AllowBrowserPlugin(
     WebKit::WebPluginContainer* container) const {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserPluginForAllViewTypes))
+    return true;
+
   // If this |BrowserPlugin| <object> in the |container| is not inside a
-  // <webview> shadowHost, we disable instantiating this plugin. This is to
-  // discourage and prevent developers from accidentally attaching <object>
-  // directly in apps.
+  // <webview>/<adview> shadowHost, we disable instantiating this plugin. This
+  // is to discourage and prevent developers from accidentally attaching
+  // <object> directly in apps.
   //
   // Note that this check below does *not* ensure any security, it is still
   // possible to bypass this check.
   // TODO(lazyboy): http://crbug.com/178663, Ensure we properly disallow
-  // instantiating BrowserPlugin outside of the <webview> shim.
+  // instantiating BrowserPlugin outside of the <webview>/<adview> shim.
   if (container->element().isNull())
     return false;
 
   if (container->element().shadowHost().isNull())
     return false;
 
-  if (container->element().shadowHost().tagName().equals(
-          WebKit::WebString::fromUTF8(kWebViewTagName))) {
-    return true;
-  } else {
-    return CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableBrowserPluginForAllViewTypes);
-  }
+  WebString tag_name = container->element().shadowHost().tagName();
+  return tag_name.equals(WebString::fromUTF8(kWebViewTagName)) ||
+    tag_name.equals(WebString::fromUTF8(kAdViewTagName));
 }
 
 }  // namespace chrome

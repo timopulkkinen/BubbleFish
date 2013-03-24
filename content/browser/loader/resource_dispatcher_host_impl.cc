@@ -36,6 +36,7 @@
 #include "content/browser/loader/redirect_to_file_resource_handler.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/loader/resource_request_info_impl.h"
+#include "content/browser/loader/stream_resource_handler.h"
 #include "content/browser/loader/sync_resource_handler.h"
 #include "content/browser/loader/throttling_resource_handler.h"
 #include "content/browser/loader/transfer_navigation_resource_throttle.h"
@@ -43,6 +44,9 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/resource_context_impl.h"
+#include "content/browser/streams/stream.h"
+#include "content/browser/streams/stream_context.h"
+#include "content/browser/streams/stream_registry.h"
 #include "content/browser/worker_host/worker_service_impl.h"
 #include "content/common/resource_messages.h"
 #include "content/common/ssl_status_serialization.h"
@@ -55,6 +59,7 @@
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/resource_throttle.h"
+#include "content/public/browser/stream_handle.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
@@ -155,7 +160,7 @@ GURL MaybeStripReferrer(const GURL& possible_referrer) {
 // ResourceDispatcherHostImpl should service this request.  A request might be
 // disallowed if the renderer is not authorized to retrieve the request URL or
 // if the renderer is attempting to upload an unauthorized file.
-bool ShouldServiceRequest(ProcessType process_type,
+bool ShouldServiceRequest(int process_type,
                           int child_id,
                           const ResourceHostMsg_Request& request_data)  {
   if (process_type == PROCESS_TYPE_PLUGIN)
@@ -553,6 +558,42 @@ ResourceDispatcherHostImpl::CreateResourceHandlerForDownload(
   return handler.Pass();
 }
 
+scoped_ptr<ResourceHandler>
+ResourceDispatcherHostImpl::MaybeInterceptAsStream(net::URLRequest* request,
+                                                   ResourceResponse* response) {
+  ResourceRequestInfoImpl* info = ResourceRequestInfoImpl::ForRequest(request);
+  const std::string& mime_type = response->head.mime_type;
+
+  GURL security_origin;
+  std::string target_id;
+  if (!delegate_ ||
+      !delegate_->ShouldInterceptResourceAsStream(info->GetContext(),
+                                                  request->url(),
+                                                  mime_type,
+                                                  &security_origin,
+                                                  &target_id)) {
+    return scoped_ptr<ResourceHandler>();
+  }
+
+  StreamContext* stream_context =
+      GetStreamContextForResourceContext(info->GetContext());
+
+
+  scoped_ptr<StreamResourceHandler> handler(
+      new StreamResourceHandler(request,
+                                stream_context->registry(),
+                                security_origin));
+
+  info->set_is_stream(true);
+  delegate_->OnStreamCreated(
+      info->GetContext(),
+      info->GetChildID(),
+      info->GetRouteID(),
+      target_id,
+      handler->stream()->CreateHandle(request->url(), mime_type));
+  return (scoped_ptr<ResourceHandler>(handler.release())).Pass();
+}
+
 void ResourceDispatcherHostImpl::ClearSSLClientAuthHandlerForRequest(
     net::URLRequest* request) {
   ResourceRequestInfoImpl* info = ResourceRequestInfoImpl::ForRequest(request);
@@ -836,7 +877,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
     const ResourceHostMsg_Request& request_data,
     IPC::Message* sync_result,  // only valid for sync
     int route_id) {
-  ProcessType process_type = filter_->process_type();
+  int process_type = filter_->process_type();
   int child_id = filter_->child_id();
 
   // If we crash here, figure out what URL the renderer was requesting.
@@ -922,7 +963,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
   // transferred navigation case?
 
   request->set_load_flags(load_flags);
-  request->set_priority(request_data.priority);
+  request->SetPriority(request_data.priority);
 
   // Resolve elements from request_body and prepare upload data.
   if (request_data.request_body) {
@@ -951,6 +992,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
           request_data.resource_type,
           request_data.transition_type,
           false,  // is download
+          false,  // is stream
           allow_download,
           request_data.has_user_gesture,
           request_data.referrer_policy,
@@ -1119,6 +1161,7 @@ ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
       ResourceType::SUB_RESOURCE,
       PAGE_TRANSITION_LINK,
       download,  // is_download
+      false,  // is_stream
       download,  // allow_download
       false,     // has_user_gesture
       WebKit::WebReferrerPolicyDefault,
@@ -1172,6 +1215,19 @@ void ResourceDispatcherHostImpl::OnDidLoadResourceFromMemoryCache(
 
   filter_->GetURLRequestContext(resource_type)->http_transaction_factory()->
       GetCache()->OnExternalCacheHit(url, http_method);
+}
+
+void ResourceDispatcherHostImpl::OnRenderViewHostCreated(
+    int child_id,
+    int route_id) {
+  scheduler_->OnClientCreated(child_id, route_id);
+}
+
+void ResourceDispatcherHostImpl::OnRenderViewHostDeleted(
+    int child_id,
+    int route_id) {
+  scheduler_->OnClientDeleted(child_id, route_id);
+  CancelRequestsForRoute(child_id, route_id);
 }
 
 // This function is only used for saving feature.

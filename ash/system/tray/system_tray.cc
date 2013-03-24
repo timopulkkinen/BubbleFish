@@ -12,7 +12,6 @@
 #include "ash/system/audio/tray_volume.h"
 #include "ash/system/bluetooth/tray_bluetooth.h"
 #include "ash/system/brightness/tray_brightness.h"
-#include "ash/system/chromeos/tray_display.h"
 #include "ash/system/date/tray_date.h"
 #include "ash/system/drive/tray_drive.h"
 #include "ash/system/ime/tray_ime.h"
@@ -56,11 +55,16 @@
 #include "ash/system/chromeos/network/tray_network.h"
 #include "ash/system/chromeos/network/tray_sms.h"
 #include "ash/system/chromeos/network/tray_vpn.h"
+#include "ash/system/chromeos/screen_capture/tray_screen_capture.h"
+#include "ash/system/chromeos/tray_display.h"
 #endif
 
 using views::TrayBubbleView;
 
 namespace ash {
+
+// The minimum width of the system tray menu width.
+const int kMinimumSystemTrayMenuWidth = 300;
 
 namespace internal {
 
@@ -151,6 +155,7 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(new internal::TrayLocale(this));
 #if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TrayDisplay(this));
+  AddTrayItem(new internal::TrayScreenCapture(this));
 #endif
   AddTrayItem(new internal::TrayVolume(this));
   AddTrayItem(new internal::TrayBrightness(this));
@@ -370,9 +375,13 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
   if (system_bubble_.get() && creation_type == BUBBLE_USE_EXISTING) {
     system_bubble_->bubble()->UpdateView(items, bubble_type);
   } else {
+    // The menu width is fixed, and it is a per language setting.
+    int menu_width = std::max(kMinimumSystemTrayMenuWidth,
+        Shell::GetInstance()->system_tray_delegate()->GetSystemTrayMenuWidth());
+
     TrayBubbleView::InitParams init_params(TrayBubbleView::ANCHOR_TYPE_TRAY,
                                            GetAnchorAlignment(),
-                                           kTrayPopupMinWidth,
+                                           menu_width,
                                            kTrayPopupMaxWidth);
     init_params.can_activate = can_activate;
     if (detailed) {

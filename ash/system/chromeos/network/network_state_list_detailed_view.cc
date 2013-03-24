@@ -188,10 +188,10 @@ void NetworkStateListDetailedView::NetworkIconChanged() {
 
 void NetworkStateListDetailedView::Init() {
   CreateScrollableList();
+  CreateNetworkExtra();
   CreateHeaderEntry();
   CreateHeaderButtons();
   CreateMobileAccount();
-  CreateNetworkExtra();
   NetworkStateHandler* handler = NetworkStateHandler::Get();
   NetworkStateList network_list;
   handler->RequestScan();
@@ -233,11 +233,12 @@ void NetworkStateListDetailedView::ButtonPressed(views::Button* sender,
         flimflam::kTypeWifi, true,
         chromeos::network_handler::ErrorCallback());
   } else if (sender == button_mobile_) {
-    bool enabled = handler->TechnologyEnabled(
-        NetworkStateHandler::kMatchTypeMobile);
-    handler->SetTechnologyEnabled(
-        NetworkStateHandler::kMatchTypeMobile, !enabled,
-        chromeos::network_handler::ErrorCallback());
+    // TODO: This needs to be fixed to use
+    // NetworkStateHandler::SetTechnologyEnabled instead. Currently
+    // ToggleMobile has code to handle the locked SIM case, which cannot
+    // be moved here yet due to dependencies on src/chrome/* - see,
+    // crbug.com/222540.
+    delegate->ToggleMobile();
   } else if (sender == settings_) {
     delegate->ShowNetworkSettings();
   } else if (sender == proxy_settings_) {
@@ -354,6 +355,13 @@ void NetworkStateListDetailedView::CreateNetworkExtra() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   views::View* bottom_row = new views::View();
+  views::BoxLayout* layout = new views::BoxLayout(
+      views::BoxLayout::kHorizontal,
+      kTrayMenuBottomRowPadding,
+      kTrayMenuBottomRowPadding,
+      kTrayMenuBottomRowPaddingBetweenItems);
+  layout->set_spread_blank_space(true);
+  bottom_row->SetLayoutManager(layout);
 
   if (list_type_ == LIST_TYPE_NETWORK) {
     other_wifi_ = new TrayPopupLabelButton(

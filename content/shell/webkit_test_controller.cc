@@ -149,12 +149,12 @@ void WebKitTestResultPrinter::AddMessageRaw(const std::string& message) {
 }
 
 void WebKitTestResultPrinter::AddErrorMessage(const std::string& message) {
+  if (!capture_text_only_)
+    *error_ << message << "\n";
   if (state_ != DURING_TEST)
     return;
   PrintTextHeader();
   *output_ << message << "\n";
-  if (!capture_text_only_)
-    *error_ << message << "\n";
   PrintTextFooter();
   PrintImageFooter();
 }
@@ -220,7 +220,6 @@ bool WebKitTestController::PrepareForLayoutTest(
         MSG_ROUTING_NONE,
         initial_size);
     WebContentsObserver::Observe(main_window_->web_contents());
-    prune_history_ = false;
     send_configuration_to_next_host_ = true;
     current_pid_ = base::kNullProcessId;
   } else {
@@ -238,7 +237,10 @@ bool WebKitTestController::PrepareForLayoutTest(
     OverrideWebkitPrefs(&prefs);
     render_view_host->UpdateWebkitPreferences(prefs);
     SendTestConfiguration();
-    prune_history_ = true;
+    registrar_.Add(this,
+                   NOTIFICATION_NAV_ENTRY_PENDING,
+                   Source<NavigationController>(
+                       &main_window_->web_contents()->GetController()));
   }
   main_window_->LoadURL(test_url);
   main_window_->web_contents()->GetRenderViewHost()->SetActive(true);
@@ -267,7 +269,6 @@ bool WebKitTestController::ResetAfterLayoutTest() {
   prefs_ = webkit_glue::WebPreferences();
   should_override_prefs_ = false;
   watchdog_.Cancel();
-  Send(new ShellViewMsg_ResetAll);
   return true;
 }
 
@@ -294,7 +295,6 @@ void WebKitTestController::OverrideWebkitPrefs(
       if (command_line.HasSwitch(switches::kEnableSoftwareCompositing))
         prefs->accelerated_2d_canvas_enabled = true;
       prefs->accelerated_compositing_for_video_enabled = true;
-      prefs->deferred_2d_canvas_enabled = true;
       prefs->mock_scrollbars_enabled = true;
     }
   }
@@ -320,6 +320,7 @@ bool WebKitTestController::OnMessageReceived(const IPC::Message& message) {
                         OnCaptureSessionHistory)
     IPC_MESSAGE_HANDLER(ShellViewHostMsg_CloseRemainingWindows,
                         OnCloseRemainingWindows)
+    IPC_MESSAGE_HANDLER(ShellViewHostMsg_ResetDone, OnResetDone)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -357,15 +358,6 @@ void WebKitTestController::RenderViewGone(base::TerminationStatus status) {
   DiscardMainWindow();
 }
 
-void WebKitTestController::DidNavigateMainFrame(
-    const LoadCommittedDetails& details,
-    const FrameNavigateParams& params) {
-  if (!prune_history_)
-    return;
-  prune_history_ = false;
-  main_window_->web_contents()->GetController().PruneAllButActive();
-}
-
 void WebKitTestController::WebContentsDestroyed(WebContents* web_contents) {
   DCHECK(CalledOnValidThread());
   printer_->AddErrorMessage("FAIL: main window was destroyed");
@@ -389,6 +381,11 @@ void WebKitTestController::Observe(int type,
       if (render_process_host != render_view_host->GetProcess())
         return;
       current_pid_ = base::GetProcId(render_process_host->GetHandle());
+      break;
+    }
+    case NOTIFICATION_NAV_ENTRY_PENDING: {
+      registrar_.Remove(this, NOTIFICATION_NAV_ENTRY_PENDING, source);
+      main_window_->web_contents()->GetController().PruneAllButActive();
       break;
     }
     default:
@@ -415,12 +412,14 @@ void WebKitTestController::DiscardMainWindow() {
   // loop. Otherwise, we're already outside of the message loop, and we just
   // discard the main window.
   WebContentsObserver::Observe(NULL);
-  main_window_ = NULL;
-  current_pid_ = base::kNullProcessId;
   if (is_running_test_) {
     Shell::CloseAllWindows();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  } else if (main_window_) {
+    main_window_->Close();
   }
+  main_window_ = NULL;
+  current_pid_ = base::kNullProcessId;
 }
 
 void WebKitTestController::SendTestConfiguration() {
@@ -449,7 +448,13 @@ void WebKitTestController::OnTestFinished(bool did_timeout) {
   }
   if (!printer_->output_finished())
     printer_->PrintImageFooter();
-  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  RenderViewHost* render_view_host =
+      main_window_->web_contents()->GetRenderViewHost();
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(base::IgnoreResult(&WebKitTestController::Send),
+                 base::Unretained(this),
+                 new ShellViewMsg_Reset(render_view_host->GetRoutingID())));
 }
 
 void WebKitTestController::OnImageDump(
@@ -592,6 +597,10 @@ void WebKitTestController::OnCloseRemainingWindows() {
       open_windows[i]->Close();
   }
   MessageLoop::current()->RunUntilIdle();
+}
+
+void WebKitTestController::OnResetDone() {
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 }  // namespace content

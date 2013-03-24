@@ -198,12 +198,13 @@ void AutocheckoutManager::MaybeShowAutocheckoutDialog(
   if (!show_dialog)
     return;
 
+  FormData form = BuildAutocheckoutFormData();
+  form.ssl_status = ssl_status;
   base::Callback<void(const FormStructure*)> callback =
       base::Bind(&AutocheckoutManager::ReturnAutocheckoutData,
                  weak_ptr_factory_.GetWeakPtr());
   autofill_manager_->ShowRequestAutocompleteDialog(
-      BuildAutocheckoutFormData(), frame_url, ssl_status,
-      DIALOG_TYPE_AUTOCHECKOUT, callback);
+      form, frame_url, DIALOG_TYPE_AUTOCHECKOUT, callback);
 }
 
 bool AutocheckoutManager::IsStartOfAutofillableFlow() const {
@@ -226,8 +227,6 @@ void AutocheckoutManager::ReturnAutocheckoutData(const FormStructure* result) {
   for (size_t i = 0; i < result->field_count(); ++i) {
     AutofillFieldType type = result->field(i)->type();
     if (type == CREDIT_CARD_VERIFICATION_CODE) {
-      // TODO(ramankk): CVV is not handled by CreditCard, not sure how to
-      // handle it yet.
       cvv_ = result->field(i)->value;
       continue;
     }

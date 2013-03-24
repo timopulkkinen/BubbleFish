@@ -8,10 +8,10 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "cc/io_surface_layer.h"
+#include "cc/layers/io_surface_layer.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
@@ -783,7 +783,7 @@ void WebPluginImpl::AcceleratedPluginSwappedIOSurface() {
     if (next_io_surface_id_) {
       if (!io_surface_layer_.get()) {
         io_surface_layer_ = cc::IOSurfaceLayer::Create();
-        web_layer_.reset(new WebKit::WebLayerImpl(io_surface_layer_));
+        web_layer_.reset(new webkit::WebLayerImpl(io_surface_layer_));
         container_->setWebLayer(web_layer_.get());
       }
       io_surface_layer_->SetIOSurfaceProperties(

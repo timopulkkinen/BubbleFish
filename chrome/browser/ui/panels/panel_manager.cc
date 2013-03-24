@@ -122,6 +122,7 @@ bool PanelManager::ShouldUsePanels(const std::string& extension_id) {
       wm_type != ui::WM_ICE_WM &&
       wm_type != ui::WM_KWIN &&
       wm_type != ui::WM_METACITY &&
+      wm_type != ui::WM_MUFFIN &&
       wm_type != ui::WM_MUTTER &&
       wm_type != ui::WM_XFWM4) {
     return false;
@@ -522,7 +523,7 @@ std::vector<Panel*> PanelManager::panels() const {
        stack_iter != stacks_.end(); stack_iter++) {
     for (StackedPanelCollection::Panels::const_iterator iter =
              (*stack_iter)->panels().begin();
-         iter != (*stack_iter)->panels().end(); ++stack_iter) {
+         iter != (*stack_iter)->panels().end(); ++iter) {
       panels.push_back(*iter);
     }
   }

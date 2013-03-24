@@ -5,16 +5,19 @@
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 
 #include "ash/shell.h"
+#include "base/prefs/pref_service.h"
 #include "base/time.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
 #include "chrome/browser/chromeos/ui/app_launch_view.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/webstore_startup_installer.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -55,7 +58,7 @@ void StartupAppLauncher::Start() {
   launch_splash_start_time_ = base::TimeTicks::Now().ToInternalValue();
   DVLOG(1) << "Starting... connection = "
            <<  net::NetworkChangeNotifier::GetConnectionType();
-  chromeos::ShowAppLaunchSplashScreen();
+  chromeos::ShowAppLaunchSplashScreen(app_id_);
 
   // Set a maximum allowed wait time for network.
   const int kMaxNetworkWaitSeconds = 5 * 60;
@@ -66,6 +69,16 @@ void StartupAppLauncher::Start() {
 
   net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   OnNetworkChanged(net::NetworkChangeNotifier::GetConnectionType());
+}
+
+void StartupAppLauncher::Cleanup() {
+  chromeos::CloseAppLaunchSplashScreen();
+
+  // Ends OpenAsh() keep alive since the session should either be bound with
+  // the just launched app on success or should be ended on failure.
+  chrome::EndKeepAlive();
+
+  delete this;
 }
 
 void StartupAppLauncher::OnLaunchSuccess() {
@@ -85,18 +98,17 @@ void StartupAppLauncher::OnLaunchSuccess() {
     return;
   }
 
-  chromeos::CloseAppLaunchSplashScreen();
-  delete this;
+  Cleanup();
 }
 
-void StartupAppLauncher::OnLaunchFailure() {
-  // Ends the session if launch fails. This should bring us back to login.
+void StartupAppLauncher::OnLaunchFailure(KioskAppLaunchError::Error error) {
+  DCHECK_NE(KioskAppLaunchError::NONE, error);
+
+  // Saves the error and ends the session to go back to login screen.
+  KioskAppLaunchError::Save(error);
   chrome::AttemptUserExit();
 
-  // TODO(xiyuan): Signal somehow to the session manager that app launch
-  // attempt had failed.
-
-  delete this;
+  Cleanup();
 }
 
 void StartupAppLauncher::Launch() {
@@ -110,6 +122,12 @@ void StartupAppLauncher::Launch() {
   DCHECK(update_service);
   if (update_service)
     update_service->set_app_id(app_id_);
+
+  // If the device is not enterprise managed, set prefs to reboot after update.
+  if (!g_browser_process->browser_policy_connector()->IsEnterpriseManaged()) {
+    PrefService* local_state = g_browser_process->local_state();
+    local_state->SetBoolean(prefs::kRebootAfterUpdate, true);
+  }
 
   // Always open the app in a window.
   chrome::OpenApplication(chrome::AppLaunchParams(profile_,
@@ -151,7 +169,7 @@ void StartupAppLauncher::InstallCallback(bool success,
   }
 
   LOG(ERROR) << "Failed to install app with error: " << error;
-  OnLaunchFailure();
+  OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
 }
 
 void StartupAppLauncher::OnNetworkWaitTimedout() {
@@ -181,15 +199,13 @@ void StartupAppLauncher::OnKeyEvent(ui::KeyEvent* event) {
   if (event->type() != ui::ET_KEY_PRESSED)
     return;
 
-  if (event->key_code() != ui::VKEY_X ||
+  if (event->key_code() != ui::VKEY_S ||
       !(event->flags() & ui::EF_CONTROL_DOWN) ||
-      !(event->flags() & ui::EF_ALT_DOWN) ||
-      !(event->flags() & ui::EF_SHIFT_DOWN)) {
+      !(event->flags() & ui::EF_ALT_DOWN)) {
     return;
   }
 
-  KioskAppManager::Get()->SetSuppressAutoLaunch(true);
-  OnLaunchFailure();  // User cancel failure.
+  OnLaunchFailure(KioskAppLaunchError::USER_CANCEL);
 }
 
 }   // namespace chromeos

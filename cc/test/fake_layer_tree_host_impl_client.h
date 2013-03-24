@@ -5,7 +5,7 @@
 #ifndef CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_CLIENT_H_
 #define CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_CLIENT_H_
 
-#include "cc/layer_tree_host_impl.h"
+#include "cc/trees/layer_tree_host_impl.h"
 
 namespace cc {
 
@@ -33,6 +33,8 @@ class FakeLayerTreeHostImplClient : public LayerTreeHostImplClient {
   virtual void SendManagedMemoryStats() OVERRIDE {}
   virtual bool IsInsideDraw() OVERRIDE;
   virtual void RenewTreePriority() OVERRIDE {}
+  virtual void RequestScrollbarAnimationOnImplThread(base::TimeDelta)
+      OVERRIDE {}
 };
 
 }  // namespace cc

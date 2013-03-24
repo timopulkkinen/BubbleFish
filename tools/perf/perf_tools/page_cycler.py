@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 import sys
 
+from perf_tools import histogram_measurement
 from telemetry.core import util
 from telemetry.page import page_benchmark
 
@@ -12,6 +13,16 @@ MEMORY_HISTOGRAMS = [
     {'name': 'V8.MemoryHeapSampleTotalUsed', 'units': 'kb'}]
 
 class PageCycler(page_benchmark.PageBenchmark):
+  def WillNavigateToPage(self, page, tab):
+    # pylint: disable=W0201
+    self.histograms = [histogram_measurement.HistogramMeasurement(
+                           h, histogram_measurement.RENDERER_HISTOGRAM)
+                       for h in MEMORY_HISTOGRAMS]
+    for h in self.histograms:
+      h.Start(page, tab)
+    # pylint: disable=W0201
+    self.start_commit_charge = tab.browser.memory_stats['SystemCommitCharge']
+
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArg('--dom-automation')
     options.AppendExtraBrowserArg('--js-flags=--expose_gc')
@@ -31,16 +42,16 @@ class PageCycler(page_benchmark.PageBenchmark):
       results.Add('vm_size_f_b', 'bytes', memory['Browser']['VM'],
                   chart_name='vm_size_final_b', data_type='unimportant')
     if 'VMPeak' in memory['Browser']:
-      results.Add('vm_peak_b', 'bytes', memory['Browser']['VMPeak'],
-                  chart_name='vm_pk_b', data_type='unimportant')
+      results.Add('vm_pk_b', 'bytes', memory['Browser']['VMPeak'],
+                  chart_name='vm_peak_b', data_type='unimportant')
     if 'WorkingSetSize' in memory['Browser']:
       results.Add('vm_%s_f_b' % metric, 'bytes',
                   memory['Browser']['WorkingSetSize'],
                   chart_name='vm_%s_final_b' % metric, data_type='unimportant')
     if 'WorkingSetSizePeak' in memory['Browser']:
-      results.Add('%s_peak_b' % metric, 'bytes',
+      results.Add('%s_pk_b' % metric, 'bytes',
                   memory['Browser']['WorkingSetSizePeak'],
-                  chart_name='%s_pk_b' % metric, data_type='unimportant')
+                  chart_name='%s_peak_b' % metric, data_type='unimportant')
     if 'PrivateDirty' in memory['Browser']:
       results.Add('vm_private_dirty_f_b', 'bytes',
                   memory['Browser']['PrivateDirty'],
@@ -56,16 +67,16 @@ class PageCycler(page_benchmark.PageBenchmark):
       results.Add('vm_size_f_r', 'bytes', memory['Renderer']['VM'],
                   chart_name='vm_size_final_r', data_type='unimportant')
     if 'VMPeak' in memory['Renderer']:
-      results.Add('vm_peak_r', 'bytes', memory['Browser']['VMPeak'],
-                  chart_name='vm_pk_r', data_type='unimportant')
+      results.Add('vm_pk_r', 'bytes', memory['Browser']['VMPeak'],
+                  chart_name='vm_peak_r', data_type='unimportant')
     if 'WorkingSetSize' in memory['Renderer']:
       results.Add('vm_%s_f_r' % metric, 'bytes',
                   memory['Renderer']['WorkingSetSize'],
                   chart_name='vm_%s_final_r' % metric, data_type='unimportant')
     if 'WorkingSetSizePeak' in memory['Renderer']:
-      results.Add('%s_peak_r' % metric, 'bytes',
+      results.Add('%s_pk_r' % metric, 'bytes',
                   memory['Browser']['WorkingSetSizePeak'],
-                  chart_name='%s_pk_r' % metric, data_type='unimportant')
+                  chart_name='%s_peak_r' % metric, data_type='unimportant')
     if 'PrivateDirty' in memory['Renderer']:
       results.Add('vm_private_dirty_f_r', 'bytes',
                   memory['Renderer']['PrivateDirty'],
@@ -77,7 +88,7 @@ class PageCycler(page_benchmark.PageBenchmark):
                   chart_name='vm_pss_final_r', data_type='unimportant')
 
     # Total
-    if 'VM' in memory['Browser'] and 'WM' in memory['Renderer']:
+    if 'VM' in memory['Browser'] and 'VM' in memory['Renderer']:
       results.Add('vm_size_f_t', 'bytes',
                   memory['Browser']['VM'] + memory['Renderer']['VM'],
                   chart_name='vm_size_final_t', data_type='unimportant')
@@ -101,7 +112,8 @@ class PageCycler(page_benchmark.PageBenchmark):
                   memory['Renderer']['ProportionalSetSize'],
                   chart_name='vm_pss_final_t', data_type='unimportant')
 
-    results.Add('cc', 'kb', memory['SystemCommitCharge'],
+    results.Add('cc', 'kb',
+                memory['SystemCommitCharge'] - self.start_commit_charge,
                 chart_name='commit_charge', data_type='unimportant')
     results.Add('proc_', 'count', memory['ProcessCount'],
                 chart_name='processes', data_type='unimportant')
@@ -114,20 +126,20 @@ class PageCycler(page_benchmark.PageBenchmark):
                 chart_name='read_op_b', data_type='unimportant')
     results.Add('w_op_b', '', io_stats['Browser']['WriteOperationCount'],
                 chart_name='write_op_b', data_type='unimportant')
-    results.Add('r_b', 'kb', io_stats['Browser']['ReadTransferCount'],
+    results.Add('r_b', 'kb', io_stats['Browser']['ReadTransferCount'] / 1024,
                 chart_name='read_byte_b', data_type='unimportant')
-    results.Add('w_b', 'kb', io_stats['Browser']['WriteTransferCount'],
+    results.Add('w_b', 'kb', io_stats['Browser']['WriteTransferCount'] / 1024,
                 chart_name='write_byte_b', data_type='unimportant')
     results.Add('r_op_r', '', io_stats['Renderer']['ReadOperationCount'],
                 chart_name='read_op_r', data_type='unimportant')
     results.Add('w_op_r', '', io_stats['Renderer']['WriteOperationCount'],
                 chart_name='write_op_r', data_type='unimportant')
-    results.Add('r_r', 'kb', io_stats['Renderer']['ReadOperationCount'],
+    results.Add('r_r', 'kb', io_stats['Renderer']['ReadTransferCount'] / 1024,
                 chart_name='read_byte_r', data_type='unimportant')
-    results.Add('w_r', 'kb', io_stats['Renderer']['WriteOperationCount'],
+    results.Add('w_r', 'kb', io_stats['Renderer']['WriteTransferCount'] / 1024,
                 chart_name='write_byte_r', data_type='unimportant')
 
-  def MeasurePage(self, _, tab, results):
+  def MeasurePage(self, page, tab, results):
     def _IsDone():
       return tab.GetCookieByName('__pc_done') == '1'
     util.WaitFor(_IsDone, 1200, poll_interval=5)
@@ -136,11 +148,8 @@ class PageCycler(page_benchmark.PageBenchmark):
     self.MeasureMemory(tab, results)
     self.MeasureIO(tab, results)
 
-    for histogram in MEMORY_HISTOGRAMS:
-      name = histogram['name']
-      data = tab.EvaluateJavaScript(
-          'window.domAutomationController.getHistogram("%s")' % name)
-      results.Add(name, histogram['units'], data, data_type='histogram')
+    for h in self.histograms:
+      h.GetValue(page, tab, results)
 
     def _IsNavigatedToReport():
       return tab.GetCookieByName('__navigated_to_report') == '1'

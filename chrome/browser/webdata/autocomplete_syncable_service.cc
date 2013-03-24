@@ -7,7 +7,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
@@ -79,6 +78,13 @@ bool MergeTimestamps(const sync_pb::AutofillSpecifics& autofill,
   }
 }
 
+void* UserDataKey() {
+  // Use the address of a static that COMDAT folding won't ever fold
+  // with something else.
+  static int user_data_key = 0;
+  return reinterpret_cast<void*>(&user_data_key);
+}
+
 }  // namespace
 
 AutocompleteSyncableService::AutocompleteSyncableService(
@@ -94,6 +100,20 @@ AutocompleteSyncableService::AutocompleteSyncableService(
 
 AutocompleteSyncableService::~AutocompleteSyncableService() {
   DCHECK(CalledOnValidThread());
+}
+
+// static
+void AutocompleteSyncableService::CreateForWebDataService(
+    WebDataService* web_data) {
+  web_data->GetDBUserData()->SetUserData(
+      UserDataKey(), new AutocompleteSyncableService(web_data));
+}
+
+// static
+AutocompleteSyncableService* AutocompleteSyncableService::FromWebDataService(
+    WebDataService* web_data) {
+  return static_cast<AutocompleteSyncableService*>(
+      web_data->GetDBUserData()->GetUserData(UserDataKey()));
 }
 
 AutocompleteSyncableService::AutocompleteSyncableService()
@@ -299,8 +319,8 @@ void AutocompleteSyncableService::Observe(int type,
 
 bool AutocompleteSyncableService::LoadAutofillData(
     std::vector<AutofillEntry>* entries) const {
-  return web_data_service_->GetDatabase()->
-             GetAutofillTable()->GetAllAutofillEntries(entries);
+  return AutofillTable::FromWebDatabase(
+      web_data_service_->GetDatabase())->GetAllAutofillEntries(entries);
 }
 
 bool AutocompleteSyncableService::SaveChangesToWebData(
@@ -308,8 +328,9 @@ bool AutocompleteSyncableService::SaveChangesToWebData(
   DCHECK(CalledOnValidThread());
 
   if (!new_entries.empty() &&
-      !web_data_service_->GetDatabase()->
-          GetAutofillTable()->UpdateAutofillEntries(new_entries)) {
+      !AutofillTable::FromWebDatabase(
+          web_data_service_->GetDatabase())->UpdateAutofillEntries(
+              new_entries)) {
     return false;
   }
   return true;
@@ -381,8 +402,9 @@ void AutocompleteSyncableService::WriteAutofillEntry(
 
 syncer::SyncError AutocompleteSyncableService::AutofillEntryDelete(
     const sync_pb::AutofillSpecifics& autofill) {
-  if (!web_data_service_->GetDatabase()->GetAutofillTable()->RemoveFormElement(
-          UTF8ToUTF16(autofill.name()), UTF8ToUTF16(autofill.value()))) {
+  if (!AutofillTable::FromWebDatabase(
+          web_data_service_->GetDatabase())->RemoveFormElement(
+              UTF8ToUTF16(autofill.name()), UTF8ToUTF16(autofill.value()))) {
     return error_handler_->CreateAndUploadError(
         FROM_HERE,
         "Could not remove autocomplete entry from WebDatabase.");
@@ -400,8 +422,8 @@ void AutocompleteSyncableService::ActOnChanges(
       case AutofillChange::ADD:
       case AutofillChange::UPDATE: {
         std::vector<base::Time> timestamps;
-        if (!web_data_service_->GetDatabase()->
-                GetAutofillTable()->GetAutofillTimestamps(
+        if (!AutofillTable::FromWebDatabase(
+                web_data_service_->GetDatabase())->GetAutofillTimestamps(
                     change->key().name(),
                     change->key().value(),
                     &timestamps)) {

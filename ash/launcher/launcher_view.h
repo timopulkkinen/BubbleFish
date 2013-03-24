@@ -163,6 +163,11 @@ class ASH_EXPORT LauncherView : public views::View,
   // Toggles the overflow menu.
   void ToggleOverflowBubble();
 
+  // Update first launcher button's padding. This method adds padding to the
+  // first button to include the leading inset. It needs to be called once on
+  // button creation and every time when shelf alignment is changed.
+  void UpdateFirstButtonPadding();
+
   // Invoked after the fading out animation for item deletion is ended.
   void OnFadeOutAnimationEnded();
 
@@ -236,6 +241,12 @@ class ASH_EXPORT LauncherView : public views::View,
   // Returns false if the click which closed the previous menu is the click
   // which triggered this event.
   bool IsUsableEvent(const ui::Event& event);
+
+  // Convenience accessor to model_->items().
+  const LauncherItem* LauncherItemForView(const views::View* view) const;
+
+  // Returns true if a tooltip should be shown for |view|.
+  bool ShouldShowTooltipForView(const views::View* view) const;
 
   // The model; owned by Launcher.
   LauncherModel* model_;

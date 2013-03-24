@@ -465,6 +465,19 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   RunTest("testContentScriptIsPresent", kPageWithContentScript);
 }
 
+// Tests that renderer process native memory is feasible.
+#if defined(OS_WIN)
+// This test fails on Windows. http://crbug.com/215246
+#define MAYBE_TestRendererProcessNativeMemorySize DISABLED_TestRendererProcessNativeMemorySize
+#else
+#define MAYBE_TestRendererProcessNativeMemorySize TestRendererProcessNativeMemorySize
+#endif
+
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
+                       MAYBE_TestRendererProcessNativeMemorySize) {
+  RunTest("testRendererProcessNativeMemorySize", "");
+}
+
 // Tests that scripts are not duplicated after Scripts Panel switch.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
                        TestNoScriptDuplicatesOnPanelSwitch) {
@@ -480,7 +493,13 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
 
 // Tests that pressing 'Pause' will pause script execution if the script
 // is already running.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseWhenScriptIsRunning) {
+#if defined(OS_WIN)
+// Timing out on windows tryservers: http://crbug.com/219515
+#define MAYBE_TestPauseWhenScriptIsRunning DISABLED_TestPauseWhenScriptIsRunning
+#else
+#define MAYBE_TestPauseWhenScriptIsRunning TestPauseWhenScriptIsRunning
+#endif
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestPauseWhenScriptIsRunning) {
   RunTest("testPauseWhenScriptIsRunning", kPauseWhenScriptIsRunning);
 }
 

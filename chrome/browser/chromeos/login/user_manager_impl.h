@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_MANAGER_IMPL_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_MANAGER_IMPL_H_
 
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -13,7 +14,6 @@
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
-#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -49,6 +50,7 @@ class UserManagerImpl
                             bool browser_restart) OVERRIDE;
   virtual void RetailModeUserLoggedIn() OVERRIDE;
   virtual void GuestUserLoggedIn() OVERRIDE;
+  virtual void KioskAppLoggedIn(const std::string& username) OVERRIDE;
   virtual void LocallyManagedUserLoggedIn(const std::string& username) OVERRIDE;
   virtual void PublicAccountUserLoggedIn(User* user) OVERRIDE;
   virtual void RegularUserLoggedIn(const std::string& email,
@@ -86,6 +88,7 @@ class UserManagerImpl
   virtual bool IsLoggedInAsPublicAccount() const OVERRIDE;
   virtual bool IsLoggedInAsGuest() const OVERRIDE;
   virtual bool IsLoggedInAsLocallyManagedUser() const OVERRIDE;
+  virtual bool IsLoggedInAsKioskApp() const OVERRIDE;
   virtual bool IsLoggedInAsStub() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
   virtual MergeSessionState GetMergeSessionState() const OVERRIDE;

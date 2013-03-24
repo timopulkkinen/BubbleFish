@@ -54,6 +54,7 @@ SpdyHttpStream::~SpdyHttpStream() {
 }
 
 int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
+                                     RequestPriority priority,
                                      const BoundNetLog& stream_net_log,
                                      const CompletionCallback& callback) {
   DCHECK(!stream_.get());
@@ -75,7 +76,7 @@ int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
   }
 
   int rv = stream_request_.StartRequest(
-      spdy_session_, request_info_->url, request_info_->priority,
+      spdy_session_, request_info_->url, priority,
       stream_net_log,
       base::Bind(&SpdyHttpStream::OnStreamCreated,
                  weak_factory_.GetWeakPtr(), callback));
@@ -186,10 +187,6 @@ bool SpdyHttpStream::IsResponseBodyComplete() const {
 
 bool SpdyHttpStream::CanFindEndOfResponse() const {
   return true;
-}
-
-bool SpdyHttpStream::IsMoreDataBuffered() const {
-  return false;
 }
 
 bool SpdyHttpStream::IsConnectionReused() const {

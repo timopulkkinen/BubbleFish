@@ -15,8 +15,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_change_registrar.h"
+#include "base/prefs/pref_member.h"
 #include "base/string16.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/sessions/session_id.h"
@@ -453,12 +453,6 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
-  // If necessary, update the bookmark bar state according to the Instant
-  // overlay state: when Instant overlay shows suggestions and bookmark bar is
-  // still showing attached, hide it.
-  void MaybeUpdateBookmarkBarStateForInstantOverlay(
-      const chrome::search::Mode& mode);
-
   // Show a download on the download shelf.
   void ShowDownload(content::DownloadItem* download);
 
@@ -577,6 +571,7 @@ class Browser : public TabStripModelObserver,
       const GURL& target_url) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
+                                  const string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
   virtual void ContentRestrictionsChanged(
@@ -680,8 +675,9 @@ class Browser : public TabStripModelObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from chrome::search::SearchModelObserver:
-  virtual void ModeChanged(const chrome::search::Mode& old_mode,
-                           const chrome::search::Mode& new_mode) OVERRIDE;
+  virtual void ModelChanged(
+      const chrome::search::SearchModel::State& old_state,
+      const chrome::search::SearchModel::State& new_state) OVERRIDE;
 
   // Command and state updating ///////////////////////////////////////////////
 

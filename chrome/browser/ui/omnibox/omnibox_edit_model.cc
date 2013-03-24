@@ -20,14 +20,13 @@
 #include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
+#include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/google/google_url_tracker.h"
-#include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
@@ -36,6 +35,7 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -47,6 +47,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/search/instant_controller.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -360,24 +361,6 @@ bool OmniboxEditModel::UseVerbatimInstant() {
       just_deleted_text_;
 }
 
-string16 OmniboxEditModel::GetDesiredTLD() const {
-  // Tricky corner case: The user has typed "foo" and currently sees an inline
-  // autocomplete suggestion of "foo.net".  He now presses ctrl-a (e.g. to
-  // select all, on Windows).  If we treat the ctrl press as potentially for the
-  // sake of ctrl-enter, then we risk "www.foo.com" being promoted as the best
-  // match.  This would make the autocompleted text disappear, leaving our user
-  // feeling very confused when the wrong text gets highlighted.
-  //
-  // Thus, we only treat the user as pressing ctrl-enter when the user presses
-  // ctrl without any fragile state built up in the omnibox:
-  // * the contents of the omnibox have not changed since the keypress,
-  // * there is no autocompleted text visible, and
-  // * the user is not typing a keyword query.
-  return (control_key_state_ == DOWN_WITHOUT_CHANGE &&
-          inline_autocomplete_text_.empty() && !KeywordIsSelected())?
-    ASCIIToUTF16("com") : string16();
-}
-
 bool OmniboxEditModel::CurrentTextIsURL() const {
   if (view_->toolbar_model()->WouldReplaceSearchURLWithSearchTerms())
     return false;
@@ -429,7 +412,7 @@ void OmniboxEditModel::AdjustTextForCopy(int sel_min,
   // screw up our calculation of the desired_tld.
   AutocompleteMatch match;
   AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(*text,
-        string16(), KeywordIsSelected(), true, &match, NULL);
+      KeywordIsSelected(), true, &match, NULL);
   if (AutocompleteMatch::IsSearchType(match.type))
     return;
   *url = match.destination_url;
@@ -517,7 +500,7 @@ void OmniboxEditModel::StartAutocomplete(
   // We don't explicitly clear OmniboxPopupModel::manually_selected_match, as
   // Start ends up invoking OmniboxPopupModel::OnResultChanged which clears it.
   autocomplete_controller_->Start(AutocompleteInput(
-      user_text_, cursor_position, GetDesiredTLD(),
+      user_text_, cursor_position, string16(), GURL(),
       prevent_inline_autocomplete || just_deleted_text_ ||
       (has_selected_text && inline_autocomplete_text_.empty()) ||
       (paste_state_ != NONE), keyword_is_selected,
@@ -560,6 +543,34 @@ void OmniboxEditModel::AcceptInput(WindowOpenDisposition disposition,
   AutocompleteMatch match;
   GURL alternate_nav_url;
   GetInfoForCurrentText(&match, &alternate_nav_url);
+
+  // If CTRL is down it means the user wants to append ".com" to the text he
+  // typed. If we can successfully generate a URL_WHAT_YOU_TYPED match doing
+  // that, then we use this.
+  if (control_key_state_ == DOWN_WITHOUT_CHANGE && !KeywordIsSelected()) {
+    // Generate a new AutocompleteInput, copying the latest one but using "com"
+    // as the desired TLD. Then use this autocomplete input to generate a
+    // URL_WHAT_YOU_TYPED AutocompleteMatch. Note that using the most recent
+    // input instead of the currently visible text means we'll ignore any
+    // visible inline autocompletion: if a user types "foo" and is autocompleted
+    // to "foodnetwork.com", ctrl-enter will  navigate to "foo.com", not
+    // "foodnetwork.com".  At the time of writing, this behavior matches
+    // Internet Explorer, but not Firefox.
+    const AutocompleteInput& old_input = autocomplete_controller_->input();
+    AutocompleteInput input(
+      old_input.text(), old_input.cursor_position(), ASCIIToUTF16("com"),
+      GURL(), old_input.prevent_inline_autocomplete(),
+      old_input.prefer_keyword(), old_input.allow_exact_keyword_match(),
+      old_input.matches_requested());
+    AutocompleteMatch url_match =
+        HistoryURLProvider::SuggestExactInput(match.provider, input, true);
+
+    if (url_match.destination_url.is_valid()) {
+      // We have a valid URL, we use this newly generated AutocompleteMatch.
+      match = url_match;
+      alternate_nav_url = GURL();
+    }
+  }
 
   if (!match.destination_url.is_valid())
     return;
@@ -1131,7 +1142,7 @@ void OmniboxEditModel::OnResultChanged(bool default_match_changed) {
   }
 
   InstantController* instant = controller_->GetInstant();
-  if (instant)
+  if (instant && !in_revert_)
     instant->HandleAutocompleteResults(*autocomplete_controller_->providers());
 }
 
@@ -1199,8 +1210,8 @@ void OmniboxEditModel::GetInfoForCurrentText(AutocompleteMatch* match,
     InfoForCurrentSelection(match, alternate_nav_url);
   } else {
     AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
-        UserTextFromDisplayText(view_->GetText()), GetDesiredTLD(),
-        KeywordIsSelected(), true, match, alternate_nav_url);
+        UserTextFromDisplayText(view_->GetText()), KeywordIsSelected(), true,
+        match, alternate_nav_url);
   }
 }
 
@@ -1354,7 +1365,7 @@ void OmniboxEditModel::ClassifyStringForPasteAndGo(
     GURL* alternate_nav_url) const {
   DCHECK(match);
   AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(text,
-      string16(), false, false, match, alternate_nav_url);
+      false, false, match, alternate_nav_url);
 }
 
 void OmniboxEditModel::SetFocusState(OmniboxFocusState state,

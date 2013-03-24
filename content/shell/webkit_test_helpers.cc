@@ -105,9 +105,11 @@ void ApplyLayoutTestDefaultPreferences(webkit_glue::WebPreferences* prefs) {
   prefs->accelerated_2d_canvas_enabled =
       command_line.HasSwitch(switches::kEnableAccelerated2DCanvas);
   prefs->accelerated_compositing_for_video_enabled = false;
-  prefs->deferred_2d_canvas_enabled = false;
   prefs->mock_scrollbars_enabled = false;
   prefs->fixed_position_creates_stacking_context = false;
+  prefs->apply_page_scale_factor_in_compositor = false;
+  prefs->smart_insert_delete_enabled = true;
+  prefs->minimum_accelerated_2d_canvas_size = 0;
 }
 
 }  // namespace content

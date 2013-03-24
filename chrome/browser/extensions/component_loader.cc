@@ -8,9 +8,10 @@
 #include "base/file_util.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_notifier.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -23,6 +24,7 @@
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/id_util.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -49,10 +51,9 @@ std::string GenerateId(const DictionaryValue* manifest,
                        const base::FilePath& path) {
   std::string raw_key;
   std::string id_input;
-  std::string id;
   CHECK(manifest->GetString(extension_manifest_keys::kPublicKey, &raw_key));
   CHECK(Extension::ParsePEMKeyBytes(raw_key, &id_input));
-  CHECK(Extension::GenerateId(id_input, &id));
+  std::string id = id_util::GenerateId(id_input);
   return id;
 }
 
@@ -418,6 +419,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #if defined(GOOGLE_CHROME_BUILD)
     Add(IDR_WALLPAPERMANAGER_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
+
+    if (browser_defaults::enable_component_quick_office) {
+      // Don't load Quickoffice component extension in Guest mode because
+      // it doesn't work in Incognito mode due to disabled temp fs.
+      // TODO(dpolukhin): enable Quickoffice in Guest mode.
+      if (!command_line->HasSwitch(switches::kGuestSession)) {
+        Add(IDR_QUICK_OFFICE_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
+                                  "/usr/share/chromeos-assets/quick_office")));
+      }
+    }
 #endif  // defined(OFFICIAL_BUILD)
 
     base::FilePath echo_extension_path(FILE_PATH_LITERAL(

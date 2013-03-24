@@ -11,8 +11,8 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -843,7 +843,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
 
   AutocompleteMatch match;
   AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
-      params_.selection_text, string16(), false, false, &match, NULL);
+      params_.selection_text, false, false, &match, NULL);
   selection_navigation_url_ = match.destination_url;
   if (!selection_navigation_url_.is_valid())
     return;

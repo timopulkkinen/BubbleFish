@@ -47,9 +47,9 @@
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/url_constants.h"
-#include "crypto/sha2.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/id_util.h"
 #include "extensions/common/url_pattern_set.h"
 #include "googleurl/src/url_util.h"
 #include "grit/chromium_strings.h"
@@ -91,23 +91,6 @@ const int kRSAKeySize = 1024;
 
 const char kDefaultSandboxedPageContentSecurityPolicy[] =
     "sandbox allow-scripts allow-forms allow-popups";
-
-// Converts a normal hexadecimal string into the alphabet used by extensions.
-// We use the characters 'a'-'p' instead of '0'-'f' to avoid ever having a
-// completely numeric host, since some software interprets that as an IP
-// address.
-static void ConvertHexadecimalToIDAlphabet(std::string* id) {
-  for (size_t i = 0; i < id->size(); ++i) {
-    int val;
-    if (base::HexStringToInt(base::StringPiece(id->begin() + i,
-                                               id->begin() + i + 1),
-                             &val)) {
-      (*id)[i] = val + 'a';
-    } else {
-      (*id)[i] = 'a';
-    }
-  }
-}
 
 // A singleton object containing global data needed by the extension objects.
 class ExtensionConfig {
@@ -197,28 +180,21 @@ scoped_ptr<ActionInfo> LoadExtensionActionInfoHelper(
 
 }  // namespace
 
-const base::FilePath::CharType Extension::kManifestFilename[] =
-    FILE_PATH_LITERAL("manifest.json");
-const base::FilePath::CharType Extension::kLocaleFolder[] =
-    FILE_PATH_LITERAL("_locales");
-const base::FilePath::CharType Extension::kMessagesFilename[] =
-    FILE_PATH_LITERAL("messages.json");
-
 #if defined(OS_WIN)
 const char Extension::kExtensionRegistryPath[] =
     "Software\\Google\\Chrome\\Extensions";
 #endif
-
-// first 16 bytes of SHA256 hashed public key.
-const size_t Extension::kIdSize = 16;
 
 const char Extension::kMimeType[] = "application/x-chrome-extension";
 
 const int Extension::kValidWebExtentSchemes =
     URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS;
 
-const int Extension::kValidHostPermissionSchemes =
-    UserScript::kValidUserScriptSchemes | URLPattern::SCHEME_CHROMEUI;
+const int Extension::kValidHostPermissionSchemes = URLPattern::SCHEME_CHROMEUI |
+                                                   URLPattern::SCHEME_HTTP |
+                                                   URLPattern::SCHEME_HTTPS |
+                                                   URLPattern::SCHEME_FILE |
+                                                   URLPattern::SCHEME_FTP;
 
 Extension::Requirements::Requirements()
     : webgl(false),
@@ -290,7 +266,7 @@ scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
 // static
 bool Extension::IdIsValid(const std::string& id) {
   // Verify that the id is legal.
-  if (id.size() != (kIdSize * 2))
+  if (id.size() != (id_util::kIdSize * 2))
     return false;
 
   // We only support lowercase IDs, because IDs can be used as URL components
@@ -304,16 +280,6 @@ bool Extension::IdIsValid(const std::string& id) {
 }
 
 // static
-std::string Extension::GenerateIdForPath(const base::FilePath& path) {
-  base::FilePath new_path = Extension::MaybeNormalizePath(path);
-  std::string path_bytes =
-      std::string(reinterpret_cast<const char*>(new_path.value().data()),
-                  new_path.value().size() * sizeof(base::FilePath::CharType));
-  std::string id;
-  return GenerateId(path_bytes, &id) ? id : "";
-}
-
-// static
 bool Extension::IsExtension(const base::FilePath& file_name) {
   return file_name.MatchesExtension(chrome::kExtensionFileExtension);
 }
@@ -323,6 +289,7 @@ void Extension::GetBasicInfo(bool enabled,
   info->SetString(info_keys::kIdKey, id());
   info->SetString(info_keys::kNameKey, name());
   info->SetBoolean(info_keys::kEnabledKey, enabled);
+  info->SetBoolean(info_keys::kKioskEnabledKey, kiosk_enabled());
   info->SetBoolean(info_keys::kOfflineEnabledKey, offline_enabled());
   info->SetString(info_keys::kVersionKey, VersionString());
   info->SetString(info_keys::kDescriptionKey, description());
@@ -442,17 +409,6 @@ bool Extension::ParsePEMKeyBytes(const std::string& input,
 bool Extension::ProducePEM(const std::string& input, std::string* output) {
   DCHECK(output);
   return (input.length() == 0) ? false : base::Base64Encode(input, output);
-}
-
-// static
-bool Extension::GenerateId(const std::string& input, std::string* output) {
-  DCHECK(output);
-  uint8 hash[Extension::kIdSize];
-  crypto::SHA256HashString(input, hash, sizeof(hash));
-  *output = StringToLowerASCII(base::HexEncode(hash, sizeof(hash)));
-  ConvertHexadecimalToIDAlphabet(output);
-
-  return true;
 }
 
 // static
@@ -590,26 +546,50 @@ bool Extension::ParsePermissions(const char* key,
       URLPattern pattern = URLPattern(kAllowedSchemes);
       URLPattern::ParseResult parse_result = pattern.Parse(permission_str);
       if (parse_result == URLPattern::PARSE_SUCCESS) {
+        // The path component is not used for host permissions, so we force it
+        // to match all paths.
+        pattern.SetPath("/*");
+        int valid_schemes = pattern.valid_schemes();
+        if (pattern.MatchesScheme(chrome::kFileScheme) &&
+            !CanExecuteScriptEverywhere()) {
+          wants_file_access_ = true;
+          if (!(creation_flags_ & ALLOW_FILE_ACCESS))
+            valid_schemes &= ~URLPattern::SCHEME_FILE;
+        }
+
+        if (pattern.scheme() != chrome::kChromeUIScheme &&
+            !CanExecuteScriptEverywhere()) {
+          // Keep chrome:// in allowed schemes only if it's explicitly requested
+          // or CanExecuteScriptEverywhere is true. If the
+          // extensions_on_chrome_urls flag is not set, CanSpecifyHostPermission
+          // will fail, so don't check the flag here.
+          valid_schemes &= ~URLPattern::SCHEME_CHROMEUI;
+        }
+        pattern.SetValidSchemes(valid_schemes);
+
         if (!CanSpecifyHostPermission(pattern, *api_permissions)) {
+          // TODO(aboxhall): make a warning (see line 633)
           *error = ErrorUtils::FormatErrorMessageUTF16(
               errors::kInvalidPermissionScheme, permission_str);
           return false;
         }
 
-        // The path component is not used for host permissions, so we force it
-        // to match all paths.
-        pattern.SetPath("/*");
+        host_permissions->AddPattern(pattern);
 
-        if (pattern.MatchesScheme(chrome::kFileScheme) &&
-            !CanExecuteScriptEverywhere()) {
-          wants_file_access_ = true;
-          if (!(creation_flags_ & ALLOW_FILE_ACCESS)) {
-            pattern.SetValidSchemes(
-                pattern.valid_schemes() & ~URLPattern::SCHEME_FILE);
+        // We need to make sure all_urls matches chrome://favicon and
+        // (maybe) chrome://thumbnail, so add them back in to host_permissions
+        // separately.
+        if (pattern.match_all_urls()) {
+          host_permissions->AddPattern(
+              URLPattern(URLPattern::SCHEME_CHROMEUI,
+                         chrome::kChromeUIFaviconURL));
+          if (api_permissions->find(APIPermission::kExperimental) !=
+              api_permissions->end()) {
+            host_permissions->AddPattern(
+                URLPattern(URLPattern::SCHEME_CHROMEUI,
+                           chrome::kChromeUIThumbnailURL));
           }
         }
-
-        host_permissions->AddPattern(pattern);
         continue;
       }
 
@@ -664,13 +644,6 @@ bool Extension::CanSilentlyIncreasePermissions() const {
 }
 
 bool Extension::HasHostPermission(const GURL& url) const {
-  if (url.SchemeIs(chrome::kChromeUIScheme) &&
-      url.host() != chrome::kChromeUIFaviconHost &&
-      url.host() != chrome::kChromeUIThumbnailHost &&
-      location() != Manifest::COMPONENT) {
-    return false;
-  }
-
   base::AutoLock auto_lock(runtime_data_lock_);
   return runtime_data_.GetActivePermissions()->
       HasExplicitAccessToOrigin(url);
@@ -803,9 +776,12 @@ bool Extension::CanExecuteScriptOnPage(const GURL& document_url,
     return false;
   }
 
-  if (document_url.SchemeIs(chrome::kChromeUIScheme) &&
-      !CanExecuteScriptEverywhere()) {
-    return false;
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kExtensionsOnChromeURLs)) {
+    if (document_url.SchemeIs(chrome::kChromeUIScheme) &&
+        !CanExecuteScriptEverywhere()) {
+      return false;
+    }
   }
 
   if (top_frame_url.SchemeIs(extensions::kExtensionScheme) &&
@@ -1003,15 +979,6 @@ bool Extension::ShouldDisplayInExtensionSettings() const {
   return true;
 }
 
-bool Extension::HasContentScriptAtURL(const GURL& url) const {
-  for (UserScriptList::const_iterator it = content_scripts_.begin();
-      it != content_scripts_.end(); ++it) {
-    if (it->MatchesURL(url))
-      return true;
-  }
-  return false;
-}
-
 scoped_refptr<const PermissionSet> Extension::GetTabSpecificPermissions(
     int tab_id) const {
   base::AutoLock auto_lock(runtime_data_lock_);
@@ -1164,13 +1131,12 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
   if (manifest->HasKey(keys::kPublicKey)) {
     std::string public_key;
     std::string public_key_bytes;
-    std::string extension_id;
     if (!manifest->GetString(keys::kPublicKey, &public_key) ||
-        !ParsePEMKeyBytes(public_key, &public_key_bytes) ||
-        !GenerateId(public_key_bytes, &extension_id)) {
+        !ParsePEMKeyBytes(public_key, &public_key_bytes)) {
       *error = ASCIIToUTF16(errors::kInvalidKey);
       return false;
     }
+    std::string extension_id = id_util::GenerateId(public_key_bytes);
     manifest->set_extension_id(extension_id);
     return true;
   }
@@ -1182,7 +1148,7 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
     // If there is a path, we generate the ID from it. This is useful for
     // development mode, because it keeps the ID stable across restarts and
     // reloading the extension.
-    std::string extension_id = GenerateIdForPath(path);
+    std::string extension_id = id_util::GenerateIdForPath(path);
     if (extension_id.empty()) {
       NOTREACHED() << "Could not create ID from path.";
       return false;
@@ -1190,23 +1156,6 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
     manifest->set_extension_id(extension_id);
     return true;
   }
-}
-
-// static
-base::FilePath Extension::MaybeNormalizePath(const base::FilePath& path) {
-#if defined(OS_WIN)
-  // Normalize any drive letter to upper-case. We do this for consistency with
-  // net_utils::FilePathToFileURL(), which does the same thing, to make string
-  // comparisons simpler.
-  std::wstring path_str = path.value();
-  if (path_str.size() >= 2 && path_str[0] >= L'a' && path_str[0] <= L'z' &&
-      path_str[1] == ':')
-    path_str[0] += ('A' - 'a');
-
-  return base::FilePath(path_str);
-#else
-  return path;
-#endif
 }
 
 bool Extension::LoadManagedModeFeatures(string16* error) {
@@ -1260,6 +1209,7 @@ Extension::Extension(const base::FilePath& path,
                      scoped_ptr<extensions::Manifest> manifest)
     : manifest_version_(0),
       incognito_split_mode_(false),
+      kiosk_enabled_(false),
       offline_enabled_(false),
       converted_from_user_script_(false),
       manifest_(manifest.release()),
@@ -1273,7 +1223,7 @@ Extension::Extension(const base::FilePath& path,
       wants_file_access_(false),
       creation_flags_(0) {
   DCHECK(path.empty() || path.IsAbsolute());
-  path_ = MaybeNormalizePath(path);
+  path_ = id_util::MaybeNormalizePath(path);
 }
 
 Extension::~Extension() {
@@ -1724,6 +1674,7 @@ bool Extension::LoadSharedFeatures(string16* error) {
       !LoadNaClModules(error) ||
       !LoadSandboxedPages(error) ||
       !LoadRequirements(error) ||
+      !LoadKioskEnabled(error) ||
       !LoadOfflineEnabled(error))
     return false;
 
@@ -1933,6 +1884,22 @@ bool Extension::LoadRequirements(string16* error) {
   return true;
 }
 
+bool Extension::LoadKioskEnabled(string16* error) {
+  if (!manifest_->HasKey(keys::kKioskEnabled))
+    return true;
+
+  if (!manifest_->GetBoolean(keys::kKioskEnabled, &kiosk_enabled_)) {
+    *error = ASCIIToUTF16(errors::kInvalidKioskEnabled);
+    return false;
+  }
+
+  // All other use cases should be already filtered out by manifest feature
+  // checks.
+  DCHECK(is_platform_app());
+
+  return true;
+}
+
 bool Extension::LoadOfflineEnabled(string16* error) {
   // Defaults to false, except for platform apps which are offline by default.
   if (!manifest_->HasKey(keys::kOfflineEnabled)) {
@@ -1951,41 +1918,10 @@ bool Extension::LoadExtensionFeatures(string16* error) {
     manifest_->GetBoolean(keys::kConvertedFromUserScript,
                           &converted_from_user_script_);
 
-  if (!LoadContentScripts(error) ||
-      !LoadSystemIndicator(error) ||
+  if (!LoadSystemIndicator(error) ||
       !LoadIncognitoMode(error))
     return false;
 
-  return true;
-}
-
-bool Extension::LoadContentScripts(string16* error) {
-  if (!manifest_->HasKey(keys::kContentScripts))
-    return true;
-  const ListValue* list_value;
-  if (!manifest_->GetList(keys::kContentScripts, &list_value)) {
-    *error = ASCIIToUTF16(errors::kInvalidContentScriptsList);
-    return false;
-  }
-
-  for (size_t i = 0; i < list_value->GetSize(); ++i) {
-    const DictionaryValue* content_script = NULL;
-    if (!list_value->GetDictionary(i, &content_script)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidContentScript, base::IntToString(i));
-      return false;
-    }
-
-    UserScript script;
-    if (!LoadUserScriptHelper(content_script, i, error, &script))
-      return false;  // Failed to parse script context definition.
-    script.set_extension_id(id());
-    if (converted_from_user_script_) {
-      script.set_emulate_greasemonkey(true);
-      script.set_match_all_frames(true);  // Greasemonkey matches all frames.
-    }
-    content_scripts_.push_back(script);
-  }
   return true;
 }
 
@@ -2034,251 +1970,6 @@ bool Extension::LoadIncognitoMode(string16* error) {
     *error = ASCIIToUTF16(errors::kInvalidIncognitoBehavior);
     return false;
   }
-  return true;
-}
-
-// Helper method that loads a UserScript object from a dictionary in the
-// content_script list of the manifest.
-bool Extension::LoadUserScriptHelper(const DictionaryValue* content_script,
-                                     int definition_index,
-                                     string16* error,
-                                     UserScript* result) {
-  // run_at
-  if (content_script->HasKey(keys::kRunAt)) {
-    std::string run_location;
-    if (!content_script->GetString(keys::kRunAt, &run_location)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidRunAt,
-          base::IntToString(definition_index));
-      return false;
-    }
-
-    if (run_location == values::kRunAtDocumentStart) {
-      result->set_run_location(UserScript::DOCUMENT_START);
-    } else if (run_location == values::kRunAtDocumentEnd) {
-      result->set_run_location(UserScript::DOCUMENT_END);
-    } else if (run_location == values::kRunAtDocumentIdle) {
-      result->set_run_location(UserScript::DOCUMENT_IDLE);
-    } else {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidRunAt,
-          base::IntToString(definition_index));
-      return false;
-    }
-  }
-
-  // all frames
-  if (content_script->HasKey(keys::kAllFrames)) {
-    bool all_frames = false;
-    if (!content_script->GetBoolean(keys::kAllFrames, &all_frames)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidAllFrames, base::IntToString(definition_index));
-      return false;
-    }
-    result->set_match_all_frames(all_frames);
-  }
-
-  // matches (required)
-  const ListValue* matches = NULL;
-  if (!content_script->GetList(keys::kMatches, &matches)) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kInvalidMatches,
-        base::IntToString(definition_index));
-    return false;
-  }
-
-  if (matches->GetSize() == 0) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kInvalidMatchCount,
-        base::IntToString(definition_index));
-    return false;
-  }
-  for (size_t j = 0; j < matches->GetSize(); ++j) {
-    std::string match_str;
-    if (!matches->GetString(j, &match_str)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidMatch,
-          base::IntToString(definition_index),
-          base::IntToString(j),
-          errors::kExpectString);
-      return false;
-    }
-
-    URLPattern pattern(UserScript::kValidUserScriptSchemes);
-    if (CanExecuteScriptEverywhere())
-      pattern.SetValidSchemes(URLPattern::SCHEME_ALL);
-
-    URLPattern::ParseResult parse_result = pattern.Parse(match_str);
-    if (parse_result != URLPattern::PARSE_SUCCESS) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidMatch,
-          base::IntToString(definition_index),
-          base::IntToString(j),
-          URLPattern::GetParseResultString(parse_result));
-      return false;
-    }
-
-    if (pattern.MatchesScheme(chrome::kFileScheme) &&
-        !CanExecuteScriptEverywhere()) {
-      wants_file_access_ = true;
-      if (!(creation_flags_ & ALLOW_FILE_ACCESS)) {
-        pattern.SetValidSchemes(
-            pattern.valid_schemes() & ~URLPattern::SCHEME_FILE);
-      }
-    }
-
-    result->add_url_pattern(pattern);
-  }
-
-  // exclude_matches
-  if (content_script->HasKey(keys::kExcludeMatches)) {  // optional
-    const ListValue* exclude_matches = NULL;
-    if (!content_script->GetList(keys::kExcludeMatches, &exclude_matches)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidExcludeMatches,
-          base::IntToString(definition_index));
-      return false;
-    }
-
-    for (size_t j = 0; j < exclude_matches->GetSize(); ++j) {
-      std::string match_str;
-      if (!exclude_matches->GetString(j, &match_str)) {
-        *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidExcludeMatch,
-            base::IntToString(definition_index),
-            base::IntToString(j),
-            errors::kExpectString);
-        return false;
-      }
-
-      URLPattern pattern(UserScript::kValidUserScriptSchemes);
-      if (CanExecuteScriptEverywhere())
-        pattern.SetValidSchemes(URLPattern::SCHEME_ALL);
-      URLPattern::ParseResult parse_result = pattern.Parse(match_str);
-      if (parse_result != URLPattern::PARSE_SUCCESS) {
-        *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidExcludeMatch,
-            base::IntToString(definition_index), base::IntToString(j),
-            URLPattern::GetParseResultString(parse_result));
-        return false;
-      }
-
-      result->add_exclude_url_pattern(pattern);
-    }
-  }
-
-  // include/exclude globs (mostly for Greasemonkey compatibility)
-  if (!LoadGlobsHelper(content_script, definition_index, keys::kIncludeGlobs,
-                       error, &UserScript::add_glob, result)) {
-      return false;
-  }
-
-  if (!LoadGlobsHelper(content_script, definition_index, keys::kExcludeGlobs,
-                       error, &UserScript::add_exclude_glob, result)) {
-      return false;
-  }
-
-  // js and css keys
-  const ListValue* js = NULL;
-  if (content_script->HasKey(keys::kJs) &&
-      !content_script->GetList(keys::kJs, &js)) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kInvalidJsList,
-        base::IntToString(definition_index));
-    return false;
-  }
-
-  const ListValue* css = NULL;
-  if (content_script->HasKey(keys::kCss) &&
-      !content_script->GetList(keys::kCss, &css)) {
-    *error = ErrorUtils::
-        FormatErrorMessageUTF16(errors::kInvalidCssList,
-        base::IntToString(definition_index));
-    return false;
-  }
-
-  // The manifest needs to have at least one js or css user script definition.
-  if (((js ? js->GetSize() : 0) + (css ? css->GetSize() : 0)) == 0) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kMissingFile,
-        base::IntToString(definition_index));
-    return false;
-  }
-
-  if (js) {
-    for (size_t script_index = 0; script_index < js->GetSize();
-         ++script_index) {
-      const Value* value;
-      std::string relative;
-      if (!js->Get(script_index, &value) || !value->GetAsString(&relative)) {
-        *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidJs,
-            base::IntToString(definition_index),
-            base::IntToString(script_index));
-        return false;
-      }
-      GURL url = GetResourceURL(relative);
-      ExtensionResource resource = GetResource(relative);
-      result->js_scripts().push_back(UserScript::File(
-          resource.extension_root(), resource.relative_path(), url));
-    }
-  }
-
-  if (css) {
-    for (size_t script_index = 0; script_index < css->GetSize();
-         ++script_index) {
-      const Value* value;
-      std::string relative;
-      if (!css->Get(script_index, &value) || !value->GetAsString(&relative)) {
-        *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidCss,
-            base::IntToString(definition_index),
-            base::IntToString(script_index));
-        return false;
-      }
-      GURL url = GetResourceURL(relative);
-      ExtensionResource resource = GetResource(relative);
-      result->css_scripts().push_back(UserScript::File(
-          resource.extension_root(), resource.relative_path(), url));
-    }
-  }
-
-  return true;
-}
-
-bool Extension::LoadGlobsHelper(
-    const DictionaryValue* content_script,
-    int content_script_index,
-    const char* globs_property_name,
-    string16* error,
-    void(UserScript::*add_method)(const std::string& glob),
-    UserScript* instance) {
-  if (!content_script->HasKey(globs_property_name))
-    return true;  // they are optional
-
-  const ListValue* list = NULL;
-  if (!content_script->GetList(globs_property_name, &list)) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kInvalidGlobList,
-        base::IntToString(content_script_index),
-        globs_property_name);
-    return false;
-  }
-
-  for (size_t i = 0; i < list->GetSize(); ++i) {
-    std::string glob;
-    if (!list->GetString(i, &glob)) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kInvalidGlob,
-          base::IntToString(content_script_index),
-          globs_property_name,
-          base::IntToString(i));
-      return false;
-    }
-
-    (instance->*add_method)(glob);
-  }
-
   return true;
 }
 
@@ -2357,6 +2048,12 @@ bool Extension::CanSpecifyHostPermission(const URLPattern& pattern,
     if (CanExecuteScriptEverywhere())
       return true;
 
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kExtensionsOnChromeURLs))
+      return true;
+
+    // TODO(aboxhall): return from_webstore() when webstore handles blocking
+    // extensions which request chrome:// urls
     return false;
   }
 

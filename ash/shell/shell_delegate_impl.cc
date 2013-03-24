@@ -47,6 +47,10 @@ bool ShellDelegateImpl::IsSessionStarted() const {
   return true;
 }
 
+bool ShellDelegateImpl::IsGuestSession() const {
+  return false;
+}
+
 bool ShellDelegateImpl::IsFirstRunAfterBoot() const {
   return false;
 }
@@ -72,6 +76,9 @@ void ShellDelegateImpl::UnlockScreen() {
 
 bool ShellDelegateImpl::IsScreenLocked() const {
   return locked_;
+}
+
+void ShellDelegateImpl::PreInit() {
 }
 
 void ShellDelegateImpl::Shutdown() {

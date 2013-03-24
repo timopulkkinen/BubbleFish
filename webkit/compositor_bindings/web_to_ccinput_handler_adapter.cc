@@ -6,8 +6,9 @@
 
 #include "third_party/WebKit/Source/Platform/chromium/public/WebInputHandlerClient.h"
 
-#define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, cc_name)                     \
-  COMPILE_ASSERT(int(WebKit::webkit_name) == int(cc::cc_name),                 \
+#define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, cc_name) \
+  COMPILE_ASSERT(static_cast<int>(WebKit::webkit_name) ==  \
+                 static_cast<int>(cc::cc_name),            \
                  mismatching_enums)
 
 COMPILE_ASSERT_MATCHING_ENUM(WebInputHandlerClient::ScrollStatusOnMainThread,
@@ -37,7 +38,7 @@ WebToCCInputHandlerAdapter::~WebToCCInputHandlerAdapter() {}
 
 class WebToCCInputHandlerAdapter::ClientAdapter : public WebInputHandlerClient {
  public:
-  ClientAdapter(cc::InputHandlerClient* client) : client_(client) {}
+  explicit ClientAdapter(cc::InputHandlerClient* client) : client_(client) {}
 
   virtual ~ClientAdapter() {}
 
@@ -49,6 +50,11 @@ class WebToCCInputHandlerAdapter::ClientAdapter : public WebInputHandlerClient {
 
   virtual bool scrollByIfPossible(WebPoint point, WebFloatSize delta) {
     return client_->ScrollBy(point, delta);
+  }
+
+  virtual bool scrollVerticallyByPageIfPossible(
+      WebPoint point, WebScrollbar::ScrollDirection direction) {
+    return client_->ScrollVerticallyByPage(point, direction);
   }
 
   virtual void scrollEnd() { client_->ScrollEnd(); }

@@ -22,7 +22,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_ASH)
@@ -63,8 +63,8 @@ bool WaitForTabsAndPopups(Browser* browser,
                           int num_popups,
                           int num_panels) {
   SCOPED_TRACE(
-      StringPrintf("WaitForTabsAndPopups tabs:%d, popups:%d, panels:%d",
-                   num_tabs, num_popups, num_panels));
+      base::StringPrintf("WaitForTabsAndPopups tabs:%d, popups:%d, panels:%d",
+                         num_tabs, num_popups, num_panels));
   // We start with one tab and one browser already open.
   ++num_tabs;
   size_t num_browsers = static_cast<size_t>(num_popups) + 1;

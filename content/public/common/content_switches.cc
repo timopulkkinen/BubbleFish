@@ -32,10 +32,6 @@ const char kBrowserCrashTest[]              = "crash-test";
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 
-// Run Chrome in Chrome Frame mode. This means that Chrome expects to be run
-// as a dependent process of the Chrome Frame plugin.
-const char kChromeFrame[]                   = "chrome-frame";
-
 // Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
 // This is controlled by policy and is kept separate from the other
 // enable/disable switches to avoid accidentally regressing the policy
@@ -79,9 +75,6 @@ const char kDisableDatabases[]              = "disable-databases";
 
 // Disables data transfer items.
 const char kDisableDataTransferItems[]      = "disable-data-transfer-items";
-
-// Disable deferred 2d canvas rendering.
-const char kDisableDeferred2dCanvas[]        = "disable-deferred-2d-canvas";
 
 // Disables desktop notifications (default enabled on windows).
 const char kDisableDesktopNotifications[]   = "disable-desktop-notifications";
@@ -486,9 +479,6 @@ const char kInProcessGPU[]                  = "in-process-gpu";
 // Runs plugins inside the renderer process
 const char kInProcessPlugins[]              = "in-process-plugins";
 
-// Runs WebGL inside the renderer process.
-const char kInProcessWebGL[]                = "in-process-webgl";
-
 // Specifies the flags passed to JS engine
 const char kJavaScriptFlags[]               = "js-flags";
 
@@ -505,13 +495,6 @@ const char kLogPluginMessages[]             = "log-plugin-messages";
 // Sample memory usage with high frequency and store the results to the
 // Renderer.Memory histogram. Used in memory tests.
 const char kMemoryMetrics[]                 = "memory-metrics";
-
-// Causes the process to run as a NativeClient broker
-// (used for launching NaCl loader processes on 64-bit Windows).
-const char kNaClBrokerProcess[]             = "nacl-broker";
-
-// Causes the process to run as a NativeClient loader.
-const char kNaClLoaderProcess[]             = "nacl-loader";
 
 // Don't send HTTP-Referer headers.
 const char kNoReferrers[]                   = "no-referrers";
@@ -596,17 +579,6 @@ const char kRendererProcessLimit[]          = "renderer-process-limit";
 
 // Causes the renderer process to display a dialog on launch.
 const char kRendererStartupDialog[]         = "renderer-startup-dialog";
-
-// Renders a border around composited Render Layers to help debug and study
-// layer compositing.
-const char kShowCompositedLayerBorders[]    = "show-composited-layer-borders";
-
-// Draws a textual dump of the compositor layer tree to help debug and study
-// layer compositing.
-const char kShowCompositedLayerTree[]       = "show-composited-layer-tree";
-
-// Draws a FPS indicator
-const char kShowFPSCounter[]                = "show-fps-counter";
 
 // Enables accelerated compositing for overflow scroll. Promotes eligible
 // overflow:scroll elements to layers to enable accelerated scrolling for them.

@@ -17,7 +17,7 @@
 #include "ui/message_center/notification_list.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/message_center_bubble.h"
-#include "ui/message_center/views/message_popup_bubble.h"
+#include "ui/message_center/views/message_popup_collection.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
@@ -103,8 +103,8 @@ typedef InProcessBrowserTest WebNotificationTrayWinTest;
 
 // TODO(dewittj): More exhaustive testing.
 IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest, WebNotifications) {
-  scoped_ptr<WebNotificationTrayWin> tray(new WebNotificationTrayWin());
-  message_center::MessageCenter* message_center = tray->message_center();
+  message_center::MessageCenter* message_center =
+      message_center::MessageCenter::Get();
   scoped_ptr<TestDelegate> delegate(new TestDelegate(message_center));
 
   // Add a notification.
@@ -166,8 +166,9 @@ IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest, WebNotificationPopupBubble) {
 
 using message_center::NotificationList;
 
+// Flaky, see http://crbug.com/222500 .
 IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest,
-                       ManyMessageCenterNotifications) {
+                       DISABLED_ManyMessageCenterNotifications) {
   scoped_ptr<WebNotificationTrayWin> tray(new WebNotificationTrayWin());
   message_center::MessageCenter* message_center = tray->message_center();
   scoped_ptr<TestDelegate> delegate(new TestDelegate(message_center));
@@ -176,7 +177,7 @@ IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest,
   size_t notifications_to_add =
       NotificationList::kMaxVisibleMessageCenterNotifications + 1;
   for (size_t i = 0; i < notifications_to_add; ++i) {
-    std::string id = StringPrintf("test_id%d", static_cast<int>(i));
+    std::string id = base::StringPrintf("test_id%d", static_cast<int>(i));
     delegate->AddNotification(id);
   }
   bool shown = tray->message_center_tray_->ShowMessageCenterBubble();
@@ -187,6 +188,8 @@ IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest,
             message_center->NotificationCount());
   EXPECT_EQ(NotificationList::kMaxVisibleMessageCenterNotifications,
             tray->GetMessageCenterBubbleForTest()->NumMessageViewsForTest());
+  message_center->notification_list()->RemoveAllNotifications();
+  message_center->NotifyMessageCenterChanged(false);
 }
 
 IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest, ManyPopupNotifications) {
@@ -198,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest, ManyPopupNotifications) {
   size_t notifications_to_add =
       NotificationList::kMaxVisiblePopupNotifications + 1;
   for (size_t i = 0; i < notifications_to_add; ++i) {
-    std::string id = StringPrintf("test_id%d", static_cast<int>(i));
+    std::string id = base::StringPrintf("test_id%d", static_cast<int>(i));
     delegate->AddNotification(id);
   }
   // Hide and reshow the bubble so that it is updated immediately, not delayed.
@@ -207,10 +210,11 @@ IN_PROC_BROWSER_TEST_F(WebNotificationTrayWinTest, ManyPopupNotifications) {
   EXPECT_TRUE(tray->message_center_tray_->popups_visible());
   EXPECT_EQ(notifications_to_add,
             message_center->NotificationCount());
-  EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications,
-            tray->GetPopupBubbleForTest()->NumMessageViewsForTest());
-  message_center->SetDelegate(NULL);
+  NotificationList::PopupNotifications popups =
+      message_center->notification_list()->GetPopupNotifications();
+  EXPECT_EQ(NotificationList::kMaxVisiblePopupNotifications, popups.size());
   message_center->notification_list()->RemoveAllNotifications();
+  message_center->NotifyMessageCenterChanged(false);
 }
 
 }  // namespace message_center

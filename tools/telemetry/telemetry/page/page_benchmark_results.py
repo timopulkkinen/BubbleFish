@@ -1,7 +1,9 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 from collections import defaultdict
+from itertools import chain
 
 from telemetry.page import page_test
 from telemetry.page import perf_tests_helper
@@ -120,10 +122,7 @@ class PageBenchmarkResults(page_test.PageTestResults):
         measurement_units_type = (measurement_name,
                                   value.units,
                                   value.data_type)
-        if value.data_type == 'histogram':
-          value_url = (value.value, page_values.page.url)
-        else:
-          value_url = (value.output_value, page_values.page.url)
+        value_url = (value.value, page_values.page.url)
         results_summary[measurement_units_type].append(value_url)
 
     # Output the results summary sorted by name, then units, then data type.
@@ -131,13 +130,11 @@ class PageBenchmarkResults(page_test.PageTestResults):
         results_summary.iteritems()):
       measurement, units, data_type = measurement_units_type
 
-      if data_type == 'histogram':
-        # For histograms, the _by_url data is important.
-        by_url_data_type = 'histogram'
+      if 'histogram' in data_type:
+        by_url_data_type = 'unimportant-histogram'
       else:
-        # For non-histograms, the _by_url data is unimportant.
         by_url_data_type = 'unimportant'
-      if '.' in measurement:
+      if '.' in measurement and 'histogram' not in data_type:
         measurement, trace = measurement.split('.', 1)
         trace += (trace_tag or '')
       else:
@@ -148,7 +145,10 @@ class PageBenchmarkResults(page_test.PageTestResults):
           self._PrintPerfResult(measurement + '_by_url', url, [value], units,
                                 by_url_data_type)
 
-      # For histograms, we don't print the average data, only the _by_url.
-      if not data_type == 'histogram':
+      # For histograms, we don't print the average data, only the _by_url,
+      # unless there is only 1 page in which case the _by_urls are omitted.
+      if 'histogram' not in data_type or len(value_url_list) == 1:
         values = [i[0] for i in value_url_list]
+        if isinstance(values[0], list):
+          values = list(chain.from_iterable(values))
         self._PrintPerfResult(measurement, trace, values, units, data_type)

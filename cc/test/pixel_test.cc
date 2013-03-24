@@ -5,10 +5,10 @@
 #include "cc/test/pixel_test.h"
 
 #include "base/path_service.h"
-#include "cc/compositor_frame_metadata.h"
-#include "cc/gl_renderer.h"
-#include "cc/output_surface.h"
-#include "cc/resource_provider.h"
+#include "cc/output/compositor_frame_metadata.h"
+#include "cc/output/gl_renderer.h"
+#include "cc/output/output_surface.h"
+#include "cc/resources/resource_provider.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -70,8 +70,7 @@ void PixelTest::SetUp() {
                                  resource_provider_.get());
 
   scoped_refptr<webkit::gpu::ContextProviderInProcess> offscreen_contexts =
-      webkit::gpu::ContextProviderInProcess::Create(
-          webkit::gpu::ContextProviderInProcess::IN_PROCESS_COMMAND_BUFFER);
+      webkit::gpu::ContextProviderInProcess::Create();
   ASSERT_TRUE(offscreen_contexts->BindToCurrentThread());
   resource_provider_->set_offscreen_context_provider(offscreen_contexts);
 }

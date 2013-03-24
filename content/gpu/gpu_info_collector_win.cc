@@ -169,19 +169,17 @@ content::GpuPerformanceStats RetrieveGpuPerformanceStatsWithHistograms() {
 Version DisplayLinkVersion() {
   base::win::RegKey key;
 
-  if (FAILED(key.Open(
-      HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))) {
-    return Version();
-  }
-
-  if (FAILED(key.OpenKey(L"DisplayLink", KEY_READ | KEY_WOW64_64KEY)))
+  if (key.Open(HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))
     return Version();
 
-  if (FAILED(key.OpenKey(L"Core", KEY_READ | KEY_WOW64_64KEY)))
+  if (key.OpenKey(L"DisplayLink", KEY_READ | KEY_WOW64_64KEY))
+    return Version();
+
+  if (key.OpenKey(L"Core", KEY_READ | KEY_WOW64_64KEY))
     return Version();
 
   string16 version;
-  if (FAILED(key.ReadValue(L"Version", &version)))
+  if (key.ReadValue(L"Version", &version))
     return Version();
 
   return Version(WideToASCII(version));
@@ -191,15 +189,13 @@ Version DisplayLinkVersion() {
 bool IsLenovoDCuteInstalled() {
   base::win::RegKey key;
 
-  if (FAILED(key.Open(
-      HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))) {
-    return false;
-  }
-
-  if (FAILED(key.OpenKey(L"Lenovo", KEY_READ | KEY_WOW64_64KEY)))
+  if (key.Open(HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ | KEY_WOW64_64KEY))
     return false;
 
-  if (FAILED(key.OpenKey(L"Lenovo dCute", KEY_READ | KEY_WOW64_64KEY)))
+  if (key.OpenKey(L"Lenovo", KEY_READ | KEY_WOW64_64KEY))
+    return false;
+
+  if (key.OpenKey(L"Lenovo dCute", KEY_READ | KEY_WOW64_64KEY))
     return false;
 
   return true;
@@ -214,11 +210,17 @@ bool D3D11ShouldWork(const content::GPUInfo& gpu_info) {
 
   // Intel?
   if (gpu_info.gpu.vendor_id == 0x8086) {
-    // 2nd Generation Core Processor Family Integrated Graphics Controller?
+    // 2nd Generation Core Processor Family Integrated Graphics Controller
+    // or Intel Ivy Bridge?
     if (gpu_info.gpu.device_id == 0x0102 ||
         gpu_info.gpu.device_id == 0x0106 ||
         gpu_info.gpu.device_id == 0x0116 ||
-        gpu_info.gpu.device_id == 0x0126) {
+        gpu_info.gpu.device_id == 0x0126 ||
+        gpu_info.gpu.device_id == 0x0152 ||
+        gpu_info.gpu.device_id == 0x0156 ||
+        gpu_info.gpu.device_id == 0x015a ||
+        gpu_info.gpu.device_id == 0x0162 ||
+        gpu_info.gpu.device_id == 0x0166) {
       // http://crbug.com/196373.
       if (base::win::GetVersion() == base::win::VERSION_VISTA)
         return false;
@@ -371,7 +373,7 @@ namespace gpu_info_collector {
 
 #if !defined(GOOGLE_CHROME_BUILD)
 AMDVideoCardType GetAMDVideocardType() {
-  return UNKNOWN;
+  return STANDALONE;
 }
 #else
 // This function has a real implementation for official builds that can
@@ -498,13 +500,13 @@ bool CollectContextGraphicsInfo(content::GPUInfo* gpu_info) {
                         &pixel_shader_minor_version)) {
     gpu_info->can_lose_context = direct3d_version == "9";
     gpu_info->vertex_shader_version =
-        StringPrintf("%d.%d",
-                     vertex_shader_major_version,
-                     vertex_shader_minor_version);
+        base::StringPrintf("%d.%d",
+                           vertex_shader_major_version,
+                           vertex_shader_minor_version);
     gpu_info->pixel_shader_version =
-        StringPrintf("%d.%d",
-                     pixel_shader_major_version,
-                     pixel_shader_minor_version);
+        base::StringPrintf("%d.%d",
+                           pixel_shader_major_version,
+                           pixel_shader_minor_version);
 
     // DirectX diagnostics are collected asynchronously because it takes a
     // couple of seconds. Do not mark gpu_info as complete until that is done.

@@ -16,7 +16,7 @@
 #include "remoting/host/client_session.h"
 #include "remoting/host/desktop_session_connector.h"
 #include "remoting/host/ipc_audio_capturer.h"
-#include "remoting/host/ipc_event_executor.h"
+#include "remoting/host/ipc_input_injector.h"
 #include "remoting/host/ipc_session_controller.h"
 #include "remoting/host/ipc_video_frame_capturer.h"
 #include "remoting/host/session_controller.h"
@@ -55,12 +55,12 @@ scoped_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer(
   return scoped_ptr<AudioCapturer>(new IpcAudioCapturer(this));
 }
 
-scoped_ptr<EventExecutor> DesktopSessionProxy::CreateEventExecutor(
+scoped_ptr<InputInjector> DesktopSessionProxy::CreateInputInjector(
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<EventExecutor>(new IpcEventExecutor(this));
+  return scoped_ptr<InputInjector>(new IpcInputInjector(this));
 }
 
 scoped_ptr<SessionController> DesktopSessionProxy::CreateSessionController() {
@@ -155,7 +155,9 @@ bool DesktopSessionProxy::AttachToDesktop(
 
   // Pass ID of the client (which is authenticated at this point) to the desktop
   // session agent and start the agent.
-  SendToDesktop(new ChromotingNetworkDesktopMsg_StartSessionAgent(client_jid_));
+  SendToDesktop(new ChromotingNetworkDesktopMsg_StartSessionAgent(
+      client_jid_, screen_resolution_));
+
   return true;
 }
 
@@ -272,11 +274,29 @@ void DesktopSessionProxy::InjectMouseEvent(const protocol::MouseEvent& event) {
       new ChromotingNetworkDesktopMsg_InjectMouseEvent(serialized_event));
 }
 
-void DesktopSessionProxy::StartEventExecutor(
+void DesktopSessionProxy::StartInputInjector(
     scoped_ptr<protocol::ClipboardStub> client_clipboard) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   client_clipboard_ = client_clipboard.Pass();
+}
+
+void DesktopSessionProxy::SetScreenResolution(
+    const ScreenResolution& resolution) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  screen_resolution_ = resolution;
+  if (!screen_resolution_.IsValid())
+    return;
+
+  // Pass the client's resolution to both daemon and desktop session agent.
+  // Depending on the session kind the screen resolution ccan be set by either
+  // the daemon (for example RDP sessions on Windows) or by the desktop session
+  // agent (when sharing the physical console).
+  if (desktop_session_connector_)
+    desktop_session_connector_->SetScreenResolution(this, resolution);
+  SendToDesktop(
+      new ChromotingNetworkDesktopMsg_SetScreenResolution(resolution));
 }
 
 void DesktopSessionProxy::ConnectToDesktopSession(
@@ -288,7 +308,7 @@ void DesktopSessionProxy::ConnectToDesktopSession(
 
   desktop_session_connector_ = desktop_session_connector;
   desktop_session_connector_->ConnectTerminal(
-      this, DesktopSessionParams(), virtual_terminal);
+      this, ScreenResolution(), virtual_terminal);
 }
 
 DesktopSessionProxy::~DesktopSessionProxy() {

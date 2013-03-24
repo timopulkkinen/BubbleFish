@@ -23,6 +23,8 @@ namespace internal {
 using std::vector;
 using std::string;
 
+using base::StringPrintf;
+
 class DisplayManagerTest : public test::AshTestBase,
                            public gfx::DisplayObserver,
                            public aura::WindowObserver {
@@ -67,7 +69,7 @@ class DisplayManagerTest : public test::AshTestBase,
   }
 
   const DisplayInfo& GetDisplayInfo(const gfx::Display& display) {
-    return display_manager()->GetDisplayInfo(display);
+    return display_manager()->GetDisplayInfo(display.id());
   }
 
   const DisplayInfo& GetDisplayInfoAt(int index) {
@@ -469,6 +471,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
   EXPECT_EQ(invalid_id, display_manager()->mirrored_display_id());
+  EXPECT_FALSE(display_manager()->IsMirrored());
 
   // mirrored...
   display_info_list.clear();
@@ -480,6 +483,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
             FindDisplayForId(internal_display_id).bounds().ToString());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
   EXPECT_EQ(11U, display_manager()->mirrored_display_id());
+  EXPECT_TRUE(display_manager()->IsMirrored());
 
   // Test display name.
   EXPECT_EQ(StringPrintf("x-%d", internal_display_id),
@@ -489,6 +493,19 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("x-12", display_manager()->GetDisplayNameForId(12));
   // Default name for the id that doesn't exist.
   EXPECT_EQ("Display 100", display_manager()->GetDisplayNameForId(100));
+
+  // and exit mirroring.
+  display_info_list.clear();
+  display_info_list.push_back(native_display_info);
+  display_info_list.push_back(external_display_info);
+  display_manager()->OnNativeDisplaysChanged(display_info_list);
+  EXPECT_EQ(2U, display_manager()->GetNumDisplays());
+  EXPECT_EQ(2U, display_manager()->num_connected_displays());
+  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_EQ("0,0 500x500",
+            FindDisplayForId(internal_display_id).bounds().ToString());
+  EXPECT_EQ("500,0 100x100",
+            FindDisplayForId(10).bounds().ToString());
 }
 
 #if defined(OS_WIN)

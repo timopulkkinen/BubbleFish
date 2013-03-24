@@ -8,6 +8,7 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
@@ -69,20 +70,35 @@ ChangeListProcessor::~ChangeListProcessor() {
 }
 
 void ChangeListProcessor::ApplyFeeds(
+    scoped_ptr<google_apis::AboutResource> about_resource,
     const ScopedVector<google_apis::ResourceList>& feed_list,
     bool is_delta_feed,
-    int64 root_feed_changestamp,
     const base::Closure& on_complete_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!on_complete_callback.is_null());
+  DCHECK(is_delta_feed || about_resource.get());
 
   int64 delta_feed_changestamp = 0;
   ChangeListToEntryProtoMapUMAStats uma_stats;
   FeedToEntryProtoMap(feed_list, &delta_feed_changestamp, &uma_stats);
   // Note FeedToEntryProtoMap calls Clear() which resets on_complete_callback_.
   on_complete_callback_ = on_complete_callback;
-  largest_changestamp_ =
-      is_delta_feed ? delta_feed_changestamp : root_feed_changestamp;
+  largest_changestamp_ = 0;
+  if (is_delta_feed) {
+    largest_changestamp_ = delta_feed_changestamp;
+  } else if (about_resource.get()) {
+    largest_changestamp_ = about_resource->largest_change_id();
+
+    DVLOG(1) << "Root folder ID is " << about_resource->root_folder_id();
+    DCHECK(!about_resource->root_folder_id().empty());
+  } else {
+    // A full update without AboutResouce will have no effective changestamp.
+    NOTREACHED();
+  }
+
+  // TODO(haruki): Add pseudo tree structure for "drive"/root" and "drive/other"
+  // when we start using those namespaces. The root folder ID is necessary for
+  // full feed update.
   ApplyEntryProtoMap(is_delta_feed);
 
   // Shouldn't record histograms when processing delta feeds.
@@ -94,7 +110,7 @@ void ChangeListProcessor::ApplyEntryProtoMap(bool is_delta_feed) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!is_delta_feed) {  // Full update.
-    changed_dirs_.insert(base::FilePath(kDriveRootDirectory));
+    changed_dirs_.insert(util::GetDriveMyDriveRootPath());
     resource_metadata_->RemoveAll(
         base::Bind(&ChangeListProcessor::ApplyNextEntryProtoAsync,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -205,7 +221,8 @@ void ChangeListProcessor::NotifyForAddEntry(bool is_directory,
                                             const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  DVLOG(1) << "NotifyForAddEntry " << file_path.value();
+  DVLOG(1) << "NotifyForAddEntry " << file_path.value() << ", error = "
+      << error;
   if (error == DRIVE_FILE_OK) {
     // Notify if a directory has been created.
     if (is_directory)
@@ -384,7 +401,7 @@ void ChangeListProcessor::UpdateRootEntry(const base::Closure& closure) {
   DCHECK(!closure.is_null());
 
   resource_metadata_->GetEntryInfoByPath(
-      base::FilePath(kDriveRootDirectory),
+      util::GetDriveMyDriveRootPath(),
       base::Bind(&ChangeListProcessor::UpdateRootEntryAfterGetEntry,
                  weak_ptr_factory_.GetWeakPtr(),
                  closure));
@@ -435,7 +452,6 @@ void ChangeListProcessor::UpdateRootEntryAfterRefreshEntry(
 void ChangeListProcessor::OnComplete() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  resource_metadata_->set_loaded(true);
   resource_metadata_->SetLargestChangestamp(
       largest_changestamp_,
       base::Bind(&RunOnCompleteCallback, on_complete_callback_));

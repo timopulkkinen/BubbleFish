@@ -10,8 +10,8 @@
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
-#include "cc/context_provider.h"
-#include "cc/thread_impl.h"
+#include "cc/base/thread_impl.h"
+#include "cc/output/context_provider.h"
 #include "media/base/media.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
@@ -66,8 +66,8 @@
 #include "base/mac/mac_util.h"
 #endif
 
-using WebKit::WebLayerTreeViewImplForTesting;
 using WebKit::WebScriptController;
+using webkit::WebLayerTreeViewImplForTesting;
 
 TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode,
     WebKit::Platform* shadow_platform_delegate)
@@ -373,21 +373,12 @@ WebKit::WebThemeEngine* TestWebKitPlatformSupport::themeEngine() {
 WebKit::WebGraphicsContext3D*
 TestWebKitPlatformSupport::createOffscreenGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes) {
-  switch (webkit_support::GetGraphicsContext3DImplementation()) {
-    case webkit_support::IN_PROCESS:
-      return webkit::gpu::WebGraphicsContext3DInProcessImpl::CreateForWebView(
-          attributes, false);
-    case webkit_support::IN_PROCESS_COMMAND_BUFFER: {
-      scoped_ptr<webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl>
-          context(new
-              webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl());
-      if (!context->Initialize(attributes, NULL))
-        return NULL;
-      return context.release();
-    }
-  }
-  NOTREACHED();
-  return NULL;
+  using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
+  scoped_ptr<WebGraphicsContext3DInProcessCommandBufferImpl> context(
+      new WebGraphicsContext3DInProcessCommandBufferImpl());
+  if (!context->Initialize(attributes, NULL))
+    return NULL;
+  return context.release();
 }
 
 WebKit::WebGraphicsContext3D*
@@ -461,21 +452,6 @@ void TestWebKitPlatformSupport::GetPlugins(
   if (refresh)
     webkit::npapi::PluginList::Singleton()->RefreshPlugins();
   webkit::npapi::PluginList::Singleton()->GetPlugins(plugins);
-  // Don't load the forked npapi_layout_test_plugin in DRT, we only want to
-  // use the upstream version TestNetscapePlugIn.
-  const base::FilePath::StringType kPluginBlackList[] = {
-    FILE_PATH_LITERAL("npapi_layout_test_plugin.dll"),
-    FILE_PATH_LITERAL("WebKitTestNetscapePlugIn.plugin"),
-    FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
-  };
-  for (int i = plugins->size() - 1; i >= 0; --i) {
-    webkit::WebPluginInfo plugin_info = plugins->at(i);
-    for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
-      if (plugin_info.path.BaseName() == base::FilePath(kPluginBlackList[j])) {
-        plugins->erase(plugins->begin() + i);
-      }
-    }
-  }
 }
 
 webkit_glue::ResourceLoaderBridge*

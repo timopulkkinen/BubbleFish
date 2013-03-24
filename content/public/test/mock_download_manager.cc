@@ -4,7 +4,7 @@
 
 #include "content/public/test/mock_download_manager.h"
 
-#include "content/browser/download/byte_stream.h"
+#include "content/browser/byte_stream.h"
 #include "content/browser/download/download_create_info.h"
 
 namespace content {
@@ -65,7 +65,7 @@ bool MockDownloadManager::CreateDownloadItemAdapter::operator==(
           state == rhs.state &&
           danger_type == rhs.danger_type &&
           interrupt_reason == rhs.interrupt_reason &&
-          opened == opened);
+          opened == rhs.opened);
 }
 
 MockDownloadManager::MockDownloadManager() {}

@@ -536,6 +536,20 @@ TEST(FormStructureTest, AutocompleteAttributeOverridesOtherHeuristics) {
   EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(0)->heuristic_type());
   EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(1)->heuristic_type());
   EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(2)->heuristic_type());
+
+  // When Autocheckout is enabled, we should ignore 'autocomplete' attribute
+  // when deciding to crowdsource.
+  form_structure.reset(new FormStructure(form, "http://fake.url"));
+  form_structure->DetermineHeuristicTypes(TestAutofillMetrics());
+  EXPECT_TRUE(form_structure->IsAutofillable(true));
+  EXPECT_TRUE(form_structure->ShouldBeCrowdsourced());
+
+  ASSERT_EQ(3U, form_structure->field_count());
+  ASSERT_EQ(0U, form_structure->autofill_count());
+
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(0)->heuristic_type());
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(1)->heuristic_type());
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(2)->heuristic_type());
 }
 
 // Verify that we can correctly process sections listed in the |autocomplete|
@@ -2143,6 +2157,12 @@ TEST(FormStructureTest, CheckFormSignature) {
 
   field.label = ASCIIToUTF16("First Name");
   field.name = ASCIIToUTF16("first");
+  form.fields.push_back(field);
+
+  // Password fields shouldn't affect the signature.
+  field.label = ASCIIToUTF16("Password");
+  field.name = ASCIIToUTF16("password");
+  field.form_control_type = "password";
   form.fields.push_back(field);
 
   form_structure.reset(new FormStructure(form, std::string()));

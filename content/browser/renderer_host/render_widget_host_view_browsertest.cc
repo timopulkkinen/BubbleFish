@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/port/browser/render_widget_host_view_frame_subscriber.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/render_view_host.h"
@@ -35,47 +38,77 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
     ui::DisableTestCompositor();
   }
 
-#if defined(OS_MACOSX)
-  void SetupCompositingSurface() {
-    NavigateToURL(shell(), net::FilePathToFileURL(
-        test_dir_.AppendASCII("rwhv_compositing_static.html")));
+  bool CheckAcceleratedCompositingActive() {
+    RenderWidgetHostImpl* impl =
+        RenderWidgetHostImpl::From(
+            shell()->web_contents()->GetRenderWidgetHostView()->
+                GetRenderWidgetHost());
+    return impl->is_accelerated_compositing_active();
+  }
+
+  bool CheckCompositingSurface() {
+#if defined(OS_WIN)
+    if (!GpuDataManagerImpl::GetInstance()->IsUsingAcceleratedSurface())
+      return false;
+#endif
 
     RenderViewHost* const rwh =
         shell()->web_contents()->GetRenderViewHost();
     RenderWidgetHostViewPort* rwhvp =
         static_cast<RenderWidgetHostViewPort*>(rwh->GetView());
-
-    // Wait until an IoSurface is created by repeatedly resizing the window.
-    // TODO(justinlin): Find a better way to force an IoSurface when possible.
-    int increment = 0;
-    while (!rwhvp->HasAcceleratedSurface(gfx::Size())) {
-      base::RunLoop run_loop;
-      SetWindowBounds(shell()->window(), gfx::Rect(size_.width() + increment,
-                                                   size_.height()));
-      // Wait for any ViewHostMsg_CompositorSurfaceBuffersSwapped message.
-      run_loop.RunUntilIdle();
-      increment++;
-      ASSERT_LT(increment, 50);
-    }
-  }
+    bool ret = !rwhvp->GetCompositingSurface().is_null();
+#if defined(OS_MACOSX)
+    ret &= rwhvp->HasAcceleratedSurface(gfx::Size());
 #endif
+    return ret;
+  }
+
+  bool SetupCompositingSurface() {
+#if defined(OS_MACOSX)
+    if (!IOSurfaceSupport::Initialize())
+      return false;
+#endif
+    NavigateToURL(shell(), net::FilePathToFileURL(
+        test_dir_.AppendASCII("rwhv_compositing_animation.html")));
+    if (!CheckAcceleratedCompositingActive())
+      return false;
+
+    // The page is now accelerated composited but a compositing surface might
+    // not be available immediately so wait for it.
+    while (!CheckCompositingSurface()) {
+      base::RunLoop run_loop;
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          run_loop.QuitClosure(),
+          base::TimeDelta::FromMilliseconds(10));
+      run_loop.Run();
+    }
+    return true;
+  }
+
+  bool SetupNonCompositing() {
+    NavigateToURL(shell(), net::FilePathToFileURL(
+        test_dir_.AppendASCII("rwhv_compositing_static.html")));
+    return !CheckCompositingSurface();
+  }
 
   void FinishCopyFromBackingStore(bool expected_result,
                                   const base::Closure& quit_closure,
                                   bool result,
                                   const SkBitmap& bitmap) {
     quit_closure.Run();
-    ASSERT_EQ(expected_result, result);
+    EXPECT_EQ(expected_result, result);
     if (expected_result)
-      ASSERT_FALSE(bitmap.empty());
+      EXPECT_FALSE(bitmap.empty());
     finish_called_ = true;
   }
 
   void FinishCopyFromCompositingSurface(bool expected_result,
                                         const base::Closure& quit_closure,
                                         bool result) {
-    quit_closure.Run();
-    ASSERT_EQ(expected_result, result);
+    if (!quit_closure.is_null())
+      quit_closure.Run();
+    EXPECT_EQ(expected_result, result);
     finish_called_ = true;
   }
 
@@ -104,18 +137,31 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   DeliverFrameCallback callback_;
 };
 
+#if defined(OS_MACOSX) || defined(OS_WIN)
+
+static void DeliverFrameFunc(const scoped_refptr<base::MessageLoopProxy>& loop,
+                             base::Closure quit_closure,
+                             bool* frame_captured_out,
+                             base::Time timestamp,
+                             bool frame_captured) {
+  *frame_captured_out = frame_captured;
+  if (!quit_closure.is_null())
+    loop->PostTask(FROM_HERE, quit_closure);
+}
+
+#endif
+
 #if defined(OS_MACOSX)
 // Tests that the callback passed to CopyFromBackingStore is always called, even
 // when the RenderWidgetHost is deleting in the middle of an async copy.
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
                        MacAsyncCopyFromBackingStoreCallbackTest) {
-  if (!IOSurfaceSupport::Initialize())
+  if (!SetupCompositingSurface()) {
+    LOG(WARNING) << "Accelerated compositing not running.";
     return;
-
-  SetupCompositingSurface();
+  }
 
   base::RunLoop run_loop;
-
   RenderViewHost* const rwh =
       shell()->web_contents()->GetRenderViewHost();
   RenderWidgetHostViewPort* rwhvp =
@@ -133,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
   rwhvp->AcceleratedSurfaceRelease();
   run_loop.Run();
 
-  ASSERT_TRUE(finish_called_);
+  EXPECT_TRUE(finish_called_);
 }
 
 // Tests that the callback passed to CopyFromCompositingSurfaceToVideoFrame is
@@ -142,13 +188,12 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
 IN_PROC_BROWSER_TEST_F(
     RenderWidgetHostViewBrowserTest,
     MacAsyncCopyFromCompositingSurfaceToVideoFrameCallbackTest) {
-  if (!IOSurfaceSupport::Initialize())
+  if (!SetupCompositingSurface()) {
+    LOG(WARNING) << "Accelerated compositing not running.";
     return;
-
-  SetupCompositingSurface();
+  }
 
   base::RunLoop run_loop;
-
   RenderViewHost* const rwh =
       shell()->web_contents()->GetRenderViewHost();
   RenderWidgetHostViewPort* rwhvp =
@@ -169,16 +214,44 @@ IN_PROC_BROWSER_TEST_F(
 
   ASSERT_TRUE(finish_called_);
 }
+#endif
 
-// TODO(justinlin): Enable this test for other platforms.
+#if (defined(OS_WIN) && !defined(USE_AURA)) || defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
-                       MacAsyncCopyFromBackingStoreTest) {
-  if (!IOSurfaceSupport::Initialize())
+                       FrameSubscriberTest) {
+  if (!SetupCompositingSurface()) {
+    LOG(WARNING) << "Accelerated compositing not running.";
     return;
-
-  SetupCompositingSurface();
+  }
 
   base::RunLoop run_loop;
+  RenderWidgetHostViewPort* view = RenderWidgetHostViewPort::FromRWHV(
+      shell()->web_contents()->GetRenderViewHost()->GetView());
+  ASSERT_TRUE(view);
+
+  if (!view->CanSubscribeFrame()) {
+    LOG(WARNING) << "Frame subscription no supported on this platform.";
+    return;
+  }
+
+  bool frame_captured = false;
+  scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber(
+      new FakeFrameSubscriber(base::Bind(&DeliverFrameFunc,
+                                         base::MessageLoopProxy::current(),
+                                         run_loop.QuitClosure(),
+                                         &frame_captured)));
+  view->BeginFrameSubscription(subscriber.Pass());
+  run_loop.Run();
+  view->EndFrameSubscription();
+  EXPECT_TRUE(frame_captured);
+}
+
+// Test copying from backing store when page is non-accelerated-composited.
+IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
+                       CopyFromBackingStore) {
+  SetupNonCompositing();
+  base::RunLoop run_loop;
+
   shell()->web_contents()->GetRenderViewHost()->CopyFromBackingStore(
       gfx::Rect(),
       size_,
@@ -186,48 +259,49 @@ IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
                  base::Unretained(this), true, run_loop.QuitClosure()));
   run_loop.Run();
 
-  ASSERT_TRUE(finish_called_);
+  EXPECT_TRUE(finish_called_);
 }
+#endif
 
-static void DeliverFrameFunc(base::Closure quit_closure,
-                             bool* frame_captured_out,
-                             base::Time timestamp,
-                             bool frame_captured) {
-  *frame_captured_out = frame_captured;
-  quit_closure.Run();
-}
-
-// This test is flaky: crbug.com/180190.
-IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest,
-                       DISABLED_MacFrameSubscriberTest) {
-  if (!IOSurfaceSupport::Initialize())
+#if defined(OS_MACOSX)
+// Test that we can copy twice from an accelerated composited page.
+// This test is only running on Mac because this is the only platform that
+// we can reliably detect that accelerated surface is in use.
+IN_PROC_BROWSER_TEST_F(RenderWidgetHostViewBrowserTest, CopyTwice) {
+  if (!SetupCompositingSurface()) {
+    LOG(WARNING) << "Accelerated compositing not running.";
     return;
-
-  SetupCompositingSurface();
+  }
 
   base::RunLoop run_loop;
-  RenderWidgetHostViewPort* view = RenderWidgetHostViewPort::FromRWHV(
-      shell()->web_contents()->GetRenderViewHost()->GetView());
-  ASSERT_TRUE(view);
+  RenderViewHost* const rwh =
+      shell()->web_contents()->GetRenderViewHost();
+  RenderWidgetHostViewPort* rwhvp =
+      static_cast<RenderWidgetHostViewPort*>(rwh->GetView());
+  scoped_refptr<media::VideoFrame> dest =
+      media::VideoFrame::CreateBlackFrame(size_);
 
-  EXPECT_TRUE(view->CanSubscribeFrame());
-
-  bool frame_captured = false;
-  view->BeginFrameSubscription(
-      new FakeFrameSubscriber(base::Bind(&DeliverFrameFunc,
-                                         run_loop.QuitClosure(),
-                                         &frame_captured)));
-
-  // To ensure there is always a repaint we resize the window to a weird
-  // size. This gurantees a repaint if the window is already in |size_|.
-  SetWindowBounds(shell()->window(),
-                  gfx::Rect(size_.width() / 2, size_.height() / 2));
+  bool first_frame_captured = false;
+  bool second_frame_captured = false;
+  rwhvp->CopyFromCompositingSurfaceToVideoFrame(
+      gfx::Rect(rwhvp->GetViewBounds().size()), dest,
+      base::Bind(&DeliverFrameFunc,
+                 base::MessageLoopProxy::current(),
+                 base::Closure(),
+                 &first_frame_captured,
+                 base::Time::Now()));
+  rwhvp->CopyFromCompositingSurfaceToVideoFrame(
+      gfx::Rect(rwhvp->GetViewBounds().size()), dest,
+      base::Bind(&DeliverFrameFunc,
+                 base::MessageLoopProxy::current(),
+                 run_loop.QuitClosure(),
+                 &second_frame_captured,
+                 base::Time::Now()));
   run_loop.Run();
-  view->EndFrameSubscription();
 
-  EXPECT_TRUE(frame_captured);
+  EXPECT_TRUE(first_frame_captured);
+  EXPECT_TRUE(second_frame_captured);
 }
-
 #endif
 
 }  // namespace content

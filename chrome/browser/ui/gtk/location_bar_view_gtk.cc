@@ -75,7 +75,6 @@
 #include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_entry.h"
@@ -388,7 +387,7 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
 
   // Now initialize the OmniboxViewGtk.
   location_entry_.reset(new OmniboxViewGtk(this, toolbar_model_, browser_,
-      command_updater_, popup_window_mode_, hbox_.get()));
+      browser_->profile(), command_updater_, popup_window_mode_, hbox_.get()));
   location_entry_->Init();
 
   g_signal_connect(hbox_.get(), "expose-event",

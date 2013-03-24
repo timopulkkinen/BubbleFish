@@ -66,7 +66,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -1673,8 +1673,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
 #if defined(OS_MACOSX)
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 #elif defined(OS_CHROMEOS)
-  // Immersive fullscreen behaves like Mac presentation mode.
-  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+  // TODO(jamescook): When immersive fullscreen is enabled by default, test
+  // for BookmarkBar::SHOW.
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 #else
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 #endif
@@ -1930,7 +1931,6 @@ class ClickModifierTest : public InProcessBrowserTest {
           web_contents ? &web_contents->GetController() : NULL;
       content::TestNavigationObserver same_tab_observer(
           content::Source<NavigationController>(controller),
-          NULL,
           1);
       SimulateMouseClick(web_contents, modifiers, button);
       base::RunLoop run_loop;

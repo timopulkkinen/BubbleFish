@@ -79,6 +79,7 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual gfx::Size GetPhysicalBackingSize() const OVERRIDE;
+  virtual float GetOverdrawBottomHeight() const OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputStateChanged(
@@ -133,6 +134,8 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual InputEventAckState FilterInputEvent(
+      const WebKit::WebInputEvent& input_event) OVERRIDE;
   virtual void OnAccessibilityNotifications(
       const std::vector<AccessibilityHostMsg_NotificationParams>&
           params) OVERRIDE;
@@ -180,7 +183,8 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
 
  private:
   void BuffersSwapped(const gpu::Mailbox& mailbox,
-                      const gfx::Size size,
+                      const gfx::Size texture_size,
+                      const gfx::SizeF content_size,
                       const base::Closure& ack_callback);
 
   // The model object.

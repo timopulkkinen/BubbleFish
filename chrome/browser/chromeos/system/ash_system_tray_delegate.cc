@@ -5,6 +5,9 @@
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
 
 #include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
@@ -14,6 +17,7 @@
 #include "ash/system/bluetooth/bluetooth_observer.h"
 #include "ash/system/brightness/brightness_observer.h"
 #include "ash/system/chromeos/network/network_observer.h"
+#include "ash/system/chromeos/network/network_tray_delegate.h"
 #include "ash/system/date/clock_observer.h"
 #include "ash/system/drive/drive_observer.h"
 #include "ash/system/ime/ime_observer.h"
@@ -77,6 +81,7 @@
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -92,6 +97,7 @@
 #include "device/bluetooth/bluetooth_device.h"
 #include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using drive::DriveSystemService;
@@ -102,10 +108,10 @@ namespace chromeos {
 namespace {
 
 // The minimum session length limit that can be set.
-const int kSessionLengthLimitMinMs = 30 * 1000; // 30 seconds.
+const int kSessionLengthLimitMinMs = 30 * 1000;  // 30 seconds.
 
 // The maximum session length limit that can be set.
-const int kSessionLengthLimitMaxMs = 24 * 60 * 60 * 1000; // 24 hours.
+const int kSessionLengthLimitMaxMs = 24 * 60 * 60 * 1000;  // 24 hours.
 
 // Time delay for rechecking gdata operation when we suspect that there will
 // be no upcoming activity notifications that need to be pushed to UI.
@@ -186,6 +192,14 @@ void BluetoothDeviceConnectError(
   // TODO(sad): Do something?
 }
 
+ash::NetworkObserver::NetworkType NetworkTypeForCellular(
+    const CellularNetwork* cellular) {
+  if (cellular->network_technology() == NETWORK_TECHNOLOGY_LTE ||
+      cellular->network_technology() == NETWORK_TECHNOLOGY_LTE_ADVANCED)
+    return ash::NetworkObserver::NETWORK_CELLULAR_LTE;
+  return ash::NetworkObserver::NETWORK_CELLULAR;
+}
+
 class SystemTrayDelegate : public ash::SystemTrayDelegate,
                            public AudioHandler::VolumeObserver,
                            public PowerManagerClient::Observer,
@@ -217,8 +231,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         clock_type_(base::k24HourClock),
         search_key_mapped_to_(input_method::kSearchKey),
         screen_locked_(false),
+        have_session_start_time_(false),
+        have_session_length_limit_(false),
         data_promo_notification_(new DataPromoNotification()),
         cellular_activating_(false),
+        cellular_out_of_credits_(false),
         volume_control_delegate_(new VolumeController()) {
     // Register notifications on construction so that events such as
     // PROFILE_CREATED do not get missed if they happen before Initialize().
@@ -370,7 +387,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     if (manager->IsLoggedInAsGuest())
       return ash::user::LOGGED_IN_GUEST;
     if (manager->IsLoggedInAsDemoUser())
-      return ash::user::LOGGED_IN_KIOSK;
+      return ash::user::LOGGED_IN_RETAIL_MODE;
     if (manager->IsLoggedInAsPublicAccount())
       return ash::user::LOGGED_IN_PUBLIC;
     return ash::user::LOGGED_IN_USER;
@@ -628,7 +645,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     info->tray_icon_visible = icon->ShouldShowIconInTray();
   }
 
-  virtual void GetVirtualNetworkIcon(ash::NetworkIconInfo* info) OVERRIDE{
+  virtual void GetVirtualNetworkIcon(ash::NetworkIconInfo* info) OVERRIDE {
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
     if (crosnet->virtual_network_connected()) {
       NetworkMenuIcon* icon = network_icon_vpn_.get();
@@ -747,18 +764,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   virtual void ConnectToNetwork(const std::string& network_id) OVERRIDE {
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
     Network* network = crosnet->FindNetworkByPath(network_id);
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
-            ash::switches::kAshDisableNewNetworkStatusArea)) {
-      // If the new network handlers are enabled, this should always trigger
-      // displaying the network settings UI.
-      if (network)
-        network_menu_->ShowTabbedNetworkSettings(network);
-      else
-        ShowNetworkSettings();
-    } else {
-      if (network)
-        network_menu_->ConnectToNetwork(network);
-    }
+    if (network)
+      network_menu_->ConnectToNetwork(network);  // Shows settings if connected
+    else
+      ShowNetworkSettings();
   }
 
   virtual void RequestNetworkScan() OVERRIDE {
@@ -888,8 +897,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     BaseLoginDisplayHost::default_host()->OpenProxySettings();
   }
 
-  virtual ash::VolumeControlDelegate* GetVolumeControlDelegate() const OVERRIDE
-  {
+  virtual ash::VolumeControlDelegate*
+  GetVolumeControlDelegate() const OVERRIDE {
     return volume_control_delegate_.get();
   }
 
@@ -898,12 +907,30 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     volume_control_delegate_.swap(delegate);
   }
 
-  virtual base::Time GetSessionStartTime() OVERRIDE {
-    return session_start_time_;
+  virtual bool GetSessionStartTime(
+      base::TimeTicks* session_start_time) OVERRIDE {
+    *session_start_time = session_start_time_;
+    return have_session_start_time_;
   }
 
-  virtual base::TimeDelta GetSessionLengthLimit() OVERRIDE {
-    return session_length_limit_;
+  virtual bool GetSessionLengthLimit(
+      base::TimeDelta* session_length_limit) OVERRIDE {
+    *session_length_limit = session_length_limit_;
+    return have_session_length_limit_;
+  }
+
+  virtual int GetSystemTrayMenuWidth() OVERRIDE {
+    return l10n_util::GetLocalizedContentsWidthInPixels(
+        IDS_SYSTEM_TRAY_MENU_BUBBLE_WIDTH_PIXELS);
+  }
+
+  virtual string16 FormatTimeDuration(
+      const base::TimeDelta& delta) const OVERRIDE {
+    return TimeFormat::TimeDurationLong(delta);
+  }
+
+  virtual void MaybeSpeak(const std::string& utterance) const OVERRIDE {
+    accessibility::MaybeSpeak(utterance);
   }
 
  private:
@@ -973,26 +1000,31 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   void UpdateSessionStartTime() {
-    session_start_time_ = base::Time::FromInternalValue(
-        local_state_registrar_.prefs()->GetInt64(prefs::kSessionStartTime));
-    GetSystemTrayNotifier()->NotifySessionStartTimeChanged(session_start_time_);
+    const PrefService* local_state = local_state_registrar_.prefs();
+    if (local_state->HasPrefPath(prefs::kSessionStartTime)) {
+      have_session_start_time_ = true;
+      session_start_time_ = base::TimeTicks::FromInternalValue(
+          local_state->GetInt64(prefs::kSessionStartTime));
+    } else {
+      have_session_start_time_ = false;
+      session_start_time_ = base::TimeTicks();
+    }
+    GetSystemTrayNotifier()->NotifySessionStartTimeChanged();
   }
 
   void UpdateSessionLengthLimit() {
-    const PrefService::Preference* session_length_limit_pref =
-        local_state_registrar_.prefs()->
-            FindPreference(prefs::kSessionLengthLimit);
-    int limit;
-    if (session_length_limit_pref->IsDefaultValue() ||
-        !session_length_limit_pref->GetValue()->GetAsInteger(&limit)) {
-      session_length_limit_ = base::TimeDelta();
-    } else {
+    const PrefService* local_state = local_state_registrar_.prefs();
+    if (local_state->HasPrefPath(prefs::kSessionLengthLimit)) {
+      have_session_length_limit_ = true;
       session_length_limit_ = base::TimeDelta::FromMilliseconds(
-          std::min(std::max(limit, kSessionLengthLimitMinMs),
-              kSessionLengthLimitMaxMs));
+          std::min(std::max(local_state->GetInteger(prefs::kSessionLengthLimit),
+                            kSessionLengthLimitMinMs),
+                   kSessionLengthLimitMaxMs));
+    } else {
+      have_session_length_limit_ = false;
+      session_length_limit_ = base::TimeDelta();
     }
-    GetSystemTrayNotifier()->NotifySessionLengthLimitChanged(
-        session_length_limit_);
+    GetSystemTrayNotifier()->NotifySessionLengthLimitChanged();
   }
 
   void NotifyRefreshNetwork() {
@@ -1018,14 +1050,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         crosnet->AddNetworkObserver(new_path, this);
       active_network_path_ = new_path;
     }
-  }
-
-  void RefreshNetworkDeviceObserver(NetworkLibrary* crosnet) {
-    const NetworkDevice* cellular = crosnet->FindCellularDevice();
-    std::string new_cellular_device_path = cellular ?
-        cellular->device_path() : std::string();
-    if (cellular_device_path_ != new_cellular_device_path)
-      cellular_device_path_ = new_cellular_device_path;
   }
 
   void AddNetworkToList(std::vector<ash::NetworkIconInfo>* list,
@@ -1147,10 +1171,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   // Overridden from NetworkLibrary::NetworkManagerObserver.
   virtual void OnNetworkManagerChanged(NetworkLibrary* crosnet) OVERRIDE {
     RefreshNetworkObserver(crosnet);
-    RefreshNetworkDeviceObserver(crosnet);
     data_promo_notification_->ShowOptionalMobileDataPromoNotification(
         crosnet, GetPrimarySystemTray(), this);
-    UpdateCellularActivation();
+    UpdateCellular();
 
     NotifyRefreshNetwork();
   }
@@ -1284,7 +1307,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
             base::TimeDelta::FromMilliseconds(kGDataOperationRecheckDelayMs));
       }
     }
-
   }
 
   // Pulls the list of ongoing drive operations and initiates status update.
@@ -1356,7 +1378,19 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   // Overridden from ash::NetworkTrayDelegate
-  virtual void NotificationLinkClicked(size_t index) OVERRIDE {
+  virtual void NotificationLinkClicked(
+      ash::NetworkObserver::MessageType message_type,
+      size_t link_index) OVERRIDE {
+    if (message_type == ash::NetworkObserver::ERROR_OUT_OF_CREDITS) {
+      const CellularNetwork* cellular =
+          CrosLibrary::Get()->GetNetworkLibrary()->cellular_network();
+      if (cellular)
+        ConnectToNetwork(cellular->service_path());
+      ash::Shell::GetInstance()->system_tray_notifier()->
+          NotifyClearNetworkMessage(message_type);
+    }
+    if (message_type != ash::NetworkObserver::MESSAGE_DATA_PROMO)
+      return;
     // If we have deal info URL defined that means that there're
     // 2 links in bubble. Let the user close it manually then thus giving
     // ability to navigate to second link.
@@ -1367,7 +1401,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       data_promo_notification_->CloseNotification();
 
     std::string deal_url_to_open;
-    if (index == 0) {
+    if (link_index == 0) {
       if (!deal_topup_url.empty()) {
         deal_url_to_open = deal_topup_url;
       } else {
@@ -1378,7 +1412,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         network_menu_->ShowTabbedNetworkSettings(cellular);
         return;
       }
-    } else if (index == 1) {
+    } else if (link_index == 1) {
       deal_url_to_open = deal_info_url;
     }
 
@@ -1408,7 +1442,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     UpdateEnterpriseDomain();
   }
 
-  void UpdateCellularActivation() {
+  void UpdateCellular() {
     const CellularNetworkVector& cellular_networks =
         CrosLibrary::Get()->GetNetworkLibrary()->cellular_networks();
     if (cellular_networks.empty())
@@ -1420,15 +1454,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       cellular_activating_ = true;
     } else if (cellular->activated() && cellular_activating_) {
       cellular_activating_ = false;
-
-      // Detect which icon to show, 3G or LTE.
-      ash::NetworkObserver::NetworkType type =
-          (cellular->network_technology() == NETWORK_TECHNOLOGY_LTE ||
-           cellular->network_technology() == NETWORK_TECHNOLOGY_LTE_ADVANCED)
-          ? ash::NetworkObserver::NETWORK_CELLULAR_LTE
-          : ash::NetworkObserver::NETWORK_CELLULAR;
-
-      // Show the notification.
+      ash::NetworkObserver::NetworkType type = NetworkTypeForCellular(cellular);
       ash::Shell::GetInstance()->system_tray_notifier()->
           NotifySetNetworkMessage(
               NULL,
@@ -1441,6 +1467,27 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                   UTF8ToUTF16((cellular->name()))),
                   std::vector<string16>());
     }
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+            ash::switches::kAshDisableNewNetworkStatusArea)) {
+      return;
+    }
+    // Trigger "Out of credits" notification (for NetworkLibrary impl)
+    if (cellular->out_of_credits() && !cellular_out_of_credits_) {
+      cellular_out_of_credits_ = true;
+      ash::NetworkObserver::NetworkType type = NetworkTypeForCellular(cellular);
+      std::vector<string16> links;
+      links.push_back(
+          l10n_util::GetStringFUTF16(IDS_NETWORK_OUT_OF_CREDITS_LINK,
+                                     UTF8ToUTF16(cellular->name())));
+      ash::Shell::GetInstance()->system_tray_notifier()->
+          NotifySetNetworkMessage(
+              this, ash::NetworkObserver::ERROR_OUT_OF_CREDITS, type,
+              l10n_util::GetStringUTF16(IDS_NETWORK_OUT_OF_CREDITS_TITLE),
+              l10n_util::GetStringUTF16(IDS_NETWORK_OUT_OF_CREDITS_BODY),
+              links);
+    } else if (!cellular->out_of_credits() && cellular_out_of_credits_) {
+      cellular_out_of_credits_ = false;
+    }
   }
 
   scoped_ptr<base::WeakPtrFactory<SystemTrayDelegate> > ui_weak_ptr_factory_;
@@ -1451,13 +1498,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar local_state_registrar_;
   scoped_ptr<PrefChangeRegistrar> user_pref_registrar_;
-  std::string cellular_device_path_;
   std::string active_network_path_;
   PowerSupplyStatus power_supply_status_;
   base::HourClockType clock_type_;
   int search_key_mapped_to_;
   bool screen_locked_;
-  base::Time session_start_time_;
+  bool have_session_start_time_;
+  base::TimeTicks session_start_time_;
+  bool have_session_length_limit_;
   base::TimeDelta session_length_limit_;
   std::string enterprise_domain_;
 
@@ -1465,6 +1513,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   scoped_ptr<DataPromoNotification> data_promo_notification_;
   bool cellular_activating_;
+  bool cellular_out_of_credits_;
 
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
 

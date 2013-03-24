@@ -1282,24 +1282,6 @@ void FreePixmap(Display* display, XID pixmap) {
   XFreePixmap(display, pixmap);
 }
 
-bool GetOutputDeviceHandles(std::vector<XID>* outputs) {
-  DCHECK(outputs);
-  outputs->clear();
-
-  if (!IsRandRAvailable())
-    return false;
-
-  Display* display = GetXDisplay();
-
-  Window root_window = DefaultRootWindow(display);
-  XRRScreenResources* screen_resources =
-      XRRGetScreenResources(display, root_window);
-  for (int i = 0; i < screen_resources->noutput; ++i)
-    outputs->push_back(screen_resources->outputs[i]);
-  XRRFreeScreenResources(screen_resources);
-  return true;
-}
-
 bool GetOutputDeviceData(XID output,
                          uint16* manufacturer_id,
                          uint16* product_code,
@@ -1527,26 +1509,28 @@ WindowManagerName GuessWindowManager() {
   std::string name;
   if (GetWindowManagerName(&name)) {
     // These names are taken from the WMs' source code.
-    if (name == "Compiz" || name == "compiz")
-      return WM_COMPIZ;
-    if (name == "KWin")
-      return WM_KWIN;
-    if (name == "Metacity")
-      return WM_METACITY;
-    if (name == "Mutter")
-      return WM_MUTTER;
-    if (name == "Xfwm4")
-      return WM_XFWM4;
-    if (name == "chromeos-wm")
-      return WM_CHROME_OS;
     if (name == "Blackbox")
       return WM_BLACKBOX;
+    if (name == "chromeos-wm")
+      return WM_CHROME_OS;
+    if (name == "Compiz" || name == "compiz")
+      return WM_COMPIZ;
     if (name == "e16")
       return WM_ENLIGHTENMENT;
     if (StartsWithASCII(name, "IceWM", true))
       return WM_ICE_WM;
+    if (name == "KWin")
+      return WM_KWIN;
+    if (name == "Metacity")
+      return WM_METACITY;
+    if (name == "Mutter (Muffin)")
+      return WM_MUFFIN;
+    if (name == "Mutter")
+      return WM_MUTTER;
     if (name == "Openbox")
       return WM_OPENBOX;
+    if (name == "Xfwm4")
+      return WM_XFWM4;
   }
   return WM_UNKNOWN;
 }
@@ -1791,7 +1775,7 @@ void LogErrorEventDescription(Display* dpy,
       int ext_code, first_event, first_error;
       XQueryExtension(dpy, ext_list[i], &ext_code, &first_event, &first_error);
       if (error_event.request_code == ext_code) {
-        std::string msg = StringPrintf(
+        std::string msg = base::StringPrintf(
             "%s.%d", ext_list[i], error_event.minor_code);
         XGetErrorDatabaseText(
             dpy, "XRequest", msg.c_str(), "Unknown", request_str,

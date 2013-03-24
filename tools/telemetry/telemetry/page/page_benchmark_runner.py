@@ -9,7 +9,6 @@ import sys
 
 from telemetry.core import browser_finder
 from telemetry.core import browser_options
-from telemetry.page import all_page_actions # pylint: disable=W0611
 from telemetry.page import block_page_benchmark_results
 from telemetry.page import csv_page_benchmark_results
 from telemetry.page import page_benchmark
@@ -23,10 +22,9 @@ def Main(benchmark_dir):
   Args:
     benchmark_dir: Path to directory containing PageBenchmarks.
   """
-  benchmarks = discover.Discover(benchmark_dir,
-                                 os.path.join(benchmark_dir, '..'),
-                                 '',
-                                 page_benchmark.PageBenchmark)
+  benchmarks = discover.DiscoverClasses(benchmark_dir,
+                                        os.path.join(benchmark_dir, '..'),
+                                        page_benchmark.PageBenchmark)
 
   # Naively find the benchmark. If we use the browser options parser, we run
   # the risk of failing to parse if we use a benchmark-specific parameter.

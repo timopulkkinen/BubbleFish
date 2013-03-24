@@ -10,6 +10,7 @@
 
 #include "base/files/file_path.h"
 #include "base/platform_file.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileError.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/quota/quota_types.h"
@@ -114,7 +115,7 @@ WEBKIT_STORAGE_EXPORT std::string GetFileSystemTypeString(FileSystemType type);
 // Returns false if the |type_string| is invalid.
 WEBKIT_STORAGE_EXPORT bool GetFileSystemPublicType(
     std::string type_string,
-    WebKit::WebFileSystem::Type* type);
+    WebKit::WebFileSystemType* type);
 
 // Encodes |file_path| to a string.
 // Following conditions should be held:

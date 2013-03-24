@@ -211,6 +211,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserPpapiHost* browser_host) OVERRIDE;
   virtual content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) OVERRIDE;
+  virtual bool SupportsBrowserPlugin(content::BrowserContext* browser_context,
+                                     const GURL& site_url) OVERRIDE;
   virtual bool AllowPepperSocketAPI(
       content::BrowserContext* browser_context,
       const GURL& url,
@@ -227,6 +229,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #endif
 #if defined(OS_WIN)
   virtual const wchar_t* GetResourceDllName() OVERRIDE;
+  virtual void PreSpawnRenderer(sandbox::TargetPolicy* policy,
+                                bool* success) OVERRIDE;
 #endif
 #if defined(USE_NSS)
   virtual

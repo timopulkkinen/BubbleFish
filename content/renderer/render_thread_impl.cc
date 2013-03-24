@@ -79,8 +79,6 @@
 #include "media/base/media_switches.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorSupport.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebColorName.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
@@ -646,9 +644,11 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
           compositor_thread_->message_loop_proxy();
     }
 
-    input_handler_manager_.reset(
-        new InputHandlerManager(this, compositor_message_loop_proxy_));
-    AddFilter(input_handler_manager_->GetMessageFilter());
+    if (GetContentClient()->renderer()->ShouldCreateCompositorInputHandler()) {
+      input_handler_manager_.reset(
+          new InputHandlerManager(this, compositor_message_loop_proxy_));
+      AddFilter(input_handler_manager_->GetMessageFilter());
+    }
   }
 
   scoped_refptr<base::MessageLoopProxy> output_surface_loop;
@@ -764,6 +764,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
     WebRuntimeFeatures::enableExperimentalContentSecurityPolicyFeatures(true);
     WebRuntimeFeatures::enableCSSRegions(true);
     WebRuntimeFeatures::enableDialogElement(true);
+    WebRuntimeFeatures::enableFontLoadEvents(true);
   }
 
   WebRuntimeFeatures::enableSeamlessIFrames(

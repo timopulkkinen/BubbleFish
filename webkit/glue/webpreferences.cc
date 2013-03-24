@@ -93,7 +93,7 @@ WebPreferences::WebPreferences()
       accelerated_compositing_for_animation_enabled(false),
       accelerated_compositing_for_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
-      deferred_2d_canvas_enabled(false),
+      minimum_accelerated_2d_canvas_size(257 * 256),
       antialiased_2d_canvas_disabled(false),
       accelerated_filters_enabled(false),
       gesture_tap_highlight_enabled(false),
@@ -134,6 +134,11 @@ WebPreferences::WebPreferences()
       supports_multiple_windows(true),
       viewport_enabled(false),
       initialize_at_minimum_page_scale(true),
+#if defined(OS_MACOSX)
+      smart_insert_delete_enabled(true),
+#else
+      smart_insert_delete_enabled(false),
+#endif
       cookie_enabled(true)
 #if defined(OS_ANDROID)
       ,
@@ -372,8 +377,8 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
 
-  // Enable deferred 2d canvas if requested on the command line.
-  settings->setDeferred2dCanvasEnabled(deferred_2d_canvas_enabled);
+  settings->setMinimumAccelerated2dCanvasSize(
+      minimum_accelerated_2d_canvas_size);
 
   // Disable antialiasing for 2d canvas if requested on the command line.
   settings->setAntialiased2dCanvasEnabled(!antialiased_2d_canvas_disabled);
@@ -453,6 +458,8 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setViewportEnabled(viewport_enabled);
   settings->setInitializeAtMinimumPageScale(initialize_at_minimum_page_scale);
 
+  settings->setSmartInsertDeleteEnabled(smart_insert_delete_enabled);
+
 #if defined(OS_ANDROID)
   settings->setAllowCustomScrollbarInMainFrame(false);
   settings->setTextAutosizingEnabled(text_autosizing_enabled);
@@ -462,6 +469,8 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setDoubleTapToZoomEnabled(double_tap_to_zoom_enabled);
   settings->setMediaPlaybackRequiresUserGesture(
       user_gesture_required_for_media_playback);
+  settings->setDefaultVideoPosterURL(
+        ASCIIToUTF16(default_video_poster_url.spec()));
 #endif
 
   WebNetworkStateNotifier::setOnLine(is_online);

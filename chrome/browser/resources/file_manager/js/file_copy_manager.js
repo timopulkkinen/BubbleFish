@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 if (chrome.extension) {
   var getContentWindows = function() {
     return chrome.extension.getViews();
@@ -303,8 +305,8 @@ FileCopyManager.prototype.sendEvent_ = function(eventName, eventArgs) {
   var windows = getContentWindows();
   for (var i = 0; i < windows.length; i++) {
     var w = windows[i];
-    if (w.fileCopyManagerWrapper)
-      w.fileCopyManagerWrapper.onEvent(eventName, eventArgs);
+    if (w.FileCopyManagerWrapper)
+      w.FileCopyManagerWrapper.getInstance().onEvent(eventName, eventArgs);
   }
 };
 
@@ -860,6 +862,8 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
       var sourceFileUrl = sourceEntry.toURL();
       var targetFileUrl = targetDirEntry.toURL() + '/' +
                           encodeURIComponent(targetRelativePath);
+      var sourceFilePath = util.extractFilePath(sourceFileUrl);
+      var targetFilePath = util.extractFilePath(targetFileUrl);
       var transferedBytes = 0;
 
       var onStartTransfer = function() {
@@ -890,14 +894,17 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
       var onFileTransfersUpdated = function(statusList) {
         for (var i = 0; i < statusList.length; i++) {
           var s = statusList[i];
-          if (s.fileUrl == sourceFileUrl || s.fileUrl == targetFileUrl) {
+          // Comparing urls is unreliable, since they may use different
+          // url encoding schemes (eg. rfc2396 vs. rfc3986).
+          var filePath = util.extractFilePath(s.fileUrl);
+          if (filePath == sourceFilePath || filePath == targetFilePath) {
             var processed = s.processed;
 
             // It becomes tricky when both the sides are on Drive.
             // Currently, it is implemented by download followed by upload.
             // Note, however, download will not happen if the file is cached.
             if (task.sourceOnDrive && task.targetOnDrive) {
-              if (s.fileUrl == sourceFileUrl) {
+              if (filePath == sourceFilePath) {
                 // Download transfer is detected. Let's halve the progress.
                 downTransfer = processed = (s.processed >> 1);
               } else {

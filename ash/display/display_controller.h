@@ -30,6 +30,7 @@ template <typename T> class JSONValueConverter;
 
 namespace ash {
 namespace internal {
+class DisplayManager;
 class RootWindowController;
 }
 
@@ -43,6 +44,9 @@ struct ASH_EXPORT DisplayLayout {
     BOTTOM,
     LEFT
   };
+  // Factory method to create DisplayLayout from ints. The |mirrored| is
+  // set to false. Used for persistence and webui.
+  static DisplayLayout FromInts(int position, int offsets);
 
   DisplayLayout();
   DisplayLayout(Position position, int offset);
@@ -65,6 +69,9 @@ struct ASH_EXPORT DisplayLayout {
   // based on the top/left edge of the primary display.
   int offset;
 
+  // True if displays are mirrored.
+  bool mirrored;
+
   // Returns string representation of the layout for debugging/testing.
   std::string ToString() const;
 };
@@ -79,6 +86,10 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
     // but before the change is applied to aura/ash.
     virtual void OnDisplayConfigurationChanging() = 0;
 
+    // Invoked when the all display configuration changes
+    // have been applied.
+    virtual void OnDisplayConfigurationChanged() {};
+
    protected:
     virtual ~Observer() {}
   };
@@ -86,6 +97,7 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
   DisplayController();
   virtual ~DisplayController();
 
+  void Start();
   void Shutdown();
 
   // Returns primary display. This is safe to use after ash::Shell is
@@ -158,6 +170,8 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
   void RegisterLayoutForDisplayIdPair(int64 id1,
                                       int64 id2,
                                       const DisplayLayout& layout);
+  // OBSOLETE
+  // TODO(oshima): Remove this in m28.
   void RegisterLayoutForDisplayId(int64 id, const DisplayLayout& layout);
 
   // Sets the layout for the current display pair. The |layout| specifies
@@ -180,6 +194,8 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
   virtual void OnDisplayRemoved(const gfx::Display& display) OVERRIDE;
 
  private:
+  friend class internal::DisplayManager;
+
   // Create a root window for given |display|.
   aura::RootWindow* CreateRootWindowForDisplay(const gfx::Display& display);
 
@@ -190,6 +206,7 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver {
   void UpdateDisplayBoundsForLayout();
 
   void NotifyDisplayConfigurationChanging();
+  void NotifyDisplayConfigurationChanged();
 
   void SetLayoutForDisplayIdPair(const DisplayIdPair& display_pair,
                                  const DisplayLayout& layout);

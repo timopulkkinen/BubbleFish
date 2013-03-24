@@ -6,9 +6,9 @@
 #define CONTENT_RENDERER_GPU_RENDER_WIDGET_COMPOSITOR_H_
 
 #include "base/time.h"
-#include "cc/layer_tree_host_client.h"
-#include "cc/layer_tree_settings.h"
-#include "cc/rendering_stats.h"
+#include "cc/debug/rendering_stats.h"
+#include "cc/trees/layer_tree_host_client.h"
+#include "cc/trees/layer_tree_settings.h"
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebLayerTreeView.h"
 
@@ -36,6 +36,7 @@ class RenderWidgetCompositor : public WebKit::WebLayerTreeView,
   void GetRenderingStats(cc::RenderingStats* stats);
   skia::RefPtr<SkPicture> CapturePicture();
   void EnableHidingTopControls(bool enable);
+  void SetOverdrawBottomHeight(float overdraw_bottom_height);
 
   // WebLayerTreeView implementation.
   virtual void setSurfaceReady();
@@ -75,20 +76,20 @@ class RenderWidgetCompositor : public WebKit::WebLayerTreeView,
   virtual void setContinuousPaintingEnabled(bool enabled);
 
   // cc::LayerTreeHostClient implementation.
-  virtual void willBeginFrame() OVERRIDE;
-  virtual void didBeginFrame() OVERRIDE;
-  virtual void animate(double monotonic_frame_begin_time) OVERRIDE;
-  virtual void layout() OVERRIDE;
-  virtual void applyScrollAndScale(gfx::Vector2d scroll_delta,
+  virtual void WillBeginFrame() OVERRIDE;
+  virtual void DidBeginFrame() OVERRIDE;
+  virtual void Animate(double frame_begin_time) OVERRIDE;
+  virtual void Layout() OVERRIDE;
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                    float page_scale) OVERRIDE;
-  virtual scoped_ptr<cc::OutputSurface> createOutputSurface() OVERRIDE;
-  virtual void didRecreateOutputSurface(bool success) OVERRIDE;
-  virtual scoped_ptr<cc::InputHandler> createInputHandler() OVERRIDE;
-  virtual void willCommit() OVERRIDE;
-  virtual void didCommit() OVERRIDE;
-  virtual void didCommitAndDrawFrame() OVERRIDE;
-  virtual void didCompleteSwapBuffers() OVERRIDE;
-  virtual void scheduleComposite() OVERRIDE;
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface() OVERRIDE;
+  virtual void DidRecreateOutputSurface(bool success) OVERRIDE;
+  virtual scoped_ptr<cc::InputHandler> CreateInputHandler() OVERRIDE;
+  virtual void WillCommit() OVERRIDE;
+  virtual void DidCommit() OVERRIDE;
+  virtual void DidCommitAndDrawFrame() OVERRIDE;
+  virtual void DidCompleteSwapBuffers() OVERRIDE;
+  virtual void ScheduleComposite() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>

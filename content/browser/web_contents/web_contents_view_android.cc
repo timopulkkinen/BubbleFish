@@ -54,6 +54,11 @@ void WebContentsViewAndroid::SetContentViewCore(
   }
 }
 
+void WebContentsViewAndroid::RequestExternalVideoSurface(int player_id) {
+  if (content_view_core_)
+    content_view_core_->RequestExternalVideoSurface(player_id);
+}
+
 gfx::NativeView WebContentsViewAndroid::GetNativeView() const {
   return content_view_core_;
 }
@@ -164,6 +169,9 @@ void WebContentsViewAndroid::RenderViewCreated(RenderViewHost* host) {
 }
 
 void WebContentsViewAndroid::RenderViewSwappedIn(RenderViewHost* host) {
+}
+
+void WebContentsViewAndroid::SetOverscrollControllerEnabled(bool enabled) {
 }
 
 void WebContentsViewAndroid::ShowContextMenu(

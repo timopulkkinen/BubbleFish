@@ -21,15 +21,16 @@
 #include "base/supports_user_data.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
@@ -223,8 +224,8 @@ void ClearPendingEmailOnIOThread(content::ResourceContext* context) {
 }
 
 // Determines the source of the sign in and the continue URL.  Its either one
-// of the known sign in access point (first run, NTP, menu, settings) or its
-// an implicit sign in via another Google property.  In the former case,
+// of the known sign in access point (first run, NTP, Apps page, menu, settings)
+// or its an implicit sign in via another Google property.  In the former case,
 // "service" is also checked to make sure its "chromiumsync".
 SyncPromoUI::Source GetSigninSource(const GURL& url, GURL* continue_url) {
   std::string value;
@@ -865,8 +866,8 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
       }
     }
 
-    // If this is an explicit sign in (i.e., first run, NTP, menu,settings)
-    // then force the auto accept type to explicit.
+    // If this is an explicit sign in (i.e., first run, NTP, Apps page, menu,
+    // settings) then force the auto accept type to explicit.
     source = GetSigninSource(request->url(), &continue_url);
     if (source != SyncPromoUI::SOURCE_UNKNOWN)
       auto_accept = AUTO_ACCEPT_EXPLICIT;
@@ -918,9 +919,8 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
   if (!helper)
     return;
 
-  if (auto_accept != AUTO_ACCEPT_NONE) {
+  if (auto_accept != AUTO_ACCEPT_NONE)
     helper->auto_accept_ = auto_accept;
-  }
 
   if (source != SyncPromoUI::SOURCE_UNKNOWN &&
       helper->source_ == SyncPromoUI::SOURCE_UNKNOWN) {
@@ -955,10 +955,10 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
     helper->continue_url_ = continue_url;
 }
 
-void OneClickSigninHelper::RedirectToNTP(bool show_bubble) {
-  VLOG(1) << "OneClickSigninHelper::RedirectToNTP";
+void OneClickSigninHelper::RedirectToNtpOrAppsPage(bool show_bubble) {
+  VLOG(1) << "OneClickSigninHelper::RedirectToNtpOrAppsPage";
 
-  // Redirect to NTP with sign in bubble visible.
+  // Redirect to NTP/Apps page with sign in bubble visible.
   content::WebContents* contents = web_contents();
   Profile* profile =
       Profile::FromBrowserContext(contents->GetBrowserContext());
@@ -968,12 +968,13 @@ void OneClickSigninHelper::RedirectToNTP(bool show_bubble) {
     pref_service->SetString(prefs::kSyncPromoErrorMessage, error_message_);
   }
 
-  content::OpenURLParams params(
-      GURL(chrome::kChromeUINewTabURL),
-      content::Referrer(),
-      CURRENT_TAB,
-      content::PAGE_TRANSITION_AUTO_TOPLEVEL,
-      false);
+  GURL url(chrome::search::IsInstantExtendedAPIEnabled() ?
+           chrome::kChromeUIAppsURL : chrome::kChromeUINewTabURL);
+  content::OpenURLParams params(url,
+                                content::Referrer(),
+                                CURRENT_TAB,
+                                content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                false);
   contents->OpenURL(params);
 
   error_message_.clear();
@@ -1041,6 +1042,31 @@ bool OneClickSigninHelper::OnFormSubmitted(const content::PasswordForm& form) {
   return true;
 }
 
+void OneClickSigninHelper::NavigateToPendingEntry(
+    const GURL& url,
+    content::NavigationController::ReloadType reload_type) {
+  VLOG(1) << "OneClickSigninHelper::NavigateToPendingEntry: url=" << url.spec();
+  // If the tab navigates to a new page, and this page is not a valid Gaia
+  // sign in redirect or reponse, or the expected continue URL, make sure to
+  // clear the internal state.  This is needed to detect navigations in the
+  // middle of the sign in process that may redirect back to the sign in
+  // process (see crbug.com/181163 for details).
+  const GURL continue_url =
+      SyncPromoUI::GetNextPageURLForSyncPromoURL(
+          SyncPromoUI::GetSyncPromoURL(GURL(),
+                                       SyncPromoUI::SOURCE_START_PAGE,
+                                       false));
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+
+  if (!IsValidGaiaSigninRedirectOrResponseURL(url) &&
+      continue_url_.is_valid() &&
+      url.ReplaceComponents(replacements) !=
+          continue_url_.ReplaceComponents(replacements)) {
+    CleanTransientState();
+  }
+}
+
 void OneClickSigninHelper::DidStopLoading(
     content::RenderViewHost* render_view_host) {
   // If the user left the sign in process, clear all members.
@@ -1056,7 +1082,7 @@ void OneClickSigninHelper::DidStopLoading(
   // explicit sign ins.
   if (!error_message_.empty() && auto_accept_ == AUTO_ACCEPT_EXPLICIT) {
     VLOG(1) << "OneClickSigninHelper::DidStopLoading: error=" << error_message_;
-    RedirectToNTP(true);
+    RedirectToNtpOrAppsPage(true);
     return;
   }
 
@@ -1080,15 +1106,17 @@ void OneClickSigninHelper::DidStopLoading(
       url.ReplaceComponents(replacements) ==
         continue_url_.ReplaceComponents(replacements));
 
-  // If there is no valid email or password yet, there is nothing to do.
-  if (email_.empty() || password_.empty()) {
+  // If there is no valid email yet, there is nothing to do.  As of M26, the
+  // password is allowed to be empty, since its no longer required to setup
+  // sync.
+  if (email_.empty()) {
     VLOG(1) << "OneClickSigninHelper::DidStopLoading: nothing to do";
     if (continue_url_match && auto_accept_ == AUTO_ACCEPT_EXPLICIT)
       RedirectToSignin();
     std::string unused_value;
     if (net::GetValueForKeyInQuery(url, "ntp", &unused_value)) {
       SyncPromoUI::SetUserSkippedSyncPromo(profile);
-      RedirectToNTP(false);
+      RedirectToNtpOrAppsPage(false);
     }
     return;
   }
@@ -1240,14 +1268,13 @@ void OneClickSigninHelper::DidStopLoading(
       }
 
       // If this explicit sign in is not from settings page/webstore, show the
-      // NTP after sign in completes.  In the case of the settings page, it will
-      // get closed by SyncSetupHandler. In the case of webstore, it will
-      // redirect back to webstore.
+      // NTP/Apps page after sign in completes. In the case of the settings
+      // page, it will get closed by SyncSetupHandler. In the case of webstore,
+      // it will redirect back to webstore.
       if (source_ != SyncPromoUI::SOURCE_SETTINGS &&
           source_ != SyncPromoUI::SOURCE_WEBSTORE_INSTALL) {
         signin_tracker_.reset(new SigninTracker(profile, this));
-        // Show the NTP, but don't show the signed-in bubble yet.
-        RedirectToNTP(false);
+        RedirectToNtpOrAppsPage(false);
       }
       break;
     }
@@ -1311,13 +1338,15 @@ void OneClickSigninHelper::SigninFailed(const GoogleServiceAuthError& error) {
         break;
     }
   }
-
-  RedirectToNTP(true);
-  signin_tracker_.reset();
+  RedirectOnSigninComplete();
 }
 
 void OneClickSigninHelper::SigninSuccess() {
-  // Signed in now, so show the signed-in bubble.
-  RedirectToNTP(true);
+  RedirectOnSigninComplete();
+}
+
+void OneClickSigninHelper::RedirectOnSigninComplete() {
+  // Show the result in the sign-in bubble.
+  RedirectToNtpOrAppsPage(true);
   signin_tracker_.reset();
 }

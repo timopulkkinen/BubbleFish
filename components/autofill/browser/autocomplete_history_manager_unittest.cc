@@ -11,6 +11,7 @@
 #include "chrome/browser/webdata/autofill_web_data_service_impl.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/webdata/web_data_service_test_util.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -36,13 +37,14 @@ class MockWebDataService : public WebDataService {
     current_mock_web_data_service_ = this;
   }
 
-  static scoped_refptr<RefcountedProfileKeyedService> Build(Profile* profile) {
+  MOCK_METHOD1(AddFormFields, void(const std::vector<FormFieldData>&));
+
+  static scoped_refptr<MockWebDataService> GetCurrent() {
+    if (!current_mock_web_data_service_) {
+      return new MockWebDataService();
+    }
     return current_mock_web_data_service_;
   }
-
-  virtual void ShutdownOnUIThread() OVERRIDE {}
-
-  MOCK_METHOD1(AddFormFields, void(const std::vector<FormFieldData>&));
 
  protected:
   virtual ~MockWebDataService() {}
@@ -54,6 +56,22 @@ class MockWebDataService : public WebDataService {
 };
 
 MockWebDataService* MockWebDataService::current_mock_web_data_service_ = NULL;
+
+class MockWebDataServiceWrapperCurrent : public MockWebDataServiceWrapperBase {
+ public:
+  static ProfileKeyedService* Build(Profile* profile) {
+    return new MockWebDataServiceWrapperCurrent();
+  }
+
+  MockWebDataServiceWrapperCurrent() {}
+
+  scoped_refptr<WebDataService> GetWebData() OVERRIDE {
+    return MockWebDataService::GetCurrent();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockWebDataServiceWrapperCurrent);
+};
 
 class MockAutofillManagerDelegate
     : public autofill::TestAutofillManagerDelegate {
@@ -73,14 +91,15 @@ class MockAutofillManagerDelegate
 class AutocompleteHistoryManagerTest : public ChromeRenderViewHostTestHarness {
  protected:
   AutocompleteHistoryManagerTest()
-      : db_thread_(BrowserThread::DB) {
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        db_thread_(BrowserThread::DB) {
   }
 
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
     web_data_service_ = new MockWebDataService();
     WebDataServiceFactory::GetInstance()->SetTestingFactory(
-        profile(), MockWebDataService::Build);
+        profile(), MockWebDataServiceWrapperCurrent::Build);
     autocomplete_manager_.reset(new AutocompleteHistoryManager(web_contents()));
   }
 
@@ -88,8 +107,11 @@ class AutocompleteHistoryManagerTest : public ChromeRenderViewHostTestHarness {
     autocomplete_manager_.reset();
     web_data_service_ = NULL;
     ChromeRenderViewHostTestHarness::TearDown();
+    message_loop_.RunUntilIdle();
+
   }
 
+  content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
   scoped_refptr<MockWebDataService> web_data_service_;
   scoped_ptr<AutocompleteHistoryManager> autocomplete_manager_;

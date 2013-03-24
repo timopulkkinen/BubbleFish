@@ -19,10 +19,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
+#include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_test_util.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/thread_observer_helper.h"
 #include "components/autofill/browser/autofill_profile.h"
 #include "components/autofill/browser/credit_card.h"
@@ -76,8 +76,11 @@ class WebDataServiceTest : public testing::Test {
     db_thread_.Start();
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    wds_ = new WebDataService();
-    wds_->Init(temp_dir_.path());
+    base::FilePath path = temp_dir_.path().AppendASCII("TestWebDB");
+    wds_ = new WebDataService(path, WebDataServiceBase::ProfileErrorCallback());
+    // Need to add at least one table so the database gets created.
+    wds_->AddTable(scoped_ptr<WebDatabaseTable>(new AutofillTable).Pass());
+    wds_->Init();
   }
 
   virtual void TearDown() {
@@ -85,9 +88,9 @@ class WebDataServiceTest : public testing::Test {
     wds_ = NULL;
     WaitForDatabaseThread();
 
-    db_thread_.Stop();
     MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
+    db_thread_.Stop();
   }
 
   void WaitForDatabaseThread() {

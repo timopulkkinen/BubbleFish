@@ -27,6 +27,11 @@
 namespace chromeos {
 namespace {
 
+const char kInsetsTopKey[] = "insets_top";
+const char kInsetsLeftKey[] = "insets_left";
+const char kInsetsBottomKey[] = "insets_bottom";
+const char kInsetsRightKey[] = "insets_right";
+
 // This kind of boilerplates should be done by base::JSONValueConverter but it
 // doesn't support classes like gfx::Insets for now.
 // TODO(mukai): fix base::JSONValueConverter and use it here.
@@ -36,10 +41,10 @@ bool ValueToInsets(const base::DictionaryValue& value, gfx::Insets* insets) {
   int left = 0;
   int bottom = 0;
   int right = 0;
-  if (value.GetInteger("top", &top) &&
-      value.GetInteger("left", &left) &&
-      value.GetInteger("bottom", &bottom) &&
-      value.GetInteger("right", &right)) {
+  if (value.GetInteger(kInsetsTopKey, &top) &&
+      value.GetInteger(kInsetsLeftKey, &left) &&
+      value.GetInteger(kInsetsBottomKey, &bottom) &&
+      value.GetInteger(kInsetsRightKey, &right)) {
     insets->Set(top, left, bottom, right);
     return true;
   }
@@ -48,10 +53,10 @@ bool ValueToInsets(const base::DictionaryValue& value, gfx::Insets* insets) {
 
 void InsetsToValue(const gfx::Insets& insets, base::DictionaryValue* value) {
   DCHECK(value);
-  value->SetInteger("top", insets.top());
-  value->SetInteger("left", insets.left());
-  value->SetInteger("bottom", insets.bottom());
-  value->SetInteger("right", insets.right());
+  value->SetInteger(kInsetsTopKey, insets.top());
+  value->SetInteger(kInsetsLeftKey, insets.left());
+  value->SetInteger(kInsetsBottomKey, insets.bottom());
+  value->SetInteger(kInsetsRightKey, insets.right());
 }
 
 ash::internal::DisplayManager* GetDisplayManager() {
@@ -72,13 +77,12 @@ ash::DisplayController* GetDisplayController() {
   return ash::Shell::GetInstance()->display_controller();
 }
 
-void NotifyDisplayLayoutChanged() {
+void LoadDisplayLayouts() {
   PrefService* local_state = g_browser_process->local_state();
   ash::DisplayController* display_controller = GetDisplayController();
 
-  ash::DisplayLayout default_layout(
-      static_cast<ash::DisplayLayout::Position>(local_state->GetInteger(
-          prefs::kSecondaryDisplayLayout)),
+  ash::DisplayLayout default_layout = ash::DisplayLayout::FromInts(
+      local_state->GetInteger(prefs::kSecondaryDisplayLayout),
       local_state->GetInteger(prefs::kSecondaryDisplayOffset));
   display_controller->SetDefaultDisplayLayout(default_layout);
 
@@ -114,40 +118,44 @@ void NotifyDisplayLayoutChanged() {
   }
 }
 
-void NotifyDisplayOverscans() {
+void LoadDisplayProperties() {
   PrefService* local_state = g_browser_process->local_state();
-
-  const base::DictionaryValue* overscans = local_state->GetDictionary(
-      prefs::kDisplayOverscans);
-  for (DictionaryValue::Iterator it(*overscans);
-       !it.IsAtEnd();
-       it.Advance()) {
-    int64 display_id = gfx::Display::kInvalidDisplayID;
-    if (!base::StringToInt64(it.key(), &display_id)) {
-      LOG(WARNING) << "Invalid key, cannot convert to display ID: " << it.key();
+  const base::DictionaryValue* properties = local_state->GetDictionary(
+      prefs::kDisplayProperties);
+  for (DictionaryValue::Iterator it(*properties); !it.IsAtEnd(); it.Advance()) {
+    const base::DictionaryValue* dict_value = NULL;
+    if (!it.value().GetAsDictionary(&dict_value) || dict_value == NULL)
+      continue;
+    int64 id = gfx::Display::kInvalidDisplayID;
+    if (!base::StringToInt64(it.key(), &id) ||
+        id == gfx::Display::kInvalidDisplayID) {
       continue;
     }
+    gfx::Display::Rotation rotation = gfx::Display::ROTATE_0;
+    float ui_scale = 1.0f;
+    const gfx::Insets* insets_to_set = NULL;
 
-    const base::DictionaryValue* value = NULL;
-    if (!it.value().GetAsDictionary(&value)) {
-      LOG(WARNING) << "Can't find dictionary value for " << it.key();
-      continue;
+    int rotation_value = 0;
+    if (dict_value->GetInteger("rotation", &rotation_value)) {
+      rotation = static_cast<gfx::Display::Rotation>(rotation_value);
     }
-
+    int ui_scale_value = 0;
+    if (dict_value->GetInteger("ui-scale", &ui_scale_value))
+      ui_scale = static_cast<float>(ui_scale_value) / 1000.0f;
     gfx::Insets insets;
-    if (!ValueToInsets(*value, &insets)) {
-      LOG(WARNING) << "Can't convert the data into insets for " << it.key();
-      continue;
-    }
-
-    GetDisplayController()->SetOverscanInsets(display_id, insets);
+    if (ValueToInsets(*dict_value, &insets))
+      insets_to_set = &insets;
+    GetDisplayManager()->RegisterDisplayProperty(id,
+                                                 rotation,
+                                                 ui_scale,
+                                                 insets_to_set);
   }
 }
 
-void StoreDisplayLayoutPref(int64 id1,
-                            int64 id2,
+void StoreDisplayLayoutPref(const ash::DisplayIdPair& pair,
                             const ash::DisplayLayout& display_layout) {
-  std::string name = base::Int64ToString(id1) + "," + base::Int64ToString(id2);
+  std::string name =
+      base::Int64ToString(pair.first) + "," + base::Int64ToString(pair.second);
 
   PrefService* local_state = g_browser_process->local_state();
   DictionaryPrefUpdate update(local_state, prefs::kSecondaryDisplays);
@@ -160,27 +168,44 @@ void StoreDisplayLayoutPref(int64 id1,
   }
   if (ash::DisplayLayout::ConvertToValue(display_layout, layout_value.get()))
     pref_data->Set(name, layout_value.release());
-  local_state->SetInteger(prefs::kSecondaryDisplayLayout,
-                          static_cast<int>(display_layout.position));
-  local_state->SetInteger(prefs::kSecondaryDisplayOffset,
-                          display_layout.offset);
 }
 
 void StoreCurrentDisplayLayoutPrefs() {
-  if (!IsValidUser() || gfx::Screen::GetNativeScreen()->GetNumDisplays() < 2)
+  if (!IsValidUser() || GetDisplayManager()->num_connected_displays() < 2)
     return;
 
   ash::DisplayController* display_controller = GetDisplayController();
-  ash::DisplayLayout display_layout =
-      display_controller->GetCurrentDisplayLayout();
   ash::DisplayIdPair pair = display_controller->GetCurrentDisplayIdPair();
-
-  StoreDisplayLayoutPref(pair.first, pair.second, display_layout);
+  ash::DisplayLayout display_layout =
+      display_controller->GetRegisteredDisplayLayout(pair);
+  StoreDisplayLayoutPref(pair, display_layout);
 }
 
+void StoreCurrentDisplayProperties() {
+  ash::internal::DisplayManager* display_manager = GetDisplayManager();
+  PrefService* local_state = g_browser_process->local_state();
+
+  DictionaryPrefUpdate update(local_state, prefs::kDisplayProperties);
+  base::DictionaryValue* pref_data = update.Get();
+
+  size_t num = display_manager->GetNumDisplays();
+  for (size_t i = 0; i < num; ++i) {
+    int64 id = display_manager->GetDisplayAt(i)->id();
+    ash::internal::DisplayInfo info = display_manager->GetDisplayInfo(id);
+
+    scoped_ptr<base::DictionaryValue> property_value(
+        new base::DictionaryValue());
+    property_value->SetInteger("rotation", static_cast<int>(info.rotation()));
+    property_value->SetInteger("ui-scale",
+                               static_cast<int>(info.ui_scale() * 1000));
+    if (info.has_custom_overscan_insets())
+      InsetsToValue(info.overscan_insets_in_dip(), property_value.get());
+    pref_data->Set(base::Int64ToString(id), property_value.release());
+  }
+}
 
 void StorePrimaryDisplayIDPref(int64 display_id) {
-  if (!IsValidUser())
+  if (!IsValidUser() || gfx::Screen::GetNativeScreen()->GetNumDisplays() < 2)
     return;
 
   PrefService* local_state = g_browser_process->local_state();
@@ -201,64 +226,52 @@ void RegisterDisplayLocalStatePrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kSecondaryDisplayOffset, 0);
   // Per-display preference.
   registry->RegisterDictionaryPref(prefs::kSecondaryDisplays);
+  registry->RegisterDictionaryPref(prefs::kDisplayProperties);
 
   // Primary output name.
   registry->RegisterInt64Pref(prefs::kPrimaryDisplayID,
                               gfx::Display::kInvalidDisplayID);
-
-  // Display overscan preference.
-  registry->RegisterDictionaryPref(prefs::kDisplayOverscans);
 }
 
 void StoreDisplayPrefs() {
+  if (!IsValidUser())
+    return;
   StorePrimaryDisplayIDPref(ash::Shell::GetScreen()->GetPrimaryDisplay().id());
   StoreCurrentDisplayLayoutPrefs();
+  StoreCurrentDisplayProperties();
 }
 
-void SetAndStoreDisplayLayoutPref(int layout, int offset) {
-  ash::DisplayLayout display_layout(
-      static_cast<ash::DisplayLayout::Position>(layout), offset);
-  ash::Shell::GetInstance()->display_controller()->
-      SetLayoutForCurrentDisplays(display_layout);
-  StoreCurrentDisplayLayoutPrefs();
-}
+void SetCurrentAndDefaultDisplayLayout(const ash::DisplayLayout& layout) {
+  ash::DisplayController* display_controller = GetDisplayController();
+  display_controller->SetLayoutForCurrentDisplays(layout);
 
-void StoreDisplayLayoutPref(int64 id1, int64 id2,
-                            int layout, int offset) {
-  ash::DisplayLayout display_layout(
-      static_cast<ash::DisplayLayout::Position>(layout), offset);
-  StoreDisplayLayoutPref(id1, id2, display_layout);
-}
-
-void SetAndStoreDisplayOverscan(const gfx::Display& display,
-                                const gfx::Insets& insets) {
   if (IsValidUser()) {
-    DictionaryPrefUpdate update(
-        g_browser_process->local_state(), prefs::kDisplayOverscans);
-    const std::string id = base::Int64ToString(display.id());
-
-    base::DictionaryValue* pref_data = update.Get();
-    base::DictionaryValue* insets_value = new base::DictionaryValue();
-    InsetsToValue(insets, insets_value);
-    pref_data->Set(id, insets_value);
+    PrefService* local_state = g_browser_process->local_state();
+    ash::DisplayIdPair pair = display_controller->GetCurrentDisplayIdPair();
+    // Use registered layout as the layout might have been inverted when
+    // the displays are swapped.
+    ash::DisplayLayout display_layout =
+        display_controller->GetRegisteredDisplayLayout(pair);
+    local_state->SetInteger(prefs::kSecondaryDisplayLayout,
+                            static_cast<int>(display_layout.position));
+    local_state->SetInteger(prefs::kSecondaryDisplayOffset,
+                            display_layout.offset);
   }
-
-  ash::Shell::GetInstance()->display_controller()->SetOverscanInsets(
-      display.id(), insets);
 }
 
-void SetAndStorePrimaryDisplayIDPref(int64 display_id) {
-  StorePrimaryDisplayIDPref(display_id);
-  ash::Shell::GetInstance()->display_controller()->SetPrimaryDisplayId(
-      display_id);
-}
-
-void NotifyDisplayLocalStatePrefChanged() {
+void LoadDisplayPreferences() {
   PrefService* local_state = g_browser_process->local_state();
+  LoadDisplayLayouts();
+  LoadDisplayProperties();
   ash::Shell::GetInstance()->display_controller()->SetPrimaryDisplayId(
       local_state->GetInt64(prefs::kPrimaryDisplayID));
-  NotifyDisplayLayoutChanged();
-  NotifyDisplayOverscans();
+}
+
+// Stores the display layout for given display pairs.
+void StoreDisplayLayoutPrefForTest(int64 id1,
+                                   int64 id2,
+                                   const ash::DisplayLayout& layout) {
+  StoreDisplayLayoutPref(std::make_pair(id1, id2), layout);
 }
 
 }  // namespace chromeos

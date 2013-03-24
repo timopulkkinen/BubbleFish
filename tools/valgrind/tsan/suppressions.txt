@@ -98,7 +98,12 @@
   ThreadSanitizer:Race
   fun:__strncasecmp_l_ssse3
   fun:base::strncasecmp
-  fun:StartsWithASCII
+}
+{
+  False positive on strcasecmp OOB read
+  ThreadSanitizer:Race
+  fun:__strcasecmp_l_ssse3
+  fun:base::strcasecmp
 }
 
 {
@@ -1061,3 +1066,66 @@
    ...
    fun:base::debug::TraceSamplingThread::ThreadMain
 }
+{
+   bug_222601a
+   ThreadSanitizer:Race
+   fun:XFixesFindDisplay
+   fun:XFixesQueryExtension
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222601b
+   ThreadSanitizer:Race
+   fun:XextFindDisplay
+   ...
+   fun:XShmQueryVersion
+   fun:media::XServerPixelBuffer::InitShm
+   fun:media::XServerPixelBuffer::Init
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222601c
+   ThreadSanitizer:Race
+   fun:XextAddDisplay
+   ...
+   fun:media::XServerPixelBuffer::InitShm
+   fun:media::XServerPixelBuffer::Init
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222684a
+   ThreadSanitizer:Race
+   ...
+   fun:WebCore::shouldTreatAsUniqueOrigin
+   fun:WebCore::SecurityOrigin::create
+   fun:WebCore::SecurityOrigin::createFromString
+   fun:WebKit::WebSecurityOrigin::createFromString
+}
+{
+   bug_222684b
+   ThreadSanitizer:Race
+   ...
+   fun:WebCore::SecurityOrigin::SecurityOrigin
+   fun:WebCore::SecurityOrigin::create
+   fun:WebCore::SecurityOrigin::createFromString
+   fun:WebKit::WebSecurityOrigin::createFromString
+}
+{
+  bug_223262a
+  ThreadSanitizer:Race
+  fun:XextFindDisplay
+  fun:_xgeFindDisplay
+  fun:xgeExtRegister
+  fun:XextAddDisplay
+  fun:XRecordCreateContext
+  fun:remoting::::LocalInputMonitorLinux::Core::StartOnInputThread
+}
+{
+  bug_223262b
+  ThreadSanitizer:Race
+  ...
+  fun:XextAddDisplay
+  fun:XRecordCreateContext
+  fun:remoting::::LocalInputMonitorLinux::Core::StartOnInputThread
+}
+

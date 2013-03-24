@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/callback_forward.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/drive/drive_file_error.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
@@ -37,6 +38,44 @@ const char kWildCard[] = "*";
 // The path is used for creating a symlink in "pinned" directory for a file
 // which is not yet fetched.
 const char kSymLinkToDevNull[] = "/dev/null";
+
+// Special resource IDs introduced to manage pseudo directory tree locally.
+// These strings are supposed to be different from any resource ID used on the
+// server, and are never sent to the server. Practical resource IDs used so far
+// have only alphabets/numbers ([a-zA-Z0-9]) and ':'.
+// Hence '<' and '>' around the directory name have been added to make them
+// different from normal server-side IDs.
+const char kDriveGrandRootSpecialResourceId[] = "<drive>";
+
+const char kDriveOtherDirSpecialResourceId[] = "<other>";
+
+// The directory names used for the Google Drive file system tree. These names
+// are used in URLs for the file manager, hence user-visible.
+const base::FilePath::CharType kDriveGrandRootDirName[] =
+    FILE_PATH_LITERAL("drive");
+
+const base::FilePath::CharType kDriveMyDriveRootDirName[] =
+    FILE_PATH_LITERAL("root");
+
+const base::FilePath::CharType kDriveOtherDirName[] =
+    FILE_PATH_LITERAL("other");
+
+// TODO(haruki): Change this to "drive/root" in order to use separate namespace.
+// http://crbug.com/174233
+const base::FilePath::CharType kDriveMyDriveRootPath[] =
+    FILE_PATH_LITERAL("drive");
+
+const base::FilePath::CharType kDriveOtherDirPath[] =
+    FILE_PATH_LITERAL("drive/other");
+
+// Returns the path of the top root of the pseudo tree.
+const base::FilePath& GetDriveGrandRootPath();
+
+// Returns the path of the directory representing "My Drive".
+const base::FilePath& GetDriveMyDriveRootPath();
+
+// Returns the path of the directory representing entries other than "My Drive".
+const base::FilePath& GetDriveOtherDirPath();
 
 // Returns the Drive mount point path, which looks like "/special/drive".
 const base::FilePath& GetDriveMountPointPath();
@@ -138,6 +177,15 @@ void ConvertPlatformFileInfoToProto(const base::PlatformFileInfo& file_info,
 
 // Does nothing with |error|. Used with functions taking FileOperationCallback.
 void EmptyFileOperationCallback(DriveFileError error);
+
+// Helper to destroy objects which needs Destroy() to be called on destruction.
+struct DestroyHelper {
+  template<typename T>
+  void operator()(T* object) const {
+    if (object)
+      object->Destroy();
+  }
+};
 
 }  // namespace util
 }  // namespace drive

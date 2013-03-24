@@ -6,9 +6,10 @@
 
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
+#include "chrome/browser/autofill/autocheckout_whitelist_manager_factory.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -52,6 +53,14 @@ PersonalDataManager* TabAutofillManagerDelegate::GetPersonalDataManager() {
 PrefService* TabAutofillManagerDelegate::GetPrefs() {
   return Profile::FromBrowserContext(web_contents_->GetBrowserContext())->
       GetPrefs();
+}
+
+autocheckout::WhitelistManager*
+TabAutofillManagerDelegate::GetAutocheckoutWhitelistManager() const {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  return autocheckout::WhitelistManagerFactory::GetForProfile(
+      profile->GetOriginalProfile());
 }
 
 bool TabAutofillManagerDelegate::IsSavingPasswordsEnabled() const {
@@ -146,7 +155,6 @@ void TabAutofillManagerDelegate::HideAutocheckoutBubble() {
 void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
     const FormData& form,
     const GURL& source_url,
-    const content::SSLStatus& ssl_status,
     const AutofillMetrics& metric_logger,
     DialogType dialog_type,
     const base::Callback<void(const FormStructure*)>& callback) {
@@ -156,7 +164,6 @@ void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
       new autofill::AutofillDialogControllerImpl(web_contents_,
                                                  form,
                                                  source_url,
-                                                 ssl_status,
                                                  metric_logger,
                                                  dialog_type,
                                                  callback);
@@ -184,7 +191,7 @@ void TabAutofillManagerDelegate::ShowAutofillPopup(
   popup_controller_ = AutofillPopupControllerImpl::GetOrCreate(
       popup_controller_,
       delegate,
-      web_contents()->GetView()->GetContentNativeView(),
+      web_contents()->GetView()->GetNativeView(),
       element_bounds_in_screen_space);
 
   popup_controller_->Show(values, labels, icons, identifiers);

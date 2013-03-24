@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/webdata/web_data_service_test_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/public/browser/notification_service.h"
@@ -60,12 +62,13 @@ class FakeWebDataService : public WebDataService {
   }
 
   virtual void ShutdownOnUIThread() OVERRIDE {
-    ShutdownSyncableService();
-  }
-
-  virtual AutocompleteSyncableService*
-      GetAutocompleteSyncableService() const OVERRIDE {
-    return autocomplete_syncable_service_;
+    // The storage for syncable services must be destructed on the DB
+    // thread.
+    base::RunLoop run_loop;
+    BrowserThread::PostTaskAndReply(BrowserThread::DB, FROM_HERE,
+        base::Bind(&FakeWebDataService::ShutdownOnDBThread,
+                   base::Unretained(this)), run_loop.QuitClosure());
+    run_loop.Run();
   }
 
   void StartSyncableService() {
@@ -78,19 +81,10 @@ class FakeWebDataService : public WebDataService {
     run_loop.Run();
   }
 
-  void ShutdownSyncableService() {
-    // The |autofill_profile_syncable_service_| must be destructed on the DB
-    // thread.
-    base::RunLoop run_loop;
-    BrowserThread::PostTaskAndReply(BrowserThread::DB, FROM_HERE,
-        base::Bind(&FakeWebDataService::DestroySyncableService,
-                   base::Unretained(this)), run_loop.QuitClosure());
-    run_loop.Run();
-  }
-
   void GetAutofillCullingValue(bool* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    *result = autocomplete_syncable_service_->cull_expired_entries();
+    *result = AutocompleteSyncableService::FromWebDataService(
+        this)->cull_expired_entries();
   }
 
   bool CheckAutofillCullingValue() {
@@ -105,28 +99,36 @@ class FakeWebDataService : public WebDataService {
 
  private:
   virtual ~FakeWebDataService() {
-    DCHECK(!autocomplete_syncable_service_);
   }
 
   void CreateSyncableService() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     // These services are deleted in DestroySyncableService().
-    autocomplete_syncable_service_ = new AutocompleteSyncableService(this);
+    AutocompleteSyncableService::CreateForWebDataService(this);
   }
-
-  void DestroySyncableService() {
-    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    delete autocomplete_syncable_service_;
-    autocomplete_syncable_service_ = NULL;
-  }
-
-  // We own the syncable services, but don't use a |scoped_ptr| because the
-  // lifetime must be managed on the DB thread.
-  AutocompleteSyncableService* autocomplete_syncable_service_;
 
   bool is_database_loaded_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeWebDataService);
+};
+
+class MockWebDataServiceWrapperSyncable : public MockWebDataServiceWrapper {
+ public:
+  static ProfileKeyedService* Build(Profile* profile) {
+    return new MockWebDataServiceWrapperSyncable();
+  }
+
+  MockWebDataServiceWrapperSyncable()
+      : MockWebDataServiceWrapper(new FakeWebDataService()) {
+  }
+
+  void Shutdown() OVERRIDE {
+    static_cast<FakeWebDataService*>(
+        fake_web_data_service_.get())->ShutdownOnUIThread();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockWebDataServiceWrapperSyncable);
 };
 
 class SyncAutofillDataTypeControllerTest : public testing::Test {
@@ -147,7 +149,7 @@ class SyncAutofillDataTypeControllerTest : public testing::Test {
         WillRepeatedly(Return(change_processor_.get()));
 
     WebDataServiceFactory::GetInstance()->SetTestingFactory(
-        &profile_, BuildWebDataService);
+        &profile_, MockWebDataServiceWrapperSyncable::Build);
 
     autofill_dtc_ =
         new AutofillDataTypeController(&profile_sync_factory_,
@@ -173,11 +175,6 @@ class SyncAutofillDataTypeControllerTest : public testing::Test {
   virtual void TearDown() {
     autofill_dtc_ = NULL;
     change_processor_ = NULL;
-  }
-
-  static scoped_refptr<RefcountedProfileKeyedService>
-      BuildWebDataService(Profile* profile) {
-    return new FakeWebDataService();
   }
 
   void BlockForDBThread() {

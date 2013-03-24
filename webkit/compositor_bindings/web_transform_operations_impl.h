@@ -6,7 +6,7 @@
 #define WEBKIT_COMPOSITOR_BINDINGS_WEB_TRANSFORM_OPERATIONS_IMPL_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "cc/transform_operations.h"
+#include "cc/animation/transform_operations.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebTransformOperations.h"
 #include "webkit/compositor_bindings/webkit_compositor_bindings_export.h"
 
@@ -31,9 +31,9 @@ class WebTransformOperationsImpl : public WebKit::WebTransformOperations {
   virtual bool isIdentity() const;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WebTransformOperationsImpl);
-
   cc::TransformOperations transform_operations_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebTransformOperationsImpl);
 };
 
 }  // namespace webkit

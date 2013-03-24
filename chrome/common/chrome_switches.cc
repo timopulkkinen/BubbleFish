@@ -139,6 +139,10 @@ const char kCheckForUpdateIntervalSec[]     = "check-for-update-interval";
 const char kCheckCloudPrintConnectorPolicy[] =
     "check-cloud-print-connector-policy";
 
+// Run Chrome in Chrome Frame mode. This means that Chrome expects to be run
+// as a dependent process of the Chrome Frame plugin.
+const char kChromeFrame[]                   = "chrome-frame";
+
 // Tells Chrome to delay shutdown (for a specified number of seconds) when a
 // Chrome Frame automation channel is closed.
 const char kChromeFrameShutdownDelay[]      = "chrome-frame-shutdown-delay";
@@ -173,6 +177,10 @@ const char kCloudPrintPrintTicket[]         = "cloud-print-print-ticket";
 
 // Used with kCloudPrintFile to specify a title for the resulting print job.
 const char kCloudPrintJobTitle[]            = "cloud-print-job-title";
+
+// Setup cloud print proxy for provided printers. This does not start
+// service or register proxy for autostart.
+const char kCloudPrintSetupProxy[] = "cloud-print-setup-proxy";
 
 // The URL of the cloud print service to use, overrides any value stored in
 // preferences, and the default. Only used if the cloud print service has been
@@ -301,6 +309,9 @@ const char kDisableExtensionsHttpThrottling[] =
 const char kDisableExtensionsResourceWhitelist[] =
     "disable-extensions-resource-whitelist";
 
+// Disables automatically making app run in full screen in force app mode.
+const char kDisableFullscreenApp[]          = "disable-fullscreen-app";
+
 // Disable Instant extended API.
 const char kDisableInstantExtendedAPI[] = "disable-instant-extended-api";
 
@@ -386,6 +397,10 @@ const char kDisableSyncPreferences[]        = "disable-sync-preferences";
 // Disable syncing custom search engines.
 const char kDisableSyncSearchEngines[]      = "disable-sync-search-engines";
 
+// Disables synced notifications.
+const char kDisableSyncSyncedNotifications[] =
+    "disable-sync-synced-notifications";
+
 // Disables syncing browser sessions. Will override kEnableSyncTabs.
 const char kDisableSyncTabs[]               = "disable-sync-tabs";
 
@@ -430,6 +445,13 @@ const char kDnsPrefetchDisable[]            = "dns-prefetch-disable";
 // logging to be enabled to really do anything). Used by developers and test
 // scripts.
 const char kDumpHistogramsOnExit[]          = "dump-histograms-on-exit";
+
+// Enables the <adview> tag in packaged apps.
+const char kEnableAdview[]                  = "enable-adview";
+
+// Enables specifying a "src" attribute on <adview> elements
+// (for testing purposes, to skip the whitelist).
+const char kEnableAdviewSrcAttribute[]      = "enable-adview-src-attribute";
 
 // Enables the experimental asynchronous DNS client.
 const char kEnableAsyncDns[]                = "enable-async-dns";
@@ -483,11 +505,19 @@ const char kEnableExperimentalExtensionApis[] =
 const char kEnableExtensionActivityLogging[] =
     "enable-extension-activity-logging";
 
+const char kEnableExtensionActivityLogTesting[] =
+    "enable-extension-activity-log-testing";
+
 // Enables the extension activity UI.
 const char kEnableExtensionActivityUI[]     = "enable-extension-activity-ui";
 
 // Enables or disables showing extensions in the action box.
 const char kExtensionsInActionBox[]         = "extensions-in-action-box";
+
+// Enables or disables running extensions on chrome:// URLs.
+// Extensions still need to explicitly request access to chrome:// URLs in the
+// manifest.
+const char kExtensionsOnChromeURLs[]        = "extensions-on-chrome-urls";
 
 // By default, cookies are not allowed on file://. They are needed for testing,
 // for example page cycler and layout tests. See bug 1157243.
@@ -518,7 +548,9 @@ const char kEnableIPPooling[]               = "enable-ip-pooling";
 // have restrictions applied.
 const char kEnableManagedUsers[]     = "enable-managed-users";
 
-// Allows reporting memory info (JS heap size) to page.
+// Make the values returned to window.performance.memory more granular and more
+// up to date. Without this flag, the memory information is still available, but
+// it is bucketized and updated less frequently.
 const char kEnableMemoryInfo[]              = "enable-memory-info";
 
 // Enables metrics recording and reporting in the browser startup sequence, as
@@ -536,16 +568,6 @@ const char kEnableNaCl[]                    = "enable-nacl";
 
 // Enables debugging via RSP over a socket.
 const char kEnableNaClDebug[]               = "enable-nacl-debug";
-
-// Uses NaCl manifest URL to choose whether NaCl program will be debugged by
-// debug stub.
-// Switch value format: [!]pattern1,pattern2,...,patternN. Each pattern uses
-// the same syntax as patterns in Chrome extension manifest. The only difference
-// is that * scheme matches all schemes instead of matching only http and https.
-// If the value doesn't start with !, a program will be debugged if manifest URL
-// matches any pattern. If the value starts with !, a program will be debugged
-// if manifest URL does not match any pattern.
-const char kNaClDebugMask[]                 = "nacl-debug-mask";
 
 // Enables hardware exception handling via debugger process.
 const char kEnableNaClExceptionHandling[]   = "enable-nacl-exception-handling";
@@ -595,9 +617,6 @@ const char kEnableResourceContentSettings[] =
 // supported server-side for searches on google.com.
 const char kEnableSdch[]                    = "enable-sdch";
 
-// Enable SPDY/3. This is a temporary testing flag.
-const char kEnableSpdy3[]                   = "enable-spdy3";
-
 // Enable SPDY/3.1. This is a temporary testing flag.
 const char kEnableSpdy31[]                  = "enable-spdy31";
 
@@ -612,10 +631,6 @@ const char kEnableStackedTabStrip[]         = "enable-stacked-tab-strip";
 
 // Enables experimental suggestions pane in New Tab page.
 const char kEnableSuggestionsTabPage[]      = "enable-suggestions-ntp";
-
-// Enables synced notifications.
-const char kEnableSyncSyncedNotifications[] =
-    "enable-sync-synced-notifications";
 
 // Enables synced favicons
 const char kEnableSyncFavicons[]            = "enable-sync-favicons";
@@ -683,9 +698,6 @@ const char kForceAppMode[]                  = "force-app-mode";
 // Displays the First Run experience when the browser is started, regardless of
 // whether or not it's actually the First Run (this overrides kNoFirstRun).
 const char kForceFirstRun[]                 = "force-first-run";
-
-// Forces application to run in full screen in force app mode.
-const char kForceFullscreenApp[]            = "force-fullscreen-app";
 
 // Tries to load cloud policy for every signed in user, regardless of whether
 // they are a dasher user or not. Used to allow any GAIA account to be used for
@@ -860,6 +872,20 @@ const char kMetricsRecordingOnly[]          = "metrics-recording-only";
 // Enables multiprofile Chrome.
 const char kMultiProfiles[]                 = "multi-profiles";
 
+// Causes the process to run as a NativeClient broker
+// (used for launching NaCl loader processes on 64-bit Windows).
+const char kNaClBrokerProcess[]             = "nacl-broker";
+
+// Uses NaCl manifest URL to choose whether NaCl program will be debugged by
+// debug stub.
+// Switch value format: [!]pattern1,pattern2,...,patternN. Each pattern uses
+// the same syntax as patterns in Chrome extension manifest. The only difference
+// is that * scheme matches all schemes instead of matching only http and https.
+// If the value doesn't start with !, a program will be debugged if manifest URL
+// matches any pattern. If the value starts with !, a program will be debugged
+// if manifest URL does not match any pattern.
+const char kNaClDebugMask[]                 = "nacl-debug-mask";
+
 // Native Client GDB debugger for loader. It needs switches calculated
 // at run time in order to work correctly. That's why NaClLoadCmdPrefix
 // flag can't be used.
@@ -867,6 +893,9 @@ const char kNaClGdb[]                       = "nacl-gdb";
 
 // GDB script to pass to the nacl-gdb debugger at startup.
 const char kNaClGdbScript[]                 = "nacl-gdb-script";
+
+// Causes the process to run as a NativeClient loader.
+const char kNaClLoaderProcess[]             = "nacl-loader";
 
 // On POSIX only: the contents of this flag are prepended to the nacl-loader
 // command line. Useful values might be "valgrind" or "xterm -e gdb --args".
@@ -1438,6 +1467,9 @@ const char kAshWebUIInit[]                  = "ash-webui-init";
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[]        = "enable-carrier-switching";
 
+// Disables Kiosk app mode for ChromeOS.
+const char kDisableAppMode[]                = "disable-app-mode";
+
 // Disables wallpaper boot animation (except of OOBE case).
 const char kDisableBootAnimation[]          = "disable-boot-animation";
 
@@ -1457,9 +1489,6 @@ const char kDisableLoginAnimations[]        = "disable-login-animations";
 
 // Avoid doing animations upon oobe.
 const char kDisableOobeAnimation[]          = "disable-oobe-animation";
-
-// Enable Kiosk app mode for ChromeOS.
-const char kEnableAppMode[]                 = "enable-app-mode";
 
 // Enables component extension that initializes background pages of
 // certain hosted applications.

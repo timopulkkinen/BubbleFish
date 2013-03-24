@@ -526,7 +526,8 @@ void WorkspaceManager::FadeDesktop(aura::Window* window,
     direction = DesktopBackgroundFadeController::FADE_OUT;
     parent = contents_view_;
     stack_above = desktop_workspace()->window();
-    DCHECK_EQ(kCrossFadeSwitchTimeMS, (int)duration.InMilliseconds());
+    DCHECK_EQ(kCrossFadeSwitchTimeMS,
+              static_cast<int>(duration.InMilliseconds()));
     duration = base::TimeDelta::FromMilliseconds(kCrossFadeSwitchTimeMS);
   }
   desktop_fade_controller_.reset(
@@ -665,11 +666,13 @@ void WorkspaceManager::ProcessDeletion() {
 void WorkspaceManager::OnWindowAddedToWorkspace(Workspace* workspace,
                                                 Window* child) {
   child->SetProperty(kWorkspaceKey, workspace);
-  // Do nothing (other than updating shelf visibility) as the right parent was
-  // chosen by way of GetParentForNewWindow() or we explicitly moved the window
+  // Don't make changes to window parenting as the right parent was chosen
+  // by way of GetParentForNewWindow() or we explicitly moved the window
   // to the workspace.
-  if (workspace == active_workspace_)
+  if (workspace == active_workspace_) {
     UpdateShelfVisibility();
+    FramePainter::UpdateSoloWindowHeader(child->GetRootWindow());
+  }
 
   RearrangeVisibleWindowOnShow(child);
 }
@@ -697,8 +700,10 @@ void WorkspaceManager::OnWorkspaceChildWindowVisibilityChanged(
       RearrangeVisibleWindowOnShow(child);
     else
       RearrangeVisibleWindowOnHideOrRemove(child);
-    if (workspace == active_workspace_)
+    if (workspace == active_workspace_) {
       UpdateShelfVisibility();
+      FramePainter::UpdateSoloWindowHeader(child->GetRootWindow());
+    }
   }
 }
 
@@ -784,6 +789,17 @@ void WorkspaceManager::OnTrackedByWorkspaceChanged(Workspace* workspace,
                                                    aura::Window* window) {
   Workspace* new_workspace = NULL;
   if (IsMaximized(window)) {
+    if (workspace->is_maximized() && workspace->GetNumMaximizedWindows() == 1) {
+      // If |window| is the only window in a maximized workspace then leave
+      // it there. Additionally animate it back to the origin.
+      ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
+      // All bounds changes get routed through WorkspaceLayoutManager and since
+      // the window is maximized WorkspaceLayoutManager is going to force a
+      // value. In other words, it doesn't matter what we supply to SetBounds()
+      // here.
+      window->SetBounds(gfx::Rect());
+      return;
+    }
     new_workspace = CreateWorkspace(true);
     pending_workspaces_.insert(new_workspace);
   } else if (workspace->is_maximized()) {

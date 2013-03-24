@@ -147,9 +147,10 @@ class WalletClient
   // to accept various legal documents before a FullWallet can be generated.
   // The |document_ids| and |google_transaction_id| are provided in the response
   // to the GetWalletItems call.
-  void AcceptLegalDocuments(const std::vector<std::string>& document_ids,
-                            const std::string& google_transaction_id,
-                            const GURL& source_url);
+  virtual void AcceptLegalDocuments(
+      const std::vector<std::string>& document_ids,
+      const std::string& google_transaction_id,
+      const GURL& source_url);
 
   // Authenticates that |card_verification_number| is for the backing instrument
   // with |instrument_id|. |obfuscated_gaia_id| is used as a key when escrowing
@@ -160,21 +161,21 @@ class WalletClient
                               const std::string& obfuscated_gaia_id);
 
   // GetFullWallet retrieves the a FullWallet for the user.
-  void GetFullWallet(const FullWalletRequest& full_wallet_request);
+  virtual void GetFullWallet(const FullWalletRequest& full_wallet_request);
 
   // SaveAddress saves a new shipping address.
-  void SaveAddress(const Address& address, const GURL& source_url);
+  virtual void SaveAddress(const Address& address, const GURL& source_url);
 
   // SaveInstrument saves a new instrument.
-  void SaveInstrument(const Instrument& instrument,
-                      const std::string& obfuscated_gaia_id,
-                      const GURL& source_url);
+  virtual void SaveInstrument(const Instrument& instrument,
+                              const std::string& obfuscated_gaia_id,
+                              const GURL& source_url);
 
   // SaveInstrumentAndAddress saves a new instrument and address.
-  void SaveInstrumentAndAddress(const Instrument& instrument,
-                                const Address& shipping_address,
-                                const std::string& obfuscated_gaia_id,
-                                const GURL& source_url);
+  virtual void SaveInstrumentAndAddress(const Instrument& instrument,
+                                        const Address& shipping_address,
+                                        const std::string& obfuscated_gaia_id,
+                                        const GURL& source_url);
 
   // SendAutocheckoutStatus is used for tracking the success of Autocheckout
   // flows. |status| is the result of the flow, |merchant_domain| is the domain
@@ -183,6 +184,10 @@ class WalletClient
   void SendAutocheckoutStatus(autofill::AutocheckoutStatus status,
                               const GURL& source_url,
                               const std::string& google_transaction_id);
+
+  // UpdateAddress updates Online Wallet with the data in |address|.
+  void UpdateAddress(const Address& address,
+                     const GURL& source_url);
 
   // UpdateInstrument changes the instrument with id |instrument_id| with the
   // information in |billing_address|. Its primary use is for upgrading ZIP code
@@ -203,9 +208,6 @@ class WalletClient
   FRIEND_TEST_ALL_PREFIXES(WalletClientTest, PendingRequest);
   FRIEND_TEST_ALL_PREFIXES(WalletClientTest, CancelPendingRequests);
 
-  // TODO(ahutter): Implement this.
-  std::string GetRiskParams() { return std::string("risky business"); }
-
   enum RequestType {
     NO_PENDING_REQUEST,
     ACCEPT_LEGAL_DOCUMENTS,
@@ -216,6 +218,7 @@ class WalletClient
     SAVE_INSTRUMENT,
     SAVE_INSTRUMENT_AND_ADDRESS,
     SEND_STATUS,
+    UPDATE_ADDRESS,
     UPDATE_INSTRUMENT,
   };
 

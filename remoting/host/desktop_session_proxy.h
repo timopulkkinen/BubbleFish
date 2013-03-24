@@ -19,6 +19,7 @@
 #include "media/video/capture/screen/shared_buffer.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/desktop_environment.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -39,7 +40,6 @@ namespace remoting {
 class AudioPacket;
 class ClientSession;
 class DesktopSessionConnector;
-struct DesktopSessionParams;
 struct DesktopSessionProxyTraits;
 class IpcAudioCapturer;
 class IpcVideoFrameCapturer;
@@ -73,7 +73,7 @@ class DesktopSessionProxy
   // Mirrors DesktopEnvironment.
   scoped_ptr<AudioCapturer> CreateAudioCapturer(
       scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner);
-  scoped_ptr<EventExecutor> CreateEventExecutor(
+  scoped_ptr<InputInjector> CreateInputInjector(
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
   scoped_ptr<SessionController> CreateSessionController();
@@ -116,11 +116,14 @@ class DesktopSessionProxy
   void SetVideoCapturer(
       const base::WeakPtr<IpcVideoFrameCapturer> video_capturer);
 
-  // APIs used to implement the EventExecutor interface.
+  // APIs used to implement the InputInjector interface.
   void InjectClipboardEvent(const protocol::ClipboardEvent& event);
   void InjectKeyEvent(const protocol::KeyEvent& event);
   void InjectMouseEvent(const protocol::MouseEvent& event);
-  void StartEventExecutor(scoped_ptr<protocol::ClipboardStub> client_clipboard);
+  void StartInputInjector(scoped_ptr<protocol::ClipboardStub> client_clipboard);
+
+  // API used to implement the SessionController interface.
+  void SetScreenResolution(const ScreenResolution& resolution);
 
  private:
   friend class base::DeleteHelper<DesktopSessionProxy>;
@@ -177,7 +180,7 @@ class DesktopSessionProxy
   // Points to the audio capturer receiving captured audio packets.
   base::WeakPtr<IpcAudioCapturer> audio_capturer_;
 
-  // Points to the client stub passed to StartEventExecutor().
+  // Points to the client stub passed to StartInputInjector().
   scoped_ptr<protocol::ClipboardStub> client_clipboard_;
 
   // Used to bind to a desktop session and receive notifications every time
@@ -203,6 +206,10 @@ class DesktopSessionProxy
 
   typedef std::map<int, scoped_refptr<media::SharedBuffer> > SharedBuffers;
   SharedBuffers shared_buffers_;
+
+  // Keeps the desired screen resolution so it can be passed to a newly attached
+  // desktop session agent.
+  ScreenResolution screen_resolution_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopSessionProxy);
 };

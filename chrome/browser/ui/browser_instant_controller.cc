@@ -7,8 +7,8 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -132,9 +132,12 @@ Profile* BrowserInstantController::profile() const {
 void BrowserInstantController::CommitInstant(
     scoped_ptr<content::WebContents> overlay,
     bool in_new_tab) {
-  if (profile()->GetExtensionService()->IsInstalledApp(overlay->GetURL())) {
+  const extensions::Extension* extension =
+      profile()->GetExtensionService()->GetInstalledApp(overlay->GetURL());
+  if (extension) {
     AppLauncherHandler::RecordAppLaunchType(
-        extension_misc::APP_LAUNCH_OMNIBOX_INSTANT);
+        extension_misc::APP_LAUNCH_OMNIBOX_INSTANT,
+        extension->GetType());
   }
   if (in_new_tab) {
     // TabStripModel takes ownership of |overlay|.
@@ -236,8 +239,14 @@ void BrowserInstantController::ResetInstant(const std::string& pref_name) {
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserInstantController, search::SearchModelObserver implementation:
 
-void BrowserInstantController::ModeChanged(const search::Mode& old_mode,
-                                           const search::Mode& new_mode) {
+void BrowserInstantController::ModelChanged(
+    const search::SearchModel::State& old_state,
+    const search::SearchModel::State& new_state) {
+  if (old_state.mode == new_state.mode)
+    return;
+
+  const search::Mode& new_mode = new_state.mode;
+
   if (search::IsInstantExtendedAPIEnabled()) {
     // Record some actions corresponding to the mode change. Note that to get
     // the full story, it's necessary to look at other UMA actions as well,
@@ -252,7 +261,7 @@ void BrowserInstantController::ModeChanged(const search::Mode& old_mode,
   if (new_mode.is_ntp())
     UpdateThemeInfo();
 
-  instant_.SearchModeChanged(old_mode, new_mode);
+  instant_.SearchModeChanged(old_state.mode, new_mode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -331,6 +340,9 @@ void BrowserInstantController::OnThemeChanged(ThemeService* theme_service) {
           IDR_THEME_NTP_BACKGROUND);
       DCHECK(image);
       theme_info_.image_height = image->height();
+
+      theme_info_.has_attribution =
+          theme_service->HasCustomImage(IDR_THEME_NTP_ATTRIBUTION);
     }
 
     initialized_theme_info_ = true;

@@ -38,6 +38,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
@@ -405,15 +406,22 @@ void OpenCurrentURL(Browser* browser) {
   if (!location_bar)
     return;
 
+  content::PageTransition page_transition = location_bar->GetPageTransition();
   WindowOpenDisposition open_disposition =
       location_bar->GetWindowOpenDisposition();
-  if (browser->instant_controller() &&
+  // A PAGE_TRANSITION_TYPED means the user has typed a URL. We do not want to
+  // open URLs with instant_controller since in some cases it disregards it
+  // and performs a search instead. For example, when using CTRL-Enter, the
+  // location_bar is aware of the URL but instant is not.
+  if (PageTransitionStripQualifier(page_transition) !=
+          content::PAGE_TRANSITION_TYPED &&
+      browser->instant_controller() &&
       browser->instant_controller()->OpenInstant(open_disposition))
     return;
 
   GURL url(location_bar->GetInputString());
 
-  NavigateParams params(browser, url, location_bar->GetPageTransition());
+  NavigateParams params(browser, url, page_transition);
   params.disposition = open_disposition;
   // Use ADD_INHERIT_OPENER so that all pages opened by the omnibox at least
   // inherit the opener. In some cases the tabstrip will determine the group
@@ -424,9 +432,12 @@ void OpenCurrentURL(Browser* browser) {
   Navigate(&params);
 
   DCHECK(browser->profile()->GetExtensionService());
-  if (browser->profile()->GetExtensionService()->IsInstalledApp(url)) {
+  const extensions::Extension* extension =
+      browser->profile()->GetExtensionService()->GetInstalledApp(url);
+  if (extension) {
     AppLauncherHandler::RecordAppLaunchType(
-        extension_misc::APP_LAUNCH_OMNIBOX_LOCATION);
+        extension_misc::APP_LAUNCH_OMNIBOX_LOCATION,
+        extension->GetType());
   }
 }
 
@@ -575,36 +586,36 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
     browser->tab_strip_model()->InsertWebContentsAt(
         index + 1, contents_dupe, add_types);
   } else {
-    Browser* browser = NULL;
-    if (browser->is_app()) {
-      CHECK(!browser->is_type_popup());
-      CHECK(!browser->is_type_panel());
-      browser = new Browser(
-          Browser::CreateParams::CreateForApp(Browser::TYPE_POPUP,
+    Browser* new_browser = NULL;
+    if (browser->is_app() &&
+        !browser->is_type_popup() &&
+        !browser->is_type_panel()) {
+      new_browser = new Browser(
+          Browser::CreateParams::CreateForApp(browser->type(),
                                               browser->app_name(),
                                               gfx::Rect(),
                                               browser->profile(),
                                               browser->host_desktop_type()));
-    } else if (browser->is_type_popup()) {
-      browser = new Browser(
-          Browser::CreateParams(Browser::TYPE_POPUP, browser->profile(),
+    } else {
+      new_browser = new Browser(
+          Browser::CreateParams(browser->type(), browser->profile(),
                                 browser->host_desktop_type()));
     }
-
     // Preserve the size of the original window. The new window has already
     // been given an offset by the OS, so we shouldn't copy the old bounds.
-    BrowserWindow* new_window = browser->window();
+    BrowserWindow* new_window = new_browser->window();
     new_window->SetBounds(gfx::Rect(new_window->GetRestoredBounds().origin(),
                           browser->window()->GetRestoredBounds().size()));
 
     // We need to show the browser now.  Otherwise ContainerWin assumes the
     // WebContents is invisible and won't size it.
-    browser->window()->Show();
+    new_browser->window()->Show();
 
     // The page transition below is only for the purpose of inserting the tab.
-    browser->tab_strip_model()->AddWebContents(contents_dupe, -1,
-                                               content::PAGE_TRANSITION_LINK,
-                                               TabStripModel::ADD_ACTIVE);
+    new_browser->tab_strip_model()->AddWebContents(
+        contents_dupe, -1,
+        content::PAGE_TRANSITION_LINK,
+        TabStripModel::ADD_ACTIVE);
   }
 
   SessionService* session_service =
@@ -879,10 +890,7 @@ bool CanOpenTaskManager() {
 
 void OpenTaskManager(Browser* browser, bool highlight_background_resources) {
   content::RecordAction(UserMetricsAction("TaskManager"));
-  if (highlight_background_resources)
-    browser->window()->ShowBackgroundPages();
-  else
-    browser->window()->ShowTaskManager();
+  chrome::ShowTaskManager(browser, highlight_background_resources);
 }
 
 void OpenFeedbackDialog(Browser* browser) {

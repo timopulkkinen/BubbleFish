@@ -187,7 +187,9 @@
     "whitelist": [
       "oickdpebdnfbgkcaoklfcdhjniefkcji",  // browser_tests
       "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // QuickOffice
-      "ionpfmkccalenbmnddpbmocokhaknphg"   // QuickOffice Dev
+      "ionpfmkccalenbmnddpbmocokhaknphg",  // QuickOffice Dev
+      "bpmcpldpdmajfigpchkicefoigmkfalc",  // Quickoffice component extension
+      "ehibbfinohgbchlgdbfpikodjaojhccn"   // Editor
     ]
   },
   "minimum_chrome_version": {
@@ -205,6 +207,12 @@
   "name": {
     "channel": "stable",
     "extension_types": "all"
+  },
+  "kiosk_enabled": {
+    "channel": "stable",
+    "extension_types": [
+      "platform_app"
+    ]
   },
   "offline_enabled": {
     "channel": "stable",

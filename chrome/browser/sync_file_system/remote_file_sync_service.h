@@ -100,8 +100,17 @@ class RemoteFileSyncService {
       const GURL& origin,
       const SyncStatusCallback& callback) = 0;
 
-  // Deletes the |origin| directory from the remote backing service.
-  virtual void DeleteOriginDirectory(
+  virtual void EnableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
+
+  virtual void DisableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
+
+  // Uninstalls the |origin| by deleting its remote data copy and then removing
+  // the origin from the metadata store.
+  virtual void UninstallOrigin(
       const GURL& origin,
       const SyncStatusCallback& callback) = 0;
 

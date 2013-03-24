@@ -396,6 +396,14 @@ int DevToolsWindow::GetHeight(int container_height) {
   return height_;
 }
 
+int DevToolsWindow::GetMinimumWidth() {
+  return kMinDevToolsWidth;
+}
+
+int DevToolsWindow::GetMinimumHeight() {
+  return kMinDevToolsHeight;
+}
+
 void DevToolsWindow::SetWidth(int width) {
   width_ = width;
   profile_->GetPrefs()->SetInteger(prefs::kDevToolsVSplitLocation, width);
@@ -611,7 +619,7 @@ void DevToolsWindow::DoAction() {
 std::string SkColorToRGBAString(SkColor color) {
   // We convert the alpha using DoubleToString because StringPrintf will use
   // locale specific formatters (e.g., use , instead of . in German).
-  return StringPrintf("rgba(%d,%d,%d,%s)", SkColorGetR(color),
+  return base::StringPrintf("rgba(%d,%d,%d,%s)", SkColorGetR(color),
       SkColorGetG(color), SkColorGetB(color),
       base::DoubleToString(SkColorGetA(color) / 255.0).c_str());
 }
@@ -632,7 +640,7 @@ GURL DevToolsWindow::GetDevToolsUrl(Profile* profile,
   bool experiments_enabled =
       command_line.HasSwitch(switches::kEnableDevToolsExperiments);
 
-  std::string url_string = StringPrintf("%sdevtools.html?"
+  std::string url_string = base::StringPrintf("%sdevtools.html?"
       "dockSide=%s&toolbarColor=%s&textColor=%s%s%s",
       chrome::kChromeUIDevToolsURL,
       SideToString(dock_side).c_str(),
@@ -651,7 +659,7 @@ void DevToolsWindow::UpdateTheme() {
       tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   SkColor color_tab_text =
       tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
-  std::string command = StringPrintf(
+  std::string command = base::StringPrintf(
       "InspectorFrontendAPI.setToolbarColors(\"%s\", \"%s\")",
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str());

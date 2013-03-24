@@ -21,12 +21,13 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
+#include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,7 +36,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_instructions_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_drag_drop.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_drag_drop_views.h"
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -44,6 +45,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/page_navigator.h"
@@ -138,14 +140,14 @@ static const int kOtherFolderButtonTag = 1;
 // TODO(kuan): change chrome::kNTPBookmarkBarHeight to this new height when
 // search_ntp replaces ntp4; for now, while both versions exist, this new height
 // is only needed locally.
-static const int kSearchNewTabBookmarkBarHeight = 36;
+static const int kSearchNewTabBookmarkBarHeight = 40;
 
 // TODO(kuan): change BookmarkBarView::kNewtabHorizontalPadding and
 // BookmarkBarView::kNewtabVerticalPadding to these new values when search_ntp
 // replaces ntp4; for now, while both versions exist, these new values are only
 // needed locally.
-static const int kSearchNewTabHorizontalPadding = 0;
-static const int kSearchNewTabVerticalPadding = 3;
+static const int kSearchNewTabHorizontalPadding = 2;
+static const int kSearchNewTabVerticalPadding = 5;
 
 // Tag for the 'Apps Shortcut' button.
 static const int kAppsShortcutButtonTag = 2;
@@ -333,7 +335,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     return;
 
   AppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_BOOKMARK_BAR);
+      extension_misc::APP_LAUNCH_BOOKMARK_BAR,
+      extensions::Manifest::TYPE_PLATFORM_APP);
 }
 
 int GetNewtabHorizontalPadding() {
@@ -896,8 +899,7 @@ int BookmarkBarView::OnPerformDrop(const DropTargetEvent& event) {
   const BookmarkNodeData data = drop_info_->data;
   DCHECK(data.is_valid());
   drop_info_.reset();
-  return bookmark_utils::PerformBookmarkDrop(browser_->profile(), data,
-                                             parent_node, index);
+  return chrome::DropBookmarks(browser_->profile(), data, parent_node, index);
 }
 
 void BookmarkBarView::ShowContextMenu(const gfx::Point& p,
@@ -1142,8 +1144,16 @@ void BookmarkBarView::OnMenuButtonClicked(views::View* view,
 
 void BookmarkBarView::ButtonPressed(views::Button* sender,
                                     const ui::Event& event) {
+  WindowOpenDisposition disposition_from_event_flags =
+      ui::DispositionFromEventFlags(event.flags());
+
   if (sender->tag() == kAppsShortcutButtonTag) {
-    chrome::ShowAppLauncherPage(browser_);
+    OpenURLParams params(GURL(chrome::kChromeUIAppsURL),
+                         Referrer(),
+                         disposition_from_event_flags,
+                         content::PAGE_TRANSITION_AUTO_BOOKMARK,
+                         false);
+    page_navigator_->OpenURL(params);
     bookmark_utils::RecordAppsPageOpen(GetBookmarkLaunchLocation());
     return;
   }
@@ -1157,9 +1167,6 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
     node = model_->bookmark_bar_node()->GetChild(index);
   }
   DCHECK(page_navigator_);
-
-  WindowOpenDisposition disposition_from_event_flags =
-      ui::DispositionFromEventFlags(event.flags());
 
   if (node->is_url()) {
     RecordAppLaunch(browser_->profile(), node->url());
@@ -1658,6 +1665,8 @@ void BookmarkBarView::UpdateColors() {
   for (int i = 0; i < GetBookmarkButtonCount(); ++i)
     GetBookmarkButton(i)->SetEnabledColor(text_color);
   other_bookmarked_button()->SetEnabledColor(text_color);
+  if (apps_page_shortcut_->visible())
+    apps_page_shortcut_->SetEnabledColor(text_color);
 }
 
 void BookmarkBarView::UpdateOtherBookmarksVisibility() {
@@ -1824,7 +1833,8 @@ gfx::Size BookmarkBarView::LayoutItems(bool compute_bounds_only) {
 bool BookmarkBarView::ShouldShowAppsShortcut() const {
   return chrome::search::IsInstantExtendedAPIEnabled() &&
       browser_->profile()->GetPrefs()->GetBoolean(
-          prefs::kShowAppsShortcutInBookmarkBar);
+          prefs::kShowAppsShortcutInBookmarkBar) &&
+      !browser_->profile()->IsOffTheRecord();
 }
 
 void BookmarkBarView::OnAppsPageShortcutVisibilityChanged() {

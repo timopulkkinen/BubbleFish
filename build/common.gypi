@@ -111,6 +111,11 @@
         # Sets whether chrome is built for google tv device.
         'google_tv%': 0,
 
+        # This variable tells WebCore.gyp and JavaScriptCore.gyp whether they
+        # are built under a chromium full build (1) or a webkit.org chromium
+        # build (0).
+        'inside_chromium_build%': 1,
+
         'conditions': [
           # Set default value of toolkit_views based on OS.
           ['OS=="win" or chromeos==1 or use_aura==1', {
@@ -172,6 +177,7 @@
       'enable_touch_ui%': '<(enable_touch_ui)',
       'android_webview_build%': '<(android_webview_build)',
       'google_tv%': '<(google_tv)',
+      'inside_chromium_build%': '<(inside_chromium_build)',
       'enable_app_list%': '<(enable_app_list)',
       'enable_message_center%': '<(enable_message_center)',
       'use_default_render_theme%': '<(use_default_render_theme)',
@@ -179,11 +185,6 @@
 
       # Override branding to select the desired branding flavor.
       'branding%': 'Infomonitor',
-
-      # This variable tells WebCore.gyp and JavaScriptCore.gyp whether they are
-      # are built under a chromium full build (1) or a webkit.org chromium
-      # build (0).
-      'inside_chromium_build%': 1,
 
       # Set to 1 to enable fast builds. It disables debug info for fastest
       # compilation.
@@ -389,18 +390,11 @@
       # with one of those tools.
       'build_for_tool%': '',
 
-      # Whether tests targets should be run, archived or just have the
-      # dependencies verified. All the tests targets have the '_run' suffix,
-      # e.g. base_unittests_run runs the target base_unittests. The test target
-      # always calls tools/swarm_client/isolate.py. See the script's --help for
-      # more information and the valid --mode values. Meant to be overriden with
-      # GYP_DEFINES.
-      # TODO(maruel): Converted the default from 'check' to 'noop' so work can
-      # be done while the builders are being reconfigured to check out test data
-      # files.
-      'test_isolation_mode%': 'noop',
       # If no directory is specified then a temporary directory will be used.
       'test_isolation_outdir%': '',
+      # True if isolate should fail if the isolate files refer to files
+      # that are missing.
+      'test_isolation_fail_on_missing': 0,
 
       'sas_dll_path%': '<(DEPTH)/third_party/platformsdk_win7/files/redist/x86',
       'wix_path%': '<(DEPTH)/third_party/wix',
@@ -619,6 +613,18 @@
           'sysroot%': '<!(cd <(DEPTH) && pwd -P)/mipsel-sysroot/sysroot',
           'CXX%': '<!(cd <(DEPTH) && pwd -P)/mipsel-sysroot/bin/mipsel-linux-gnu-gcc',
         }],
+
+        # Whether tests targets should be run, archived or just have the
+        # dependencies verified. All the tests targets have the '_run' suffix,  
+        # e.g. base_unittests_run runs the target base_unittests. The test
+        # target always calls tools/swarm_client/isolate.py. See the script's
+        # --help for more information and the valid --mode values. Meant to be
+        # overriden with GYP_DEFINES.
+        ['inside_chromium_build==1 and OS != "ios"', {
+          'test_isolation_mode%': 'check',
+        }, {
+          'test_isolation_mode%': 'noop',
+        }],
       ],
 
       # Set this to 1 to use the Google-internal file containing
@@ -654,6 +660,9 @@
       'google_api_key%': '',
       'google_default_client_id%': '',
       'google_default_client_secret%': '',
+
+      # Whether Android uses OpenMAX DL FFT.  Default is no.
+      'use_openmax_dl_fft%': 0,
     },
 
     # Copy conditionally-set variables out one scope.
@@ -724,6 +733,7 @@
     'use_canvas_skia%': '<(use_canvas_skia)',
     'test_isolation_mode%': '<(test_isolation_mode)',
     'test_isolation_outdir%': '<(test_isolation_outdir)',
+    'test_isolation_fail_on_missing': '<(test_isolation_fail_on_missing)',
     'enable_automation%': '<(enable_automation)',
     'enable_printing%': '<(enable_printing)',
     'enable_google_now%': '<(enable_google_now)',
@@ -911,6 +921,9 @@
     # Set ARM float abi compilation flag.
     'arm_float_abi%': 'softfp',
 
+    # Enable use of OpenMAX DL FFT routines.
+    'use_openmax_dl_fft%': '<(use_openmax_dl_fft)',
+    
     # Enable new NPDevice API.
     'enable_new_npdevice_api%': 0,
 
@@ -1122,13 +1135,15 @@
              'android_ndk_root%': '<!(cd <(DEPTH) && pwd -P)/third_party/android_tools/ndk/',
              'android_sdk_root%': '<!(cd <(DEPTH) && pwd -P)/third_party/android_tools/sdk/',
              'android_host_arch%': '<!(uname -m)',
+             # Android API-level of the SDK used for compilation.
+             'android_sdk_version%': '17',
           },
           # Copy conditionally-set variables out one scope.
           'android_ndk_root%': '<(android_ndk_root)',
           'android_sdk_root%': '<(android_sdk_root)',
+          'android_sdk_version%': '<(android_sdk_version)',
 
-          # Android API-level of the SDK used for compilation.
-          'android_sdk_version%': '17',
+          'android_sdk%': '<(android_sdk_root)/platforms/android-<(android_sdk_version)',
 
           # Android API level 14 is ICS (Android 4.0) which is the minimum
           # platform requirement for Chrome on Android, we use it for native
@@ -1166,7 +1181,8 @@
         'android_ndk_include': '<(android_ndk_sysroot)/usr/include',
         'android_ndk_lib': '<(android_ndk_sysroot)/usr/lib',
         'android_sdk_tools%': '<(android_sdk_root)/platform-tools',
-        'android_sdk%': '<(android_sdk_root)/platforms/android-<(android_sdk_version)',
+        'android_sdk%': '<(android_sdk)',
+        'android_sdk_jar%': '<(android_sdk)/android.jar',
 
         # Location of the "strip" binary, used by both gyp and scripts.
         'android_strip%' : '<!(/bin/echo -n <(android_toolchain)/*-strip)',
@@ -2836,6 +2852,7 @@
                 ],
                 'ldflags': [
                   '--sysroot=<(sysroot)',
+                  '<!(<(DEPTH)/build/linux/sysroot_ld_path.sh <(sysroot))',
                 ],
               }]]
           }],

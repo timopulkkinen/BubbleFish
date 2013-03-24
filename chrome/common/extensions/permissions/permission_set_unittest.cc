@@ -14,6 +14,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
@@ -77,11 +78,12 @@ bool Contains(const std::vector<string16>& warnings,
 
 }  // namespace
 
-
 class PermissionsTest : public testing::Test {
+ protected:
   virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
     (new BackgroundManifestHandler)->Register();
+    (new ContentScriptsHandler)->Register();
     (new PluginsHandler)->Register();
   }
 
@@ -660,6 +662,7 @@ TEST_F(PermissionsTest, PermissionMessages) {
   // These are considered "nuisance" or "trivial" permissions that don't need
   // a prompt.
   skip.insert(APIPermission::kActiveTab);
+  skip.insert(APIPermission::kAdView);
   skip.insert(APIPermission::kAlarms);
   skip.insert(APIPermission::kAppCurrentWindowInternal);
   skip.insert(APIPermission::kAppRuntime);
@@ -671,6 +674,7 @@ TEST_F(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kIdle);
   skip.insert(APIPermission::kNotification);
   skip.insert(APIPermission::kPointerLock);
+  skip.insert(APIPermission::kPower);
   skip.insert(APIPermission::kPushMessaging);
   skip.insert(APIPermission::kSessionRestore);
   skip.insert(APIPermission::kScreensaver);

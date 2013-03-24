@@ -15,7 +15,7 @@
 #include "content/public/browser/resource_context.h"
 #include "content/public/common/socket_permission_request.h"
 #include "net/base/address_list.h"
-#include "net/base/host_resolver.h"
+#include "net/dns/host_resolver.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
@@ -79,7 +79,7 @@ void CreateNetAddressListFromAddressList(
 
 PepperHostResolverPrivateMessageFilter::PepperHostResolverPrivateMessageFilter(
     BrowserPpapiHostImpl* host, PP_Instance instance)
-    : plugin_process_type_(host->plugin_process_type()),
+    : external_plugin_(host->external_plugin()),
       render_process_id_(0),
       render_view_id_(0) {
   DCHECK(host);
@@ -126,7 +126,7 @@ int32_t PepperHostResolverPrivateMessageFilter::OnMsgResolve(
   RenderViewHost* render_view_host = RenderViewHost::FromID(render_process_id_,
                                                             render_view_id_);
   if (!render_view_host ||
-      !pepper_socket_utils::CanUseSocketAPIs(plugin_process_type_,
+      !pepper_socket_utils::CanUseSocketAPIs(external_plugin_,
                                              request,
                                              render_view_host)) {
     return PP_ERROR_FAILED;

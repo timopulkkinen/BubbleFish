@@ -17,10 +17,9 @@ IpcSessionController::IpcSessionController(
 IpcSessionController::~IpcSessionController() {
 }
 
-void IpcSessionController::OnClientResolutionChanged(
-    const SkIPoint& client_dpi,
-    const SkISize& client_size) {
-  NOTIMPLEMENTED();
+void IpcSessionController::SetScreenResolution(
+    const ScreenResolution& resolution) {
+  desktop_session_proxy_->SetScreenResolution(resolution);
 }
 
 }  // namespace remoting

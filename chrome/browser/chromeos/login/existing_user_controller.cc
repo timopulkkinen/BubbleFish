@@ -221,13 +221,12 @@ void ExistingUserController::ResumeLogin() {
   resume_login_callback_.Run();
 }
 
-void ExistingUserController::OnKioskAppLaunchStarted() {
+void ExistingUserController::PrepareKioskAppLaunch() {
+  // Disable login UI while waiting for the kiosk app launch. There is no
+  // balanced UI enable call because this very login screen will not be
+  // accessed again. If app is launched, it will be destroyed. If app fails to
+  // launch, chrome is restarted to go back to a new login screen.
   login_display_->SetUIEnabled(false);
-}
-
-void ExistingUserController::OnKioskAppLaunchFailed() {
-  login_display_->SetUIEnabled(true);
-  // TODO(xiyuan): Show some error message.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -698,6 +697,11 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   guest_mode_url_ = GURL::EmptyGURL();
   std::string error = failure.GetErrorString();
 
+  if (UserManager::Get()->GetUserFlow(last_login_attempt_username_)->
+          HandleLoginFailure(failure, host_)) {
+    return;
+  }
+
   if (failure.reason() == LoginFailure::OWNER_REQUIRED) {
     ShowError(IDS_LOGIN_ERROR_OWNER_REQUIRED, error);
     content::BrowserThread::PostDelayedTask(
@@ -851,6 +855,11 @@ void ExistingUserController::OnPasswordChangeDetected() {
                  weak_factory_.GetWeakPtr()))) {
     // Value of owner email is still not verified.
     // Another attempt will be invoked after verification completion.
+    return;
+  }
+
+  if (UserManager::Get()->GetUserFlow(last_login_attempt_username_)->
+          HandlePasswordChangeDetected(host_)) {
     return;
   }
 

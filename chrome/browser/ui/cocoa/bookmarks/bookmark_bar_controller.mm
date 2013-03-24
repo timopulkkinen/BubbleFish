@@ -14,9 +14,9 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/themes/theme_service_factory.h"
@@ -50,6 +50,7 @@
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -127,20 +128,19 @@ using content::WebContents;
 
 namespace {
 
-// Overlap (in pixels) between the toolbar and the bookmark bar (when showing in
-// normal mode).
-const CGFloat kBookmarkBarOverlap = 3.0;
-
 // Duration of the bookmark bar animations.
 const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 
 void RecordAppLaunch(Profile* profile, GURL url) {
   DCHECK(profile->GetExtensionService());
-  if (!profile->GetExtensionService()->IsInstalledApp(url))
+  const extensions::Extension* extension =
+      profile->GetExtensionService()->GetInstalledApp(url);
+  if (!extension)
     return;
 
   AppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_BOOKMARK_BAR);
+      extension_misc::APP_LAUNCH_BOOKMARK_BAR,
+      extension->GetType());
 }
 
 }  // namespace
@@ -274,14 +274,14 @@ void RecordAppLaunch(Profile* profile, GURL url) {
                           name:bookmark_button::kPulseBookmarkButtonNotification
                         object:nil];
 
-    // This call triggers an awakeFromNib, which builds the bar, which
-    // might uses folderImage_.  So make sure it happens after
-    // folderImage_ is loaded.
-    [[self animatableView] setResizeDelegate:resizeDelegate];
-
     contextMenuController_.reset(
         [[BookmarkContextMenuCocoaController alloc]
             initWithBookmarkBarController:self]);
+
+    // This call triggers an -awakeFromNib, which builds the bar, which might
+    // use |folderImage_| and |contextMenuController_|. Ensure it happens after
+    // |folderImage_| is loaded and |contextMenuController_| is created.
+    [[self animatableView] setResizeDelegate:resizeDelegate];
   }
   return self;
 }
@@ -524,7 +524,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     // If we ever need any other animation cases, code would go here.
   }
 
-  return [self isInState:BookmarkBar::SHOW] ? kBookmarkBarOverlap : 0;
+  return [self isInState:BookmarkBar::SHOW] ? bookmarks::kBookmarkBarOverlap
+                                            : 0;
 }
 
 - (CGFloat)toolbarDividerOpacity {
@@ -658,6 +659,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [self doMenuFlashOnSeparateThread:sender];
   DCHECK([sender respondsToSelector:@selector(bookmarkNode)]);
   const BookmarkNode* node = [sender bookmarkNode];
+  DCHECK(node);
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   RecordAppLaunch(browser_->profile(), node->url());
@@ -890,7 +892,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     // Height takes into account the extra height we have since the toolbar
     // only compresses when we're done.
     [view animateToNewHeight:(bookmarks::kBookmarkBarHeight -
-                              kBookmarkBarOverlap)
+                              bookmarks::kBookmarkBarOverlap)
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::SHOW
                                 toState:BookmarkBar::HIDDEN]) {
@@ -917,7 +919,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     // Height takes into account the extra height we have since the toolbar
     // only compresses when we're done.
     [view animateToNewHeight:(bookmarks::kBookmarkBarHeight -
-                              kBookmarkBarOverlap)
+                              bookmarks::kBookmarkBarOverlap)
                     duration:kBookmarkBarAnimationDuration];
   } else {
     // Oops! An animation we don't know how to handle.
@@ -1157,7 +1159,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   BOOL visible = bookmarkModel_->IsLoaded() &&
       chrome::search::IsInstantExtendedAPIEnabled() &&
       browser_->profile()->GetPrefs()->GetBoolean(
-          prefs::kShowAppsShortcutInBookmarkBar);
+          prefs::kShowAppsShortcutInBookmarkBar) &&
+      !browser_->profile()->IsOffTheRecord();
   [appsPageShortcutButton_ setHidden:!visible];
   return visible;
 }
@@ -1223,7 +1226,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (void)openAppsPage:(id)sender {
-  chrome::ShowAppLauncherPage(browser_);
+  WindowOpenDisposition disposition =
+      event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+  [self openURL:GURL(chrome::kChromeUIAppsURL) disposition:disposition];
   bookmark_utils::RecordAppsPageOpen([self bookmarkLaunchLocation]);
 }
 
@@ -2174,7 +2179,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   // If folder menus are not being shown, do nothing.  This is different from
   // BookmarkBarFolderController's implementation because the bar should NOT
   // automatically open folder menus when the mouse passes over a folder
-  // button while the BookmarkBarFolderController DOES automically open
+  // button while the BookmarkBarFolderController DOES automatically open
   // a subfolder menu.
   if (!showFolderMenus_)
     return;
@@ -2186,7 +2191,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   if ([folderController_ parentButton] == sender)
     return;
   // Else open a new one if it makes sense to do so.
-  if ([sender bookmarkNode]->is_folder()) {
+  const BookmarkNode* node = [sender bookmarkNode];
+  if (node && node->is_folder()) {
     // Update |hoverButton_| so that it corresponds to the open folder.
     hoverButton_.reset([sender retain]);
     [folderTarget_ openBookmarkFolderFromButton:sender];

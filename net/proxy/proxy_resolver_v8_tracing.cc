@@ -14,9 +14,9 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "net/base/address_list.h"
-#include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
+#include "net/dns/host_resolver.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_error_observer.h"
 #include "net/proxy/proxy_resolver_v8.h"
@@ -953,7 +953,7 @@ HostResolver::RequestInfo ProxyResolverV8Tracing::Job::MakeDnsRequestInfo(
 
 std::string ProxyResolverV8Tracing::Job::MakeDnsCacheKey(
     const std::string& host, ResolveDnsOperation op) {
-  return StringPrintf("%d:%s", op, host.c_str());
+  return base::StringPrintf("%d:%s", op, host.c_str());
 }
 
 void ProxyResolverV8Tracing::Job::HandleAlertOrError(bool is_alert,

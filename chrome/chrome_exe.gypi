@@ -581,9 +581,8 @@
                 'common/crash_keys.cc',
                 'nacl/nacl_exe_win_64.cc',
                 '../content/app/startup_helper_win.cc',
-                '../content/common/debug_flags.cc',  # Needed for sandbox_policy.cc
                 '../content/common/sandbox_init_win.cc',
-                '../content/common/sandbox_policy.cc',
+                '../content/common/sandbox_win.cc',
                 '../content/public/common/content_switches.cc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
               ],

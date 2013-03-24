@@ -296,6 +296,12 @@ const int kAutoHideTaskbarThicknessPx = 2;
 // Desktop.
 const int kDesktopChromeAuraTouchId = 9;
 
+// For windows with the standard frame removed, the client area needs to be
+// different from the window area to avoid a "feature" in Windows's handling of
+// WM_NCCALCSIZE data. See the comment near the bottom of GetClientAreaInsets
+// for more details.
+const int kClientAreaBottomInsetHack = -1;
+
 }  // namespace
 
 // A scoping class that prevents a window from being able to redraw in response
@@ -980,8 +986,14 @@ void HWNDMessageHandler::ClientAreaSizeChanged() {
   if (delegate_->WidgetSizeIsClientSize()) {
     // TODO(beng): investigate whether this could be done
     // from other branch of if-else.
-    if (!IsMinimized())
+    if (!IsMinimized()) {
       GetClientRect(hwnd(), &r);
+      // This is needed due to a hack that works around a "feature" in
+      // Windows's handling of WM_NCCALCSIZE. See the comment near the end of
+      // GetClientAreaInsets for more details.
+      if (remove_standard_frame_)
+        r.bottom += kClientAreaBottomInsetHack;
+    }
   } else {
     GetWindowRect(hwnd(), &r);
   }
@@ -1015,10 +1027,22 @@ gfx::Insets HWNDMessageHandler::GetClientAreaInsets() const {
                        border_thickness);
   }
 
-  // The hack below doesn't seem to be necessary when the standard frame is
-  // removed.
+  // Returning empty insets for a window with the standard frame removed seems
+  // to cause Windows to treat the window specially, treating black as
+  // transparent and changing around some of the painting logic. I suspect it's
+  // some sort of horrible backwards-compatability hack, but the upshot of it
+  // is that if the insets are empty then in certain conditions (it seems to
+  // be subtly related to timing), the contents of windows with the standard
+  // frame removed will flicker to transparent during resize.
+  //
+  // To work around this, we increase the size of the client area by 1px
+  // *beyond* the bottom of the window. This prevents Windows from having a
+  // hissy fit and flashing the window incessantly during resizes, but it also
+  // means that the client area is reported 1px larger than it really is, so
+  // user code has to compensate by making its content shorter if it wants
+  // everything to appear inside the window.
   if (remove_standard_frame_)
-    return insets;
+    return gfx::Insets(0, 0, kClientAreaBottomInsetHack, 0);
   // This is weird, but highly essential. If we don't offset the bottom edge
   // of the client rect, the window client area and window area will match,
   // and when returning to glass rendering mode from non-glass, the client
@@ -1817,21 +1841,38 @@ LRESULT HWNDMessageHandler::OnReflectedMessage(UINT message,
 LRESULT HWNDMessageHandler::OnSetCursor(UINT message,
                                         WPARAM w_param,
                                         LPARAM l_param) {
-  LRESULT result = 0;
-  // Use a ScopedRedrawLock to avoid weird non-client painting for windows with
-  // custom frames when glass is not enabled. Otherwise, default handling is
-  // sufficient and does not produce the weird non-client painting artifacts.
-  if (delegate_->IsUsingCustomFrame() && !ui::win::IsAeroGlassEnabled() &&
-      LOWORD(l_param) >= HTLEFT && LOWORD(l_param) <= HTBOTTOMRIGHT) {
-    // Prevent classic theme custom frame artifacts on these WM_SETCUROR calls.
-    result = DefWindowProcWithRedrawLock(message, w_param, l_param);
-    // Invalidate the window to paint over any outdated window regions asap, as
-    // using a RedrawLock for WM_SETCURSOR may show content through this window.
-    InvalidateRect(hwnd(), NULL, FALSE);
-  } else {
-    SetMsgHandled(FALSE);
+  // Reimplement the necessary default behavior here. Calling DefWindowProc can
+  // trigger weird non-client painting for non-glass windows with custom frames.
+  // Using a ScopedRedrawLock to prevent caption rendering artifacts may allow
+  // content behind this window to incorrectly paint in front of this window.
+  // Invalidating the window to paint over either set of artifacts is not ideal.
+  wchar_t* cursor = IDC_ARROW;
+  switch (LOWORD(l_param)) {
+    case HTSIZE:
+      cursor = IDC_SIZENWSE;
+      break;
+    case HTLEFT:
+    case HTRIGHT:
+      cursor = IDC_SIZEWE;
+      break;
+    case HTTOP:
+    case HTBOTTOM:
+      cursor = IDC_SIZENS;
+      break;
+    case HTTOPLEFT:
+    case HTBOTTOMRIGHT:
+      cursor = IDC_SIZENWSE;
+      break;
+    case HTTOPRIGHT:
+    case HTBOTTOMLEFT:
+      cursor = IDC_SIZENESW;
+      break;
+    default:
+      // Use the default value, IDC_ARROW.
+      break;
   }
-  return result;
+  SetCursor(LoadCursor(NULL, cursor));
+  return 0;
 }
 
 void HWNDMessageHandler::OnSetFocus(HWND last_focused_window) {

@@ -8,8 +8,8 @@
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
-#include "cc/compositor_frame.h"
-#include "cc/compositor_frame_ack.h"
+#include "cc/output/compositor_frame.h"
+#include "cc/output/compositor_frame_ack.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
 #include "content/common/edit_command.h"
@@ -34,7 +34,6 @@
 #include "media/audio/audio_parameters.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_log_event.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFloatPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFloatRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
@@ -45,6 +44,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/point.h"
@@ -803,9 +803,10 @@ IPC_MESSAGE_ROUTED0(ViewMsg_Close)
 // the view's current size.  The generated ViewHostMsg_PaintRect message will
 // have the IS_RESIZE_ACK flag set. It also receives the resizer rect so that
 // we don't have to fetch it every time WebKit asks for it.
-IPC_MESSAGE_ROUTED4(ViewMsg_Resize,
+IPC_MESSAGE_ROUTED5(ViewMsg_Resize,
                     gfx::Size /* new_size */,
                     gfx::Size /* physical_backing_size */,
+                    float /* overdraw_bottom_height */,
                     gfx::Rect /* resizer_rect */,
                     bool /* is_fullscreen */)
 
@@ -1385,6 +1386,14 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
 // Sent by the browser as a reply to ViewHostMsg_SwapCompositorFrame.
 IPC_MESSAGE_ROUTED1(ViewMsg_SwapCompositorFrameAck,
                     cc::CompositorFrameAck /* ack */)
+
+// Sent from the browser to ask the renderer for a snapshot of the current view.
+// The renderer replies with whether the snapshot succeeded and the SkBitmap.
+IPC_MESSAGE_ROUTED1(ViewMsg_Snapshot,
+                    gfx::Rect /* src_subrect */)
+IPC_MESSAGE_ROUTED2(ViewHostMsg_Snapshot,
+                    bool, /* success */
+                    SkBitmap /* bitmap */)
 
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
@@ -2361,58 +2370,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_PluginFocusChanged,
 // Instructs the browser to start plugin IME.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_StartPluginIme)
 
-//---------------------------------------------------------------------------
-// Messages related to accelerated plugins
-
-// This is sent from the renderer to the browser to allocate a fake
-// PluginWindowHandle on the browser side which is used to identify
-// the plugin to the browser later when backing store is allocated
-// or reallocated. |opaque| indicates whether the plugin's output is
-// considered to be opaque, as opposed to translucent. This message
-// is reused for rendering the accelerated compositor's output.
-// |root| indicates whether the output is supposed to cover the
-// entire window.
-IPC_SYNC_MESSAGE_ROUTED2_1(ViewHostMsg_AllocateFakePluginWindowHandle,
-                           bool /* opaque */,
-                           bool /* root */,
-                           gfx::PluginWindowHandle /* id */)
-
-// Destroys a fake window handle previously allocated using
-// AllocateFakePluginWindowHandle.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_DestroyFakePluginWindowHandle,
-                    gfx::PluginWindowHandle /* id */)
-
-// This message, used on Mac OS X 10.5 and earlier (no IOSurface support),
-// is sent from the renderer to the browser on behalf of the plug-in
-// to indicate that a new backing store was allocated for that plug-in
-// instance.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_AcceleratedSurfaceSetTransportDIB,
-                    gfx::PluginWindowHandle /* window */,
-                    int32 /* width */,
-                    int32 /* height */,
-                    TransportDIB::Handle /* handle for the DIB */)
-
-// This message, used on Mac OS X 10.6 and later (where IOSurface is
-// supported), is sent from the renderer to the browser on behalf of the
-// plug-in to indicate that a new backing store was allocated for that
-// plug-in instance.
-//
-// NOTE: the original intent was to pass a mach port as the IOSurface
-// identifier but it looks like that will be a lot of work. For now we pass an
-// ID from IOSurfaceGetID.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_AcceleratedSurfaceSetIOSurface,
-                    gfx::PluginWindowHandle /* window */,
-                    int32 /* width */,
-                    int32 /* height */,
-                    uint64 /* surface_id */)
-
-// This message notifies the browser process that the plug-in
-// swapped the buffers associated with the given "window", which
-// should cause the browser to redraw the various plug-ins'
-// contents.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_AcceleratedSurfaceBuffersSwapped,
-                    gfx::PluginWindowHandle /* window */,
-                    uint64 /* surface_handle */)
 #elif defined(OS_WIN)
 // Request that the given font characters be loaded by the browser so it's
 // cached by the OS. Please see RenderMessageFilter::OnPreCacheFontCharacters

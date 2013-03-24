@@ -67,86 +67,6 @@ GURL GetBaseUrlForTesting(int port);
 // chrome/test/data.
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path);
 
-// Copies the result from EntryActionCallback and quit the message loop.
-void CopyResultFromEntryActionCallbackAndQuit(GDataErrorCode* error_out,
-                                              GDataErrorCode error_in);
-
-// Copies the results from GetDataCallback.
-void CopyResultsFromGetDataCallback(GDataErrorCode* error_out,
-                                    scoped_ptr<base::Value>* value_out,
-                                    GDataErrorCode error_in,
-                                    scoped_ptr<base::Value> value_in);
-
-// Copies the results from GetDataCallback and quit the message loop.
-void CopyResultsFromGetDataCallbackAndQuit(GDataErrorCode* error_out,
-                                           scoped_ptr<base::Value>* value_out,
-                                           GDataErrorCode error_in,
-                                           scoped_ptr<base::Value> value_in);
-
-// Copies the results from GetResourceListCallback.
-void CopyResultsFromGetResourceListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceList>* resource_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceList> resource_list_in);
-
-// Copies the results from GetAccountMetadataCallback.
-void CopyResultsFromGetAccountMetadataCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadata>* account_metadata_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AccountMetadata> account_metadata_in);
-
-// Copies the results from GetAccountMetadataCallback and quit the message
-// loop.
-void CopyResultsFromGetAccountMetadataCallbackAndQuit(
-    GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadata>* account_metadata_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AccountMetadata> account_metadata_in);
-
-// Copies the results from GetAboutResourceCallback.
-void CopyResultsFromGetAboutResourceCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AboutResource>* about_resource_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AboutResource> about_resource_in);
-
-// Copies the results from GetAppListCallback.
-void CopyResultsFromGetAppListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AppList>* app_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AppList> app_list_in);
-
-// Copies the results from DownloadActionCallback.
-void CopyResultsFromDownloadActionCallback(
-    GDataErrorCode* error_out,
-    base::FilePath* temp_file_out,
-    GDataErrorCode error_in,
-    const base::FilePath& temp_file_in);
-
-// Copies the results from InitiateUploadCallback.
-void CopyResultsFromInitiateUploadCallback(
-    GDataErrorCode* error_out,
-    GURL* url_out,
-    GDataErrorCode error_in,
-    const GURL& url_in);
-
-// Copies the results from InitiateUploadCallback and quit the message loop.
-void CopyResultsFromInitiateUploadCallbackAndQuit(
-    GDataErrorCode* error_out,
-    GURL* url_out,
-    GDataErrorCode error_in,
-    const GURL& url_in);
-
-// Copies the results from ResumeUploadCallback.
-void CopyResultsFromUploadRangeCallback(
-    UploadRangeResponse* response_out,
-    scoped_ptr<ResourceEntry>* entry_out,
-    const UploadRangeResponse& response_in,
-    scoped_ptr<ResourceEntry> entry_in);
-
 // Returns a HttpResponse created from the given file path.
 scoped_ptr<test_server::HttpResponse> CreateHttpResponseFromFile(
     const base::FilePath& file_path);
@@ -200,9 +120,7 @@ bool ParseContentRangeHeader(const std::string& value,
 //   EXPECT_EQ(expected_result2, result2);
 //                     :
 //
-// Note: The max arity of the supported function is 3. The limitation comes
-//   from the max arity of base::Callback, which is 7. A created callback
-//   consumes two arguments for each input type.
+// Note: The max arity of the supported function is 4 based on the usage.
 // TODO(hidehiko): Use replace CopyResultFromXxxCallback method defined above
 //   by this one. (crbug.com/180569).
 namespace internal {
@@ -285,6 +203,33 @@ void CopyResultCallback(
   *out3 = CopyResultCallbackHelper<T3>::Move(&in3);
 }
 
+// Holds the pointers for output. This is introduced for the workaround of
+// the arity limitation of Callback.
+template<typename T1, typename T2, typename T3, typename T4>
+struct OutputParams {
+  OutputParams(T1* out1, T2* out2, T3* out3, T4* out4)
+      : out1(out1), out2(out2), out3(out3), out4(out4) {}
+  T1* out1;
+  T2* out2;
+  T3* out3;
+  T4* out4;
+};
+
+// Copies the |in1|'s value to |output->out1|, |in2|'s to |output->out2|,
+// and so on.
+template<typename T1, typename T2, typename T3, typename T4>
+void CopyResultCallback(
+    const OutputParams<T1, T2, T3, T4>& output,
+    typename CopyResultCallbackHelper<T1>::InType in1,
+    typename CopyResultCallbackHelper<T2>::InType in2,
+    typename CopyResultCallbackHelper<T3>::InType in3,
+    typename CopyResultCallbackHelper<T4>::InType in4) {
+  *output.out1 = CopyResultCallbackHelper<T1>::Move(&in1);
+  *output.out2 = CopyResultCallbackHelper<T2>::Move(&in2);
+  *output.out3 = CopyResultCallbackHelper<T3>::Move(&in3);
+  *output.out4 = CopyResultCallbackHelper<T4>::Move(&in4);
+}
+
 }  // namespace internal
 
 template<typename T1>
@@ -307,6 +252,17 @@ base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType,
 CreateCopyResultCallback(T1* out1, T2* out2, T3* out3) {
   return base::Bind(
       &internal::CopyResultCallback<T1, T2, T3>, out1, out2, out3);
+}
+
+template<typename T1, typename T2, typename T3, typename T4>
+base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType,
+                    typename internal::CopyResultCallbackHelper<T2>::InType,
+                    typename internal::CopyResultCallbackHelper<T3>::InType,
+                    typename internal::CopyResultCallbackHelper<T4>::InType)>
+CreateCopyResultCallback(T1* out1, T2* out2, T3* out3, T4* out4) {
+  return base::Bind(
+      &internal::CopyResultCallback<T1, T2, T3, T4>,
+      internal::OutputParams<T1, T2, T3, T4>(out1, out2, out3, out4));
 }
 
 }  // namespace test_util

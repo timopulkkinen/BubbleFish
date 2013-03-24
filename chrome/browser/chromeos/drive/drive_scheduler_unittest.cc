@@ -154,11 +154,8 @@ TEST_F(DriveSchedulerTest, GetAboutResource) {
   google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
   scoped_ptr<google_apis::AboutResource> about_resource;
   scheduler_->GetAboutResource(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAboutResourceCallback,
-          &error,
-          &about_resource));
-
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &about_resource));
   google_apis::test_util::RunBlockingPoolTask();
   ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
   ASSERT_TRUE(about_resource);
@@ -171,10 +168,7 @@ TEST_F(DriveSchedulerTest, GetAppList) {
   scoped_ptr<google_apis::AppList> app_list;
 
   scheduler_->GetAppList(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAppListCallback,
-          &error,
-          &app_list));
+      google_apis::test_util::CreateCopyResultCallback(&error, &app_list));
   google_apis::test_util::RunBlockingPoolTask();
 
   ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
@@ -188,10 +182,8 @@ TEST_F(DriveSchedulerTest, GetAccountMetadata) {
   scoped_ptr<google_apis::AccountMetadata> account_metadata;
 
   scheduler_->GetAccountMetadata(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAccountMetadataCallback,
-          &error,
-          &account_metadata));
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &account_metadata));
   google_apis::test_util::RunBlockingPoolTask();
 
   ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
@@ -211,10 +203,8 @@ TEST_F(DriveSchedulerTest, GetResourceList) {
       std::string(),
       true,
       std::string(),
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetResourceListCallback,
-          &error,
-          &resource_list));
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &resource_list));
   google_apis::test_util::RunBlockingPoolTask();
 
   ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
@@ -415,9 +405,8 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularDisabled) {
       kOutputFilePath,
       kContentUrl,
       DriveClientContext(BACKGROUND),
-      base::Bind(&google_apis::test_util::CopyResultsFromDownloadActionCallback,
-                 &download_error,
-                 &output_file_path),
+      google_apis::test_util::CreateCopyResultCallback(
+          &download_error, &output_file_path),
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
@@ -425,11 +414,8 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularDisabled) {
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAccountMetadataCallback,
-          &metadata_error,
-          &account_metadata));
-
+      google_apis::test_util::CreateCopyResultCallback(
+          &metadata_error, &account_metadata));
   google_apis::test_util::RunBlockingPoolTask();
 
   // Check the metadata
@@ -473,9 +459,8 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxDisabled) {
       kOutputFilePath,
       kContentUrl,
       DriveClientContext(BACKGROUND),
-      base::Bind(&google_apis::test_util::CopyResultsFromDownloadActionCallback,
-                 &download_error,
-                 &output_file_path),
+      google_apis::test_util::CreateCopyResultCallback(
+          &download_error, &output_file_path),
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
@@ -483,11 +468,8 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxDisabled) {
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAccountMetadataCallback,
-          &metadata_error,
-          &account_metadata));
-
+      google_apis::test_util::CreateCopyResultCallback(
+          &metadata_error, &account_metadata));
   google_apis::test_util::RunBlockingPoolTask();
 
   // Check the metadata
@@ -531,9 +513,8 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularEnabled) {
       kOutputFilePath,
       kContentUrl,
       DriveClientContext(BACKGROUND),
-      base::Bind(&google_apis::test_util::CopyResultsFromDownloadActionCallback,
-                 &download_error,
-                 &output_file_path),
+      google_apis::test_util::CreateCopyResultCallback(
+          &download_error, &output_file_path),
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
@@ -541,11 +522,8 @@ TEST_F(DriveSchedulerTest, DownloadFileCellularEnabled) {
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAccountMetadataCallback,
-          &metadata_error,
-          &account_metadata));
-
+      google_apis::test_util::CreateCopyResultCallback(
+          &metadata_error, &account_metadata));
   google_apis::test_util::RunBlockingPoolTask();
 
   // Check the metadata
@@ -581,9 +559,8 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxEnabled) {
       kOutputFilePath,
       kContentUrl,
       DriveClientContext(BACKGROUND),
-      base::Bind(&google_apis::test_util::CopyResultsFromDownloadActionCallback,
-                 &download_error,
-                 &output_file_path),
+      google_apis::test_util::CreateCopyResultCallback(
+          &download_error, &output_file_path),
       google_apis::GetContentCallback());
   // Metadata should still work
   google_apis::GDataErrorCode metadata_error = google_apis::GDATA_OTHER_ERROR;
@@ -591,11 +568,8 @@ TEST_F(DriveSchedulerTest, DownloadFileWimaxEnabled) {
 
   // Try to get the metadata
   scheduler_->GetAccountMetadata(
-      base::Bind(
-          &google_apis::test_util::CopyResultsFromGetAccountMetadataCallback,
-          &metadata_error,
-          &account_metadata));
-
+      google_apis::test_util::CreateCopyResultCallback(
+          &metadata_error, &account_metadata));
   google_apis::test_util::RunBlockingPoolTask();
 
   // Check the metadata

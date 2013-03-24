@@ -52,6 +52,7 @@
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
 #include "chromeos/dbus/mock_session_manager_client.h"
 #include "chromeos/dbus/mock_shill_manager_client.h"
+#include "chromeos/dbus/mock_update_engine_client.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_utils.h"
@@ -176,6 +177,10 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
     EXPECT_CALL(*mock_dbus_thread_manager->mock_shill_manager_client(),
                 RemovePropertyChangedObserver(_))
         .Times(AnyNumber());
+    EXPECT_CALL(*mock_dbus_thread_manager->mock_update_engine_client(),
+                GetLastStatus())
+        .Times(1)
+        .WillOnce(Return(MockUpdateEngineClient::Status()));
 
     SetUpSessionManager(mock_dbus_thread_manager);
 
@@ -460,19 +465,21 @@ class ExistingUserControllerPublicSessionTest
     }
 
     // Wait for the device local account policy to be installed.
-    policy::MockCloudPolicyStoreObserver observer;
-    scoped_refptr<content::MessageLoopRunner> runner =
-      new content::MessageLoopRunner;
     policy::CloudPolicyStore* store = TestingBrowserProcess::GetGlobal()->
         browser_policy_connector()->GetDeviceLocalAccountPolicyService()->
         GetBrokerForAccount(kAutoLoginUsername)->core()->store();
-    store->AddObserver(&observer);
-    EXPECT_CALL(observer, OnStoreLoaded(store))
-        .Times(1)
-        .WillOnce(InvokeWithoutArgs(runner.get(),
-                                    &content::MessageLoopRunner::Quit));
-    runner->Run();
-    store->RemoveObserver(&observer);
+    if (!store->has_policy()) {
+      policy::MockCloudPolicyStoreObserver observer;
+      scoped_refptr<content::MessageLoopRunner> runner =
+          new content::MessageLoopRunner;
+      store->AddObserver(&observer);
+      EXPECT_CALL(observer, OnStoreLoaded(store))
+          .Times(1)
+          .WillOnce(InvokeWithoutArgs(runner.get(),
+                                      &content::MessageLoopRunner::Quit));
+      runner->Run();
+      store->RemoveObserver(&observer);
+    }
   }
 
   virtual void SetUpSessionManager(

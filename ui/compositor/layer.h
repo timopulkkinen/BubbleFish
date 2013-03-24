@@ -12,11 +12,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "cc/animation_events.h"
-#include "cc/content_layer_client.h"
-#include "cc/layer_animation_event_observer.h"
-#include "cc/scoped_ptr_vector.h"
-#include "cc/texture_layer_client.h"
+#include "cc/animation/animation_events.h"
+#include "cc/animation/layer_animation_event_observer.h"
+#include "cc/base/scoped_ptr_vector.h"
+#include "cc/layers/content_layer_client.h"
+#include "cc/layers/texture_layer_client.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/compositor/compositor.h"
@@ -294,12 +294,13 @@ class COMPOSITOR_EXPORT Layer
   // ContentLayerClient
   virtual void PaintContents(
       SkCanvas* canvas, gfx::Rect clip, gfx::RectF* opaque) OVERRIDE;
+  virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
 
   cc::Layer* cc_layer() { return cc_layer_; }
 
   // TextureLayerClient
-  virtual unsigned prepareTexture(cc::ResourceUpdateQueue&) OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* context() OVERRIDE;
+  virtual unsigned PrepareTexture(cc::ResourceUpdateQueue* queue) OVERRIDE;
+  virtual WebKit::WebGraphicsContext3D* Context3d() OVERRIDE;
 
   float device_scale_factor() const { return device_scale_factor_; }
 

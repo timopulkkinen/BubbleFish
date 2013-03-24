@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_MANAGED_USER_SETTINGS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_MANAGED_USER_SETTINGS_HANDLER_H_
 
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
@@ -28,6 +28,9 @@ class ManagedUserSettingsHandler : public OptionsPageUIHandler {
  private:
   // Save user metrics. Called from WebUI.
   void SaveMetrics(const base::ListValue* args);
+
+  // Records metric that the settings page was opened. Called from WebUI.
+  void HandlePageOpened(const base::ListValue* args);
 
   // Called when the local passphrase changes.
   void OnLocalPassphraseChanged();

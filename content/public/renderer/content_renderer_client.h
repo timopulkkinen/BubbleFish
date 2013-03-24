@@ -37,6 +37,7 @@ class WebPlugin;
 class WebPluginContainer;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
+class WebThemeEngine;
 class WebURLRequest;
 struct WebPluginParams;
 struct WebURLError;
@@ -151,6 +152,10 @@ class CONTENT_EXPORT ContentRendererClient {
   // returns NULL the content layer will handle hyphenation.
   virtual WebKit::WebHyphenator* OverrideWebHyphenator();
 
+  // Allows the embedder to override the WebThemeEngine used. If it returns NULL
+  // the content layer will provide an engine.
+  virtual WebKit::WebThemeEngine* OverrideThemeEngine();
+
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
   virtual bool RunIdleHandlerWhenWidgetsHidden();
@@ -227,6 +232,9 @@ class CONTENT_EXPORT ContentRendererClient {
   // If not NULL, the returned MessageLoop must be valid for the lifetime of
   // RenderThreadImpl. If NULL, then a new thread will be created.
   virtual MessageLoop* OverrideCompositorMessageLoop() const;
+
+  // Allow the embedder to disable input event filtering by the compositor.
+  virtual bool ShouldCreateCompositorInputHandler() const;
 };
 
 }  // namespace content

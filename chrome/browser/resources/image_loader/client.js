@@ -79,6 +79,20 @@ ImageLoader.Client.recordPercentage = function(name, value) {
 };
 
 /**
+ * Sends a message to the Image Loader extension.
+ * @param {Object} request Hash array with request data.
+ * @param {function(Object)=} opt_callback Response handling callback.
+ *     The response is passed as a hash array.
+ * @private
+ */
+ImageLoader.Client.sendMessage_ = function(request, opt_callback) {
+  opt_callback = opt_callback || function(response) {};
+  var sendMessage = chrome.runtime ? chrome.runtime.sendMessage :
+                                     chrome.extension.sendMessage;
+  sendMessage(ImageLoader.EXTENSION_ID, request, opt_callback);
+};
+
+/**
  * Handles a message from the remote image loader and calls the registered
  * callback to pass the response back to the requester.
  *
@@ -148,7 +162,7 @@ ImageLoader.Client.prototype.load = function(
     var cachedData = this.cache_.loadImage(cacheKey, opt_options.timestamp);
     if (cachedData) {
       ImageLoader.Client.recordBinary('Cache.HitMiss', 1);
-      callback({ status: 'success', data: cachedData });
+      callback({status: 'success', data: cachedData});
       return null;
     } else {
       ImageLoader.Client.recordBinary('Cache.HitMiss', 0);
@@ -162,14 +176,14 @@ ImageLoader.Client.prototype.load = function(
   // Not available in cache, performing a request to a remote extension.
   var request = opt_options;
   this.lastTaskId_++;
-  var task = { isValid: opt_isValid };
+  var task = {isValid: opt_isValid};
   this.tasks_[this.lastTaskId_] = task;
 
   request.url = url;
   request.taskId = this.lastTaskId_;
+  request.timestamp = opt_options.timestamp;
 
-  chrome.extension.sendMessage(
-      ImageLoader.EXTENSION_ID,
+  ImageLoader.Client.sendMessage_(
       request,
       function(result) {
         // Save to cache.
@@ -185,9 +199,7 @@ ImageLoader.Client.prototype.load = function(
  * @param {number} taskId Task id returned by ImageLoader.Client.load().
  */
 ImageLoader.Client.prototype.cancel = function(taskId) {
-  chrome.extension.sendMessage(
-      ImageLoader.EXTENSION_ID,
-      { taskId: taskId, cancel: true });
+  ImageLoader.Client.sendMessage_({taskId: taskId, cancel: true});
 };
 
 /**
@@ -208,7 +220,7 @@ ImageLoader.Client.Cache = function() {
  * @const
  * @type {number}
  */
-ImageLoader.Client.Cache.MEMORY_LIMIT = 100 * 1024 * 1024;  // 100 MB.
+ImageLoader.Client.Cache.MEMORY_LIMIT = 20 * 1024 * 1024;  // 20 MB.
 
 /**
  * Creates a cache key.
@@ -219,13 +231,13 @@ ImageLoader.Client.Cache.MEMORY_LIMIT = 100 * 1024 * 1024;  // 100 MB.
  */
 ImageLoader.Client.Cache.createKey = function(url, opt_options) {
   opt_options = opt_options || {};
-  var array = { url: url,
-                scale: opt_options.scale,
-                width: opt_options.width,
-                height: opt_options.height,
-                maxWidth: opt_options.maxWidth,
-                maxHeight: opt_options.maxHeight };
-  return JSON.stringify(array);
+  return JSON.stringify({url: url,
+                         orientation: opt_options.orientation,
+                         scale: opt_options.scale,
+                         width: opt_options.width,
+                         height: opt_options.height,
+                         maxWidth: opt_options.maxWidth,
+                         maxHeight: opt_options.maxHeight});
 };
 
 /**
@@ -270,9 +282,9 @@ ImageLoader.Client.Cache.prototype.saveImage = function(
   }
 
   if (ImageLoader.Client.Cache.MEMORY_LIMIT - this.size_ >= data.length) {
-    this.images_[key] = { lastLoadTimestamp: Date.now(),
-                          timestamp: opt_timestamp ? opt_timestamp : null,
-                          data: data };
+    this.images_[key] = {lastLoadTimestamp: Date.now(),
+                         timestamp: opt_timestamp ? opt_timestamp : null,
+                         data: data};
     this.size_ += data.length;
   }
 };
@@ -331,8 +343,8 @@ ImageLoader.Client.Cache.prototype.removeImage = function(key) {
  *
  * @param {string} url Url of the requested image.
  * @param {Image} image Image node to load the requested picture into.
- * @param {Object} options Loader options, such as: scale, maxHeight, width,
- *     height and/or cache.
+ * @param {Object} options Loader options, such as: orientation, scale,
+ *     maxHeight, width, height and/or cache.
  * @param {function=} onSuccess Callback for success.
  * @param {function=} onError Callback for failure.
  * @param {function=} opt_isValid Function returning false in case

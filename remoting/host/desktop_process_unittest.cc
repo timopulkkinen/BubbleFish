@@ -22,6 +22,7 @@
 #include "remoting/host/desktop_process.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_mock_objects.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -107,9 +108,9 @@ class DesktopProcessTest : public testing::Test {
   // DesktopEnvironmentFactory::Create().
   DesktopEnvironment* CreateDesktopEnvironment();
 
-  // Creates a dummy EventExecutor, to mock
-  // DesktopEnvironment::CreateEventExecutor().
-  EventExecutor* CreateEventExecutor();
+  // Creates a dummy InputInjector, to mock
+  // DesktopEnvironment::CreateInputInjector().
+  InputInjector* CreateInputInjector();
 
   // Creates a dummy SessionController, to mock
   // DesktopEnvironment::CreateSessionController().
@@ -200,10 +201,10 @@ DesktopEnvironment* DesktopProcessTest::CreateDesktopEnvironment() {
   MockDesktopEnvironment* desktop_environment = new MockDesktopEnvironment();
   EXPECT_CALL(*desktop_environment, CreateAudioCapturerPtr(_))
       .Times(0);
-  EXPECT_CALL(*desktop_environment, CreateEventExecutorPtr(_, _))
+  EXPECT_CALL(*desktop_environment, CreateInputInjectorPtr(_, _))
       .Times(AnyNumber())
       .WillRepeatedly(
-          InvokeWithoutArgs(this, &DesktopProcessTest::CreateEventExecutor));
+          InvokeWithoutArgs(this, &DesktopProcessTest::CreateInputInjector));
   EXPECT_CALL(*desktop_environment, CreateSessionControllerPtr())
       .Times(AnyNumber())
       .WillRepeatedly(
@@ -219,10 +220,10 @@ DesktopEnvironment* DesktopProcessTest::CreateDesktopEnvironment() {
   return desktop_environment;
 }
 
-EventExecutor* DesktopProcessTest::CreateEventExecutor() {
-  MockEventExecutor* event_executor = new MockEventExecutor();
-  EXPECT_CALL(*event_executor, StartPtr(_));
-  return event_executor;
+InputInjector* DesktopProcessTest::CreateInputInjector() {
+  MockInputInjector* input_injector = new MockInputInjector();
+  EXPECT_CALL(*input_injector, StartPtr(_));
+  return input_injector;
 }
 
 SessionController* DesktopProcessTest::CreateSessionController() {
@@ -305,7 +306,7 @@ void DesktopProcessTest::SendStartSessionAgent() {
   // function call" warnings printed when DisconnectWindow::Show() and
   // DisconnectWindow::Hide() are called.
   network_channel_->Send(new ChromotingNetworkDesktopMsg_StartSessionAgent(
-      "user@domain/rest-of-jid"));
+      "user@domain/rest-of-jid", ScreenResolution()));
 }
 
 // Launches the desktop process and waits when it connects back.

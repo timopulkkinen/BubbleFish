@@ -201,6 +201,7 @@
         'system/chromeos/network/network_state_list_detailed_view.h',
         'system/chromeos/network/network_state_notifier.cc',
         'system/chromeos/network/network_state_notifier.h',
+        'system/chromeos/network/network_tray_delegate.h',
         'system/chromeos/network/tray_network.cc',
         'system/chromeos/network/tray_network.h',
         'system/chromeos/network/tray_network_state_observer.cc',
@@ -209,6 +210,9 @@
         'system/chromeos/network/tray_sms.h',
         'system/chromeos/network/tray_vpn.cc',
         'system/chromeos/network/tray_vpn.h',
+        'system/chromeos/screen_capture/screen_capture_observer.h',
+        'system/chromeos/screen_capture/tray_screen_capture.cc',
+        'system/chromeos/screen_capture/tray_screen_capture.h',
         'system/chromeos/tray_display.cc',
         'system/chromeos/tray_display.h',
         'system/date/clock_observer.h',
@@ -687,6 +691,9 @@
             # Can't resize on Windows Ash. http://crbug.com/165962
             ['exclude', 'magnifier/magnification_controller_unittest.cc'],
             ['exclude', 'wm/workspace/workspace_window_resizer_unittest.cc'],
+          ],
+          'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_unscaled_resources.rc',
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],

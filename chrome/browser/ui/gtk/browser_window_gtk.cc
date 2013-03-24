@@ -26,10 +26,10 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -961,14 +961,6 @@ void BrowserWindowGtk::ToggleBookmarkBar() {
 
 void BrowserWindowGtk::ShowUpdateChromeDialog() {
   UpdateRecommendedDialog::Show(window_);
-}
-
-void BrowserWindowGtk::ShowTaskManager() {
-  TaskManagerGtk::Show(false);
-}
-
-void BrowserWindowGtk::ShowBackgroundPages() {
-  TaskManagerGtk::Show(true);
 }
 
 void BrowserWindowGtk::ShowBookmarkBubble(const GURL& url,
@@ -2312,11 +2304,14 @@ void BrowserWindowGtk::UpdateDevToolsForContents(WebContents* contents) {
 }
 
 void BrowserWindowGtk::ShowDevToolsContainer() {
+  gtk_widget_set_size_request(devtools_container_->widget(),
+      devtools_window_->GetMinimumWidth(),
+      devtools_window_->GetMinimumHeight());
   bool to_right = devtools_dock_side_ == DEVTOOLS_DOCK_SIDE_RIGHT;
   gtk_paned_pack2(GTK_PANED(to_right ? contents_hsplit_ : contents_vsplit_),
                   devtools_container_->widget(),
                   FALSE,
-                  TRUE);
+                  FALSE);
   UpdateDevToolsSplitPosition();
   gtk_widget_show(devtools_container_->widget());
 }
@@ -2371,6 +2366,7 @@ bool BrowserWindowGtk::GetCustomFramePrefDefault() {
           wm_type == ui::WM_COMPIZ ||
           wm_type == ui::WM_ENLIGHTENMENT ||
           wm_type == ui::WM_METACITY ||
+          wm_type == ui::WM_MUFFIN ||
           wm_type == ui::WM_MUTTER ||
           wm_type == ui::WM_OPENBOX ||
           wm_type == ui::WM_XFWM4);

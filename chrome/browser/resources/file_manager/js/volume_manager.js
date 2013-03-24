@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * VolumeManager is responsible for tracking list of mounted volumes.
  *
@@ -159,7 +161,7 @@ VolumeManager.prototype.initMountPoints_ = function() {
       }
 
       cr.dispatchSimpleEvent(self, 'ready');
-      this.ready_ = true;
+      self.ready_ = true;
       if (mountedVolumes.length > 0)
         cr.dispatchSimpleEvent(self, 'change');
     }
@@ -253,7 +255,14 @@ VolumeManager.prototype.onMountCompleted_ = function(event) {
 VolumeManager.prototype.waitDriveLoaded_ = function(mountPath, callback) {
   chrome.fileBrowserPrivate.requestLocalFileSystem(function(filesystem) {
     filesystem.root.getDirectory(mountPath, {},
-        callback.bind(null, true),
+        function(entry) {
+            // After introducion of the 'fast-fetch' feature, getting the root
+            // entry does not start fetching data. Rather, it starts when the
+            // entry is read.
+            entry.createReader().readEntries(
+                callback.bind(null, true),
+                callback.bind(null, false));
+        },
         callback.bind(null, false));
   });
 };

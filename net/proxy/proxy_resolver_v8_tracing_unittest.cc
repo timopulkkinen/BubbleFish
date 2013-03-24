@@ -16,11 +16,11 @@
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_cache.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/test_completion_callback.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_error_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -74,8 +74,8 @@ class MockErrorObserver : public ProxyResolverErrorObserver {
                                 const string16& error) OVERRIDE {
     {
       base::AutoLock l(lock_);
-      output += StringPrintf("Error: line %d: %s\n", line_number,
-                             UTF16ToASCII(error).c_str());
+      output += base::StringPrintf("Error: line %d: %s\n", line_number,
+                                   UTF16ToASCII(error).c_str());
     }
     event_.Signal();
   }

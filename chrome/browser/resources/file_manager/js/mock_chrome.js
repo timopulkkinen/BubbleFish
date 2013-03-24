@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 function MockEventSource() {
   this.listeners_ = [];
 }
@@ -296,6 +298,10 @@ chrome.fileBrowserPrivate = {
 
   archiveCount_: 0,
 
+  /**
+   * Get the list of mount points.
+   * @param {function(Array.<MountPointInfo>)} callback Callback
+   */
   getMountPoints: function(callback) {
     callback([].concat(chrome.fileBrowserPrivate.mountPoints_));
   },
@@ -498,6 +504,9 @@ chrome.fileBrowserPrivate = {
       CHROMEOS_RELEASE_BOARD: 'stumpy',
 
       DRIVE_DIRECTORY_LABEL: 'Google Drive',
+      DRIVE_OFFLINE_COLLECTION_LABEL: 'Offline',
+      DRIVE_SHARED_WITH_ME_COLLECTION_LABEL: 'Shared with me',
+      DRIVE_DIRECTORY_LABEL: 'Google Drive',
       ENABLE_DRIVE: true,
       PDF_VIEW_ENABLED: true,
       SWF_VIEW_ENABLED: true,
@@ -534,6 +543,7 @@ chrome.fileBrowserPrivate = {
       ERROR_NEW_FOLDER_EMPTY_NAME: 'Please specify a folder name',
       NEW_FOLDER_BUTTON_LABEL: 'New folder',
       NEW_WINDOW_BUTTON_LABEL: 'New window',
+      CHANGE_DEFAULT_APP_BUTTON_LABEL: 'Change default app...',
       FILENAME_LABEL: 'File Name',
       PREPARING_LABEL: 'Preparing',
       DRAGGING_MULTIPLE_ITEMS: '$1 items',
@@ -886,14 +896,6 @@ chrome.fileBrowserPrivate = {
    * Reload the filesystem metadata from the server immediately.
    */
   reloadDrive: function() {},
-
-  /**
-   * Get the list of mount points.
-   * @param {function(Array.<MountPointInfo>)} callback Callback
-   */
-  getMountPoints: function(callback) {
-    callback([]);
-  },
 
   /**
    * Requests a refresh of a directory.

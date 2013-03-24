@@ -254,7 +254,7 @@ class ChromeLauncherController
 
   // Returns the extension identified by |app_id|.
   virtual const extensions::Extension* GetExtensionForAppID(
-      const std::string& app_id) = 0;
+      const std::string& app_id) const = 0;
 
   // ash::LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE = 0;
@@ -269,6 +269,7 @@ class ChromeLauncherController
       int event_flags) OVERRIDE = 0;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE = 0;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE = 0;
+  virtual bool ShouldShowTooltip(const ash::LauncherItem& item) OVERRIDE = 0;
 
   // extensions::AppIconLoader overrides:
   virtual void SetAppImage(const std::string& app_id,

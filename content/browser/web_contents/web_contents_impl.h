@@ -29,7 +29,6 @@
 #include "ui/gfx/size.h"
 #include "webkit/glue/resource_type.h"
 
-struct BrowserPluginHostMsg_CreateGuest_Params;
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct ViewHostMsg_DateTimeDialogValue_Params;
 struct ViewMsg_PostMessage_Params;
@@ -89,10 +88,7 @@ class CONTENT_EXPORT WebContentsImpl
   static BrowserPluginGuest* CreateGuest(
       BrowserContext* browser_context,
       content::SiteInstance* site_instance,
-      int routing_id,
-      WebContentsImpl* opener_web_contents,
-      int guest_instance_id,
-      const BrowserPluginHostMsg_CreateGuest_Params& params);
+      int guest_instance_id);
 
   // Returns the content specific prefs for the given RVH.
   static webkit_glue::WebPreferences GetWebkitPrefs(
@@ -146,10 +142,6 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Unsets the currently showing interstitial.
   void DetachInterstitialPage();
-
-  void set_opener_web_ui_type(WebUI::TypeID opener_web_ui_type) {
-    opener_web_ui_type_ = opener_web_ui_type;
-  }
 
 #if defined(ENABLE_JAVA_BRIDGE)
   JavaBridgeDispatcherHostManager* java_bridge_dispatcher_host_manager() const {
@@ -253,7 +245,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual base::TimeTicks GetNewTabStartTime() const OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void OnCloseStarted() OVERRIDE;
-  virtual bool ShouldAcceptDragAndDrop() const OVERRIDE;
   virtual void SystemDragEnded() OVERRIDE;
   virtual void UserGestureDone() OVERRIDE;
   virtual void SetClosedByUserGesture(bool value) OVERRIDE;
@@ -268,14 +259,15 @@ class CONTENT_EXPORT WebContentsImpl
   virtual int GetMaximumZoomPercent() const OVERRIDE;
   virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual int GetContentRestrictions() const OVERRIDE;
-  virtual WebUI::TypeID GetWebUITypeForCurrentState() OVERRIDE;
   virtual WebUI* GetWebUIForCurrentState() OVERRIDE;
   virtual bool GotResponseToLockMouseRequest(bool allowed) OVERRIDE;
   virtual bool HasOpener() const OVERRIDE;
   virtual void DidChooseColorInColorChooser(int color_chooser_id,
                                             SkColor color) OVERRIDE;
   virtual void DidEndColorChooser(int color_chooser_id) OVERRIDE;
-  virtual int DownloadFavicon(const GURL& url, int image_size,
+  virtual int DownloadFavicon(const GURL& url,
+                              bool is_favicon,
+                              int image_size,
                               const FaviconDownloadCallback& callback) OVERRIDE;
 
   // Implementation of PageNavigator.
@@ -572,8 +564,7 @@ class CONTENT_EXPORT WebContentsImpl
   void OnRequestPpapiBrokerPermission(int request_id,
                                       const GURL& url,
                                       const base::FilePath& plugin_path);
-  void OnBrowserPluginAllocateInstanceID(const IPC::Message& message,
-                                         int request_id);
+  void OnBrowserPluginMessage(const IPC::Message& message);
   void OnDidDownloadFavicon(int id,
                             const GURL& image_url,
                             int requested_size,
@@ -818,10 +809,6 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Settings that get passed to the renderer process.
   RendererPreferences renderer_preferences_;
-
-  // If this tab was created from a renderer using window.open, this will be
-  // non-NULL and represent the WebUI of the opening renderer.
-  WebUI::TypeID opener_web_ui_type_;
 
   // The time that we started to create the new tab page.
   base::TimeTicks new_tab_start_time_;

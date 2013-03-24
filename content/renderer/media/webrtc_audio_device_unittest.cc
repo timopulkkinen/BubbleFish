@@ -100,11 +100,9 @@ bool InitializeCapturer(WebRtcAudioDeviceImpl* webrtc_audio_device) {
   int sample_rate = hardware_config->GetInputSampleRate();
   media::ChannelLayout channel_layout =
       hardware_config->GetInputChannelLayout();
-  if (!capturer->Initialize(channel_layout, sample_rate))
+  if (!capturer->Initialize(channel_layout, sample_rate, 1))
     return false;
 
-  // Ensures that the default capture device is utilized.
-  webrtc_audio_device->capturer()->SetDevice(1);
   return true;
 }
 
@@ -285,7 +283,7 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_StartPlayout) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
@@ -448,7 +446,7 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_PlayLocalFile) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
@@ -526,7 +524,7 @@ TEST_F(WebRTCAudioDeviceTest, MAYBE_FullDuplexAudioWithAGC) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());

@@ -52,6 +52,9 @@ class DirectoryFetchInfo {
   // the directory contents should be fetched.
   int64 changestamp() const { return changestamp_; }
 
+  // Returns a string representation of this object.
+  std::string ToString() const;
+
  private:
   const std::string resource_id_;
   const int64 changestamp_;
@@ -63,11 +66,6 @@ enum DriveFileType {
   REGULAR_FILE,
   HOSTED_DOCUMENT,
 };
-
-// The root directory name used for the Google Drive file system tree. The
-// name is used in URLs for the file manager, hence user-visible.
-const base::FilePath::CharType kDriveRootDirectory[] =
-    FILE_PATH_LITERAL("drive");
 
 // This should be incremented when incompatibility change is made in
 // drive.proto.
@@ -134,20 +132,21 @@ typedef base::Callback<void(scoped_ptr<EntryInfoPairResult> pair_result)>
 class DriveResourceMetadata {
  public:
   // |root_resource_id| is the resource id for the root directory.
-  explicit DriveResourceMetadata(const std::string& root_resource_id);
-  virtual ~DriveResourceMetadata();
+  DriveResourceMetadata(
+      const std::string& root_resource_id,
+      const base::FilePath& data_directory_path,
+      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
-  // Last time when we dumped serialized file system to disk.
-  const base::Time& last_serialized() const { return last_serialized_; }
-  void set_last_serialized(const base::Time& time) { last_serialized_ = time; }
+  // Initializes this object.
+  // This method should be called before any other methods.
+  void Initialize(const FileOperationCallback& callback);
 
-  // Size of serialized file system on disk in bytes.
-  size_t serialized_size() const { return serialized_size_; }
-  void set_serialized_size(size_t size) { serialized_size_ = size; }
+  // Destroys this object.  This method posts a task to |blocking_task_runner_|
+  // to safely delete this object.
+  void Destroy();
 
-  // True if the file system feed is loaded from the cache or from the server.
-  bool loaded() const { return loaded_; }
-  void set_loaded(bool loaded) { loaded_ = loaded; }
+  // Resets this object.
+  void Reset(const base::Closure& callback);
 
   // Largest change timestamp that was the source of content for the current
   // state of the root directory.
@@ -170,7 +169,7 @@ class DriveResourceMetadata {
   // Renames entry specified by |file_path| with the new name |new_name| and
   // calls |callback| asynchronously. |callback| must not be null.
   void RenameEntry(const base::FilePath& file_path,
-                   const base::FilePath::StringType& new_name,
+                   const std::string& new_name,
                    const FileMoveCallback& callback);
 
   // Removes entry with |resource_id| from its parent. Calls |callback| with the
@@ -230,13 +229,83 @@ class DriveResourceMetadata {
   // Removes all files/directories under root (not including root).
   void RemoveAll(const base::Closure& callback);
 
-  // Serializes/Parses to/from string via proto classes.
-  void SerializeToString(std::string* serialized_proto);
-  bool ParseFromString(const std::string& serialized_proto);
+  // Saves metadata to the data directory when appropriate.
+  void MaybeSave();
+
+  // Loads metadata from the data directory.
+  void Load(const FileOperationCallback& callback);
 
  private:
-  // Clears root_ and the resource map.
-  void ClearRoot();
+  friend class DriveResourceMetadataTest;
+
+  struct FileMoveResult;
+  struct GetEntryInfoResult;
+  struct GetEntryInfoWithFilePathResult;
+  struct ReadDirectoryResult;
+
+  // Note: Use Destroy() to delete this object.
+  virtual ~DriveResourceMetadata();
+
+  // Used to implement Initialize();
+  DriveFileError InitializeOnBlockingPool();
+
+  // Used to implement Destroy().
+  void DestroyOnBlockingPool();
+
+  // Used to implement Reset().
+  void ResetOnBlockingPool();
+
+  // Used to implement GetLargestChangestamp().
+  int64 GetLargestChangestampOnBlockingPool();
+
+  // Used to implement SetLargestChangestamp().
+  DriveFileError SetLargestChangestampOnBlockingPool(int64 value);
+
+  // Used to implement AddEntry().
+  FileMoveResult AddEntryOnBlockingPool(const DriveEntryProto& entry_proto);
+
+  // Used to implement MoveEntryToDirectory().
+  FileMoveResult MoveEntryToDirectoryOnBlockingPool(
+      const base::FilePath& file_path,
+      const base::FilePath& directory_path);
+
+  // Used to implement RenameEntry().
+  FileMoveResult RenameEntryOnBlockingPool(const base::FilePath& file_path,
+                                           const std::string& new_name);
+
+  // Used to implement RemoveEntry().
+  FileMoveResult RemoveEntryOnBlockingPool(const std::string& resource_id);
+
+  // Used to implement GetEntryInfoByResourceId().
+  scoped_ptr<GetEntryInfoWithFilePathResult>
+      GetEntryInfoByResourceIdOnBlockingPool(const std::string& resource_id);
+
+  // Used to implement GetEntryInfoByPath().
+  scoped_ptr<GetEntryInfoResult> GetEntryInfoByPathOnBlockingPool(
+      const base::FilePath& file_path);
+
+  // Used to implement ReadDirectoryByPath().
+  scoped_ptr<ReadDirectoryResult> ReadDirectoryByPathOnBlockingPool(
+      const base::FilePath& file_path);
+
+  // Used to implement RefreshEntry().
+  scoped_ptr<GetEntryInfoWithFilePathResult> RefreshEntryOnBlockingPool(
+      const DriveEntryProto& entry_proto);
+
+  // Used to implement RefreshDirectory().
+  FileMoveResult RefreshDirectoryOnBlockingPool(
+      const DirectoryFetchInfo& directory_fetch_info,
+      const DriveEntryProtoMap& entry_proto_map);
+
+  // Used to implement GetChildDirectories().
+  scoped_ptr<std::set<base::FilePath> > GetChildDirectoriesOnBlockingPool(
+      const std::string& resource_id);
+
+  // Used to implement RemoveAll().
+  void RemoveAllOnBlockingPool();
+
+  // Used to implement MaybeSave().
+  void MaybeSaveOnBlockingPool();
 
   // Continues with GetEntryInfoPairByPaths after the first DriveEntry has been
   // asynchronously fetched. This fetches the second DriveEntry only if the
@@ -299,7 +368,14 @@ class DriveResourceMetadata {
   scoped_ptr<DriveEntryProtoVector> DirectoryChildrenToProtoVector(
       const std::string& directory_resource_id);
 
-  // Private data members.
+  // Used to implement Load().
+  DriveFileError LoadOnBlockingPool();
+
+  // Parses metadata from string and set up directory structure.
+  bool ParseFromString(const std::string& serialized_proto);
+
+  const base::FilePath data_directory_path_;
+
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   scoped_ptr<DriveResourceMetadataStorage> storage_;
@@ -308,8 +384,6 @@ class DriveResourceMetadata {
 
   base::Time last_serialized_;
   size_t serialized_size_;
-  int64 largest_changestamp_;  // Stored in the serialized proto.
-  bool loaded_;
 
   // This should remain the last member so it'll be destroyed first and
   // invalidate its weak pointers before other members are destroyed.

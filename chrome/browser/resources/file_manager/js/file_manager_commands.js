@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 var CommandUtil = {};
 
 /**
@@ -235,6 +237,18 @@ Commands.newFolderCommand = {
 Commands.newWindowCommand = {
   execute: function(event, fileManager) {
     chrome.fileBrowserPrivate.openNewWindow(document.location.href);
+  },
+  canExecute: function(event, fileManager) {
+    event.canExecute = true;
+  }
+};
+
+/**
+ * Changed the default app handling inserted media.
+ */
+Commands.changeDefaultAppCommand = {
+  execute: function(event, fileManager) {
+    fileManager.showChangeDefaultAppPicker();
   },
   canExecute: function(event, fileManager) {
     event.canExecute = true;

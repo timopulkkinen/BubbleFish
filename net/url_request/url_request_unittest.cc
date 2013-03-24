@@ -33,7 +33,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -47,6 +46,7 @@
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
@@ -1402,6 +1402,60 @@ TEST_F(URLRequestTest, RequestCompletionForEmptyResponse) {
   MessageLoop::current()->Run();
   EXPECT_EQ("", d.data_received());
   EXPECT_EQ(1, default_network_delegate_.completed_requests());
+}
+
+// Make sure that SetPriority actually sets the URLRequest's priority
+// correctly, both before and after start.
+TEST_F(URLRequestTest, SetPriorityBasic) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  req.SetPriority(LOW);
+  EXPECT_EQ(LOW, req.priority());
+
+  req.Start();
+  EXPECT_EQ(LOW, req.priority());
+
+  req.SetPriority(MEDIUM);
+  EXPECT_EQ(MEDIUM, req.priority());
+}
+
+// Make sure that URLRequest calls SetPriority on a job before calling
+// Start on it.
+TEST_F(URLRequestTest, SetJobPriorityBeforeJobStart) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+  EXPECT_EQ(DEFAULT_PRIORITY, job->priority());
+
+  req.SetPriority(LOW);
+
+  req.Start();
+  EXPECT_EQ(LOW, job->priority());
+}
+
+// Make sure that URLRequest passes on its priority updates to its
+// job.
+TEST_F(URLRequestTest, SetJobPriority) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+
+  req.SetPriority(LOW);
+  req.Start();
+  EXPECT_EQ(LOW, job->priority());
+
+  req.SetPriority(MEDIUM);
+  EXPECT_EQ(MEDIUM, req.priority());
+  EXPECT_EQ(MEDIUM, job->priority());
 }
 
 // TODO(droger): Support TestServer on iOS (see http://crbug.com/148666).
@@ -4085,6 +4139,34 @@ TEST_F(URLRequestTestHTTP, EmptyHttpUserAgentSettings) {
   }
 }
 
+// Make sure that URLRequest passes on its priority updates to
+// newly-created jobs after the first one.
+TEST_F(URLRequestTestHTTP, SetSubsequentJobPriority) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("empty.html"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  scoped_refptr<URLRequestRedirectJob> redirect_job =
+      new URLRequestRedirectJob(
+          &req, &default_network_delegate_, test_server_.GetURL("echo"),
+          URLRequestRedirectJob::REDIRECT_302_FOUND);
+  AddTestInterceptor()->set_main_intercept_job(redirect_job);
+
+  req.SetPriority(LOW);
+  req.Start();
+  EXPECT_TRUE(req.is_pending());
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+
+  // Should trigger |job| to be started.
+  MessageLoop::current()->Run();
+  EXPECT_EQ(LOW, job->priority());
+}
+
 class HTTPSRequestTest : public testing::Test {
  public:
   HTTPSRequestTest() : default_context_(true) {
@@ -4253,8 +4335,8 @@ TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
   context.Init();
 
   TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
+  URLRequest r(GURL(base::StringPrintf("https://www.google.com:%d",
+                                       test_server.host_port_pair().port())),
                &d,
                &context);
 
@@ -4300,8 +4382,8 @@ TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
   context.Init();
 
   TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
+  URLRequest r(GURL(base::StringPrintf("https://www.google.com:%d",
+                                       test_server.host_port_pair().port())),
                &d,
                &context);
 
@@ -4366,8 +4448,8 @@ TEST_F(HTTPSRequestTest, HSTSPreservesPosts) {
   // cause a certificate error.  Ignore the error.
   d.set_allow_certificate_errors(true);
 
-  URLRequest req(GURL(StringPrintf("http://www.somewhere.com:%d/echo",
-                                   test_server.host_port_pair().port())),
+  URLRequest req(GURL(base::StringPrintf("http://www.somewhere.com:%d/echo",
+                                         test_server.host_port_pair().port())),
                  &d,
                  &context);
   req.set_method("POST");

@@ -35,6 +35,7 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebArrayBufferView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
@@ -73,6 +74,7 @@ using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebURLError;
+using WebKit::WebURLRequest;
 using WebKit::WebTestingSupport;
 using WebKit::WebVector;
 using WebKit::WebView;
@@ -164,7 +166,8 @@ WebKitTestRunner::WebKitTestRunner(RenderView* render_view)
       RenderViewObserverTracker<WebKitTestRunner>(render_view),
       proxy_(NULL),
       focused_view_(NULL),
-      is_main_window_(false) {
+      is_main_window_(false),
+      focus_on_next_commit_(false) {
 }
 
 WebKitTestRunner::~WebKitTestRunner() {
@@ -341,7 +344,7 @@ void WebKitTestRunner::setDatabaseQuota(int quota) {
 }
 
 void WebKitTestRunner::setDeviceScaleFactor(float factor) {
-  render_view()->GetWebView()->setDeviceScaleFactor(factor);
+  SetDeviceScaleFactor(render_view(), factor);
 }
 
 void WebKitTestRunner::setFocus(WebTestProxyBase* proxy, bool focus) {
@@ -499,10 +502,28 @@ bool WebKitTestRunner::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ShellViewMsg_SetTestConfiguration,
                         OnSetTestConfiguration)
     IPC_MESSAGE_HANDLER(ShellViewMsg_SessionHistory, OnSessionHistory)
+    IPC_MESSAGE_HANDLER(ShellViewMsg_Reset, OnReset)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   return handled;
+}
+
+void WebKitTestRunner::Navigate(const GURL& url) {
+  focus_on_next_commit_ = true;
+}
+
+void WebKitTestRunner::DidCommitProvisionalLoad(WebFrame* frame,
+                                                bool is_new_navigation) {
+  if (!focus_on_next_commit_)
+    return;
+  focus_on_next_commit_ = false;
+  render_view()->GetWebView()->setFocusedFrame(frame);
+}
+
+void WebKitTestRunner::DidFailProvisionalLoad(WebFrame* frame,
+                                              const WebURLError& error) {
+  focus_on_next_commit_ = false;
 }
 
 // Public methods - -----------------------------------------------------------
@@ -518,6 +539,7 @@ void WebKitTestRunner::Reset() {
   render_view()->ClearEditCommands();
   render_view()->GetWebView()->mainFrame()->setName(WebString());
   render_view()->GetWebView()->mainFrame()->clearOpener();
+  render_view()->GetWebView()->setPageScaleFactorLimits(-1, -1);
   render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
   render_view()->GetWebView()->enableFixedLayoutMode(false);
   render_view()->GetWebView()->setFixedLayoutSize(WebSize(0, 0));
@@ -543,50 +565,52 @@ void WebKitTestRunner::CaptureDump() {
         static_cast<const unsigned char*>(audio_data->baseAddress()) +
             audio_data->byteLength());
     Send(new ShellViewHostMsg_AudioDump(routing_id(), vector_data));
-    Send(new ShellViewHostMsg_TestFinished(routing_id(), false));
-    return;
-  }
+  } else {
+    Send(new ShellViewHostMsg_TextDump(routing_id(),
+                                       proxy()->captureTree(false)));
 
-  Send(
-      new ShellViewHostMsg_TextDump(routing_id(), proxy()->captureTree(false)));
+    if (test_config_.enable_pixel_dumping &&
+        interfaces->testRunner()->shouldGeneratePixelResults()) {
+      SkBitmap snapshot;
+      CopyCanvasToBitmap(proxy()->capturePixels(), &snapshot);
 
-  if (test_config_.enable_pixel_dumping &&
-      interfaces->testRunner()->shouldGeneratePixelResults()) {
-    SkBitmap snapshot;
-    CopyCanvasToBitmap(proxy()->capturePixels(), &snapshot);
-
-    SkAutoLockPixels snapshot_lock(snapshot);
-    base::MD5Digest digest;
+      SkAutoLockPixels snapshot_lock(snapshot);
+      base::MD5Digest digest;
 #if defined(OS_ANDROID)
-    // On Android, pixel layout is RGBA, however, other Chrome platforms use
-    // BGRA.
-    const uint8_t* raw_pixels =
-        reinterpret_cast<const uint8_t*>(snapshot.getPixels());
-    size_t snapshot_size = snapshot.getSize();
-    scoped_array<uint8_t> reordered_pixels(new uint8_t[snapshot_size]);
-    for (size_t i = 0; i < snapshot_size; i += 4) {
-      reordered_pixels[i] = raw_pixels[i + 2];
-      reordered_pixels[i + 1] = raw_pixels[i + 1];
-      reordered_pixels[i + 2] = raw_pixels[i];
-      reordered_pixels[i + 3] = raw_pixels[i + 3];
-    }
-    base::MD5Sum(reordered_pixels.get(), snapshot_size, &digest);
+      // On Android, pixel layout is RGBA, however, other Chrome platforms use
+      // BGRA.
+      const uint8_t* raw_pixels =
+          reinterpret_cast<const uint8_t*>(snapshot.getPixels());
+      size_t snapshot_size = snapshot.getSize();
+      scoped_array<uint8_t> reordered_pixels(new uint8_t[snapshot_size]);
+      for (size_t i = 0; i < snapshot_size; i += 4) {
+        reordered_pixels[i] = raw_pixels[i + 2];
+        reordered_pixels[i + 1] = raw_pixels[i + 1];
+        reordered_pixels[i + 2] = raw_pixels[i];
+        reordered_pixels[i + 3] = raw_pixels[i + 3];
+      }
+      base::MD5Sum(reordered_pixels.get(), snapshot_size, &digest);
 #else
-    base::MD5Sum(snapshot.getPixels(), snapshot.getSize(), &digest);
+      base::MD5Sum(snapshot.getPixels(), snapshot.getSize(), &digest);
 #endif
-    std::string actual_pixel_hash = base::MD5DigestToBase16(digest);
+      std::string actual_pixel_hash = base::MD5DigestToBase16(digest);
 
-    if (actual_pixel_hash == test_config_.expected_pixel_hash) {
-      SkBitmap empty_image;
-      Send(new ShellViewHostMsg_ImageDump(
-          routing_id(), actual_pixel_hash, empty_image));
-    } else {
-      Send(new ShellViewHostMsg_ImageDump(
-          routing_id(), actual_pixel_hash, snapshot));
+      if (actual_pixel_hash == test_config_.expected_pixel_hash) {
+        SkBitmap empty_image;
+        Send(new ShellViewHostMsg_ImageDump(
+            routing_id(), actual_pixel_hash, empty_image));
+      } else {
+        Send(new ShellViewHostMsg_ImageDump(
+            routing_id(), actual_pixel_hash, snapshot));
+      }
     }
   }
 
-  Send(new ShellViewHostMsg_TestFinished(routing_id(), false));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(base::IgnoreResult(&WebKitTestRunner::Send),
+                 base::Unretained(this),
+                 new ShellViewHostMsg_TestFinished(routing_id(), false)));
 }
 
 void WebKitTestRunner::OnSetTestConfiguration(
@@ -611,6 +635,16 @@ void WebKitTestRunner::OnSessionHistory(
   session_histories_ = session_histories;
   current_entry_indexes_ = current_entry_indexes;
   CaptureDump();
+}
+
+void WebKitTestRunner::OnReset() {
+  // Navigating to about:blank will make sure that no new loads are initiated
+  // by the renderer.
+  render_view()->GetWebView()->mainFrame()
+      ->loadRequest(WebURLRequest(GURL("about:blank")));
+  ShellRenderProcessObserver::GetInstance()->test_interfaces()->resetAll();
+  Reset();
+  Send(new ShellViewHostMsg_ResetDone(routing_id()));
 }
 
 }  // namespace content

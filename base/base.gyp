@@ -88,6 +88,14 @@
           ],
         }],
         ['OS == "android" and _toolset == "host"', {
+          # Always build base as a static_library for host toolset, even if
+          # we're doing a component build. Specifically, we only care about the
+          # target toolset using components since that's what developers are
+          # focusing on. In theory we should do this more generally for all
+          # targets when building for host, but getting the gyp magic
+          # per-toolset for the "component" variable is hard, and we really only
+          # need base on host.
+          'type': 'static_library',
           # Base for host support is the minimum required to run the
           # ssl false start blacklist tool. It requires further changes
           # to generically support host builds (and tests).
@@ -345,6 +353,10 @@
         'prefs/overlay_user_pref_store.cc',
         'prefs/overlay_user_pref_store.h',
         'prefs/persistent_pref_store.h',
+        'prefs/pref_change_registrar.cc',
+        'prefs/pref_change_registrar.h',
+        'prefs/pref_member.cc',
+        'prefs/pref_member.h',
         'prefs/pref_notifier.h',
         'prefs/pref_notifier_impl.cc',
         'prefs/pref_notifier_impl.h',
@@ -363,10 +375,6 @@
         'prefs/pref_value_map.h',
         'prefs/pref_value_store.cc',
         'prefs/pref_value_store.h',
-        'prefs/public/pref_change_registrar.cc',
-        'prefs/public/pref_change_registrar.h',
-        'prefs/public/pref_member.cc',
-        'prefs/public/pref_member.h',
         'prefs/value_map_pref_store.cc',
         'prefs/value_map_pref_store.h',
       ],
@@ -531,12 +539,12 @@
         'prefs/json_pref_store_unittest.cc',
         'prefs/mock_pref_change_callback.h',
         'prefs/overlay_user_pref_store_unittest.cc',
+        'prefs/pref_change_registrar_unittest.cc',
+        'prefs/pref_member_unittest.cc',
         'prefs/pref_notifier_impl_unittest.cc',
         'prefs/pref_service_unittest.cc',
         'prefs/pref_value_map_unittest.cc',
         'prefs/pref_value_store_unittest.cc',
-        'prefs/public/pref_change_registrar_unittest.cc',
-        'prefs/public/pref_member_unittest.cc',
         'process_util_unittest.cc',
         'process_util_unittest_ios.cc',
         'process_util_unittest_mac.h',

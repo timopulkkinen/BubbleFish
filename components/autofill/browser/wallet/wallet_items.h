@@ -57,9 +57,10 @@ class WalletItems {
       VISA,
     };
     enum Status {
+      AMEX_NOT_SUPPORTED,
       BILLING_INCOMPLETE,
       DECLINED,
-      DISABLED_FOR_THIS_MERCHANT,
+      DISABLED_FOR_THIS_MERCHANT,  // Deprecated.
       EXPIRED,
       INAPPLICABLE,  // Catch all status.
       PENDING,
@@ -233,6 +234,7 @@ class WalletItems {
 
  private:
   friend class WalletItemsTest;
+  friend scoped_ptr<WalletItems> GetTestWalletItems();
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest,
                            CreateWalletItemsWithRequiredActions);

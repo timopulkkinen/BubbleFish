@@ -8,7 +8,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
@@ -33,6 +32,13 @@ std::string LimitData(const std::string& data) {
   return sanitized_value;
 }
 
+void* UserDataKey() {
+  // Use the address of a static that COMDAT folding won't ever fold
+  // with something else.
+  static int user_data_key = 0;
+  return reinterpret_cast<void*>(&user_data_key);
+}
+
 }  // namespace
 
 const char kAutofillProfileTag[] = "google_chrome_autofill_profiles";
@@ -50,6 +56,21 @@ AutofillProfileSyncableService::AutofillProfileSyncableService(
 
 AutofillProfileSyncableService::~AutofillProfileSyncableService() {
   DCHECK(CalledOnValidThread());
+}
+
+// static
+void AutofillProfileSyncableService::CreateForWebDataService(
+    WebDataService* web_data) {
+  web_data->GetDBUserData()->SetUserData(
+      UserDataKey(), new AutofillProfileSyncableService(web_data));
+}
+
+// static
+AutofillProfileSyncableService*
+AutofillProfileSyncableService::FromWebDataService(
+    WebDataService* service) {
+  return static_cast<AutofillProfileSyncableService*>(
+      service->GetDBUserData()->GetUserData(UserDataKey()));
 }
 
 AutofillProfileSyncableService::AutofillProfileSyncableService()
@@ -546,10 +567,9 @@ bool AutofillProfileSyncableService::MergeProfile(
 }
 
 AutofillTable* AutofillProfileSyncableService::GetAutofillTable() const {
-  return web_data_service_->GetDatabase()->GetAutofillTable();
+  return AutofillTable::FromWebDatabase(web_data_service_->GetDatabase());
 }
 
 AutofillProfileSyncableService::DataBundle::DataBundle() {}
 
-AutofillProfileSyncableService::DataBundle::~DataBundle() {
-}
+AutofillProfileSyncableService::DataBundle::~DataBundle() {}

@@ -111,6 +111,7 @@ namespace extension_info_keys {
   const char kHomepageUrlKey[] = "homepageUrl";
   const char kIdKey[] = "id";
   const char kNameKey[] = "name";
+  const char kKioskEnabledKey[] = "kioskEnabled";
   const char kOfflineEnabledKey[] = "offlineEnabled";
   const char kOptionsUrlKey[] = "optionsUrl";
   const char kDetailsUrlKey[] = "detailsUrl";
@@ -128,8 +129,10 @@ const char kEnterpriseWebStoreAppId[] = "afchcafgojfnemjkcbhfekplkmjaldaa";
 const char kHTermAppId[] = "pnhechapfaindjhompbnflcldabbghjo";
 const char kHTermDevAppId[] = "okddffdblfhhnmhodogpojmfkjmhinfp";
 const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
-const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
+const char kQuickOfficeComponentExtensionId[] =
+    "bpmcpldpdmajfigpchkicefoigmkfalc";
 const char kQuickOfficeDevExtensionId[] = "ionpfmkccalenbmnddpbmocokhaknphg";
+const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 const char kStreamsPrivateTestExtensionId[] =
     "oickdpebdnfbgkcaoklfcdhjniefkcji";
 const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
@@ -137,6 +140,7 @@ const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
 const char kSettingsAppId[] = "ennkphjdgehloodpbhlhldgbnhmacadg";
 const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
+const char kPlatformAppLaunchHistogram[] = "Apps.AppLaunch";
 #if defined(OS_CHROMEOS)
 const char kChromeVoxExtensionPath[] =
     "/usr/share/chromeos-assets/accessibility/extensions/access_chromevox";

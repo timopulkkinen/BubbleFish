@@ -11,11 +11,11 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/webdata/encryptor/encryptor.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/mock_url_fetcher_factory.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -97,10 +97,9 @@ void TokenServiceTestHarness::TearDown() {
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
       base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
-
-  db_thread_.Stop();
   MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
+  db_thread_.Stop();
 }
 
 void TokenServiceTestHarness::WaitForDBLoadCompletion() {

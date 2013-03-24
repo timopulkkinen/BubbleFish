@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "chrome/common/instant_restricted_id_cache.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/search_types.h"
 #include "content/public/common/page_transition_types.h"
@@ -51,21 +52,17 @@ class SearchBox : public content::RenderViewObserver,
                      content::PageTransition transition,
                      WindowOpenDisposition disposition);
 
-  // Sends ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem to the browser.
-  void DeleteMostVisitedItem(uint64 most_visited_item_id);
+  // Shows any attached bars.
+  void ShowBars();
 
-  // Sends ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion to the browser.
-  void UndoMostVisitedDeletion(uint64 most_visited_item_id);
-
-  // Sends ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions to the
-  // browser.
-  void UndoAllMostVisitedDeletions();
+  // Hides any attached bars.  When the bars are hidden, the "onbarshidden"
+  // event is fired to notify the page.
+  void HideBars();
 
   const string16& query() const { return query_; }
   bool verbatim() const { return verbatim_; }
   size_t selection_start() const { return selection_start_; }
   size_t selection_end() const { return selection_end_; }
-  int results_base() const { return results_base_; }
   bool is_key_capture_enabled() const { return is_key_capture_enabled_; }
   bool display_instant_results() const { return display_instant_results_; }
   const string16& omnibox_font() const { return omnibox_font_; }
@@ -78,14 +75,39 @@ class SearchBox : public content::RenderViewObserver,
   // Returns the bounds of the omnibox popup in screen coordinates.
   gfx::Rect GetPopupBounds() const;
 
-  const std::vector<InstantAutocompleteResult>& GetAutocompleteResults();
-  // Searchbox retains ownership of this object.
-  const InstantAutocompleteResult*
-      GetAutocompleteResultWithId(size_t autocomplete_result_id) const;
   const ThemeBackgroundInfo& GetThemeBackgroundInfo();
 
-  // Most Visited items.
-  const std::vector<InstantMostVisitedItem>& GetMostVisitedItems() const;
+  // --- Autocomplete result APIs.
+
+  // Returns the most recent InstantAutocompleteResults sent by the browser.
+  void GetAutocompleteResults(
+      std::vector<InstantAutocompleteResultIDPair>* results) const;
+
+  // If the |autocomplete_result_id| is found in the cache, sets |item| to it
+  // and returns true.
+  bool GetAutocompleteResultWithID(InstantRestrictedID autocomplete_result_id,
+                                   InstantAutocompleteResult* result) const;
+
+  // --- Most Visited items APIs.
+
+  // Returns the latest most visited items sent by the browser.
+  void GetMostVisitedItems(
+      std::vector<InstantMostVisitedItemIDPair>* items) const;
+
+  // If the |most_visited_item_id| is found in the cache, sets |item| to it
+  // and returns true.
+  bool GetMostVisitedItemWithID(InstantRestrictedID most_visited_item_id,
+                                InstantMostVisitedItem* item) const;
+
+  // Sends ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem to the browser.
+  void DeleteMostVisitedItem(InstantRestrictedID most_visited_item_id);
+
+  // Sends ChromeViewHostMsg_SearchBoxUndoMostVisitedDeletion to the browser.
+  void UndoMostVisitedDeletion(InstantRestrictedID most_visited_item_id);
+
+  // Sends ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions to the
+  // browser.
+  void UndoAllMostVisitedDeletions();
 
  private:
   // Overridden from content::RenderViewObserver:
@@ -100,6 +122,7 @@ class SearchBox : public content::RenderViewObserver,
   void OnCancel(const string16& query);
   void OnPopupResize(const gfx::Rect& bounds);
   void OnMarginChange(int margin, int width);
+  void OnBarsHidden();
   void OnDetermineIfPageSupportsInstant();
   void OnAutocompleteResults(
       const std::vector<InstantAutocompleteResult>& results);
@@ -111,8 +134,8 @@ class SearchBox : public content::RenderViewObserver,
   void OnThemeAreaHeightChanged(int height);
   void OnFontInformationReceived(const string16& omnibox_font,
                                  size_t omnibox_font_size);
-  void OnGrantChromeSearchAccessFromOrigin(const GURL& origin_url);
-  void OnMostVisitedChanged(const std::vector<InstantMostVisitedItem>& items);
+  void OnMostVisitedChanged(
+      const std::vector<InstantMostVisitedItemIDPair>& items);
 
   // Returns the current zoom factor of the render view or 1 on failure.
   double GetZoom() const;
@@ -124,18 +147,16 @@ class SearchBox : public content::RenderViewObserver,
   bool verbatim_;
   size_t selection_start_;
   size_t selection_end_;
-  size_t results_base_;
   int start_margin_;
   gfx::Rect popup_bounds_;
-  std::vector<InstantAutocompleteResult> autocomplete_results_;
-  size_t last_results_base_;
-  std::vector<InstantAutocompleteResult> last_autocomplete_results_;
   bool is_key_capture_enabled_;
   ThemeBackgroundInfo theme_info_;
   bool display_instant_results_;
   string16 omnibox_font_;
   size_t omnibox_font_size_;
-  std::vector<InstantMostVisitedItem> most_visited_items_;
+  InstantRestrictedIDCache<InstantAutocompleteResult>
+      autocomplete_results_cache_;
+  InstantRestrictedIDCache<InstantMostVisitedItem> most_visited_items_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchBox);
 };

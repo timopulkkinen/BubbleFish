@@ -211,6 +211,9 @@ be available for now. -->
       <message name="IDS_SHORT_PRODUCT_NAME" desc="The Chrome application short name.">
         Infomonitor Player
       </message>
+      <message name="IDS_SHORT_PRODUCT_NAME_LOWER" desc="The Chrome application short name all lowercase">
+        chromium
+      </message>
       <message name="IDS_SXS_SHORTCUT_NAME" desc="The Chrome short cut name for SxS channel">
         Infomonitor Player
       </message>
@@ -279,9 +282,17 @@ be available for now. -->
       <message name="IDS_CERT_ERROR_NOT_YET_VALID_DETAILS" desc="Details for an X509 certificate that is not yet valid">
         You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate that is not yet valid. No information is available to indicate whether that certificate can be trusted. Infomonitor Player cannot reliably guarantee that you are communicating with &lt;strong&gt;<ph name="DOMAIN2">$2<ex>paypal.com</ex></ph>&lt;/strong&gt; and not an attacker. Your computer's clock is currently set to <ph name="CURRENT_TIME">$3<ex>Monday, July 18th, 2012 12:31PM</ex></ph>. Does that look right? If not, you should correct your system's clock and then refresh this page.
       </message>
-      <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS" desc="Details for an X509 certificate with an invalid authority">
-        You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate issued by an entity that is not trusted by your computer's operating system. This may mean that the server has generated its own security credentials, which Infomonitor Player cannot rely on for identity information, or an attacker may be trying to intercept your communications.
-      </message>
+      <if expr="pp_ifdef('ios')">
+        <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS" desc="Details for an X509 certificate with an invalid authority">
+          You attempted to reach &lt;strong&gt;<ph
+name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate issued by an entity that is not trusted by Infomonitor Player. This may mean that the server has generated its own security credentials, which we cannot rely on for identity information, or an attacker may be trying to intercept your communications.
+        </message>
+      </if>
+      <if expr="not pp_ifdef('ios')">
+        <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS" desc="Details for an X509 certificate with an invalid authority">
+          You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presented a certificate issued by an entity that is not trusted by your computer's operating system. This may mean that the server has generated its own security credentials, which we cannot rely on for identity information, or an attacker may be trying to intercept your communications.
+        </message>
+      </if>
       <message name="IDS_CERT_ERROR_CONTAINS_ERRORS_DETAILS" desc="Details of the error page for an X509 certificate that contains errors">
         You attempted to reach &lt;strong&gt;<ph name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the certificate that the server presented contains errors. Infomonitor Player cannot use a certificate with errors and cannot validate the identity of the site that you have attempted to connect to.
       </message>
@@ -443,7 +454,10 @@ be available for now. -->
         Continue running background apps when Infomonitor Player is closed
       </message>
       <message name="IDS_OPTIONS_SYSTEM_ENABLE_HARDWARE_ACCELERATION_MODE" desc="The label of the check-box that enables hardware acceleration mode">
-        Use hardware acceleration when available (requires Infomonitor Player restart)
+        Use hardware acceleration when available
+      </message>
+      <message name="IDS_OPTIONS_SYSTEM_ENABLE_HARDWARE_ACCELERATION_MODE_RESTART" desc="The restart string after changing hardware acceleration mode">
+        ( requires Infomonitor Player <ph name="BEGIN_BUTTON">&lt;button id="gpu-mode-reset-restart-button" type="button" class="link-button"&gt;</ph>restart<ph name="END_BUTTON">&lt;/button&gt;</ph>)
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
 Infomonitor Player cannot read and write to its data directory:
@@ -787,6 +801,10 @@ For Infomonitor Player, processes used to display diagnostics information (such 
       </message>
 
       <!-- Main Chrome menu -->
+      <message name="IDS_APPMENU_TOOLTIP" desc="The tooltip to show for the browser menu">
+        Customize and control Chromium
+      </message>
+
       <if expr="pp_ifdef('use_titlecase') and not pp_ifdef('chromeos')">
         <message name="IDS_ABOUT" desc="In Title Case: The text label of the About Chrome menu item">
           About &amp;Infomonitor Player
@@ -848,6 +866,14 @@ For Infomonitor Player, processes used to display diagnostics information (such 
 
       <!-- One click sign in infobar -->
       <if expr="not pp_ifdef('chromeos')">
+        <!-- New one-click signin dialog contents for SAML support -->
+        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE_NEW" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
+          Sign in to Chromium with <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>?
+        </message>
+        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_MESSAGE_NEW" desc="The message of the one click sign in dialog.">
+          You're signing in to Chromium using your <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph> account. You will be able to access your bookmarks, history, and other settings on all of your signed in devices.
+        </message>
+        <!-- Delete DIALOG_TITLE/MESSAGE when we switch to the _NEW versions -->
         <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
           You're signed in to Chromium!
         </message>

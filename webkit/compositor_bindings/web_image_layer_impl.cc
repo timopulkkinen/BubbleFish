@@ -5,9 +5,9 @@
 #include "webkit/compositor_bindings/web_image_layer_impl.h"
 
 #include "base/command_line.h"
-#include "cc/image_layer.h"
-#include "cc/picture_image_layer.h"
-#include "cc/switches.h"
+#include "cc/base/switches.h"
+#include "cc/layers/image_layer.h"
+#include "cc/layers/picture_image_layer.h"
 #include "webkit/compositor_bindings/web_layer_impl.h"
 #include "webkit/compositor_bindings/web_layer_impl_fixed_bounds.h"
 
@@ -15,7 +15,7 @@ static bool usingPictureLayer() {
   return cc::switches::IsImplSidePaintingEnabled();
 }
 
-namespace WebKit {
+namespace webkit {
 
 WebImageLayerImpl::WebImageLayerImpl() {
   if (usingPictureLayer())
@@ -26,14 +26,16 @@ WebImageLayerImpl::WebImageLayerImpl() {
 
 WebImageLayerImpl::~WebImageLayerImpl() {}
 
-WebLayer* WebImageLayerImpl::layer() { return layer_.get(); }
+WebKit::WebLayer* WebImageLayerImpl::layer() { return layer_.get(); }
 
 void WebImageLayerImpl::setBitmap(SkBitmap bitmap) {
   if (usingPictureLayer()) {
     static_cast<cc::PictureImageLayer*>(layer_->layer())->SetBitmap(bitmap);
-    static_cast<WebLayerImplFixedBounds*>(layer_.get())->SetFixedBounds(gfx::Size(bitmap.width(), bitmap.height()));
-  } else
+    static_cast<WebLayerImplFixedBounds*>(layer_.get())->SetFixedBounds(
+        gfx::Size(bitmap.width(), bitmap.height()));
+  } else {
     static_cast<cc::ImageLayer*>(layer_->layer())->SetBitmap(bitmap);
+  }
 }
 
-}  // namespace WebKit
+}  // namespace webkit

@@ -14,12 +14,13 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "cc/context_provider.h"
-#include "cc/input_handler.h"
-#include "cc/layer.h"
-#include "cc/layer_tree_host.h"
-#include "cc/output_surface.h"
-#include "cc/thread_impl.h"
+#include "cc/base/switches.h"
+#include "cc/base/thread_impl.h"
+#include "cc/input/input_handler.h"
+#include "cc/layers/layer.h"
+#include "cc/output/context_provider.h"
+#include "cc/output/output_surface.h"
+#include "cc/trees/layer_tree_host.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
@@ -415,23 +416,40 @@ Compositor::Compositor(CompositorDelegate* delegate,
   root_web_layer_->SetAnchorPoint(gfx::PointF(0.f, 0.f));
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
+
   cc::LayerTreeSettings settings;
-  settings.initialDebugState.showFPSCounter =
-      command_line->HasSwitch(switches::kUIShowFPSCounter);
-  settings.initialDebugState.showPlatformLayerTree =
-      command_line->HasSwitch(switches::kUIShowLayerTree);
-  settings.refreshRate =
+  settings.refresh_rate =
       g_test_compositor_enabled ? kTestRefreshRate : kDefaultRefreshRate;
-  settings.initialDebugState.showDebugBorders =
-      command_line->HasSwitch(switches::kUIShowLayerBorders);
-  settings.partialSwapEnabled =
-      command_line->HasSwitch(switches::kUIEnablePartialSwap);
-  settings.perTilePaintingEnabled =
-      command_line->HasSwitch(switches::kUIEnablePerTilePainting);
+  settings.partial_swap_enabled =
+      command_line->HasSwitch(cc::switches::kUIEnablePartialSwap);
+  settings.per_tile_painting_enabled =
+      command_line->HasSwitch(cc::switches::kUIEnablePerTilePainting);
+
+  // These flags should be mirrored by renderer versions in content/renderer/.
+  settings.initial_debug_state.show_debug_borders =
+      command_line->HasSwitch(cc::switches::kUIShowCompositedLayerBorders);
+  settings.initial_debug_state.show_fps_counter =
+      command_line->HasSwitch(cc::switches::kUIShowFPSCounter);
+  settings.initial_debug_state.show_paint_rects =
+      command_line->HasSwitch(switches::kUIShowPaintRects);
+  settings.initial_debug_state.show_platform_layer_tree =
+      command_line->HasSwitch(cc::switches::kUIShowCompositedLayerTree);
+  settings.initial_debug_state.show_property_changed_rects =
+      command_line->HasSwitch(cc::switches::kUIShowPropertyChangedRects);
+  settings.initial_debug_state.show_surface_damage_rects =
+      command_line->HasSwitch(cc::switches::kUIShowSurfaceDamageRects);
+  settings.initial_debug_state.show_screen_space_rects =
+      command_line->HasSwitch(cc::switches::kUIShowScreenSpaceRects);
+  settings.initial_debug_state.show_replica_screen_space_rects =
+      command_line->HasSwitch(cc::switches::kUIShowReplicaScreenSpaceRects);
+  settings.initial_debug_state.show_occluding_rects =
+      command_line->HasSwitch(cc::switches::kUIShowOccludingRects);
+  settings.initial_debug_state.show_non_occluding_rects =
+      command_line->HasSwitch(cc::switches::kUIShowNonOccludingRects);
 
   scoped_ptr<cc::Thread> thread;
   if (g_compositor_thread) {
-    thread = cc::ThreadImpl::createForDifferentThread(
+    thread = cc::ThreadImpl::CreateForDifferentThread(
         g_compositor_thread->message_loop_proxy());
   }
 
@@ -507,7 +525,7 @@ void Compositor::Draw(bool force_clear) {
   if (!IsLocked()) {
     // TODO(nduca): Temporary while compositor calls
     // compositeImmediately() directly.
-    layout();
+    Layout();
     host_->Composite(base::TimeTicks::Now());
   }
   if (!pending_swap.posted())
@@ -596,16 +614,7 @@ void Compositor::OnUpdateVSyncParameters(base::TimeTicks timebase,
                     OnUpdateVSyncParameters(this, timebase, interval));
 }
 
-void Compositor::willBeginFrame() {
-}
-
-void Compositor::didBeginFrame() {
-}
-
-void Compositor::animate(double frameBeginTime) {
-}
-
-void Compositor::layout() {
+void Compositor::Layout() {
   // We're sending damage that will be addressed during this composite
   // cycle, so we don't need to schedule another composite to address it.
   disable_schedule_composite_ = true;
@@ -614,45 +623,35 @@ void Compositor::layout() {
   disable_schedule_composite_ = false;
 }
 
-void Compositor::applyScrollAndScale(gfx::Vector2d scrollDelta,
-                                     float pageScale) {
-}
-
-scoped_ptr<cc::OutputSurface> Compositor::createOutputSurface() {
+scoped_ptr<cc::OutputSurface> Compositor::CreateOutputSurface() {
   return make_scoped_ptr(
       ContextFactory::GetInstance()->CreateOutputSurface(this));
 }
 
-void Compositor::didRecreateOutputSurface(bool success) {
-}
-
-scoped_ptr<cc::InputHandler> Compositor::createInputHandler() {
+scoped_ptr<cc::InputHandler> Compositor::CreateInputHandler() {
   return scoped_ptr<cc::InputHandler>();
 }
 
-void Compositor::willCommit() {
-}
-
-void Compositor::didCommit() {
+void Compositor::DidCommit() {
   DCHECK(!IsLocked());
   FOR_EACH_OBSERVER(CompositorObserver,
                     observer_list_,
                     OnCompositingDidCommit(this));
 }
 
-void Compositor::didCommitAndDrawFrame() {
+void Compositor::DidCommitAndDrawFrame() {
   base::TimeTicks start_time = base::TimeTicks::Now();
   FOR_EACH_OBSERVER(CompositorObserver,
                     observer_list_,
                     OnCompositingStarted(this, start_time));
 }
 
-void Compositor::didCompleteSwapBuffers() {
+void Compositor::DidCompleteSwapBuffers() {
   DCHECK(g_compositor_thread);
   NotifyEnd();
 }
 
-void Compositor::scheduleComposite() {
+void Compositor::ScheduleComposite() {
   if (!disable_schedule_composite_)
     ScheduleDraw();
 }

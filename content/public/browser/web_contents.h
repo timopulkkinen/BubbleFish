@@ -345,9 +345,6 @@ class WebContents : public PageNavigator,
   // times, subsequent calls are ignored.
   virtual void OnCloseStarted() = 0;
 
-  // Returns true if underlying WebContentsView should accept drag-n-drop.
-  virtual bool ShouldAcceptDragAndDrop() const = 0;
-
   // A render view-originated drag has ended. Informs the render view host and
   // WebContentsDelegate.
   virtual void SystemDragEnded() = 0;
@@ -387,9 +384,6 @@ class WebContents : public PageNavigator,
   // Get the content restrictions (see content::ContentRestriction).
   virtual int GetContentRestrictions() const = 0;
 
-  // Query the WebUIFactory for the TypeID for the current URL.
-  virtual WebUI::TypeID GetWebUITypeForCurrentState() = 0;
-
   // Returns the WebUI for the current state of the tab. This will either be
   // the pending WebUI, the committed WebUI, or NULL.
   virtual WebUI* GetWebUIForCurrentState()= 0;
@@ -422,11 +416,14 @@ class WebContents : public PageNavigator,
 
   // Sends a request to download the given favicon |url| and returns the unique
   // id of the download request. When the download is finished, |callback| will
-  // be called with the bitmaps received from the renderer. Note that
+  // be called with the bitmaps received from the renderer. If [is_favicon|,
+  // the cookeis are not sent and not accepted during download. Note that
   // |image_size| is a hint for images with multiple sizes. The downloaded image
   // is not resized to the given image_size. If 0 is passed, the first frame of
   // the image is returned.
-  virtual int DownloadFavicon(const GURL& url, int image_size,
+  virtual int DownloadFavicon(const GURL& url,
+                              bool is_favicon,
+                              int image_size,
                               const FaviconDownloadCallback& callback) = 0;
 
  private:

@@ -294,11 +294,6 @@ void RenderViewHostManager::DidUpdateFrameTree(
   }
 }
 
-void RenderViewHostManager::SetWebUIPostCommit(WebUIImpl* web_ui) {
-  DCHECK(!web_ui_.get());
-  web_ui_.reset(web_ui);
-}
-
 void RenderViewHostManager::RendererAbortedProvisionalLoad(
     RenderViewHost* render_view_host) {
   // We used to cancel the pending renderer here for cross-site downloads.
@@ -896,6 +891,10 @@ RenderViewHostImpl* RenderViewHostManager::UpdateRendererStateForNavigate(
       pending_and_current_web_ui_ = web_ui_->AsWeakPtr();
     } else {
       SetPendingWebUI(entry);
+
+      // Make sure the new RenderViewHost has the right bindings.
+      if (pending_web_ui())
+        render_view_host_->AllowBindings(pending_web_ui()->GetBindings());
     }
 
     if (pending_web_ui() && render_view_host_->IsRenderViewLive())

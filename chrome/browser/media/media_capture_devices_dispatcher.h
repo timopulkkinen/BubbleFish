@@ -10,6 +10,7 @@
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "content/public/browser/media_observer.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/media_stream_request.h"
 
 class AudioStreamIndicator;
@@ -56,6 +57,11 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   const content::MediaStreamDevices& GetAudioCaptureDevices();
   const content::MediaStreamDevices& GetVideoCaptureDevices();
 
+  void RequestAccess(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback);
+
   // Helper to get the default devices which can be used by the media request,
   // if the return list is empty, it means there is no available device on the
   // OS.
@@ -78,7 +84,8 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   virtual void OnCaptureDevicesOpened(
       int render_process_id,
       int render_view_id,
-      const content::MediaStreamDevices& devices) OVERRIDE;
+      const content::MediaStreamDevices& devices,
+      const base::Closure& close_callback) OVERRIDE;
   virtual void OnCaptureDevicesClosed(
       int render_process_id,
       int render_view_id,

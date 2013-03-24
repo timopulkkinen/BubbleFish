@@ -33,7 +33,6 @@
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
@@ -63,6 +62,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
@@ -130,6 +130,7 @@
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
+#include "chrome/browser/chromeos/system/automatic_reboot_manager.h"
 #else
 #include "chrome/browser/extensions/default_apps.h"
 #endif
@@ -244,6 +245,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::ProxyConfigServiceImpl::RegisterPrefs(registry);
   chromeos::RegisterDisplayLocalStatePrefs(registry);
   chromeos::ServicesCustomizationDocument::RegisterPrefs(registry);
+  chromeos::system::AutomaticRebootManager::RegisterPrefs(registry);
   chromeos::UserImageManager::RegisterPrefs(registry);
   chromeos::UserManager::RegisterPrefs(registry);
   chromeos::WallpaperManager::RegisterPrefs(registry);

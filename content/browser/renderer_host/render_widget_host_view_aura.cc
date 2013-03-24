@@ -11,8 +11,8 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "cc/compositor_frame.h"
-#include "cc/compositor_frame_ack.h"
+#include "cc/output/compositor_frame.h"
+#include "cc/output/compositor_frame_ack.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/renderer_host/backing_store_aura.h"
@@ -28,10 +28,12 @@
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/video_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
@@ -46,6 +48,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_destruction_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
@@ -334,6 +337,28 @@ void AcknowledgeBufferForGpu(
       route_id, gpu_host_id, ack);
 }
 
+void CopySnapshotToVideoFrame(const scoped_refptr<media::VideoFrame>& target,
+                              const gfx::Rect& region_in_frame,
+                              const base::Callback<void(bool)>& callback,
+                              bool succeed,
+                              const SkBitmap& bitmap) {
+  if (!succeed) {
+    callback.Run(false);
+    return;
+  }
+
+  DCHECK(region_in_frame.size() == gfx::Size(bitmap.width(), bitmap.height()));
+  {
+    SkAutoLockPixels lock(bitmap);
+    media::CopyRGBToVideoFrame(
+        reinterpret_cast<const uint8*>(bitmap.getPixels()),
+        bitmap.rowBytes(),
+        region_in_frame,
+        target.get());
+  }
+  callback.Run(true);
+}
+
 }  // namespace
 
 // We need to watch for mouse events outside a Web Popup or its parent
@@ -600,7 +625,8 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host)
       synthetic_move_sent_(false),
       accelerated_compositing_state_changed_(false),
       can_lock_compositor_(YES),
-      paint_observer_(NULL) {
+      paint_observer_(NULL),
+      accessible_parent_(NULL) {
   host_->SetView(this);
   window_observer_.reset(new WindowObserver(this));
   aura::client::SetTooltipText(window_, &tooltip_);
@@ -791,7 +817,7 @@ BrowserAccessibilityManager*
 RenderWidgetHostViewAura::GetOrCreateBrowserAccessibilityManager() {
   BrowserAccessibilityManager* manager = GetBrowserAccessibilityManager();
   if (manager)
-    return NULL;
+    return manager;
 
 #if defined(OS_WIN)
   aura::RootWindow* root_window = window_->GetRootWindow();
@@ -799,12 +825,8 @@ RenderWidgetHostViewAura::GetOrCreateBrowserAccessibilityManager() {
     return NULL;
   HWND hwnd = root_window->GetAcceleratedWidget();
 
-  // TODO: this should be the accessible of the parent View, for example
-  // GetNativeViewAccessible() called on this tab's ContentsContainer.
-  IAccessible* parent_iaccessible = NULL;
-
   manager = new BrowserAccessibilityManagerWin(
-      hwnd, parent_iaccessible,
+      hwnd, accessible_parent_,
       BrowserAccessibilityManagerWin::GetEmptyDocument(), this);
 #else
   manager = BrowserAccessibilityManager::Create(AccessibilityNodeData(), this);
@@ -909,6 +931,25 @@ bool RenderWidgetHostViewAura::IsShowing() {
 gfx::Rect RenderWidgetHostViewAura::GetViewBounds() const {
   return window_->GetBoundsInScreen();
 }
+
+void RenderWidgetHostViewAura::SetBackground(const SkBitmap& background) {
+  RenderWidgetHostViewBase::SetBackground(background);
+  host_->SetBackground(background);
+  window_->layer()->SetFillsBoundsOpaquely(background.isOpaque());
+}
+
+#if defined(OS_WIN)
+void RenderWidgetHostViewAura::SetParentNativeViewAccessible(
+    gfx::NativeViewAccessible accessible_parent) {
+  accessible_parent_ = accessible_parent;
+
+  BrowserAccessibilityManager* manager = GetBrowserAccessibilityManager();
+  if (manager) {
+    static_cast<BrowserAccessibilityManagerWin*>(manager)->
+        set_parent_iaccessible(accessible_parent);
+  }
+}
+#endif
 
 void RenderWidgetHostViewAura::UpdateCursor(const WebCursor& cursor) {
   current_cursor_ = cursor;
@@ -1065,17 +1106,12 @@ BackingStore* RenderWidgetHostViewAura::AllocBackingStore(
   return new BackingStoreAura(host_, size);
 }
 
-void RenderWidgetHostViewAura::CopyFromCompositingSurface(
+void RenderWidgetHostViewAura::CopyFromCompositingSurfaceHelper(
     const gfx::Rect& src_subrect,
-    const gfx::Size& dst_size,
+    const gfx::Size& dst_size_in_pixel,
     const base::Callback<void(bool, const SkBitmap&)>& callback) {
   base::ScopedClosureRunner scoped_callback_runner(
       base::Bind(callback, false, SkBitmap()));
-
-  if (!current_surface_)
-    return;
-
-  gfx::Size dst_size_in_pixel = ConvertSizeToPixel(this, dst_size);
 
   SkBitmap output;
   output.setConfig(SkBitmap::kARGB_8888_Config,
@@ -1115,16 +1151,55 @@ void RenderWidgetHostViewAura::CopyFromCompositingSurface(
       wrapper_callback);
 }
 
+void RenderWidgetHostViewAura::CopyFromCompositingSurface(
+    const gfx::Rect& src_subrect,
+    const gfx::Size& dst_size,
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  if (!current_surface_) {
+    callback.Run(false, SkBitmap());
+    return;
+  }
+
+  CopyFromCompositingSurfaceHelper(src_subrect,
+                                   ConvertSizeToPixel(this, dst_size),
+                                   callback);
+}
+
 void RenderWidgetHostViewAura::CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback) {
-  NOTIMPLEMENTED();
-  callback.Run(false);
+  base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
+
+  if (!current_surface_)
+    return;
+
+  // Compute the dest size we want after the letterboxing resize. Make the
+  // coordinates and sizes even because we letterbox in YUV space
+  // (see CopyRGBToVideoFrame). They need to be even for the UV samples to
+  // line up correctly.
+  // The video frame's coded_size() is in pixels and src_subrect is in DIP, but
+  // we are only concerned with the video frame's aspect ratio in this case.
+  gfx::Rect region_in_frame =
+      media::ComputeLetterboxRegion(gfx::Rect(target->coded_size()),
+                                    src_subrect.size());
+  region_in_frame = gfx::Rect(region_in_frame.x() & ~1,
+                              region_in_frame.y() & ~1,
+                              region_in_frame.width() & ~1,
+                              region_in_frame.height() & ~1);
+
+  scoped_callback_runner.Release();
+
+  CopyFromCompositingSurfaceHelper(src_subrect,
+                                   region_in_frame.size(),
+                                   base::Bind(CopySnapshotToVideoFrame,
+                                              target,
+                                              region_in_frame,
+                                              callback));
 }
 
 bool RenderWidgetHostViewAura::CanCopyToVideoFrame() const {
-  return false;
+  return current_surface_ != NULL;
 }
 
 void RenderWidgetHostViewAura::OnAcceleratedCompositingStateChange() {
@@ -1511,12 +1586,6 @@ void RenderWidgetHostViewAura::CopyFromCompositingSurfaceFinished(
   --render_widget_host_view->pending_thumbnail_tasks_;
 }
 
-void RenderWidgetHostViewAura::SetBackground(const SkBitmap& background) {
-  RenderWidgetHostViewBase::SetBackground(background);
-  host_->SetBackground(background);
-  window_->layer()->SetFillsBoundsOpaquely(background.isOpaque());
-}
-
 void RenderWidgetHostViewAura::GetScreenInfo(WebScreenInfo* results) {
   GetScreenInfoForWindow(results, window_->GetRootWindow() ? window_ : NULL);
 }
@@ -1528,7 +1597,8 @@ gfx::Rect RenderWidgetHostViewAura::GetBoundsInRootWindow() {
 void RenderWidgetHostViewAura::ProcessAckedTouchEvent(
     const WebKit::WebTouchEvent& touch_event, InputEventAckState ack_result) {
   ScopedVector<ui::TouchEvent> events;
-  if (!MakeUITouchEventsFromWebTouchEvents(touch_event, &events))
+  if (!MakeUITouchEventsFromWebTouchEvents(touch_event, &events,
+                                           SCREEN_COORDINATES))
     return;
 
   aura::RootWindow* root = window_->GetRootWindow();
@@ -1966,8 +2036,17 @@ void RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
     if (host_tracker_.get() && !host_tracker_->windows().empty()) {
       aura::Window* host = *(host_tracker_->windows().begin());
       aura::client::FocusClient* client = aura::client::GetFocusClient(host);
-      if (client)
+      if (client) {
+        // Calling host->Focus() may delete |this|. We create a local
+        // observer for that. In that case we exit without further
+        // access to any members.
+        aura::WindowDestructionObserver destruction_observer(window_);
         host->Focus();
+        if (destruction_observer.destroyed()) {
+          event->SetHandled();
+          return;
+        }
+      }
     }
     if (!in_shutdown_) {
       in_shutdown_ = true;
@@ -2449,8 +2528,16 @@ void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
 
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
-  if (cursor_client)
+  if (cursor_client) {
+#if defined(OS_WIN)
+    if (GetContentClient() && GetContentClient()->browser() &&
+        GetContentClient()->browser()->GetResourceDllName()) {
+      cursor_client->SetCursorResourceModule(
+          GetContentClient()->browser()->GetResourceDllName());
+    }
+#endif
     cursor_client->SetCursor(cursor);
+  }
 }
 
 ui::InputMethod* RenderWidgetHostViewAura::GetInputMethod() const {

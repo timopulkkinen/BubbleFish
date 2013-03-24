@@ -5,9 +5,9 @@
 #ifndef CC_TEST_FAKE_PROXY_H_
 #define CC_TEST_FAKE_PROXY_H_
 
-#include "cc/layer_tree_host.h"
-#include "cc/proxy.h"
-#include "cc/thread.h"
+#include "cc/base/thread.h"
+#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/proxy.h"
 
 namespace cc {
 
@@ -28,7 +28,6 @@ class FakeProxy : public Proxy {
   virtual void SetVisible(bool visible) OVERRIDE {}
   virtual bool InitializeRenderer() OVERRIDE;
   virtual bool RecreateOutputSurface() OVERRIDE;
-  virtual void CollectRenderingStats(RenderingStats* stats) OVERRIDE {}
   virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;
   virtual void SetNeedsAnimate() OVERRIDE {}
   virtual void SetNeedsCommit() OVERRIDE {}

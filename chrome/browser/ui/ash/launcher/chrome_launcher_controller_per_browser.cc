@@ -43,7 +43,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_entry.h"
@@ -89,6 +88,10 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   }
 
   virtual bool IsOpen() const OVERRIDE {
+    return false;
+  }
+
+  virtual bool IsVisible() const OVERRIDE {
     return false;
   }
 
@@ -252,6 +255,10 @@ ChromeLauncherControllerPerBrowser::ChromeLauncherControllerPerBrowser(
   }
 
   model_->AddObserver(this);
+  // Right now ash::Shell isn't created for tests.
+  // TODO(mukai): Allows it to observe display change and write tests.
+  if (ash::Shell::HasInstance())
+    ash::Shell::GetInstance()->display_controller()->AddObserver(this);
   // TODO(stevenjb): Find a better owner for shell_window_controller_?
   shell_window_controller_.reset(new ShellWindowLauncherController(this));
   app_tab_helper_.reset(new LauncherAppTabHelper(profile_));
@@ -293,6 +300,8 @@ ChromeLauncherControllerPerBrowser::~ChromeLauncherControllerPerBrowser() {
   shell_window_controller_.reset();
 
   model_->RemoveObserver(this);
+  if (ash::Shell::HasInstance())
+    ash::Shell::GetInstance()->display_controller()->RemoveObserver(this);
   for (IDToItemControllerMap::iterator i = id_to_item_controller_map_.begin();
        i != id_to_item_controller_map_.end(); ++i) {
     i->second->OnRemoved();
@@ -824,7 +833,7 @@ void ChromeLauncherControllerPerBrowser::SetRefocusURLPatternForTest(
 }
 
 const Extension* ChromeLauncherControllerPerBrowser::GetExtensionForAppID(
-    const std::string& app_id) {
+    const std::string& app_id) const {
   return profile_->GetExtensionService()->GetInstalledExtension(app_id);
 }
 
@@ -893,6 +902,14 @@ ash::LauncherID ChromeLauncherControllerPerBrowser::GetIDByWindow(
 bool ChromeLauncherControllerPerBrowser::IsDraggable(
     const ash::LauncherItem& item) {
   return item.type == ash::TYPE_APP_SHORTCUT ? CanPin() : true;
+}
+
+bool ChromeLauncherControllerPerBrowser::ShouldShowTooltip(
+    const ash::LauncherItem& item) {
+  if (item.type == ash::TYPE_APP_PANEL &&
+      id_to_item_controller_map_[item.id]->IsVisible())
+    return false;
+  return true;
 }
 
 void ChromeLauncherControllerPerBrowser::LauncherItemAdded(int index) {
@@ -983,6 +1000,13 @@ void ChromeLauncherControllerPerBrowser::OnShelfAlignmentChanged(
     profile_->GetPrefs()->SetString(prefs::kShelfAlignmentLocal, pref_value);
     profile_->GetPrefs()->SetString(prefs::kShelfAlignment, pref_value);
   }
+}
+
+void ChromeLauncherControllerPerBrowser::OnDisplayConfigurationChanging() {
+}
+
+void ChromeLauncherControllerPerBrowser::OnDisplayConfigurationChanged() {
+  SetShelfBehaviorsFromPrefs();
 }
 
 void ChromeLauncherControllerPerBrowser::OnIsSyncingChanged() {

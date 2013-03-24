@@ -4,15 +4,96 @@
 
 #include "chrome/browser/webdata/web_data_service_factory.h"
 
+#include "base/bind.h"
 #include "base/files/file_path.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "chrome/browser/ui/profile_error_dialog.h"
+#include "chrome/browser/webdata/autocomplete_syncable_service.h"
+#include "chrome/browser/webdata/autofill_profile_syncable_service.h"
+#include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/autofill_web_data_service_impl.h"
-#include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/common/chrome_constants.h"
+#include "chrome/browser/webdata/keyword_table.h"
+#include "chrome/browser/webdata/logins_table.h"
+#include "chrome/browser/webdata/token_service_table.h"
+#include "chrome/browser/webdata/web_apps_table.h"
+#include "chrome/browser/webdata/web_intents_table.h"
+#include "chrome/browser/webdata/webdata_constants.h"
+#include "content/public/browser/browser_thread.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
+
+using content::BrowserThread;
+
+namespace {
+
+// Callback to show error dialog on profile load error.
+void ProfileErrorCallback(sql::InitStatus status) {
+  ShowProfileErrorDialog(
+      (status == sql::INIT_FAILURE) ?
+      IDS_COULDNT_OPEN_PROFILE_ERROR : IDS_PROFILE_TOO_NEW_ERROR);
+}
+
+void InitSyncableServicesOnDBThread(scoped_refptr<WebDataService> web_data) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+
+  // Currently only Autocomplete and Autofill profiles use the new Sync API, but
+  // all the database data should migrate to this API over time.
+  AutocompleteSyncableService::CreateForWebDataService(web_data);
+  AutofillProfileSyncableService::CreateForWebDataService(web_data);
+}
+
+}  // namespace
+
+WebDataServiceWrapper::WebDataServiceWrapper() {}
+
+WebDataServiceWrapper::WebDataServiceWrapper(Profile* profile) {
+  base::FilePath path = profile->GetPath();
+  path = path.Append(kWebDataFilename);
+  web_data_service_ =
+      new WebDataService(path, base::Bind(&ProfileErrorCallback));
+
+  // All table objects that participate in managing the database must be added
+  // here.
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new AutofillTable()));
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new KeywordTable()));
+  // TODO(mdm): We only really need the LoginsTable on Windows for IE7 password
+  // access, but for now, we still create it on all platforms since it deletes
+  // the old logins table. We can remove this after a while, e.g. in M22 or so.
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new LoginsTable()));
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new TokenServiceTable()));
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new WebAppsTable()));
+  // TODO(thakis): Add a migration to delete the SQL table used by
+  // WebIntentsTable, then remove this.
+  web_data_service_->AddTable(
+      scoped_ptr<WebDatabaseTable>(new WebIntentsTable()));
+
+  web_data_service_->Init();
+
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+                          base::Bind(&InitSyncableServicesOnDBThread,
+                                     web_data_service_));
+}
+
+WebDataServiceWrapper::~WebDataServiceWrapper() {
+}
+
+void WebDataServiceWrapper::Shutdown() {
+  web_data_service_->ShutdownOnUIThread();
+  web_data_service_ = NULL;
+}
+
+scoped_refptr<WebDataService> WebDataServiceWrapper::GetWebData() {
+  return web_data_service_.get();
+}
 
 // static
-scoped_ptr<AutofillWebDataService> AutofillWebDataService::FromBrowserContext(
-    content::BrowserContext* context) {
+scoped_refptr<AutofillWebDataService>
+AutofillWebDataService::FromBrowserContext(content::BrowserContext* context) {
   // For this service, the implicit/explicit distinction doesn't
   // really matter; it's just used for a DCHECK.  So we currently
   // cheat and always say EXPLICIT_ACCESS.
@@ -20,10 +101,10 @@ scoped_ptr<AutofillWebDataService> AutofillWebDataService::FromBrowserContext(
       static_cast<Profile*>(context), Profile::EXPLICIT_ACCESS);
 
   if (service.get()) {
-    return scoped_ptr<AutofillWebDataService>(
+    return scoped_refptr<AutofillWebDataService>(
         new AutofillWebDataServiceImpl(service));
   } else {
-    return scoped_ptr<AutofillWebDataService>(NULL);
+    return scoped_refptr<AutofillWebDataService>(NULL);
   }
 }
 
@@ -38,7 +119,7 @@ scoped_refptr<WebDataService> WebDataService::FromBrowserContext(
 }
 
 WebDataServiceFactory::WebDataServiceFactory()
-    : RefcountedProfileKeyedServiceFactory(
+    : ProfileKeyedServiceFactory(
           "WebDataService",
           ProfileDependencyManager::GetInstance()) {
   // WebDataServiceFactory has no dependecies.
@@ -53,8 +134,13 @@ scoped_refptr<WebDataService> WebDataServiceFactory::GetForProfile(
   // DCHECK, we need to start taking it as a parameter to
   // AutofillWebDataServiceImpl::FromBrowserContext (see above).
   DCHECK(access_type != Profile::IMPLICIT_ACCESS || !profile->IsOffTheRecord());
-  return static_cast<WebDataService*>(
-      GetInstance()->GetServiceForProfile(profile, true).get());
+  WebDataServiceWrapper* wrapper =
+      static_cast<WebDataServiceWrapper*>(
+          GetInstance()->GetServiceForProfile(profile, true));
+  if (wrapper)
+    return wrapper->GetWebData();
+  // |wrapper| can be NULL in Incognito mode.
+  return NULL;
 }
 
 // static
@@ -64,8 +150,13 @@ scoped_refptr<WebDataService> WebDataServiceFactory::GetForProfileIfExists(
   // DCHECK, we need to start taking it as a parameter to
   // AutofillWebDataServiceImpl::FromBrowserContext (see above).
   DCHECK(access_type != Profile::IMPLICIT_ACCESS || !profile->IsOffTheRecord());
-  return static_cast<WebDataService*>(
-      GetInstance()->GetServiceForProfile(profile, false).get());
+  WebDataServiceWrapper* wrapper =
+      static_cast<WebDataServiceWrapper*>(
+          GetInstance()->GetServiceForProfile(profile, true));
+  if (wrapper)
+    return wrapper->GetWebData();
+  // |wrapper| can be NULL in Incognito mode.
+  return NULL;
 }
 
 // static
@@ -77,17 +168,9 @@ bool WebDataServiceFactory::ServiceRedirectedInIncognito() const {
   return true;
 }
 
-scoped_refptr<RefcountedProfileKeyedService>
+ProfileKeyedService*
 WebDataServiceFactory::BuildServiceInstanceFor(Profile* profile) const {
-  DCHECK(profile);
-
-  base::FilePath path = profile->GetPath();
-  path = path.Append(chrome::kWebDataFilename);
-
-  scoped_refptr<WebDataService> wds(new WebDataService());
-  if (!wds->Init(profile->GetPath()))
-    NOTREACHED();
-  return wds.get();
+  return new WebDataServiceWrapper(profile);
 }
 
 bool WebDataServiceFactory::ServiceIsNULLWhileTesting() const {

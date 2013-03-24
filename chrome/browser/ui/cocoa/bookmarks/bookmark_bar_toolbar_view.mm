@@ -4,7 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_toolbar_view.h"
 
-#include "chrome/browser/instant/search.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
@@ -180,9 +180,10 @@ const CGFloat kBorderRadius = 3.0;
         chrome::search::GetDetachedBookmarkBarSeparatorColor(themeProvider));
   strokeColor = [[self strokeColor] blendedColorWithFraction:morph
                                                      ofColor:strokeColor];
+  strokeColor = [strokeColor colorWithAlphaComponent:0.5];
   [strokeColor set];
   NSRect strokeRect = bounds;
-  strokeRect.size.height = 1;
+  strokeRect.size.height = [self cr_lineWidth];
   NSRectFillUsingOperation(strokeRect, NSCompositeSourceOver);
 }
 

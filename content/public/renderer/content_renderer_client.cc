@@ -71,6 +71,10 @@ WebKit::WebHyphenator* ContentRendererClient::OverrideWebHyphenator() {
   return NULL;
 }
 
+WebKit::WebThemeEngine* ContentRendererClient::OverrideThemeEngine() {
+  return NULL;
+}
+
 bool ContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
   return true;
 }
@@ -147,6 +151,10 @@ bool ContentRendererClient::AllowBrowserPlugin(
 
 MessageLoop* ContentRendererClient::OverrideCompositorMessageLoop() const {
   return NULL;
+}
+
+bool ContentRendererClient::ShouldCreateCompositorInputHandler() const {
+  return true;
 }
 
 }  // namespace content

@@ -367,7 +367,7 @@
       { "pref": "signin.allowed" }
     ]
   },
-  
+
   "UserDataDir": {
     "note": "TODO(joaodasilva): To test that this policy works correctly, it would need to be set before the browser is launched. PolicyPrefsTest should be refactored to support this and a test for this policy added."
   },
@@ -1474,6 +1474,15 @@
     ]
   },
 
+  "VariationsRestrictParameter": {
+    "test_policy": { "VariationsRestrictParameter": "restricted" },
+    "pref_mappings": [
+      { "pref": "variations_restrict_parameter",
+        "local_state": true
+      }
+    ]
+  },
+
   "----- Chrome OS policies ------------------------------------------------": {},
 
   "ChromeOsLockOnIdleSuspend": {
@@ -1610,6 +1619,14 @@
     ]
   },
 
+  "IdleWarningDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleWarningDelayAC": 1800000 },
+    "pref_mappings": [
+      { "pref": "power.ac_idle_warning_delay_ms" }
+    ]
+  },
+
   "IdleDelayAC": {
     "os": ["chromeos"],
     "test_policy": { "IdleDelayAC": 1800000 },
@@ -1639,6 +1656,14 @@
     "test_policy": { "ScreenLockDelayBattery": 600000 },
     "pref_mappings": [
       { "pref": "power.battery_screen_lock_delay_ms"  }
+    ]
+  },
+
+  "IdleWarningDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleWarningDelayBattery": 600000 },
+    "pref_mappings": [
+      { "pref": "power.battery_idle_warning_delay_ms" }
     ]
   },
 
@@ -1822,6 +1847,12 @@
   },
 
   "DeviceStartUpFlags": {
+  },
+
+  "UptimeLimit": {
+  },
+
+  "RebootAfterUpdate": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

@@ -17,6 +17,7 @@
       'STRICT',
       '_ATL_APARTMENT_THREADED',
       '_ATL_CSTRING_EXPLICIT_CONSTRUCTORS',
+      '_ATL_NO_COM_SUPPORT',
       '_ATL_NO_AUTOMATIC_NAMESPACE',
       '_ATL_NO_EXCEPTIONS',
     ],
@@ -56,6 +57,8 @@
         'win/local_security_policy.h',
         'win/service_controller.cc',
         'win/service_controller.h',
+        'win/service_utils.cc',
+        'win/service_utils.h',
       ],
     },
     {
@@ -65,7 +68,6 @@
         '<(SHARED_INTERMEDIATE_DIR)/cloud_print/cloud_print_service_exe_version.rc',
         'win/cloud_print_service.cc',
         'win/cloud_print_service.rc',
-        'win/resource.h',
       ],
       'dependencies': [
         'cloud_print_service_lib',

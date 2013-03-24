@@ -4,7 +4,7 @@
 
 #include "cc/test/fake_content_layer.h"
 
-#include "cc/prioritized_resource.h"
+#include "cc/resources/prioritized_resource.h"
 #include "cc/test/fake_content_layer_impl.h"
 
 namespace cc {
@@ -33,7 +33,7 @@ void FakeContentLayer::Update(ResourceUpdateQueue* queue,
 
 bool FakeContentLayer::HaveBackingAt(int i, int j) {
   const PrioritizedResource* resource = ResourceAtForTesting(i, j);
-  return resource && resource->haveBackingTexture();
+  return resource && resource->have_backing_texture();
 }
 
 }  // namespace cc

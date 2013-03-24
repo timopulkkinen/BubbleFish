@@ -14,7 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/values.h"
-#include "cc/switches.h"
+#include "cc/base/switches.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/compositor_util.h"
@@ -328,6 +328,14 @@ base::Value* GetFeatureStatus() {
           "Force compositing mode is off, either disabled at the command"
           " line or not supported by the current system.",
           false
+      },
+      {
+          "raster",
+          false,
+          !command_line.HasSwitch(switches::kEnableAcceleratedPainting),
+          "Accelerated rasterization has not been enabled or"
+          " is not supported by the current system.",
+          true
       }
   };
   const size_t kNumFeatures = sizeof(kGpuFeatureInfo) / sizeof(GpuFeatureInfo);
@@ -346,6 +354,11 @@ base::Value* GetFeatureStatus() {
         status = "disabled";
         if (kGpuFeatureInfo[i].name == "css_animation") {
           status += "_software_animated";
+        } else if (kGpuFeatureInfo[i].name == "raster") {
+          if (cc::switches::IsImplSidePaintingEnabled())
+            status += "_software_multithreaded";
+          else
+            status += "_software";
         } else {
           if (kGpuFeatureInfo[i].fallback_to_software)
             status += "_software";
@@ -382,6 +395,11 @@ base::Value* GetFeatureStatus() {
           else
             status = "accelerated";
         }
+      }
+      // TODO(reveman): Remove this when crbug.com/223286 has been fixed.
+      if (kGpuFeatureInfo[i].name == "raster" &&
+          cc::switches::IsImplSidePaintingEnabled()) {
+        status = "disabled_software_multithreaded";
       }
       feature_status_list->Append(
           NewStatusValue(kGpuFeatureInfo[i].name.c_str(), status.c_str()));

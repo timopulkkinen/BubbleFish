@@ -23,13 +23,14 @@
 
 #if defined(OS_WIN)
 #include "base/files/file_path.h"
-#include "content/common/sandbox_policy.h"
+#include "content/common/sandbox_win.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/common/sandboxed_process_launcher_delegate.h"
 #elif defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
 #elif defined(OS_ANDROID)
 #include "base/android/jni_android.h"
-#include "content/browser/android/sandboxed_process_launcher.h"
+#include "content/browser/android/child_process_launcher_android.h"
 #elif defined(OS_POSIX)
 #include "base/memory/singleton.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
@@ -68,7 +69,7 @@ class ChildProcessLauncher::Context
 
   void Launch(
 #if defined(OS_WIN)
-      const base::FilePath& exposed_dir,
+      SandboxedProcessLauncherDelegate* delegate,
 #elif defined(OS_ANDROID)
       int ipcfd,
 #elif defined(OS_POSIX)
@@ -97,7 +98,7 @@ class ChildProcessLauncher::Context
             client_thread_id_,
             child_process_id,
 #if defined(OS_WIN)
-            exposed_dir,
+            delegate,
 #elif defined(OS_ANDROID)
             ipcfd,
 #elif defined(OS_POSIX)
@@ -109,7 +110,7 @@ class ChildProcessLauncher::Context
   }
 
 #if defined(OS_ANDROID)
-  static void OnSandboxedProcessStarted(
+  static void OnChildProcessStarted(
       // |this_object| is NOT thread safe. Only use it to post a task back.
       scoped_refptr<Context> this_object,
       BrowserThread::ID client_thread_id,
@@ -180,7 +181,7 @@ class ChildProcessLauncher::Context
       BrowserThread::ID client_thread_id,
       int child_process_id,
 #if defined(OS_WIN)
-      const base::FilePath& exposed_dir,
+      SandboxedProcessLauncherDelegate* delegate,
 #elif defined(OS_ANDROID)
       int ipcfd,
 #elif defined(OS_POSIX)
@@ -193,7 +194,8 @@ class ChildProcessLauncher::Context
     base::TimeTicks begin_launch_time = base::TimeTicks::Now();
 
 #if defined(OS_WIN)
-    base::ProcessHandle handle = StartProcessWithAccess(cmd_line, exposed_dir);
+    scoped_ptr<SandboxedProcessLauncherDelegate> delegate_deleter(delegate);
+    base::ProcessHandle handle = StartSandboxedProcess(delegate, cmd_line);
 #elif defined(OS_ANDROID)
     // Android WebView runs in single process, ensure that we never get here
     // when running in single process mode.
@@ -210,8 +212,8 @@ class ChildProcessLauncher::Context
         GetAdditionalMappedFilesForChildProcess(*cmd_line, child_process_id,
                                                 &files_to_register);
 
-    StartSandboxedProcess(cmd_line->argv(), files_to_register,
-        base::Bind(&ChildProcessLauncher::Context::OnSandboxedProcessStarted,
+    StartChildProcess(cmd_line->argv(), files_to_register,
+        base::Bind(&ChildProcessLauncher::Context::OnChildProcessStarted,
                    this_object, client_thread_id, begin_launch_time));
 
 #elif defined(OS_POSIX)
@@ -366,7 +368,7 @@ class ChildProcessLauncher::Context
       base::ProcessHandle handle) {
 #if defined(OS_ANDROID)
     LOG(INFO) << "ChromeProcess: Stopping process with handle " << handle;
-    StopSandboxedProcess(handle);
+    StopChildProcess(handle);
 #else
     base::Process process(handle);
      // Client has gone away, so just kill the process.  Using exit code 0
@@ -409,7 +411,7 @@ class ChildProcessLauncher::Context
 
 ChildProcessLauncher::ChildProcessLauncher(
 #if defined(OS_WIN)
-    const base::FilePath& exposed_dir,
+    SandboxedProcessLauncherDelegate* delegate,
 #elif defined(OS_POSIX)
     bool use_zygote,
     const base::EnvironmentVector& environ,
@@ -421,7 +423,7 @@ ChildProcessLauncher::ChildProcessLauncher(
   context_ = new Context();
   context_->Launch(
 #if defined(OS_WIN)
-      exposed_dir,
+      delegate,
 #elif defined(OS_ANDROID)
       ipcfd,
 #elif defined(OS_POSIX)

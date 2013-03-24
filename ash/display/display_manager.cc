@@ -54,6 +54,12 @@ typedef std::vector<DisplayInfo> DisplayInfoList;
 
 namespace {
 
+// List of value UI Scale values. These scales are equivalent to 1024,
+// 1280, 1600 and 1920 pixel width respectively on 2560 pixel width 2x
+// density display.
+const float kUIScales[] = {0.8f, 1.0f, 1.25f, 1.5f};
+const size_t kUIScaleTableSize = arraysize(kUIScales);
+
 struct DisplaySortFunctor {
   bool operator()(const gfx::Display& a, const gfx::Display& b) {
     return a.id() < b.id();
@@ -69,6 +75,14 @@ struct DisplayInfoSortFunctor {
 gfx::Display& GetInvalidDisplay() {
   static gfx::Display* invalid_display = new gfx::Display();
   return *invalid_display;
+}
+
+bool IsValidUIScale(float scale) {
+  for (size_t i = 0; i < kUIScaleTableSize; ++i) {
+    if (kUIScales[i] == scale)
+      return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -104,6 +118,21 @@ void DisplayManager::CycleDisplay() {
 // static
 void DisplayManager::ToggleDisplayScaleFactor() {
   Shell::GetInstance()->display_manager()->ScaleDisplayImpl();
+}
+
+// static
+float DisplayManager::GetNextUIScale(float scale, bool up) {
+  for (size_t i = 0; i < kUIScaleTableSize; ++i) {
+    if (kUIScales[i] == scale) {
+      if (up && i != kUIScaleTableSize -1)
+        return kUIScales[i + 1];
+      if (!up && i != 0)
+        return kUIScales[i - 1];
+      return kUIScales[i];
+    }
+  }
+  // Fallback to 1.0f if the |scale| wasn't in the list.
+  return 1.0f;
 }
 
 bool DisplayManager::IsActiveDisplay(const gfx::Display& display) const {
@@ -156,7 +185,7 @@ void DisplayManager::SetOverscanInsets(int64 display_id,
   DisplayInfoList display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
        iter != displays_.end(); ++iter) {
-    display_info_list.push_back(GetDisplayInfo(*iter));
+    display_info_list.push_back(GetDisplayInfo(iter->id()));
   }
   UpdateDisplays(display_info_list);
 }
@@ -166,7 +195,7 @@ void DisplayManager::ClearCustomOverscanInsets(int64 display_id) {
   DisplayInfoList display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
        iter != displays_.end(); ++iter) {
-    display_info_list.push_back(GetDisplayInfo(*iter));
+    display_info_list.push_back(GetDisplayInfo(iter->id()));
   }
   UpdateDisplays(display_info_list);
 }
@@ -178,9 +207,12 @@ void DisplayManager::SetDisplayRotation(int64 display_id,
   DisplayInfoList display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
        iter != displays_.end(); ++iter) {
-    DisplayInfo info = GetDisplayInfo(*iter);
-    if (info.id() == display_id)
+    DisplayInfo info = GetDisplayInfo(iter->id());
+    if (info.id() == display_id) {
+      if (info.rotation() == rotation)
+        return;
       info.set_rotation(rotation);
+    }
     display_info_list.push_back(info);
   }
   UpdateDisplays(display_info_list);
@@ -188,19 +220,39 @@ void DisplayManager::SetDisplayRotation(int64 display_id,
 
 void DisplayManager::SetDisplayUIScale(int64 display_id,
                                        float ui_scale) {
-  if (!IsDisplayUIScalingEnabled())
+  if (!IsDisplayUIScalingEnabled() || !IsValidUIScale(ui_scale))
     return;
+
   DisplayInfoList display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
        iter != displays_.end(); ++iter) {
-    DisplayInfo info = GetDisplayInfo(*iter);
-    if (info.id() == display_id)
+    DisplayInfo info = GetDisplayInfo(iter->id());
+    if (info.id() == display_id) {
+      if (info.ui_scale() == ui_scale)
+        return;
       info.set_ui_scale(ui_scale);
+    }
     display_info_list.push_back(info);
   }
   UpdateDisplays(display_info_list);
 }
 
+void DisplayManager::RegisterDisplayProperty(
+    int64 display_id,
+    gfx::Display::Rotation rotation,
+    float ui_scale,
+    const gfx::Insets* overscan_insets) {
+  if (display_info_.find(display_id) == display_info_.end()) {
+    display_info_[display_id] =
+        DisplayInfo(display_id, std::string(""), false);
+  }
+
+  display_info_[display_id].set_rotation(rotation);
+  if (IsValidUIScale(ui_scale))
+    display_info_[display_id].set_ui_scale(ui_scale);
+  if (overscan_insets)
+    display_info_[display_id].SetOverscanInsets(true, *overscan_insets);
+}
 
 bool DisplayManager::IsDisplayRotationEnabled() const {
   static bool enabled = !CommandLine::ForCurrentProcess()->
@@ -217,9 +269,12 @@ bool DisplayManager::IsDisplayUIScalingEnabled() const {
   // 2x density (currently Pixel).
   int64 display_id = gfx::Display::InternalDisplayId();
 #if defined(OS_CHROMEOS)
-  // On linux desktop, allow ui scaling on the first dislpay.
-  if (!base::chromeos::IsRunningOnChromeOS())
+  // On linux desktop, allow ui scaling on the first dislpay if an internal
+  // display isn't specified.
+  if (display_id == gfx::Display::kInvalidDisplayID &&
+      !base::chromeos::IsRunningOnChromeOS()) {
     display_id = Shell::GetInstance()->display_manager()->first_display_id();
+  }
 #endif
   return GetDisplayForId(display_id).device_scale_factor() == 2.0f;
 }
@@ -286,6 +341,15 @@ void DisplayManager::OnNativeDisplaysChanged(
   UpdateDisplays(new_display_info_list);
 }
 
+void DisplayManager::UpdateDisplays() {
+  DisplayInfoList display_info_list;
+  for (DisplayList::const_iterator iter = displays_.begin();
+       iter != displays_.end(); ++iter) {
+    display_info_list.push_back(GetDisplayInfo(iter->id()));
+  }
+  UpdateDisplays(display_info_list);
+}
+
 void DisplayManager::UpdateDisplays(
     const std::vector<DisplayInfo>& updated_display_info_list) {
   DisplayInfoList new_display_info_list = updated_display_info_list;
@@ -320,11 +384,12 @@ void DisplayManager::UpdateDisplays(
     } else if (curr_iter->id() == new_info_iter->id()) {
       const gfx::Display& current_display = *curr_iter;
       // Copy the info because |CreateDisplayFromInfo| updates the instance.
-      const DisplayInfo current_display_info = GetDisplayInfo(current_display);
+      const DisplayInfo current_display_info =
+          GetDisplayInfo(current_display.id());
       InsertAndUpdateDisplayInfo(*new_info_iter);
       gfx::Display new_display =
           CreateDisplayFromDisplayInfoById(new_info_iter->id());
-      const DisplayInfo& new_display_info = GetDisplayInfo(new_display);
+      const DisplayInfo& new_display_info = GetDisplayInfo(new_display.id());
       // TODO(oshima): Rotating square dislay doesn't work as the size
       // won't change. This doesn't cause a problem now as there is no
       // such display. This will be fixed by comparing the rotation as
@@ -371,6 +436,12 @@ void DisplayManager::UpdateDisplays(
   // being removed are accessed during shutting down the root.
   displays_.insert(displays_.end(), removed_displays.begin(),
                    removed_displays.end());
+  DisplayController* display_controller =
+      Shell::GetInstance()->display_controller();
+  // |display_controller| is NULL during the bootstrap.
+  if (display_controller)
+    display_controller->NotifyDisplayConfigurationChanging();
+
   for (DisplayList::const_reverse_iterator iter = removed_displays.rbegin();
        iter != removed_displays.rend(); ++iter) {
     Shell::GetInstance()->screen()->NotifyDisplayRemoved(displays_.back());
@@ -384,8 +455,10 @@ void DisplayManager::UpdateDisplays(
        iter != changed_display_indices.end(); ++iter) {
     Shell::GetInstance()->screen()->NotifyBoundsChanged(displays_[*iter]);
   }
-  EnsurePointerInDisplays();
+  if (display_controller)
+    display_controller->NotifyDisplayConfigurationChanged();
 
+  EnsurePointerInDisplays();
 #if defined(USE_X11) && defined(OS_CHROMEOS)
   if (!changed_display_indices.empty() && base::chromeos::IsRunningOnChromeOS())
     ui::ClearX11DefaultRootWindow();
@@ -403,10 +476,10 @@ const gfx::Display* DisplayManager::GetPrimaryDisplayCandidate() const {
     // On ChromeOS device, root windows are stacked vertically, and
     // default primary is the one on top.
     int count = GetNumDisplays();
-    int y = GetDisplayInfo(*primary_candidate).bounds_in_pixel().y();
+    int y = GetDisplayInfo(primary_candidate->id()).bounds_in_pixel().y();
     for (int i = 1; i < count; ++i) {
       const gfx::Display* display = &displays_[i];
-      const DisplayInfo& display_info = GetDisplayInfo(*display);
+      const DisplayInfo& display_info = GetDisplayInfo(display->id());
       if (display->IsInternal()) {
         primary_candidate = display;
         break;
@@ -422,6 +495,10 @@ const gfx::Display* DisplayManager::GetPrimaryDisplayCandidate() const {
 
 size_t DisplayManager::GetNumDisplays() const {
   return displays_.size();
+}
+
+bool DisplayManager::IsMirrored() const {
+  return mirrored_display_id_ != gfx::Display::kInvalidDisplayID;
 }
 
 const gfx::Display& DisplayManager::GetDisplayNearestWindow(
@@ -464,10 +541,9 @@ const gfx::Display& DisplayManager::GetDisplayMatching(
   return matching ? *matching : DisplayController::GetPrimaryDisplay();
 }
 
-const DisplayInfo& DisplayManager::GetDisplayInfo(
-    const gfx::Display& display) const {
+const DisplayInfo& DisplayManager::GetDisplayInfo(int64 display_id) const {
   std::map<int64, DisplayInfo>::const_iterator iter =
-      display_info_.find(display.id());
+      display_info_.find(display_id);
   CHECK(iter != display_info_.end());
   return iter->second;
 }
@@ -518,7 +594,7 @@ void DisplayManager::CycleDisplayImpl() {
   DCHECK(!displays_.empty());
   std::vector<DisplayInfo> new_display_info_list;
   new_display_info_list.push_back(
-      GetDisplayInfo(DisplayController::GetPrimaryDisplay()));
+      GetDisplayInfo(DisplayController::GetPrimaryDisplay().id()));
   // Add if there is only one display.
   if (displays_.size() == 1) {
     // Layout the 2nd display below the primary as with the real device.
@@ -526,8 +602,10 @@ void DisplayManager::CycleDisplayImpl() {
     gfx::Rect host_bounds =
         gfx::Rect(primary->GetHostOrigin(),  primary->GetHostSize());
     new_display_info_list.push_back(DisplayInfo::CreateFromSpec(
-        StringPrintf("%d+%d-500x400", host_bounds.x(), host_bounds.bottom())));
+        base::StringPrintf(
+            "%d+%d-500x400", host_bounds.x(), host_bounds.bottom())));
   }
+  num_connected_displays_ = new_display_info_list.size();
   UpdateDisplays(new_display_info_list);
 }
 
@@ -536,7 +614,7 @@ void DisplayManager::ScaleDisplayImpl() {
   std::vector<DisplayInfo> new_display_info_list;
   for (DisplayList::const_iterator iter = displays_.begin();
        iter != displays_.end(); ++iter) {
-    DisplayInfo display_info = GetDisplayInfo(*iter);
+    DisplayInfo display_info = GetDisplayInfo(iter->id());
     display_info.set_device_scale_factor(
         display_info.device_scale_factor() == 1.0f ? 2.0f : 1.0f);
     new_display_info_list.push_back(display_info);
@@ -613,9 +691,11 @@ void DisplayManager::InsertAndUpdateDisplayInfo(const DisplayInfo& new_info) {
   std::map<int64, DisplayInfo>::iterator info =
       display_info_.find(new_info.id());
   if (info != display_info_.end())
-    info->second.CopyFromNative(new_info);
-  else
+    info->second.Copy(new_info);
+  else {
     display_info_[new_info.id()] = new_info;
+    display_info_[new_info.id()].set_native(false);
+  }
   bool on_chromeos = false;
 #if defined(OS_CHROMEOS)
   on_chromeos = base::chromeos::IsRunningOnChromeOS();

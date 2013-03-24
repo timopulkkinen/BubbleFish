@@ -7,7 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "cc/software_output_device.h"
+#include "cc/output/software_output_device.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 
 namespace content {
@@ -17,15 +17,15 @@ namespace content {
 class CompositorSoftwareOutputDeviceGLAdapter
     : NON_EXPORTED_BASE(public cc::SoftwareOutputDevice),
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
-public:
+ public:
   CompositorSoftwareOutputDeviceGLAdapter(
       WebKit::WebGraphicsContext3D* context3d);
   virtual ~CompositorSoftwareOutputDeviceGLAdapter();
 
-  virtual void Resize(const gfx::Size& size) OVERRIDE;
+  virtual void Resize(gfx::Size size) OVERRIDE;
   virtual void EndPaint(cc::SoftwareFrameData* frame_data) OVERRIDE;
 
-private:
+ private:
   void InitShaders();
 
   unsigned program_;

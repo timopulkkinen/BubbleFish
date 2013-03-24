@@ -20,6 +20,8 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
+#include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,6 +41,7 @@ class ExtensionFileUtilTest : public testing::Test {
     (new extensions::DefaultLocaleHandler)->Register();
     (new extensions::IconsHandler)->Register();
     (new extensions::PageActionHandler)->Register();
+    (new extensions::ContentScriptsHandler)->Register();
   }
 
   virtual void TearDown() OVERRIDE {
@@ -171,8 +174,13 @@ TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesOnlyReserved) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
-  ASSERT_TRUE(file_util::CreateDirectory(src_path));
+  const base::FilePath::CharType* folders[] =
+      { extensions::kLocaleFolder, extensions::kPlatformSpecificFolder };
+
+  for (size_t i = 0; i < arraysize(folders); i++) {
+    base::FilePath src_path = temp.path().Append(folders[i]);
+    ASSERT_TRUE(file_util::CreateDirectory(src_path));
+  }
 
   std::string error;
   EXPECT_TRUE(extension_file_util::CheckForIllegalFilenames(temp.path(),
@@ -183,7 +191,7 @@ TEST_F(ExtensionFileUtilTest, CheckIllegalFilenamesReservedAndIllegal) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().Append(Extension::kLocaleFolder);
+  base::FilePath src_path = temp.path().Append(extensions::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(src_path));
 
   src_path = temp.path().AppendASCII("_some_dir");

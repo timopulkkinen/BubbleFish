@@ -204,6 +204,7 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
     private int mViewportHeightPix;
     private int mPhysicalBackingWidthPix;
     private int mPhysicalBackingHeightPix;
+    private int mOverdrawBottomHeightPix;
 
     // Cached copy of all positions and scales as reported by the renderer.
     private final RenderCoordinates mRenderCoordinates;
@@ -800,6 +801,11 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
     @CalledByNative
     public int getPhysicalBackingHeightPix() { return mPhysicalBackingHeightPix; }
 
+    /**
+     * @return Amount the output surface extends past the bottom of the window viewport.
+     */
+    @CalledByNative
+    public int getOverdrawBottomHeightPix() { return mOverdrawBottomHeightPix; }
 
     /**
      * @see android.webkit.WebView#getContentHeight()
@@ -1180,7 +1186,7 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
         if (mNativeContentViewCore != 0) {
             int pid = nativeGetCurrentRenderProcessId(mNativeContentViewCore);
             if (pid > 0) {
-                SandboxedProcessLauncher.bindAsHighPriority(pid);
+                ChildProcessLauncher.bindAsHighPriority(pid);
             }
         }
         setAccessibilityState(true);
@@ -1195,7 +1201,7 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
         if (mNativeContentViewCore != 0) {
             int pid = nativeGetCurrentRenderProcessId(mNativeContentViewCore);
             if (pid > 0) {
-                SandboxedProcessLauncher.unbindAsHighPriority(pid);
+                ChildProcessLauncher.unbindAsHighPriority(pid);
             }
         }
         setAccessibilityState(false);
@@ -1288,6 +1294,20 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
 
         mPhysicalBackingWidthPix = wPix;
         mPhysicalBackingHeightPix = hPix;
+
+        if (mNativeContentViewCore != 0) {
+            nativeWasResized(mNativeContentViewCore);
+        }
+    }
+
+    /**
+     * Called when the amount the surface is overdrawing off the bottom has changed.
+     * @param overdrawHeightPix The overdraw height.
+     */
+    public void onOverdrawBottomHeightChanged(int overdrawHeightPix) {
+        if (mOverdrawBottomHeightPix == overdrawHeightPix) return;
+
+        mOverdrawBottomHeightPix = overdrawHeightPix;
 
         if (mNativeContentViewCore != 0) {
             nativeWasResized(mNativeContentViewCore);
@@ -2133,10 +2153,10 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
     private void onRenderProcessSwap(int oldPid, int newPid) {
         if (mAttachedToWindow && oldPid != newPid) {
             if (oldPid > 0) {
-                SandboxedProcessLauncher.unbindAsHighPriority(oldPid);
+                ChildProcessLauncher.unbindAsHighPriority(oldPid);
             }
             if (newPid > 0) {
-                SandboxedProcessLauncher.bindAsHighPriority(newPid);
+                ChildProcessLauncher.bindAsHighPriority(newPid);
             }
         }
     }
@@ -2558,6 +2578,23 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
         return new Rect(x, y, right, bottom);
     }
 
+    public void attachExternalVideoSurface(int playerId, Surface surface) {
+        if (mNativeContentViewCore != 0) {
+            nativeAttachExternalVideoSurface(mNativeContentViewCore, playerId, surface);
+        }
+    }
+
+    public void detachExternalVideoSurface(int playerId) {
+        if (mNativeContentViewCore != 0) {
+            nativeDetachExternalVideoSurface(mNativeContentViewCore, playerId);
+        }
+    }
+
+    @CalledByNative
+    private void requestExternalVideoSurface(int playerId) {
+        getContentViewClient().onExternalVideoSurfaceRequested(playerId);
+    }
+
     private native int nativeInit(boolean hardwareAccelerated, boolean inputEventsDeliveredAtVSync,
             int webContentsPtr, int windowAndroidPtr);
 
@@ -2721,4 +2758,10 @@ public class ContentViewCore implements MotionEventDelegate, NavigationClient {
             int nativeContentViewCoreImpl, boolean enable);
 
     private native void nativeShowImeIfNeeded(int nativeContentViewCoreImpl);
+
+    private native void nativeAttachExternalVideoSurface(
+            int nativeContentViewCoreImpl, int playerId, Surface surface);
+
+    private native void nativeDetachExternalVideoSurface(
+            int nativeContentViewCoreImpl, int playerId);
 }

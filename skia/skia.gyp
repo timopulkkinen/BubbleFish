@@ -87,6 +87,10 @@
         '../third_party/skia/src/pdf/SkPDFUtils.cpp',
         '../third_party/skia/src/pdf/SkPDFUtils.h',
 
+        #'../third_party/skia/src/ports/SkPurgeableMemoryBlock_android.cpp',
+        #'../third_party/skia/src/ports/SkPurgeableMemoryBlock_mac.cpp',
+        '../third_party/skia/src/ports/SkPurgeableMemoryBlock_none.cpp',
+
         '../third_party/skia/src/ports/FontHostConfiguration_android.cpp',
         #'../third_party/skia/src/ports/SkFontHost_FONTPATH.cpp',
         '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
@@ -94,7 +98,6 @@
         '../third_party/skia/src/ports/SkFontHost_FreeType_common.h',
         '../third_party/skia/src/ports/SkFontHost_android.cpp',
         #'../third_party/skia/src/ports/SkFontHost_ascender.cpp',
-        '../third_party/skia/src/ports/SkFontHost_tables.cpp',
         #'../third_party/skia/src/ports/SkFontHost_linux.cpp',
         '../third_party/skia/src/ports/SkFontHost_mac.cpp',
         #'../third_party/skia/src/ports/SkFontHost_none.cpp',
@@ -215,6 +218,7 @@
         '../third_party/skia/src/image',
         '../third_party/skia/src/sfnt',
         '../third_party/skia/src/utils',
+        '../third_party/skia/src/lazy',
       ],
       'msvs_disabled_warnings': [4244, 4267, 4341, 4345, 4390, 4554, 4748, 4800],
       'defines': [
@@ -339,14 +343,6 @@
         [ 'OS != "win"', {
           'sources/': [ ['exclude', '_win\\.(cc|cpp)$'] ],
         }],
-        [ 'chromeos == 1', {
-          'defines': [
-            # Temporarily use SkPaint to keep a scale factor needed for correct
-            # font rendering in high DPI mode.
-            # See https://codereview.appspot.com/6495089/
-            'SK_SUPPORT_HINTING_SCALE_FACTOR',
-          ],
-        }],
         [ 'armv7 == 1', {
           'defines': [
             '__ARM_ARCH__=7',
@@ -376,9 +372,6 @@
           'sources': [
             '../third_party/skia/src/ports/SkFontHost_fontconfig.cpp',
             '../third_party/skia/src/ports/SkFontConfigInterface_direct.cpp',
-          ],
-          'sources!': [
-            '../third_party/skia/src/ports/SkFontHost_tables.cpp',
           ],
           'defines': [
 #            'SK_USE_COLOR_LUMINANCE',
@@ -480,7 +473,6 @@
             ['exclude', '/pdf/'],
             ['exclude', '^ext/vector_platform_device_skia\\.'],
             ['exclude', 'opts_check_SSE2\\.cpp$'],
-            ['exclude', 'SkFontHost_tables\\.cpp$',],
           ],
         }],
         [ 'OS == "mac"', {
@@ -499,11 +491,6 @@
           },
           'sources': [
             '../third_party/skia/src/utils/mac/SkStream_mac.cpp',
-          ],
-          'sources!': [
-            # The mac's fonthost implements the table methods natively,
-            # so no need for these generic versions.
-            '../third_party/skia/src/ports/SkFontHost_tables.cpp',
           ],
         }],
         [ 'OS == "win"', {
@@ -585,11 +572,6 @@
           'SK_ENABLE_INST_COUNT=0',
         ],
         'conditions': [
-          [ 'chromeos == 1', {
-            'defines': [
-            'SK_SUPPORT_HINTING_SCALE_FACTOR',
-          ],
-          }],
           ['OS=="android"', {
             'dependencies!': [
               'skia_opts',

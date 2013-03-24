@@ -56,7 +56,7 @@
 #include "content/public/test/test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -1154,7 +1154,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
       // We don't expect to pick up a running prerender, so instead
       // observe one navigation.
       content::TestNavigationObserver observer(
-          content::NotificationService::AllSources(), NULL, 1);
+          content::NotificationService::AllSources(), 1);
       base::RunLoop run_loop;
       observer.WaitForObservation(
           base::Bind(&content::RunThisRunLoop,
@@ -1813,7 +1813,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 // See crbug.com/131836.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderTaskManager) {
   // Show the task manager. This populates the model.
-  current_browser()->window()->ShowTaskManager();
+  chrome::OpenTaskManager(current_browser(), false);
   // Wait for the model of task manager to start.
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 

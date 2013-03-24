@@ -288,7 +288,7 @@ extern const char kShow3gPromoNotification[];
 extern const char kChromeOSReleaseNotesVersion[];
 extern const char kUseSharedProxies[];
 extern const char kEnableCrosDRM[];
-extern const char kDisplayOverscans[];
+extern const char kDisplayProperties[];
 extern const char kPrimaryDisplayID[];
 extern const char kSecondaryDisplayLayout[];
 extern const char kSecondaryDisplayOffset[];
@@ -298,10 +298,12 @@ extern const char kSessionLengthLimit[];
 extern const char kPowerAcScreenDimDelayMs[];
 extern const char kPowerAcScreenOffDelayMs[];
 extern const char kPowerAcScreenLockDelayMs[];
+extern const char kPowerAcIdleWarningDelayMs[];
 extern const char kPowerAcIdleDelayMs[];
 extern const char kPowerBatteryScreenDimDelayMs[];
 extern const char kPowerBatteryScreenOffDelayMs[];
 extern const char kPowerBatteryScreenLockDelayMs[];
+extern const char kPowerBatteryIdleWarningDelayMs[];
 extern const char kPowerBatteryIdleDelayMs[];
 extern const char kPowerIdleAction[];
 extern const char kPowerLidClosedAction[];
@@ -446,6 +448,7 @@ extern const char kBookmarkPromptEnabled[];
 extern const char kBookmarkPromptImpressionCount[];
 
 extern const char kVariationsLastFetchTime[];
+extern const char kVariationsRestrictParameter[];
 extern const char kVariationsSeed[];
 extern const char kVariationsSeedDate[];
 
@@ -591,10 +594,10 @@ extern const char kDevToolsOpenDocked[];
 extern const char kDevToolsRemoteEnabled[];
 #endif
 extern const char kDevToolsVSplitLocation[];
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 // Used by Chrome Mobile.
 extern const char kSpdyProxyAuthEnabled[];
-#endif
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 extern const char kSigninAllowed[];
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasSetupCompleted[];
@@ -735,6 +738,8 @@ extern const char kUsersWallpaperInfo[];
 extern const char kAudioOutputAllowed[];
 extern const char kOwnerPrimaryMouseButtonRight[];
 extern const char kOwnerTapToClickEnabled[];
+extern const char kUptimeLimit[];
+extern const char kRebootAfterUpdate[];
 #endif
 
 extern const char kClearPluginLSODataEnabled[];
@@ -764,6 +769,11 @@ extern const char kBuiltInDnsClientEnabled[];
 
 extern const char kHttpReceivedContentLength[];
 extern const char kHttpOriginalContentLength[];
+#if defined(OS_ANDROID) || defined(OS_IOS)
+extern const char kDailyHttpOriginalContentLength[];
+extern const char kDailyHttpReceivedContentLength[];
+extern const char kDailyHttpContentLengthLastUpdateDate[];
+#endif
 
 extern const char kRegisteredProtocolHandlers[];
 extern const char kIgnoredProtocolHandlers[];

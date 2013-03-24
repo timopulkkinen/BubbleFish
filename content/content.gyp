@@ -295,8 +295,8 @@
             'aidl_interface_file': 'public/android/java/src/org/chromium/content/common/common.aidl',
           },
           'sources': [
-            'public/android/java/src/org/chromium/content/common/ISandboxedProcessCallback.aidl',
-            'public/android/java/src/org/chromium/content/common/ISandboxedProcessService.aidl',
+            'public/android/java/src/org/chromium/content/common/IChildProcessCallback.aidl',
+            'public/android/java/src/org/chromium/content/common/IChildProcessService.aidl',
           ],
           'includes': [ '../build/java_aidl.gypi' ],
         },
@@ -360,7 +360,6 @@
           'variables': {
             'jni_gen_package': 'content',
             'input_java_class': 'android/graphics/SurfaceTexture.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
@@ -370,7 +369,6 @@
           'variables': {
             'jni_gen_package': 'content',
             'input_java_class': 'android/view/Surface.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
@@ -380,7 +378,6 @@
           'variables': {
             'jni_gen_package': 'content',
             'input_java_class': 'java/util/HashSet.class',
-            'input_jar_file': '<(android_sdk)/android.jar',
           },
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },

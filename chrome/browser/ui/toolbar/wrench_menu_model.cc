@@ -16,9 +16,9 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/instant/search.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
@@ -30,6 +30,7 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/send_feedback_experiment.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -85,6 +86,7 @@ string16 GetUpgradeDialogMenuItemName() {
     return l10n_util::GetStringUTF16(IDS_UPDATE_NOW);
   }
 }
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -203,8 +205,17 @@ void ToolsMenuModel::Build(Browser* browser) {
 /*
 #if !defined(OS_CHROMEOS)
   // Show IDC_FEEDBACK in "Tools" menu for non-ChromeOS platforms.
-  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  if (!chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+#else
+  if (chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 #endif
 
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
@@ -613,8 +624,11 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
     }
   }
 
-  if (browser_defaults::kShowFeedbackMenuItem)
-    AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
+  if (browser_defaults::kShowFeedbackMenuItem &&
+      !chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+  }
 
   AddGlobalErrorMenuItems();
 
@@ -628,10 +642,20 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
   if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
     show_exit_menu = false;
 #endif
-  if (show_exit_menu) {
+  if (show_exit_menu)
     AddSeparator(ui::NORMAL_SEPARATOR);
-    AddItemWithStringId(IDC_EXIT, IDS_EXIT);
+
+#if !defined(OS_CHROMEOS)
+  // For Send Feedback Link experiment (crbug.com/169339).
+  if (chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
   }
+#endif
+
+  if (show_exit_menu)
+    AddItemWithStringId(IDC_EXIT, IDS_EXIT);
 
   if (is_new_menu && supports_new_separators &&
       !ui::NativeTheme::IsNewMenuStyleEnabled()) {

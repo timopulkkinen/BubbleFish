@@ -8,8 +8,8 @@
 #include "base/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
@@ -799,11 +799,6 @@ void FileBrowserEventRouter::OnDiskRemoved(
   VLOG(1) << "Disk removed: " << disk->device_path();
 
   if (!disk->mount_path().empty()) {
-    if (!suspend_state_delegate_->SystemIsResuming()) {
-      notifications_->ShowNotification(
-          FileBrowserNotifications::DEVICE_HARD_UNPLUG,
-          disk->system_path_prefix());
-    }
     DiskMountManager::GetInstance()->UnmountPath(
         disk->mount_path(),
         chromeos::UNMOUNT_OPTIONS_LAZY,

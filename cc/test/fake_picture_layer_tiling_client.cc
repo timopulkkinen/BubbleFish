@@ -8,7 +8,8 @@ namespace cc {
 
 class FakeInfinitePicturePileImpl : public PicturePileImpl {
  public:
-  FakeInfinitePicturePileImpl() {
+  FakeInfinitePicturePileImpl()
+      : PicturePileImpl(false) {
     gfx::Size size(std::numeric_limits<int>::max(),
                    std::numeric_limits<int>::max());
     Resize(size);
@@ -20,7 +21,13 @@ class FakeInfinitePicturePileImpl : public PicturePileImpl {
 };
 
 FakePictureLayerTilingClient::FakePictureLayerTilingClient()
-    : tile_manager_(&tile_manager_client_, NULL, 1, false, false, false),
+    : tile_manager_(&tile_manager_client_,
+                    NULL,
+                    1,
+                    false,
+                    false,
+                    false,
+                    &stats_instrumentation_),
       pile_(new FakeInfinitePicturePileImpl()) {
 }
 

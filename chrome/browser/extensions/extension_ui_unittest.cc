@@ -13,8 +13,11 @@
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
@@ -28,6 +31,8 @@ class ExtensionUITest : public testing::Test {
 
  protected:
   virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
+
     // Create an ExtensionService and ManagementPolicy to inject into the
     // ExtensionSettingsHandler.
     profile_.reset(new TestingProfile());
@@ -40,6 +45,8 @@ class ExtensionUITest : public testing::Test {
 
     handler_.reset(new ExtensionSettingsHandler(extension_service_,
                                                 management_policy_));
+
+    (new extensions::ContentScriptsHandler)->Register();
   }
 
   virtual void TearDown() OVERRIDE {
@@ -47,6 +54,8 @@ class ExtensionUITest : public testing::Test {
     profile_.reset();
     // Execute any pending deletion tasks.
     message_loop_.RunUntilIdle();
+    extensions::ManifestHandler::ClearRegistryForTesting();
+    testing::Test::TearDown();
   }
 
   static DictionaryValue* DeserializeJSONTestData(const base::FilePath& path,
@@ -66,7 +75,7 @@ class ExtensionUITest : public testing::Test {
     std::string error;
 
     base::FilePath manifest_path = extension_path.Append(
-        Extension::kManifestFilename);
+        extensions::kManifestFilename);
     scoped_ptr<DictionaryValue> extension_data(DeserializeJSONTestData(
         manifest_path, &error));
     EXPECT_EQ("", error);

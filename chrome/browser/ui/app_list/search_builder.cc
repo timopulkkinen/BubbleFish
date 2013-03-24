@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -343,7 +344,7 @@ void SearchBuilder::StartSearch() {
   // are not implemented.
   // TODO(xiyuan): Figure out the features that need to support here.
   controller_->Start(AutocompleteInput(search_box_->text(), string16::npos,
-                                       string16(), false, false, true,
+                                       string16(), GURL(), false, false, true,
                                        AutocompleteInput::ALL_MATCHES));
 }
 
@@ -364,6 +365,9 @@ void SearchBuilder::OpenResult(const app_list::SearchResult& result,
     const extensions::Extension* extension =
         GetExtensionByURL(profile_, match.destination_url);
     if (extension) {
+      AppLauncherHandler::RecordAppLaunchType(
+          extension_misc::APP_LAUNCH_APP_LIST_SEARCH,
+          extension->GetType());
       content::RecordAction(
           content::UserMetricsAction("AppList_ClickOnAppFromSearch"));
       list_controller_->ActivateApp(profile_, extension, event_flags);

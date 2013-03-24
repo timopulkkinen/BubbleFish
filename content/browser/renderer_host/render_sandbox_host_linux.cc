@@ -223,7 +223,14 @@ class SandboxIPCProcess  {
       reply.WriteBool(true);
     }
 
+    // The receiver will have its own access to the file, so we will close it
+    // after this send.
     SendRendererReply(fds, reply, result_fd);
+
+    if (result_fd >= 0) {
+      int err = HANDLE_EINTR(close(result_fd));
+      DCHECK(!err);
+    }
   }
 
   void HandleGetFontFamilyForChars(int fd, const Pickle& pickle,

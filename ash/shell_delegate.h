@@ -92,6 +92,9 @@ class ASH_EXPORT ShellDelegate {
   // Returns true if we're logged in and browser has been started
   virtual bool IsSessionStarted() const = 0;
 
+  // Returns true if we're logged in as guest.
+  virtual bool IsGuestSession() const = 0;
+
   // Returns true if this is the first time that the shell has been run after
   // the system has booted.  false is returned after the shell has been
   // restarted, typically due to logging in as a guest or logging out.
@@ -112,6 +115,10 @@ class ASH_EXPORT ShellDelegate {
 
   // Returns true if the screen is currently locked.
   virtual bool IsScreenLocked() const = 0;
+
+  // Called before processing |Shell::Init()| so that the delegate
+  // can perform tasks necessary before the shell is initialized.
+  virtual void PreInit() = 0;
 
   // Shuts down the environment.
   virtual void Shutdown() = 0;

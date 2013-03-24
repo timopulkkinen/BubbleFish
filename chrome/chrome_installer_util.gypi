@@ -55,6 +55,8 @@
           'installer/util/google_chrome_sxs_distribution.h',
           'installer/util/google_update_constants.cc',
           'installer/util/google_update_constants.h',
+          'installer/util/google_update_experiment_util.cc',
+          'installer/util/google_update_experiment_util.h',
           'installer/util/google_update_settings.cc',
           'installer/util/google_update_settings.h',
           'installer/util/google_update_util.cc',
@@ -205,11 +207,14 @@
           'target_name': 'installer_util',
           'type': 'static_library',
           'dependencies': [
+            '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
             '<(DEPTH)/chrome/common_constants.gyp:common_constants',
           ],
           'sources': [
+            'installer/util/google_update_experiment_util.cc',
+            'installer/util/google_update_experiment_util.h',
             'installer/util/master_preferences.cc',
             'installer/util/master_preferences.h',
             'installer/util/master_preferences_constants.cc',

@@ -20,10 +20,14 @@
       # This part is shared between the targets defined below.
       ['ppapi_shared_target==1', {
         'sources': [
+          'shared_impl/array_var.cc',
+          'shared_impl/array_var.h',
           'shared_impl/array_writer.cc',
           'shared_impl/array_writer.h',
           'shared_impl/callback_tracker.cc',
           'shared_impl/callback_tracker.h',
+          'shared_impl/dictionary_var.cc',
+          'shared_impl/dictionary_var.h',
           'shared_impl/file_io_state_manager.cc',
           'shared_impl/file_io_state_manager.h',
           'shared_impl/file_path.cc',
@@ -111,6 +115,8 @@
           'shared_impl/var.h',
           'shared_impl/var_tracker.cc',
           'shared_impl/var_tracker.h',
+          'shared_impl/var_value_conversions.cc',
+          'shared_impl/var_value_conversions.h',
           # TODO(viettrungluu): Split these out; it won't be used in NaCl.
           'shared_impl/private/net_address_private_impl.cc',
           'shared_impl/private/net_address_private_impl.h',
@@ -139,7 +145,6 @@
           'thunk/ppb_browser_font_trusted_thunk.cc',
           'thunk/ppb_buffer_api.h',
           'thunk/ppb_buffer_thunk.cc',
-          'thunk/ppb_buffer_trusted_api.h',
           'thunk/ppb_buffer_trusted_thunk.cc',
           'thunk/ppb_char_set_thunk.cc',
           'thunk/ppb_console_thunk.cc',
@@ -204,6 +209,7 @@
           'thunk/ppb_network_monitor_private_api.h',
           'thunk/ppb_network_monitor_private_thunk.cc',
           'thunk/ppb_pdf_api.h',
+          'thunk/ppb_pdf_thunk.cc',
           'thunk/ppb_printing_api.h',
           'thunk/ppb_printing_thunk.cc',
           'thunk/ppb_resource_array_api.h',
@@ -229,6 +235,8 @@
           'thunk/ppb_url_response_info_api.h',
           'thunk/ppb_url_response_info_thunk.cc',
           'thunk/ppb_url_util_thunk.cc',
+          'thunk/ppb_var_array_thunk.cc',
+          'thunk/ppb_var_dictionary_thunk.cc',
           'thunk/ppb_video_capture_api.h',
           'thunk/ppb_video_capture_thunk.cc',
           'thunk/ppb_video_decoder_api.h',

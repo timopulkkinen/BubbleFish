@@ -23,6 +23,10 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
+
 namespace app_list {
 
 namespace {
@@ -94,10 +98,10 @@ void AppListView::InitAsBubble(
   SetBubbleArrowLocation(arrow_location);
 
 #if defined(USE_AURA)
+  GetWidget()->GetNativeWindow()->layer()->SetMasksToBounds(true);
   GetBubbleFrameView()->set_background(new AppListBackground(
       GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius(),
       app_list_main_view_->search_box_view()));
-
   set_background(NULL);
 #else
   set_background(new AppListBackground(
@@ -141,6 +145,10 @@ gfx::Size AppListView::GetPreferredSize() {
 
 bool AppListView::ShouldHandleSystemCommands() const {
   return true;
+}
+
+void AppListView::Prerender() {
+  app_list_main_view_->Prerender();
 }
 
 views::View* AppListView::GetInitiallyFocusedView() {

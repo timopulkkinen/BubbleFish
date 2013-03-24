@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/download/byte_stream.h"
+#include "content/browser/byte_stream.h"
 #include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
 
@@ -18,6 +18,8 @@ class IOBuffer;
 
 namespace content {
 
+class StreamHandle;
+class StreamHandleImpl;
 class StreamReadObserver;
 class StreamRegistry;
 class StreamWriteObserver;
@@ -49,6 +51,9 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   // Removes the read observer.  |observer| must be the current observer.
   void RemoveReadObserver(StreamReadObserver* observer);
 
+  // Removes the write observer.  |observer| must be the current observer.
+  void RemoveWriteObserver(StreamWriteObserver* observer);
+
   // Adds the data in |buffer| to the stream.  Takes ownership of |buffer|.
   void AddData(scoped_refptr<net::IOBuffer> buffer, size_t size);
 
@@ -60,6 +65,10 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   // Returns STREAM_HAS_DATA if data was read, STREAM_EMPTY if no data was read,
   // and STREAM_COMPLETE if the stream is finalized and all data has been read.
   StreamState ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
+
+  scoped_ptr<StreamHandle> CreateHandle(const GURL& original_url,
+                                        const std::string& mime_type);
+  void CloseHandle();
 
   // Indicates whether there is space in the buffer to add more data.
   bool can_add_data() const { return can_add_data_; }
@@ -76,7 +85,7 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   void OnSpaceAvailable();
   void OnDataAvailable();
 
-  size_t bytes_read_;
+  size_t data_bytes_read_;
   bool can_add_data_;
 
   GURL security_origin_;
@@ -91,6 +100,8 @@ class CONTENT_EXPORT Stream : public base::RefCountedThreadSafe<Stream> {
   StreamRegistry* registry_;
   StreamReadObserver* read_observer_;
   StreamWriteObserver* write_observer_;
+
+  StreamHandleImpl* stream_handle_;
 
   base::WeakPtrFactory<Stream> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(Stream);

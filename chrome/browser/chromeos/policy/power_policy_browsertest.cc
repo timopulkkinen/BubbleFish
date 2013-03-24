@@ -16,6 +16,7 @@
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
 #include "chromeos/dbus/mock_power_manager_client.h"
 #include "chromeos/dbus/mock_session_manager_client.h"
+#include "chromeos/dbus/mock_update_engine_client.h"
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -46,6 +47,7 @@ MATCHER_P(PowerManagementPolicyMatches, expected_power_management_policy,
   pm::PowerManagementPolicy actual(arg);
   actual.mutable_ac_delays();
   actual.mutable_battery_delays();
+  actual.clear_reason();
   return actual.SerializeAsString() == expected.SerializeAsString();
 }
 
@@ -73,6 +75,10 @@ void PowerPolicyBrowserTest::SetUpInProcessBrowserTestFixture() {
   chromeos::DBusThreadManager::InitializeForTesting(dbus_thread_manager);
   EXPECT_CALL(*dbus_thread_manager->mock_session_manager_client(),
               RetrieveUserPolicy(_));
+  EXPECT_CALL(*dbus_thread_manager->mock_update_engine_client(),
+              GetLastStatus())
+      .Times(1)
+      .WillOnce(Return(chromeos::MockUpdateEngineClient::Status()));
   power_manager_client_ = dbus_thread_manager->mock_power_manager_client();
   EXPECT_CALL(provider_, IsInitializationComplete(_))
       .WillRepeatedly(Return(true));
@@ -127,6 +133,13 @@ IN_PROC_BROWSER_TEST_F(PowerPolicyBrowserTest, SetPowerPolicy) {
       power_management_policy);
 
   power_management_policy.Clear();
+  power_management_policy.mutable_ac_delays()->set_idle_warning_ms(900000);
+  SetUserPolicyAndVerifyPowerManagementPolicy(
+      key::kIdleWarningDelayAC,
+      base::Value::CreateIntegerValue(900000),
+      power_management_policy);
+
+  power_management_policy.Clear();
   power_management_policy.mutable_ac_delays()->set_screen_off_ms(900000);
   SetUserPolicyAndVerifyPowerManagementPolicy(
       key::kScreenOffDelayAC,
@@ -151,6 +164,13 @@ IN_PROC_BROWSER_TEST_F(PowerPolicyBrowserTest, SetPowerPolicy) {
   power_management_policy.mutable_battery_delays()->set_idle_ms(900000);
   SetUserPolicyAndVerifyPowerManagementPolicy(
       key::kIdleDelayBattery,
+      base::Value::CreateIntegerValue(900000),
+      power_management_policy);
+
+  power_management_policy.Clear();
+  power_management_policy.mutable_battery_delays()->set_idle_warning_ms(900000);
+  SetUserPolicyAndVerifyPowerManagementPolicy(
+      key::kIdleWarningDelayBattery,
       base::Value::CreateIntegerValue(900000),
       power_management_policy);
 

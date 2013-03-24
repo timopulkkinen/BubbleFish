@@ -7,13 +7,13 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/timer.h"
 #include "ui/gfx/screen.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_constants.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
-#include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/notification_view.h"
 #include "ui/views/background.h"
 #include "ui/views/layout/fill_layout.h"
@@ -26,12 +26,11 @@ namespace message_center {
 class ToastContentsView : public views::WidgetDelegateView {
  public:
   ToastContentsView(const Notification* notification,
-                    MessagePopupCollection* collection)
+                    base::WeakPtr<MessagePopupCollection> collection)
       : collection_(collection) {
     DCHECK(collection_);
 
     set_notify_enter_exit_on_child(true);
-    SetLayoutManager(new views::FillLayout());
     // Sets the transparent background. Then, when the message view is slid out,
     // the whole toast seems to slide although the actual bound of the widget
     // remains. This is hacky but easier to keep the consistency.
@@ -47,13 +46,11 @@ class ToastContentsView : public views::WidgetDelegateView {
     views::Widget::InitParams params(
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.keep_on_top = true;
-    params.context = context;
+    if (context)
+      params.context = context;
+    else
+      params.top_level = true;
     params.transparent = true;
-    // The origin of the initial bounds are set to (0, 0). It'll then moved by
-    // MessagePopupCollection.
-    params.bounds = gfx::Rect(
-        gfx::Size(kWebNotificationWidth,
-                  GetHeightForWidth(kWebNotificationWidth)));
     params.delegate = this;
     views::Widget* widget = new views::Widget();
     widget->set_focus_on_creation(false);
@@ -67,7 +64,8 @@ class ToastContentsView : public views::WidgetDelegateView {
     views::Widget* widget = GetWidget();
     if (widget) {
       gfx::Rect bounds = widget->GetWindowBoundsInScreen();
-      bounds.set_height(view->GetHeightForWidth(kWebNotificationWidth));
+      bounds.set_width(kNotificationWidth);
+      bounds.set_height(view->GetHeightForWidth(kNotificationWidth));
       widget->SetBounds(bounds);
     }
     Layout();
@@ -106,23 +104,42 @@ class ToastContentsView : public views::WidgetDelegateView {
   }
 
   virtual bool CanActivate() const OVERRIDE {
+#if defined(OS_WIN) && defined(USE_AURA)
+    return true;
+#else
     return false;
+#endif
   }
 
   // Overridden from views::View:
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE {
-    collection_->OnMouseEntered();
+    if (collection_)
+      collection_->OnMouseEntered();
   }
 
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE {
-    collection_->OnMouseExited();
+    if (collection_)
+      collection_->OnMouseExited();
+  }
+
+  virtual void Layout() OVERRIDE {
+    if (child_count() > 0)
+      child_at(0)->SetBounds(x(), y(), width(), height());
+  }
+
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
+    if (child_count() == 0)
+      return gfx::Size();
+
+    return gfx::Size(kNotificationWidth,
+                     child_at(0)->GetHeightForWidth(kNotificationWidth));
   }
 
  private:
   base::TimeDelta delay_;
   base::Time start_time_;
   base::OneShotTimer<views::Widget> timer_;
-  MessagePopupCollection* collection_;
+  base::WeakPtr<MessagePopupCollection> collection_;
 
   DISALLOW_COPY_AND_ASSIGN(ToastContentsView);
 };
@@ -132,6 +149,7 @@ MessagePopupCollection::MessagePopupCollection(gfx::NativeView context,
     : context_(context),
       message_center_(message_center) {
   DCHECK(message_center_);
+  UpdatePopups();
 }
 
 MessagePopupCollection::~MessagePopupCollection() {
@@ -147,8 +165,17 @@ void MessagePopupCollection::UpdatePopups() {
     return;
   }
 
-  gfx::Screen* screen = gfx::Screen::GetScreenFor(context_);
-  gfx::Rect work_area = screen->GetDisplayNearestWindow(context_).work_area();
+  gfx::Rect work_area;
+  if (!context_) {
+    // On Win+Aura, we don't have a context since the popups currently show up
+    // on the Windows desktop, not in the Aura/Ash desktop.  This code will
+    // display the popups on the primary display.
+    gfx::Screen* screen = gfx::Screen::GetNativeScreen();
+    work_area = screen->GetPrimaryDisplay().work_area();
+  } else {
+    gfx::Screen* screen = gfx::Screen::GetScreenFor(context_);
+    work_area = screen->GetDisplayNearestWindow(context_).work_area();
+  }
 
   std::set<std::string> old_toast_ids;
   for (ToastContainer::iterator iter = toasts_.begin(); iter != toasts_.end();
@@ -157,14 +184,14 @@ void MessagePopupCollection::UpdatePopups() {
   }
 
   int bottom = work_area.bottom() - kMarginBetweenItems;
-  int left = work_area.right() - kWebNotificationWidth - kMarginBetweenItems;
+  int left = work_area.right() - kNotificationWidth - kMarginBetweenItems;
   // Iterate in the reverse order to keep the oldest toasts on screen. Newer
   // items may be ignored if there are no room to place them.
   for (NotificationList::PopupNotifications::const_reverse_iterator iter =
            popups.rbegin(); iter != popups.rend(); ++iter) {
     MessageView* view =
         NotificationView::Create(*(*iter), message_center_, true);
-    int view_height = view->GetHeightForWidth(kWebNotificationWidth);
+    int view_height = view->GetHeightForWidth(kNotificationWidth);
     if (bottom - view_height - kMarginBetweenItems < 0) {
       delete view;
       break;
@@ -179,9 +206,9 @@ void MessagePopupCollection::UpdatePopups() {
       // image loads.
       toast_iter->second->SetContents(view);
     } else {
-      ToastContentsView* toast = new ToastContentsView(*iter, this);
-      toast->SetContents(view);
+      ToastContentsView* toast = new ToastContentsView(*iter, AsWeakPtr());
       widget = toast->CreateWidget(context_);
+      toast->SetContents(view);
       widget->AddObserver(this);
       toast->StartTimer();
       toasts_[(*iter)->id()] = toast;

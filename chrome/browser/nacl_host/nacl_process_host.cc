@@ -27,6 +27,7 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
@@ -61,6 +62,7 @@
 #include "chrome/browser/nacl_host/nacl_broker_service_win.h"
 #include "chrome/common/nacl_debug_exception_handler_win.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/common/sandboxed_process_launcher_delegate.h"
 #endif
 
 using content::BrowserThread;
@@ -75,7 +77,36 @@ bool RunningOnWOW64() {
   return (base::win::OSInfo::GetInstance()->wow64_status() ==
           base::win::OSInfo::WOW64_ENABLED);
 }
-#endif
+
+// NOTE: changes to this class need to be reviewed by the security team.
+class NaClSandboxedProcessLauncherDelegate
+    : public content::SandboxedProcessLauncherDelegate {
+ public:
+  NaClSandboxedProcessLauncherDelegate() {}
+  virtual ~NaClSandboxedProcessLauncherDelegate() {}
+
+  virtual void PostSpawnTarget(base::ProcessHandle process) {
+#if !defined(NACL_WIN64)
+    // For Native Client sel_ldr processes on 32-bit Windows, reserve 1 GB of
+    // address space to prevent later failure due to address space fragmentation
+    // from .dll loading. The NaCl process will attempt to locate this space by
+    // scanning the address space using VirtualQuery.
+    // TODO(bbudge) Handle the --no-sandbox case.
+    // http://code.google.com/p/nativeclient/issues/detail?id=2131
+    const SIZE_T kOneGigabyte = 1 << 30;
+    void* nacl_mem = VirtualAllocEx(process,
+                                    NULL,
+                                    kOneGigabyte,
+                                    MEM_RESERVE,
+                                    PAGE_NOACCESS);
+    if (!nacl_mem) {
+      DLOG(WARNING) << "Failed to reserve address space for Native Client";
+    }
+#endif  // !defined(NACL_WIN64)
+  }
+};
+
+#endif  // OS_WIN
 
 void SetCloseOnExec(NaClHandle fd) {
 #if defined(OS_POSIX)
@@ -172,7 +203,7 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url,
       ALLOW_THIS_IN_INITIALIZER_LIST(ipc_plugin_listener_(this)),
       render_view_id_(render_view_id) {
   process_.reset(content::BrowserChildProcessHost::Create(
-      content::PROCESS_TYPE_NACL_LOADER, this));
+      PROCESS_TYPE_NACL_LOADER, this));
 
   // Set the display name so the user knows what plugin the process is running.
   // We aren't on the UI thread so getting the pref locale for language
@@ -572,7 +603,8 @@ bool NaClProcessHost::LaunchSelLdr() {
       return false;
     }
   } else {
-    process_->Launch(base::FilePath(), cmd_line.release());
+    process_->Launch(new NaClSandboxedProcessLauncherDelegate,
+                     cmd_line.release());
   }
 #elif defined(OS_POSIX)
   process_->Launch(nacl_loader_prefix.empty(),  // use_zygote
@@ -790,7 +822,7 @@ void NaClProcessHost::OnPpapiChannelCreated(
   // If the proxy channel is null, this must be the initial NaCl-Browser IPC
   // channel.
   if (!ipc_proxy_channel_.get()) {
-    DCHECK_EQ(content::PROCESS_TYPE_NACL_LOADER, process_->GetData().type);
+    DCHECK_EQ(PROCESS_TYPE_NACL_LOADER, process_->GetData().process_type);
 
     ipc_proxy_channel_.reset(
         new IPC::ChannelProxy(channel_handle,

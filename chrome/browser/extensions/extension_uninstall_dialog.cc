@@ -14,9 +14,9 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/extension_resource.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -78,14 +78,15 @@ void ExtensionUninstallDialog::ConfirmUninstall(
   extension_ = extension;
 
 #if defined(ENABLE_MANAGED_USERS)
-  // If the profile belongs to a managed user, a passphrase dialog is shown,
-  // and if the custodian authorizes by entering his passphrase, the uninstall
-  // is continued by calling |ExtensionUninstallAccepted| on the delegate.
+  // If the profile belongs to a managed user, and the profile is not in
+  // elevated state, a passphrase dialog is shown, and if the custodian
+  // authorizes by entering his passphrase, the uninstall is continued by
+  // calling |ExtensionUninstallAccepted| on the delegate.
   if (ShowAuthorizationDialog())
     return;
 #endif
 
-  ExtensionResource image = extensions::IconsInfo::GetIconResource(
+  extensions::ExtensionResource image = extensions::IconsInfo::GetIconResource(
       extension_,
       extension_misc::EXTENSION_ICON_LARGE,
       ExtensionIconSet::MATCH_BIGGER);
@@ -149,8 +150,9 @@ void ExtensionUninstallDialog::Observe(
 bool ExtensionUninstallDialog::ShowAuthorizationDialog() {
   ManagedUserService* service =
       ManagedUserServiceFactory::GetForProfile(profile_);
-  if (service->ProfileIsManaged()) {
-    service->RequestAuthorization(
+  if (service->ProfileIsManaged() && !service->CanSkipPassphraseDialog()) {
+    service->RequestAuthorizationUsingActiveWebContents(
+        browser_,
         base::Bind(&ExtensionUninstallDialog::OnAuthorizationResult,
                    base::Unretained(this)));
     return true;

@@ -10,6 +10,7 @@
 #include <map>
 #include <queue>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
@@ -92,6 +93,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // uses RenderWidgetHost::AsRenderWidgetHostImpl().
   static RenderWidgetHostImpl* From(RenderWidgetHost* rwh);
 
+  void set_hung_renderer_delay_ms(const base::TimeDelta& timeout) {
+    hung_renderer_delay_ms_ = timeout.InMilliseconds();
+  }
+
   // RenderWidgetHost implementation.
   virtual void Undo() OVERRIDE;
   virtual void Redo() OVERRIDE;
@@ -146,6 +151,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void AddKeyboardListener(KeyboardListener* listener) OVERRIDE;
   virtual void RemoveKeyboardListener(KeyboardListener* listener) OVERRIDE;
   virtual void GetWebScreenInfo(WebKit::WebScreenInfo* result) OVERRIDE;
+  virtual void GetSnapshotFromRenderer(
+      const gfx::Rect& src_subrect,
+      const base::Callback<void(bool, const SkBitmap&)>& callback) OVERRIDE;
 
   // Notification that the screen info has changed.
   void NotifyScreenInfoChanged();
@@ -602,6 +610,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnWindowlessPluginDummyWindowDestroyed(
       gfx::NativeViewId dummy_activation_window);
 #endif
+  void OnSnapshot(bool success, const SkBitmap& bitmap);
 
   // Called (either immediately or asynchronously) after we're done with our
   // BackingStore and can send an ACK to the renderer so it can paint onto it
@@ -700,6 +709,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   gfx::Size physical_backing_size_;
+
+  // The height of the physical backing surface that is overdrawn opaquely in
+  // the browser, for example by an on-screen-keyboard (in DPI-adjusted pixels).
+  float overdraw_bottom_height_;
 
   // The size we last sent as requested size to the renderer. |current_size_|
   // is only updated once the resize message has been ack'd. This on the other
@@ -860,6 +873,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 #if defined(OS_WIN)
   std::list<HWND> dummy_windows_for_activation_;
 #endif
+
+  // List of callbacks for pending snapshot requests to the renderer.
+  std::queue<base::Callback<void(bool, const SkBitmap&)> > pending_snapshots_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostImpl);
 };

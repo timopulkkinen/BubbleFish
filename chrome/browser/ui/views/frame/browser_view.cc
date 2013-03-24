@@ -15,12 +15,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/instant/search.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/password_manager/password_manager.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/speech/tts_controller.h"
@@ -81,7 +81,6 @@
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/download_manager.h"
@@ -189,8 +188,23 @@ void PaintDetachedBookmarkBar(gfx::Canvas* canvas,
       chrome::search::GetDetachedBookmarkBarSeparatorColor(theme_provider);
   DetachableToolbarView::PaintHorizontalBorder(canvas, view, true,
                                                separator_color);
-  DetachableToolbarView::PaintHorizontalBorder(canvas, view, false,
-                                               separator_color);
+  // The bottom border needs to be 1-px thick in both regular and retina
+  // displays, so we can't use DetachableToolbarView::PaintHorizontalBorder
+  // which paints a 2-px thick border in retina display.
+  SkPaint paint;
+  paint.setAntiAlias(false);
+  // Sets border to 1-px thick regardless of scale factor.
+  paint.setStrokeWidth(0);
+  // Bottom border is at 50% opacity of top border.
+  paint.setColor(SkColorSetA(separator_color,
+                             SkColorGetA(separator_color) / 2));
+  // Calculate thickness of bottom border as per current scale factor to
+  // determine where to draw the 1-px thick border.
+  float thickness = views::NonClientFrameView::kClientEdgeThickness /
+                    ui::GetScaleFactorScale(canvas->scale_factor());
+  SkScalar y = SkIntToScalar(view->height()) - SkFloatToScalar(thickness);
+  canvas->sk_canvas()->drawLine(SkIntToScalar(0), y,
+                                SkIntToScalar(view->width()), y, paint);
 }
 
 void PaintAttachedBookmarkBar(gfx::Canvas* canvas,
@@ -1192,14 +1206,6 @@ void BrowserView::ToggleBookmarkBar() {
 
 void BrowserView::ShowUpdateChromeDialog() {
   UpdateRecommendedMessageBox::Show(GetWidget()->GetNativeWindow());
-}
-
-void BrowserView::ShowTaskManager() {
-  chrome::ShowTaskManager(browser());
-}
-
-void BrowserView::ShowBackgroundPages() {
-  chrome::ShowBackgroundPages(browser());
 }
 
 void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
@@ -2229,6 +2235,11 @@ void BrowserView::ShowDevToolsContainer() {
         new views::ExternalFocusTracker(devtools_container_,
                                         GetFocusManager()));
   }
+
+  gfx::Size min_devtools_size(devtools_window_->GetMinimumWidth(),
+      devtools_window_->GetMinimumHeight());
+  devtools_container_->SetPreferredSize(min_devtools_size);
+
   devtools_container_->SetVisible(true);
   devtools_dock_side_ = devtools_window_->dock_side();
   bool dock_to_right = devtools_dock_side_ == DEVTOOLS_DOCK_SIDE_RIGHT;

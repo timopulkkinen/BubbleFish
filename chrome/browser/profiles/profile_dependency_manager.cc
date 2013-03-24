@@ -10,6 +10,7 @@
 
 #include "apps/app_restore_service_factory.h"
 #include "apps/shortcut_manager_factory.h"
+#include "chrome/browser/autofill/autocheckout_whitelist_manager_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -46,8 +47,8 @@
 #include "chrome/browser/extensions/api/system_info/system_info_api.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
-#include "chrome/browser/extensions/api/themes/theme_api.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
+#include "chrome/browser/extensions/content_scripts_parser.h"
 #include "chrome/browser/extensions/csp_parser.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
@@ -268,10 +269,12 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #if defined(ENABLE_EXTENSIONS)
   apps::AppRestoreServiceFactory::GetInstance();
   apps::ShortcutManagerFactory::GetInstance();
+  autofill::autocheckout::WhitelistManagerFactory::GetInstance();
   extensions::ActivityLogFactory::GetInstance();
   extensions::BookmarksAPI::GetFactoryInstance();
   extensions::BluetoothAPIFactory::GetInstance();
   extensions::CommandService::GetFactoryInstance();
+  extensions::ContentScriptsParser::GetFactoryInstance();
   extensions::CookiesAPI::GetFactoryInstance();
   extensions::CSPParser::GetFactoryInstance();
   extensions::DialAPIFactory::GetInstance();
@@ -314,9 +317,6 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   extensions::SuggestedLinksRegistryFactory::GetInstance();
   extensions::TabCaptureRegistryFactory::GetInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
-#if defined(ENABLE_THEMES)
-  extensions::ThemeAPI::GetFactoryInstance();
-#endif
   extensions::TtsAPI::GetFactoryInstance();
   extensions::WebAccessibleResourcesParser::GetFactoryInstance();
   extensions::WebNavigationAPI::GetFactoryInstance();

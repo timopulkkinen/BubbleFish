@@ -21,6 +21,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
+#include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -126,11 +127,14 @@ void SetToolBarStyle() {
 
 void RecordAppLaunch(Profile* profile, const GURL& url) {
   DCHECK(profile->GetExtensionService());
-  if (!profile->GetExtensionService()->IsInstalledApp(url))
+  const extensions::Extension* extension =
+      profile->GetExtensionService()->GetInstalledApp(url);
+  if (!extension)
     return;
 
   AppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_BOOKMARK_BAR);
+      extension_misc::APP_LAUNCH_BOOKMARK_BAR,
+      extension->GetType());
 }
 
 }  // namespace
@@ -1308,11 +1312,8 @@ void BookmarkBarGtk::OnDragReceived(GtkWidget* widget,
           gtk_selection_data_get_data(selection_data)), length);
       BookmarkNodeData drag_data;
       if (drag_data.ReadFromPickle(&pickle)) {
-        dnd_success = bookmark_utils::PerformBookmarkDrop(
-            browser_->profile(),
-            drag_data,
-            dest_node,
-            index) != ui::DragDropTypes::DRAG_NONE;
+        dnd_success = chrome::DropBookmarks(browser_->profile(),
+            drag_data, dest_node, index) != ui::DragDropTypes::DRAG_NONE;
       }
       break;
     }
